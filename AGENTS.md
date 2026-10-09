@@ -4,7 +4,7 @@ This file is the source of truth for how work is done in this project. Every con
 
 ## 1. Project Overview
 
-Panita Launcher is an unofficial, plug-and-play Minecraft launcher for friends. It manages accounts, downloads the required game files and Java, and runs isolated instances from the Panita API catalog.
+Panita Client is an unofficial, plug-and-play Minecraft launcher for friends. It manages accounts, downloads the required game files and Java, and runs isolated instances from the Panita API catalog.
 
 - The MVP supports at least two independent vanilla instances, Microsoft and explicit offline accounts, and launching to the Minecraft main menu.
 - Prioritize Windows. Design for Linux from the beginning and validate each platform before claiming support. macOS and modpacks are future scope.
@@ -114,7 +114,7 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 Use the current user's application-data directory, with platform-specific paths defined in the implementation plan:
 
 ```text
-PanitaLauncher/
+PanitaClient/
 ├─ accounts.json          # sensitive: metadata and Microsoft refresh tokens
 ├─ settings.json          # schema-versioned global settings
 ├─ catalog-cache.json
@@ -144,7 +144,7 @@ panita-client/
 
 - Keep business logic in the UI-independent Rust core. Keep desktop integration thin and UI state separate from account secrets.
 - Keep storage, networking, and platform integrations testable behind clear boundaries. Avoid abstractions or dependencies without a concrete need.
-- Keep detailed schemas, endpoint flows, recovery cases, and phased work in the implementation plan and decision documents rather than duplicating them here.
+- Keep phased implementation work in the implementation plan and decision documents. Annex A preserves the accepted account-storage decision within this file so these policies remain available without separate documents.
 
 ## 6. Verification and Documentation
 
@@ -152,4 +152,115 @@ panita-client/
 - Validate real browser/PKCE authentication, restart/renewal, Play-time validation, and sign-out before claiming authentication is complete. Device-code diagnostics do not establish these results.
 - Validate actual game launch and filesystem protections on every platform advertised as supported; compilation alone is insufficient.
 - Update affected decision documents when an owner-approved policy changes. Remove contradictory superseded instructions.
-- Use `docs/account-storage-decision.md` for authentication details and `docs/issues/` for implementation tracking. If these conflict with this file, surface the conflict before implementing it.
+- Use Annex A for the accepted authentication and storage policy. Local decision documents and implementation issues must remain consistent with it; surface conflicts before implementing them.
+
+## Annex A. Account and Token Storage Decision
+
+This annex is an integral part of AGENTS.md. It preserves the accepted decision, rationale, recovery cases, and validation requirements from the local source document `docs/account-storage-decision.md` as of 2026-10-08. The complete policy is included below; reading a separate file is not required. Update this annex alongside any owner-approved policy changes.
+Status: Accepted
+Date: 2026-10-05
+Updated: 2026-10-08
+
+### Decision
+
+Panita Client persists account metadata and Microsoft refresh tokens in a local, schema-versioned `accounts.json` with restricted filesystem permissions. Refresh tokens are plaintext in this file. This explicitly supersedes the OS credential-store proposal and the subsequent reopened discussion.
+
+Microsoft, Xbox Live, XSTS, and Minecraft access tokens and their expiration metadata remain only in backend memory. Offline accounts have no tokens. Panita never requests or stores Microsoft passwords or MFA codes and never sends credentials to the catalog API or Supabase.
+
+The selected design prioritizes automatic session persistence across Windows, Linux, and eventually macOS without requiring a keyring service, a master password, or a remote key service. No custom encryption or API-delivered encryption key is planned. Windows is the first implementation target; each additional platform requires permission and lifecycle validation before support is announced.
+
+### Account identity and concurrency
+
+- Persist a stable internal `account_id` UUID, account type, username, Minecraft profile UUID, and the issuing public OAuth client ID. The internal ID is distinct from the Minecraft UUID and does not change with a username change. Microsoft accounts additionally contain the refresh token.
+- Give each authentication/renewal operation a unique `operation_id` and each launcher process execution a `process_session_id`. These identify work; they are not secrets or authorization mechanisms.
+- Use single-flight renewal per account and stale-result protection. Signing out invalidates pending operations so a late result cannot restore credentials.
+- Coordinate all writers, including any future CLI. Use a single-writer process or an interprocess lock with reload-before-mutation; unique IDs and an in-process mutex alone are insufficient.
+- Do not hold a global metadata lock while waiting for network responses. Recheck account existence and operation generation before committing results.
+- Reauthentication must match the intended profile identity. Do not replace an existing account's credentials with another profile's credentials accidentally. A change of issuing client ID requires reauthentication.
+
+### Interactive authentication
+
+Use the system browser with authorization code + PKCE and a loopback callback. Manual device-code entry and an embedded launcher webview are not the normal sign-in experience. Device-code remains diagnostic evidence only.
+
+Use PKCE S256, a cryptographically random verifier and state, strict state validation, a listener bound only to loopback, and cancellation/timeout cleanup. Do not log the callback URL, authorization code, verifier, tokens, or sensitive request/response bodies. Configure the native/public-client redirect in Microsoft Entra and verify it with the approved application before declaring this flow implemented. No client secret is distributed.
+
+Public client ID: `cd7a6116-ad43-4eff-aa9b-a177e1101c45`.
+
+Complete Microsoft → Xbox Live → XSTS → Minecraft Services → Java profile. Request only the required scopes (`XboxLive.signin offline_access`, verified in integration). Microsoft may still request login, consent, or MFA in its own pages.
+
+### Session lifecycle and Play validation
+
+- At startup, proactively acquire/renew the selected Microsoft account's session using its refresh token. Also acquire a session on account selection; do not refresh every saved account unnecessarily.
+- Disable Play for that Microsoft account until authentication succeeds. On failure, show an actionable error: retry for temporary failures or sign in again when required. Navigation/modal presentation is an implementation UX detail; cancellation and account switching must remain safe.
+- Track expiration from `expires_in`/`NotAfter` with a safety margin. Proactively renew near expiry and reassess after system resume. Do not invent a guaranteed expiration date for refresh tokens.
+- On every Play request with a Microsoft account, make a current authenticated request to Minecraft Services, such as fetching the Java profile. Local expiration checks alone do not detect early rejection.
+- If that request fails due to invalid authentication, attempt one renewal and repeat validation once. Persistent rejection blocks launch and requests reauthentication. Do not retry every 403 as an expired token: inspect the failure and distinguish account/permission errors.
+- Network/service failures block launch with that account and offer retry; they do not erase credentials or imply revocation. A successful request establishes acceptance by that service at that moment, not immunity from later revocation.
+- Preserve a newly returned refresh token through an atomic account-file update before continuing subsequent authentication stages. If no replacement is returned, retain the existing token. On write failure preserve the old file, retain the new credential only in memory for retry, and do not claim persistence succeeded.
+- Account removal/sign-out clears in-memory sessions and removes both the persisted profile and refresh token. There is no separate user-facing sign-out that keeps the profile. A running game is a separate process and can retain its own session.
+
+### File protection and atomic writes
+
+- Place `accounts.json` in the current user's private application-data directory, outside instance folders and downloaded pack content. Run without administrator/root privileges.
+- On Linux/macOS, target owner-only directory/file access (0700/0600). On Windows, establish and verify an appropriate restricted DACL; do not assume a POSIX mode setting provides equivalent protection. Do not persist credentials if adequate protection cannot be established.
+- Distinguish an absent file from an unreadable or malformed file. Never overwrite unreadable/corrupt account data with an empty account list.
+- Create a uniquely named temporary file in the same protected directory, protected from creation. Write the complete document, synchronize it, then use platform-appropriate atomic replacement. Never delete the original first.
+- Because the document contains refresh tokens, the atomic-write temporary also contains refresh tokens. This is the only permitted temporary persistence, with identical protections, no export/backup, and safe cleanup of abandoned application-owned temporaries. Access tokens must never be written there.
+- Serialize account mutations. A failure before replacement leaves the previous valid file intact. Do not create token-bearing backup copies.
+- If persistence fails after successful login, a memory-only authenticated session may continue, with an accurate indication that it was not saved. Never silently loosen permissions or claim a write succeeded.
+- For failed sign-out persistence, block in-memory reuse and report cleanup incomplete. Use a durable nonsecret pending-removal marker where writable, reconcile it before restoring sessions, and retry account-file removal. If neither file nor marker can be written, explicitly report that persisted credentials may remain after restart; do not promise successful durable sign-out.
+
+### Failure and recovery cases
+
+| Situation | Behavior |
+|---|---|
+| Login succeeds and protected save succeeds | Allow authenticated use and remember the account. |
+| Startup finds a saved refresh token | Renew the selected account automatically; keep Play disabled until ready. |
+| Access token remains in memory | Reuse it, but validate with Minecraft Services on Play. |
+| Authentication is rejected | Attempt the bounded renewal described above, then require reauthentication if unresolved. |
+| Network/service unavailable | Block Microsoft launch, preserve data, offer retry or explicit selection of an offline account. |
+| File absent | Show account setup; do not treat as corruption. |
+| File unreadable or malformed | Preserve it; show recovery/error state, without resetting it silently. |
+| Save/permission failure after login | Keep a temporary in-memory session; preserve existing file and retry safely. |
+| Process stops before atomic replacement | Previous account file remains authoritative; safely clean owned stale temporaries. |
+| Sign-out succeeds | Remove profile and refresh token, clear memory, invalidate pending work. |
+| Sign-out write fails | Apply pending-removal recovery where possible; report incomplete durable cleanup. |
+| A renewal completes after sign-out | Discard it; never restore the removed account. |
+
+### Instance policy
+
+Microsoft accounts require successful current Play validation even for installed vanilla. They cannot silently become offline accounts or launch using an expired previously validated profile. Explicit offline accounts may launch fully installed vanilla without connectivity; all required game files, Java, assets, libraries, and natives must be local. Vanilla catalog updates do not force immediate upgrades of installed instances.
+
+Future modpack policy remains outside the MVP: require a successful current catalog check and synchronize changed pins before launch. Define allowable CDN cache age and behavior for disabled/deleted records before shipping modpacks. Catalog failures never delete worlds or installations.
+
+### Accepted tradeoffs and boundaries
+
+Anyone able to read `accounts.json` can extract refresh tokens; the file is not encrypted. Restricted permissions reduce access by other ordinary OS users but do not protect against malware running as the same user, administrators, or malicious game code. Copying the file may expose reusable credentials; this design does not claim device binding or prevent external backup software from copying it.
+
+A refresh token can enable continued access within its granted scope. This does not automatically grant full control of the Microsoft account. Deleting local credentials is distinct from server-side revocation and cannot invalidate a stolen copy. File replacement/deletion does not promise forensic secure erasure.
+
+Exclude the complete account file, tokens, atomic-write temporaries, and sensitive error payloads from frontend DTOs, logs, diagnostics, source control, and launcher-generated exports/backups. Exports, if added, must deliberately serialize metadata only. Keep token handling in Rust; expose only required account metadata to the UI.
+
+### Validation required
+
+- Verify browser/PKCE login through the full Minecraft chain with the approved app; existing device-code diagnostics do not establish PKCE support or persistent-storage correctness.
+- Verify login, restart, startup renewal, and Play-time validation with real accounts.
+- Verify restrictive permissions from creation, atomic replacement, and CRUD under a normal user on every supported OS.
+- Test interruption, malformed data, denied access, failed writes, failed sign-out, startup cleanup, and concurrent operations/processes.
+- Test expiration, remote rejection before expiry, one-renewal limits, network failures, late callbacks, account switches, and explicit offline account selection.
+- Check that only refresh tokens persist in the protected account file and its strictly controlled atomic-write temporaries; no other artifacts contain tokens.
+- Verify account-file schema migration across application updates without loss or broader permissions.
+
+### Implementation details to settle during development
+
+Exact OS paths, Windows ACL implementation, interprocess coordination primitive, and pending-removal marker format are implementation tasks, not unresolved product choices. Test the registered loopback redirect and full PKCE chain early. Do not declare tests complete based on this document.
+
+### References and supersession
+
+This annex supersedes the prior OS credential-store decision, the proposal to persist Minecraft access tokens, and the allowance to launch using an expired Microsoft profile. Implementation issues may track progress separately; this annex contains the accepted policy.
+
+Prism source is background for JSON persistence, not code to copy or a guarantee about future releases:
+- https://github.com/PrismLauncher/PrismLauncher/blob/develop/launcher/minecraft/auth/AccountData.cpp
+- https://github.com/PrismLauncher/PrismLauncher/blob/develop/launcher/minecraft/auth/AccountList.cpp
+
+OAuth reference: https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow
