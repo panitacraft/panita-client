@@ -1,0 +1,70 @@
+{
+  "checked_at": "2026-10-11T21:12:57.4576668Z",
+  "index_url": "https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json",
+  "runtimes": [
+    {
+      "platform": "windows-x64",
+      "component": "java-runtime-epsilon",
+      "version": {
+        "name": "25.0.1",
+        "released": "2025-12-10T08:14:17-06:00"
+      },
+      "manifest": {
+        "sha1": "b374544c680d965fb5535977d7cb04c6befe1930",
+        "size": 152664,
+        "url": "https://piston-meta.mojang.com/v1/packages/b374544c680d965fb5535977d7cb04c6befe1930/manifest.json"
+      },
+      "manifest_sha1_verified": true,
+      "file_count": 493,
+      "binaries_downloaded": false
+    },
+    {
+      "platform": "windows-x64",
+      "component": "java-runtime-delta",
+      "version": {
+        "name": "21.0.7",
+        "released": "2025-05-19T02:34:42-06:00"
+      },
+      "manifest": {
+        "sha1": "cb4394a27089d19f65d5baa6cf0482c27c3c7865",
+        "size": 148529,
+        "url": "https://piston-meta.mojang.com/v1/packages/cb4394a27089d19f65d5baa6cf0482c27c3c7865/manifest.json"
+      },
+      "manifest_sha1_verified": true,
+      "file_count": 484,
+      "binaries_downloaded": false
+    },
+    {
+      "platform": "linux",
+      "component": "java-runtime-epsilon",
+      "version": {
+        "name": "25.0.1",
+        "released": "2025-12-10T08:20:17-06:00"
+      },
+      "manifest": {
+        "sha1": "ccf325ef8f5be596cf8229fd349298d8a74d2388",
+        "size": 88214,
+        "url": "https://piston-meta.mojang.com/v1/packages/ccf325ef8f5be596cf8229fd349298d8a74d2388/manifest.json"
+      },
+      "manifest_sha1_verified": true,
+      "file_count": 434,
+      "binaries_downloaded": false
+    },
+    {
+      "platform": "linux",
+      "component": "java-runtime-delta",
+      "version": {
+        "name": "21.0.7",
+        "released": "2025-05-19T02:30:12-06:00"
+      },
+      "manifest": {
+        "sha1": "06a3884df3d9d4072b9b6df541495d81878ad2de",
+        "size": 82843,
+        "url": "https://piston-meta.mojang.com/v1/packages/06a3884df3d9d4072b9b6df541495d81878ad2de/manifest.json"
+      },
+      "manifest_sha1_verified": true,
+      "file_count": 423,
+      "binaries_downloaded": false
+    }
+  ]
+}
