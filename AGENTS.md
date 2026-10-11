@@ -34,6 +34,13 @@ Panita Client is an unofficial, plug-and-play Minecraft launcher for friends. It
 - Do not change Git configuration. If the owner identity cannot be established, ask before committing.
 - Stage only changes belonging to the current task. Preserve unrelated work and never commit credentials or runtime account files.
 
+### Branch convention
+
+- Use `develop` as the development branch. Keep `master` as the existing primary branch; do not rename it or change remote defaults without explicit authorization.
+- When a separate task branch is needed, branch from `develop` and use `<type>/<short-description>`, for example `feat/auth-fundamentals`, `fix/session-renewal`, or `docs/development-setup`.
+- Use the commit types listed below and lowercase, hyphen-separated descriptions. Do not create extra branches without a concrete reason.
+- Branch creation is local unless explicitly authorized otherwise. Pushes, remote branch changes, and GitHub issue mutations require authorization for that scope.
+
 ### Commit convention
 
 Use this area-first adaptation of Conventional Commits:
