@@ -96,7 +96,7 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 
 ### 4.2 Accounts and authentication
 
-- Use Microsoft authorization code + PKCE in the system browser with a loopback callback. Do not use an embedded launcher webview or require manual device-code entry for normal login.
+- Use Microsoft authorization code + PKCE in the system browser with the owner-selected deep-link callback `panitacraft://oauth/callback`. Verify provider acceptance and OS registration before claiming support. Do not use an embedded launcher webview or require manual device-code entry for normal login.
 - Never request or store Microsoft passwords or MFA codes. Keep credentials and authentication logic in Rust; expose only necessary account metadata to the UI.
 - Persist account metadata and only the Microsoft refresh token in local `accounts.json`, in plaintext with restricted permissions. Access tokens remain in backend memory. Do not add a keyring requirement, custom encryption, or API-delivered encryption keys without a new owner decision.
 - Associate accounts with stable internal IDs and their issuing public OAuth client ID. Use unique operation and process-session IDs, cancellation, stale-result protection, and proper write coordination.
@@ -166,7 +166,7 @@ panita-client/
 This annex is an integral part of AGENTS.md. It preserves the accepted decision, rationale, recovery cases, and validation requirements from the local source document `docs/account-storage-decision.md` as of 2026-10-08. The complete policy is included below; reading a separate file is not required. Update this annex alongside any owner-approved policy changes.
 Status: Accepted
 Date: 2026-10-05
-Updated: 2026-10-08
+Updated: 2026-10-11 (owner-selected deep-link callback)
 
 ### Decision
 
@@ -187,9 +187,9 @@ The selected design prioritizes automatic session persistence across Windows, Li
 
 ### Interactive authentication
 
-Use the system browser with authorization code + PKCE and a loopback callback. Manual device-code entry and an embedded launcher webview are not the normal sign-in experience. Device-code remains diagnostic evidence only.
+Use the system browser with authorization code + PKCE and the deep-link callback `panitacraft://oauth/callback`, selected by the owner on 2026-10-11. This supersedes the loopback callback decision. Provider acceptance and installed-platform handling remain unverified. Manual device-code entry and an embedded launcher webview are not the normal sign-in experience. Device-code remains diagnostic evidence only.
 
-Use PKCE S256, a cryptographically random verifier and state, strict state validation, a listener bound only to loopback, and cancellation/timeout cleanup. Do not log the callback URL, authorization code, verifier, tokens, or sensitive request/response bodies. Configure the native/public-client redirect in Microsoft Entra and verify it with the approved application before declaring this flow implemented. No client secret is distributed.
+Use PKCE S256, a cryptographically random verifier and state, strict state validation, and cancellation/timeout cleanup. Validate the exact callback scheme, authority, and path; accept callbacks only for an active operation and reject duplicate or stale results. Route callbacks to the owning launcher process and handle authentication entirely in Rust. If that process exits, require a new sign-in. Custom schemes are not exclusive OS ownership; PKCE remains essential. Do not log the callback URL, callback-bearing process arguments, authorization code, verifier, tokens, or sensitive request/response bodies. Configure the native/public-client redirect in Microsoft Entra and verify it with the approved application before declaring this flow implemented. No client secret is distributed.
 
 Public client ID: `cd7a6116-ad43-4eff-aa9b-a177e1101c45`.
 
@@ -260,7 +260,7 @@ Exclude the complete account file, tokens, atomic-write temporaries, and sensiti
 
 ### Implementation details to settle during development
 
-Exact OS paths, Windows ACL implementation, interprocess coordination primitive, and pending-removal marker format are implementation tasks, not unresolved product choices. Test the registered loopback redirect and full PKCE chain early. Do not declare tests complete based on this document.
+Exact OS paths, Windows ACL implementation, interprocess coordination primitive, and pending-removal marker format are implementation tasks, not unresolved product choices. Test the registered deep-link redirect, OS handler installation and process forwarding, and full PKCE chain early. Do not declare tests complete based on this document.
 
 ### References and supersession
 
