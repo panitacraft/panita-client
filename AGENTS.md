@@ -91,7 +91,8 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 - Record resolved versions and managed-file ownership per installation. Share only reusable, verified caches; coordinate writes and cleanup across operations and processes.
 - Consume the public, read-only Panita API. The launcher does not access Supabase directly or need its database credentials.
 - Use exact pinned versions. Vanilla uses the catalog Minecraft version; future Modrinth instances use the pinned pack as their authoritative source.
-- Cache the catalog for offline viewing. Disabled or removed catalog entries must not delete local installations or worlds. Installed vanilla updates are explicit, not automatic.
+- Fetch the catalog at startup. Show disabled entries dimmed, with a lock icon and Spanish status text. Check the specific instance through the API on every Play request; an explicit disabled result blocks installation/launch. Disabled or removed entries must not delete local installations or worlds. Installed vanilla updates are explicit, not automatic.
+- If the catalog API is unreachable, show the last valid cached catalog and an on-load Spanish toast explaining that installed instances remain available. Before each fallback launch, require a warning confirmation because current instance status could not be checked. Permit only complete local vanilla installations; do not bypass a known disabled state, install missing files, or treat an explicit disabled/missing response as a network outage. Microsoft authentication requirements remain independent.
 - Keep the core version-agnostic. Resolve Java and game requirements from authoritative metadata; do not hard-code one Minecraft version, loader, or CPU architecture. Broader compatibility does not expand the MVP automatically.
 
 ### 4.2 Accounts and authentication
@@ -158,6 +159,7 @@ panita-client/
 - Run checks appropriate to each change. Test authentication failures, cancellation, concurrency, persistence, and user-data preservation meaningfully.
 - Validate real browser/PKCE authentication, restart/renewal, Play-time validation, and sign-out before claiming authentication is complete. Device-code diagnostics do not establish these results.
 - Validate actual game launch and filesystem protections on every platform advertised as supported; compilation alone is insufficient.
+- The owner's Linux VM BOX is for testing the final installed product, not development or builds. Use a separate build environment. Its previously installed development packages may mask missing runtime dependencies; record this limitation and arrange a clean test baseline before claiming clean-install qualification. Do not remove packages or reset the VM without owner authorization.
 - Update affected decision documents when an owner-approved policy changes. Remove contradictory superseded instructions.
 - Use Annex A for the accepted authentication and storage policy. Local decision documents and implementation issues must remain consistent with it; surface conflicts before implementing them.
 
@@ -166,7 +168,7 @@ panita-client/
 This annex is an integral part of AGENTS.md. It preserves the accepted decision, rationale, recovery cases, and validation requirements from the local source document `docs/account-storage-decision.md` as of 2026-10-08. The complete policy is included below; reading a separate file is not required. Update this annex alongside any owner-approved policy changes.
 Status: Accepted
 Date: 2026-10-05
-Updated: 2026-10-11 (owner-selected deep-link callback)
+Updated: 2026-10-11 (deep-link callback and catalog-outage fallback)
 
 ### Decision
 
@@ -225,7 +227,7 @@ Complete Microsoft → Xbox Live → XSTS → Minecraft Services → Java profil
 | Startup finds a saved refresh token | Renew the selected account automatically; keep Play disabled until ready. |
 | Access token remains in memory | Reuse it, but validate with Minecraft Services on Play. |
 | Authentication is rejected | Attempt the bounded renewal described above, then require reauthentication if unresolved. |
-| Network/service unavailable | Block Microsoft launch, preserve data, offer retry or explicit selection of an offline account. |
+| Microsoft/Minecraft authentication service unavailable | Block Microsoft launch, preserve data, offer retry or explicit selection of an offline account. |
 | File absent | Show account setup; do not treat as corruption. |
 | File unreadable or malformed | Preserve it; show recovery/error state, without resetting it silently. |
 | Save/permission failure after login | Keep a temporary in-memory session; preserve existing file and retry safely. |
@@ -237,6 +239,8 @@ Complete Microsoft → Xbox Live → XSTS → Minecraft Services → Java profil
 ### Instance policy
 
 Microsoft accounts require successful current Play validation even for installed vanilla. They cannot silently become offline accounts or launch using an expired previously validated profile. Explicit offline accounts may launch fully installed vanilla without connectivity; all required game files, Java, assets, libraries, and natives must be local. Vanilla catalog updates do not force immediate upgrades of installed instances.
+
+Check the specific instance's API status on every Play request. A disabled result blocks the launch workflow; show disabled cards dimmed with a lock and Spanish status text. During catalog API outages, show the last valid cached list and an on-load Spanish toast indicating that installed instances remain available. Require explicit user confirmation of a warning before each fallback launch of a complete local vanilla installation. A previously known disabled state remains blocked. This fallback does not bypass current Microsoft/Minecraft authentication validation, and explicit disabled/missing responses are not outages. Preserve local data in every case.
 
 Future modpack policy remains outside the MVP: require a successful current catalog check and synchronize changed pins before launch. Define allowable CDN cache age and behavior for disabled/deleted records before shipping modpacks. Catalog failures never delete worlds or installations.
 
