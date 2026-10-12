@@ -465,7 +465,8 @@ fn write_json(
     value: &impl Serialize,
 ) -> Result<(), CoreError> {
     let mut bytes =
-        serde_json::to_vec(value).map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
+        serde_json::to_vec_pretty(value).map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
+    bytes.push(b'\n');
     let result = tx.write(name, &bytes);
     bytes.zeroize();
     result
