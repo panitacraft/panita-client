@@ -7,6 +7,7 @@ pub enum ErrorCode {
     InvalidData,
     PermissionDenied,
     StorageUnavailable,
+    StorageCommitUncertain,
     NetworkUnavailable,
     AuthenticationRequired,
     InstanceDisabled,
