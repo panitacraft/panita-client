@@ -83,6 +83,73 @@ struct AccountDocument {
     accounts: Vec<StoredAccount>,
 }
 
+// Keep the disk schema independent from UI metadata and in-memory selection.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AccountFile {
+    schema_version: u32,
+    accounts: Vec<AccountEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+enum AccountType {
+    #[serde(rename = "MSA")]
+    Microsoft,
+    #[serde(rename = "offline")]
+    Offline,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AccountEntry {
+    account_id: Uuid,
+    #[serde(rename = "type")]
+    account_type: AccountType,
+    selected: bool,
+    username: String,
+    profile_id: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    oauth_client_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refresh_token: Option<String>,
+}
+
+impl Drop for AccountEntry {
+    fn drop(&mut self) {
+        if let Some(token) = &mut self.refresh_token {
+            token.zeroize();
+        }
+    }
+}
+
+impl AccountFile {
+    fn into_document(self) -> Result<AccountDocument, CoreError> {
+        if self.schema_version != 2 || self.accounts.iter().filter(|a| a.selected).count() > 1 {
+            return Err(CoreError::new(ErrorCode::InvalidData));
+        }
+        let mut document = AccountDocument::default();
+        for mut entry in self.accounts {
+            if entry.selected {
+                document.selected_account_id = Some(entry.account_id);
+            }
+            document.accounts.push(StoredAccount {
+                metadata: AccountInfo {
+                    account_id: entry.account_id,
+                    kind: match entry.account_type {
+                        AccountType::Microsoft => AccountKind::Microsoft,
+                        AccountType::Offline => AccountKind::Offline,
+                    },
+                    username: std::mem::take(&mut entry.username),
+                    profile_id: entry.profile_id,
+                    oauth_client_id: entry.oauth_client_id.take(),
+                },
+                refresh_token: entry.refresh_token.take(),
+            });
+        }
+        Ok(document)
+    }
+}
+
 impl Default for AccountDocument {
     fn default() -> Self {
         Self {
@@ -361,10 +428,26 @@ fn load_document(tx: &StoreTransaction<'_>) -> Result<AccountDocument, CoreError
     let Some(mut bytes) = tx.read(ACCOUNT_FILE)? else {
         return Ok(AccountDocument::default());
     };
-    let parsed = serde_json::from_slice::<AccountDocument>(&bytes);
+    #[derive(Deserialize)]
+    struct Version {
+        schema_version: u32,
+    }
+    let version = serde_json::from_slice::<Version>(&bytes).map(|v| v.schema_version);
+    let migrate = matches!(version, Ok(1));
+    let parsed = match version {
+        Ok(1) => serde_json::from_slice::<AccountDocument>(&bytes)
+            .map_err(|_| CoreError::new(ErrorCode::InvalidData)),
+        Ok(2) => serde_json::from_slice::<AccountFile>(&bytes)
+            .map_err(|_| CoreError::new(ErrorCode::InvalidData))
+            .and_then(AccountFile::into_document),
+        _ => Err(CoreError::new(ErrorCode::InvalidData)),
+    };
     bytes.zeroize();
-    let document = parsed.map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
+    let document = parsed?;
     validate_document(&document)?;
+    if migrate {
+        save_document(tx, &document)?;
+    }
     Ok(document)
 }
 
@@ -456,7 +539,26 @@ fn remove_ids(document: &mut AccountDocument, ids: &[Uuid]) {
 
 fn save_document(tx: &StoreTransaction<'_>, document: &AccountDocument) -> Result<(), CoreError> {
     validate_document(document)?;
-    write_json(tx, ACCOUNT_FILE, document)
+    let file = AccountFile {
+        schema_version: 2,
+        accounts: document
+            .accounts
+            .iter()
+            .map(|account| AccountEntry {
+                account_id: account.metadata.account_id,
+                account_type: match account.metadata.kind {
+                    AccountKind::Microsoft => AccountType::Microsoft,
+                    AccountKind::Offline => AccountType::Offline,
+                },
+                selected: document.selected_account_id == Some(account.metadata.account_id),
+                username: account.metadata.username.clone(),
+                profile_id: account.metadata.profile_id,
+                oauth_client_id: account.metadata.oauth_client_id.clone(),
+                refresh_token: account.refresh_token.clone(),
+            })
+            .collect(),
+    };
+    write_json(tx, ACCOUNT_FILE, &file)
 }
 
 fn write_json(
@@ -496,6 +598,113 @@ mod tests {
             "5627dd98-e6be-3c21-b8a8-e92344183641"
         );
         assert_ne!(offline_profile_id("Steve"), offline_profile_id("steve"));
+    }
+
+    #[test]
+    fn migrate_legacy_accounts_without_losing_identity_credentials_or_selection() {
+        let (paths, repository) = repository();
+        let token = Secret::new("synthetic-migration-token".to_owned())
+            .unwrap_or_else(|_| panic!("fixture operation failed"));
+        let microsoft = repository
+            .save_microsoft(Uuid::new_v4(), "PlayerOne", &token, None)
+            .unwrap_or_else(|_| panic!("fixture operation failed"));
+        let offline = repository
+            .add_offline("Steve")
+            .unwrap_or_else(|_| panic!("fixture operation failed"));
+        repository
+            .select(microsoft.account_id)
+            .unwrap_or_else(|_| panic!("fixture operation failed"));
+        repository
+            .store
+            .with_lock(|tx| {
+                let legacy = load_document(tx)?;
+                write_json(tx, ACCOUNT_FILE, &legacy)
+            })
+            .unwrap_or_else(|_| panic!("fixture operation failed"));
+        let snapshot = repository
+            .snapshot()
+            .unwrap_or_else(|_| panic!("fixture operation failed"));
+        assert_eq!(snapshot.selected_account_id, Some(microsoft.account_id));
+        assert_eq!(snapshot.accounts.len(), 2);
+        assert_eq!(
+            repository
+                .refresh_token(microsoft.account_id)
+                .unwrap_or_else(|_| panic!("fixture operation failed"))
+                .expose(),
+            token.expose()
+        );
+        let bytes = repository
+            .store
+            .read(ACCOUNT_FILE)
+            .unwrap_or_else(|_| panic!("fixture operation failed"))
+            .unwrap_or_else(|| panic!("missing fixture file"));
+        let file: serde_json::Value =
+            serde_json::from_slice(&bytes).unwrap_or_else(|_| panic!("fixture operation failed"));
+        assert_eq!(file["schema_version"], 2);
+        assert!(file.get("selected_account_id").is_none());
+        assert_eq!(file["accounts"][0]["type"], "MSA");
+        assert_eq!(file["accounts"][0]["selected"], true);
+        assert!(file["accounts"][0].get("metadata").is_none());
+        assert!(file["accounts"][0].get("kind").is_none());
+        assert_eq!(file["accounts"][1]["type"], "offline");
+        assert_eq!(file["accounts"][1]["selected"], false);
+        assert!(file["accounts"][1].get("refresh_token").is_none());
+        assert!(file["accounts"][1].get("oauth_client_id").is_none());
+        assert!(bytes.ends_with(b"\n"));
+        repository
+            .select(offline.account_id)
+            .unwrap_or_else(|_| panic!("fixture operation failed"));
+        assert_eq!(
+            repository
+                .snapshot()
+                .unwrap_or_else(|_| panic!("fixture operation failed"))
+                .selected_account_id,
+            Some(offline.account_id)
+        );
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
+    fn reject_multiple_selected_accounts_and_unknown_fields_without_overwriting() {
+        let (paths, repository) = repository();
+        repository
+            .add_offline("Steve")
+            .unwrap_or_else(|_| panic!("fixture operation failed"));
+        repository
+            .add_offline("Notch")
+            .unwrap_or_else(|_| panic!("fixture operation failed"));
+        let original = repository
+            .store
+            .read(ACCOUNT_FILE)
+            .unwrap_or_else(|_| panic!("fixture operation failed"))
+            .unwrap_or_else(|| panic!("missing fixture file"));
+        for invalid in 0..3 {
+            let mut file: serde_json::Value = serde_json::from_slice(&original)
+                .unwrap_or_else(|_| panic!("fixture operation failed"));
+            match invalid {
+                0 => file["accounts"][0]["selected"] = true.into(),
+                1 => file["accounts"][0]["access_token"] = "forbidden".into(),
+                _ => file["schema_version"] = 3.into(),
+            }
+            let bytes =
+                serde_json::to_vec(&file).unwrap_or_else(|_| panic!("fixture operation failed"));
+            repository
+                .store
+                .transaction(ACCOUNT_FILE, |_| Ok((bytes.clone(), ())))
+                .unwrap_or_else(|_| panic!("fixture operation failed"));
+            assert!(repository.snapshot().is_err());
+            assert_eq!(
+                repository
+                    .store
+                    .read(ACCOUNT_FILE)
+                    .unwrap_or_else(|_| panic!("fixture operation failed"))
+                    .unwrap_or_else(|| panic!("missing fixture file")),
+                bytes
+            );
+        }
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }
 
     #[test]
