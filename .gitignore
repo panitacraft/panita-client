@@ -4,6 +4,7 @@
 # Build products and local development state.
 /target/
 /desktop/target/
+/desktop/gen/
 /ui/node_modules/
 /ui/dist/
 /node_modules/

@@ -1,1 +1,0 @@
-{"main-window":{"identifier":"main-window","description":"Only the main window receives Tauri core permissions.","local":true,"windows":["main"],"permissions":["core:default"]}}
