@@ -1,8 +1,14 @@
+use launcher_core::sessions::AccountController;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
+mod account_commands;
+mod protocol;
 
 struct DesktopState {
     process: launcher_core::operation::ProcessSessionId,
     logs: launcher_core::logging::BoundedLog,
+    accounts: Mutex<Option<Arc<AccountController>>>,
+    orphaned_callback: bool,
 }
 
 #[tauri::command]
@@ -15,6 +21,13 @@ fn initialize(
     use launcher_core::storage::PrivateStore;
 
     let result = (|| {
+        let mut slot = state
+            .accounts
+            .lock()
+            .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
+        if slot.is_some() {
+            return Ok(());
+        }
         let root = app
             .path()
             .app_data_dir()
@@ -22,6 +35,18 @@ fn initialize(
         let paths = AppPaths::new(root).map_err(|error| error.code())?;
         let store = PrivateStore::open(&paths).map_err(|error| error.code())?;
         GlobalSettings::load(&store).map_err(|error| error.code())?;
+        let accounts = Arc::new(
+            AccountController::new(
+                launcher_core::accounts::AccountRepository::new(store),
+                state.process,
+            )
+            .map_err(|e| e.code())?,
+        );
+        if state.orphaned_callback {
+            accounts.report_orphaned_callback().map_err(|e| e.code())?;
+        }
+        *slot = Some(accounts.clone());
+        account_commands::start_maintenance(app.clone(), accounts);
         Ok(())
     })();
     if let Err(code) = result {
@@ -53,18 +78,35 @@ pub fn run() {
         event: launcher_core::logging::LogEvent::ApplicationStarted,
     });
     let result = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .manage(DesktopState {
+            process,
+            logs,
+            accounts: Mutex::new(None),
+            orphaned_callback: std::env::args_os()
+                .skip(1)
+                .any(|arg| arg.to_string_lossy().starts_with("panitacraft:")),
+        })
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            account_commands::handle_callback(app, args);
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
         }))
         .plugin(tauri_plugin_opener::init())
-        .manage(DesktopState { process, logs })
         .invoke_handler(tauri::generate_handler![
             application_name,
             initialize,
-            catalog_snapshot
+            catalog_snapshot,
+            account_commands::account_snapshot,
+            account_commands::add_offline_account,
+            account_commands::start_microsoft_login,
+            account_commands::cancel_microsoft_login,
+            account_commands::select_account,
+            account_commands::renew_account,
+            account_commands::retry_account_save,
+            account_commands::remove_account,
+            account_commands::validate_account
         ])
         .run(tauri::generate_context!());
     if result.is_err() {

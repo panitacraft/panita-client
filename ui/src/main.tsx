@@ -5,6 +5,7 @@ import type { CatalogInstance } from './preview-catalog';
 import { messageForError } from './errors';
 import logoWhite from './assets/logo-white.svg';
 import './style.css';
+import { Accounts } from './accounts';
 
 type CatalogState =
   | { kind: 'loading' }
@@ -32,6 +33,7 @@ function App() {
         <span className="wordmark"><img src={logoWhite} alt="" aria-hidden="true" />Panita Client</span>
         <span className="preview-label">Vista previa de desarrollo</span>
       </header>
+      <Accounts />
       <section aria-labelledby="instances-heading">
         <h1 id="instances-heading">Tus instancias</h1>
         <p>Elige una versión de Minecraft para comenzar.</p>

@@ -3,5 +3,5 @@
   "identifier": "main-window",
   "description": "Only the main window receives Tauri core permissions.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
 }

@@ -17,3 +17,5 @@
 /PanitaClient/
 **/accounts.json
 **/accounts.json.*
+**/pending-account-removals.json
+**/.private-fs-*.tmp

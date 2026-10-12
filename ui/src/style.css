@@ -33,3 +33,14 @@ button { padding: 10px 14px; color: #efece5; background: #315f49; border: 0; bor
 button:disabled { cursor: not-allowed; opacity: .7; }
 button:not(:disabled) { cursor: pointer; }
 button:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
+.accounts-section { padding-bottom: 0; }
+.accounts-section h2 { margin-top: 0; }
+.account-actions, .account-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.account-actions form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+input { font: inherit; color: #efece5; background: #142d24; border: 1px solid #6c9380; border-radius: 4px; padding: 9px; width: 180px; }
+input:focus-visible { outline: 3px solid #f2cf74; outline-offset: 2px; }
+.account-list { list-style: none; padding: 0; display: grid; gap: 16px; }
+.account-list li, .login-progress { border: 1px solid #4c7564; border-radius: 8px; padding: 16px; }
+.account-list li.selected-account { border-color: #f2cf74; }
+.account-list span { color: #bdc9bd; font-size: .85rem; margin-left: 8px; }
+.account-error { color: #ffb7af; }
