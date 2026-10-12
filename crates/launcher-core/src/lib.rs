@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod catalog;
 pub mod error;
 pub mod logging;
+pub mod oauth;
 pub mod operation;
 pub mod paths;
 pub mod settings;

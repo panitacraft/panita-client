@@ -1898,10 +1898,14 @@ dependencies = [
 name = "launcher-core"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.4.3",
  "md5",
  "private-fs",
  "serde",
  "serde_json",
+ "sha2",
+ "url",
  "uuid",
  "zeroize",
 ]
