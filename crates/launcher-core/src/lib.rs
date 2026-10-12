@@ -8,6 +8,7 @@ pub mod logging;
 pub mod oauth;
 pub mod operation;
 pub mod paths;
+pub mod sessions;
 pub mod settings;
 pub mod storage;
 

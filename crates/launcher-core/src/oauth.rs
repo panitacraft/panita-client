@@ -92,6 +92,9 @@ pub struct PendingLogin {
 }
 
 impl PendingLogin {
+    pub fn is_active(&self) -> bool {
+        self.active.is_some()
+    }
     pub fn begin(&mut self, login: PkceLogin) -> Result<(), CoreError> {
         if self.active.as_ref().is_some_and(|active| !active.expired()) {
             return Err(CoreError::new(ErrorCode::OperationBusy));

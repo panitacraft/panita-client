@@ -228,6 +228,34 @@ impl AccountRepository {
         })
     }
 
+    /// Retry a first-login save while preserving its already assigned memory ID.
+    pub(crate) fn persist_unsaved(
+        &self,
+        metadata: &AccountInfo,
+        token: &Secret,
+    ) -> Result<AccountInfo, CoreError> {
+        self.store.with_lock(|tx| {
+            if load_pending(tx)?.account_ids.contains(&metadata.account_id) {
+                return Err(CoreError::new(ErrorCode::OperationCancelled));
+            }
+            let mut document = load_reconciled(tx)?;
+            if document.accounts.iter().any(|a| {
+                a.metadata.account_id == metadata.account_id
+                    || (a.metadata.kind == metadata.kind
+                        && a.metadata.profile_id == metadata.profile_id)
+            }) {
+                return Err(CoreError::new(ErrorCode::AccountMismatch));
+            }
+            document.accounts.push(StoredAccount {
+                metadata: metadata.clone(),
+                refresh_token: Some(token.expose().to_owned()),
+            });
+            document.selected_account_id = Some(metadata.account_id);
+            save_document(tx, &document)?;
+            Ok(metadata.clone())
+        })
+    }
+
     pub fn refresh_token(&self, id: Uuid) -> Result<Secret, CoreError> {
         self.store.with_lock(|tx| {
             let document = load_reconciled(tx)?;

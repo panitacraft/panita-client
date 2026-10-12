@@ -57,11 +57,12 @@ pub struct MinecraftSession {
     pub profile: JavaProfile,
     access: Secret,
     expires_at: Instant,
+    expires_wall: SystemTime,
 }
 
 impl MinecraftSession {
     pub fn needs_renewal(&self) -> bool {
-        Instant::now() >= self.expires_at
+        Instant::now() >= self.expires_at || SystemTime::now() >= self.expires_wall
     }
 }
 
@@ -168,6 +169,7 @@ impl AuthClient {
             profile,
             access,
             expires_at,
+            expires_wall: SystemTime::now() + expires_at.saturating_duration_since(Instant::now()),
         })
     }
 
@@ -381,12 +383,12 @@ struct ProfileDto {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
-    fn mock_client(
+    pub(crate) fn mock_client(
         responses: Vec<(&'static str, u16, String)>,
     ) -> (AuthClient, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap_or_else(|_| panic!("loopback"));
