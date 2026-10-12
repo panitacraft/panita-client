@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { loadPreviewCatalog, type CatalogInstance } from './preview-catalog';
+import { loadCatalog } from './catalog-api';
+import type { CatalogInstance } from './preview-catalog';
+import { messageForError } from './errors';
+import logoWhite from './assets/logo-white.svg';
 import './style.css';
 
 type CatalogState =
   | { kind: 'loading' }
-  | { kind: 'error' }
+  | { kind: 'error'; message: string }
   | { kind: 'ready'; instances: CatalogInstance[] };
 
 function App() {
@@ -13,12 +16,12 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    loadPreviewCatalog()
+    loadCatalog()
       .then(instances => {
         if (active) setCatalog({ kind: 'ready', instances });
       })
-      .catch(() => {
-        if (active) setCatalog({ kind: 'error' });
+      .catch(error => {
+        if (active) setCatalog({ kind: 'error', message: messageForError(error) });
       });
     return () => { active = false; };
   }, []);
@@ -26,7 +29,7 @@ function App() {
   return (
     <main>
       <header>
-        <span className="wordmark">Panita Client</span>
+        <span className="wordmark"><img src={logoWhite} alt="" aria-hidden="true" />Panita Client</span>
         <span className="preview-label">Vista previa de desarrollo</span>
       </header>
       <section aria-labelledby="instances-heading">
@@ -35,12 +38,12 @@ function App() {
         {catalog.kind === 'loading' && <p role="status">Cargando instancias…</p>}
         {catalog.kind === 'error' && (
           <div role="alert">
-            <p>No pudimos cargar las instancias.</p>
+            <p>{catalog.message}</p>
             <button type="button" onClick={() => {
               setCatalog({ kind: 'loading' });
-              loadPreviewCatalog()
+              loadCatalog()
                 .then(instances => setCatalog({ kind: 'ready', instances }))
-                .catch(() => setCatalog({ kind: 'error' }));
+                .catch(error => setCatalog({ kind: 'error', message: messageForError(error) }));
             }}>Reintentar</button>
           </div>
         )}

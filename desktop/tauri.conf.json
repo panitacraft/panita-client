@@ -10,6 +10,9 @@
     "frontendDist": "../ui/dist"
   },
   "app": {
+    "appDirectoriesOverride": {
+      "data": "$DATA/PanitaClient"
+    },
     "windows": [
       {
         "title": "Panita Client",
@@ -20,7 +23,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self'; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:1420"
     }
   },
   "bundle": {
