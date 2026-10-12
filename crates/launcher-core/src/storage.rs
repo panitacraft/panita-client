@@ -18,6 +18,27 @@ pub struct PrivateStore {
     lock_path: std::path::PathBuf,
 }
 
+/// Operations spanning documents share the same process-wide filesystem lock.
+pub struct StoreTransaction<'a> {
+    store: &'a PrivateStore,
+}
+
+impl StoreTransaction<'_> {
+    pub fn read(&self, name: &'static str) -> Result<Option<Vec<u8>>, CoreError> {
+        read_file(&self.store.root, Path::new(name))
+    }
+
+    pub fn write(&self, name: &'static str, bytes: &[u8]) -> Result<(), CoreError> {
+        if bytes.len() as u64 > MAX_DOCUMENT_BYTES {
+            return Err(CoreError::new(ErrorCode::InvalidData));
+        }
+        self.store
+            .root
+            .write_atomic_durable(name, bytes)
+            .map_err(map_private_error)
+    }
+}
+
 impl PrivateStore {
     pub fn open(paths: &AppPaths) -> Result<Self, CoreError> {
         let root = PrivateDir::ensure(paths.root()).map_err(map_private_error)?;
@@ -56,14 +77,20 @@ impl PrivateStore {
         name: &'static str,
         mutate: impl FnOnce(Option<Vec<u8>>) -> Result<(Vec<u8>, T), CoreError>,
     ) -> Result<T, CoreError> {
-        let lock = self.lock()?;
-        let existing = read_file(&self.root, Path::new(name))?;
-        let (next, result) = mutate(existing)?;
-        self.root
-            .write_atomic_durable(name, &next)
-            .map_err(map_private_error)?;
-        drop(lock);
-        Ok(result)
+        self.with_lock(|transaction| {
+            let existing = transaction.read(name)?;
+            let (next, result) = mutate(existing)?;
+            transaction.write(name, &next)?;
+            Ok(result)
+        })
+    }
+
+    pub fn with_lock<T>(
+        &self,
+        operation: impl FnOnce(&StoreTransaction<'_>) -> Result<T, CoreError>,
+    ) -> Result<T, CoreError> {
+        let _lock = self.lock()?;
+        operation(&StoreTransaction { store: self })
     }
 
     fn lock(&self) -> Result<File, CoreError> {

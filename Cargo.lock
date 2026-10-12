@@ -1898,10 +1898,12 @@ dependencies = [
 name = "launcher-core"
 version = "0.1.0"
 dependencies = [
+ "md5",
  "private-fs",
  "serde",
  "serde_json",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -1999,6 +2001,12 @@ dependencies = [
  "tendril",
  "web_atoms",
 ]
+
+[[package]]
+name = "md5"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ebb8d8732c6a6df3d8f032a82911cfc747e00efb95cc46e8d0acd5b5b88570c"
 
 [[package]]
 name = "memchr"
@@ -4780,6 +4788,12 @@ dependencies = [
  "syn 3.0.8",
  "synstructure",
 ]
+
+[[package]]
+name = "zeroize"
+version = "1.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
 
 [[package]]
 name = "zerotrie"
