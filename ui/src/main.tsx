@@ -1,0 +1,74 @@
+import React, { useEffect, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { loadPreviewCatalog, type CatalogInstance } from './preview-catalog';
+import './style.css';
+
+type CatalogState =
+  | { kind: 'loading' }
+  | { kind: 'error' }
+  | { kind: 'ready'; instances: CatalogInstance[] };
+
+function App() {
+  const [catalog, setCatalog] = useState<CatalogState>({ kind: 'loading' });
+
+  useEffect(() => {
+    let active = true;
+    loadPreviewCatalog()
+      .then(instances => {
+        if (active) setCatalog({ kind: 'ready', instances });
+      })
+      .catch(() => {
+        if (active) setCatalog({ kind: 'error' });
+      });
+    return () => { active = false; };
+  }, []);
+
+  return (
+    <main>
+      <header>
+        <span className="wordmark">Panita Client</span>
+        <span className="preview-label">Vista previa de desarrollo</span>
+      </header>
+      <section aria-labelledby="instances-heading">
+        <h1 id="instances-heading">Tus instancias</h1>
+        <p>Elige una versión de Minecraft para comenzar.</p>
+        {catalog.kind === 'loading' && <p role="status">Cargando instancias…</p>}
+        {catalog.kind === 'error' && (
+          <div role="alert">
+            <p>No pudimos cargar las instancias.</p>
+            <button type="button" onClick={() => {
+              setCatalog({ kind: 'loading' });
+              loadPreviewCatalog()
+                .then(instances => setCatalog({ kind: 'ready', instances }))
+                .catch(() => setCatalog({ kind: 'error' }));
+            }}>Reintentar</button>
+          </div>
+        )}
+        {catalog.kind === 'ready' && catalog.instances.length === 0 && (
+          <p role="status">No hay instancias disponibles por ahora.</p>
+        )}
+        {catalog.kind === 'ready' && catalog.instances.length > 0 && (
+          <div className="instance-grid">
+            {catalog.instances.map(instance => (
+              <article className={`instance-card${instance.enabled ? '' : ' disabled'}`} key={instance.id}>
+                <div className="card-heading">
+                  <h2>{instance.name}</h2>
+                  {!instance.enabled && <span aria-label="Instancia deshabilitada">🔒 Instancia deshabilitada</span>}
+                </div>
+                <p>{instance.description}</p>
+                <p className="version">Minecraft {instance.minecraftVersion}</p>
+                <button type="button" disabled>Disponible próximamente</button>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
