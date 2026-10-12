@@ -41,3 +41,5 @@ jobs:
         run: cargo test --workspace --locked
       - name: Lint Rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build desktop application
+        run: pnpm tauri build --no-bundle
