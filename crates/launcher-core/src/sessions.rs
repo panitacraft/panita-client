@@ -1,5 +1,6 @@
 //! Operation generations protect disk and memory from late authentication results.
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
@@ -34,6 +35,7 @@ pub struct AccountView {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct AccountsView {
+    pub revision: u64,
     pub accounts: Vec<AccountView>,
     pub selected_account_id: Option<Uuid>,
     pub login_pending: bool,
@@ -53,6 +55,7 @@ struct Ticket {
 
 struct State {
     generation: u64,
+    cancellation: tokio::sync::watch::Sender<u64>,
     pending: PendingLogin,
     interactive: Option<Ticket>,
     login_error: Option<ErrorCode>,
@@ -65,6 +68,7 @@ struct State {
 }
 
 pub struct AccountController {
+    snapshot_counter: AtomicU64,
     repository: AccountRepository,
     client: AuthClient,
     process: ProcessSessionId,
@@ -107,11 +111,13 @@ impl AccountController {
             .collect();
         let saved_ids = accounts.keys().copied().collect();
         Ok(Self {
+            snapshot_counter: AtomicU64::new(0),
             repository,
             client,
             process,
             state: Mutex::new(State {
                 generation: 0,
+                cancellation: tokio::sync::watch::channel(0).0,
                 pending: PendingLogin::default(),
                 interactive: None,
                 login_error: None,
@@ -141,11 +147,17 @@ impl AccountController {
                 .then(a.metadata.account_id.cmp(&b.metadata.account_id))
         });
         Ok(AccountsView {
+            revision: self.snapshot_counter.fetch_add(1, Ordering::Relaxed),
             accounts,
             selected_account_id: state.selected,
             login_pending: state.interactive.is_some(),
             login_error: state.login_error,
         })
+    }
+
+    pub fn report_orphaned_callback(&self) -> Result<(), CoreError> {
+        self.state()?.login_error = Some(ErrorCode::OperationCancelled);
+        Ok(())
     }
 
     pub fn add_offline(&self, name: &str) -> Result<AccountInfo, CoreError> {
@@ -226,13 +238,16 @@ impl AccountController {
     }
 
     pub async fn callback(&self, callback: &str) -> Result<(), CoreError> {
-        let (exchange, ticket) = {
+        let (exchange, ticket, cancellation) = {
             let mut state = self.state()?;
             let ticket = state
                 .interactive
                 .ok_or_else(|| CoreError::new(ErrorCode::OperationCancelled))?;
+            if !state.pending.is_active() {
+                return Err(CoreError::new(ErrorCode::OperationCancelled));
+            }
             match state.pending.accept(callback) {
-                Ok(exchange) => (exchange, ticket),
+                Ok(exchange) => (exchange, ticket, state.cancellation.subscribe()),
                 Err(error) => {
                     if !state.pending.is_active() {
                         state.interactive = None;
@@ -243,9 +258,11 @@ impl AccountController {
             }
         };
         let result = async {
-            let microsoft = self.client.exchange(&exchange).await?;
+            let microsoft =
+                cancellable(cancellation.clone(), self.client.exchange(&exchange)).await?;
             self.check_ticket(ticket)?;
-            let session = self.client.minecraft_session(&microsoft).await?;
+            let session =
+                cancellable(cancellation, self.client.minecraft_session(&microsoft)).await?;
             let mut state = self.state()?;
             verify_ticket(&state, ticket)?;
             if let Some(id) = exchange.intended_account {
@@ -356,10 +373,43 @@ impl AccountController {
         Ok(())
     }
 
+    pub async fn maintain_selected(&self) -> Result<(), CoreError> {
+        let should_renew = {
+            let state = self.state()?;
+            state.interactive.is_none()
+                && state.selected.is_some_and(|id| {
+                    state
+                        .accounts
+                        .get(&id)
+                        .is_some_and(|account| matches!(account.status, SessionStatus::Ready))
+                })
+        };
+        if should_renew {
+            self.renew_selected().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn retry_selected(&self) -> Result<(), CoreError> {
+        let selected = {
+            let state = self.state()?;
+            state.selected.filter(|id| {
+                state
+                    .accounts
+                    .get(id)
+                    .is_some_and(|account| account.metadata.kind == AccountKind::Microsoft)
+            })
+        };
+        if let Some(id) = selected {
+            self.acquire(id, true).await?;
+        }
+        Ok(())
+    }
+
     async fn acquire(&self, id: Uuid, force: bool) -> Result<Arc<MinecraftSession>, CoreError> {
         let flight = self.state()?.flights.entry(id).or_default().clone();
         let _flight = flight.lock().await;
-        let (generation, token, retry_save) = {
+        let (generation, token, retry_save, cancellation) = {
             let mut state = self.state()?;
             if state.selected != Some(id) || !state.accounts.contains_key(&id) {
                 return Err(CoreError::new(ErrorCode::OperationCancelled));
@@ -388,10 +438,11 @@ impl AccountController {
                 state.generation,
                 token,
                 state.unsaved_refresh.contains_key(&id),
+                state.cancellation.subscribe(),
             )
         };
         let result = async {
-            let microsoft = self.client.renew(&token).await?;
+            let microsoft = cancellable(cancellation.clone(), self.client.renew(&token)).await?;
             {
                 let mut state = self.state()?;
                 verify_account_generation(&state, id, generation)?;
@@ -434,7 +485,8 @@ impl AccountController {
                     }
                 }
             }
-            let session = self.client.minecraft_session(&microsoft).await?;
+            let session =
+                cancellable(cancellation, self.client.minecraft_session(&microsoft)).await?;
             let mut state = self.state()?;
             verify_account_generation(&state, id, generation)?;
             let account = state
@@ -472,7 +524,7 @@ impl AccountController {
 
     /// Future game execution consumes this validated metadata, never a UI token.
     pub async fn validate_play(&self) -> Result<JavaProfile, CoreError> {
-        let (id, kind, profile, generation, already_renewed) = {
+        let (id, kind, profile, generation, already_renewed, cancellation) = {
             let state = self.state()?;
             let id = state
                 .selected
@@ -493,17 +545,18 @@ impl AccountController {
                     .sessions
                     .get(&id)
                     .is_none_or(|session| session.needs_renewal()),
+                state.cancellation.subscribe(),
             )
         };
         if kind == AccountKind::Offline {
             return Ok(profile);
         }
         let session = self.acquire(id, false).await?;
-        let first = self.client.validate(&session).await;
+        let first = cancellable(cancellation.clone(), self.client.validate(&session)).await;
         let result = match first {
             Err(error) if error.code() == ErrorCode::AuthenticationRequired && !already_renewed => {
                 let renewed = self.acquire(id, true).await?;
-                self.client.validate(&renewed).await
+                cancellable(cancellation, self.client.validate(&renewed)).await
             }
             other => other,
         };
@@ -564,6 +617,7 @@ impl AccountController {
 
 fn invalidate(state: &mut State) {
     state.generation = state.generation.wrapping_add(1);
+    state.cancellation.send_replace(state.generation);
     state.pending.cancel();
     state.interactive = None;
     state.login_error = None;
@@ -574,6 +628,17 @@ fn invalidate(state: &mut State) {
         ) {
             account.status = SessionStatus::SignInRequired;
         }
+    }
+}
+
+async fn cancellable<T>(
+    mut cancellation: tokio::sync::watch::Receiver<u64>,
+    work: impl std::future::Future<Output = Result<T, CoreError>>,
+) -> Result<T, CoreError> {
+    tokio::select! {
+        biased;
+        _ = cancellation.changed() => Err(CoreError::new(ErrorCode::OperationCancelled)),
+        result = work => result,
     }
 }
 
@@ -610,7 +675,7 @@ fn is_storage_error(code: ErrorCode) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::authentication::tests::mock_client;
+    use crate::authentication::tests::{gated_client, mock_client};
     use crate::paths::AppPaths;
     use crate::storage::PrivateStore;
 
@@ -647,6 +712,74 @@ mod tests {
             ("/minecraft", 200, r#"{"access_token":"fixture-minecraft","expires_in":3600,"token_type":"Bearer"}"#.to_owned()),
             ("/profile", 200, r#"{"id":"5627dd98e6be3c21b8a8e92344183641","name":"PlayerOne"}"#.to_owned()),
         ]
+    }
+
+    #[tokio::test]
+    async fn sign_out_during_remote_renewal_cannot_restore_credentials() {
+        let (client, task, observed, resume) = gated_client(chain().into_iter().take(1).collect());
+        let (paths, controller, id) = saved_microsoft(client);
+        let controller = Arc::new(controller);
+        let worker = controller.clone();
+        let renewal = tokio::spawn(async move { worker.renew_selected().await });
+        assert!(observed.await.is_ok());
+        assert!(matches!(controller.remove(id), Ok(RemovalOutcome::Removed)));
+        assert!(resume.send(()).is_ok());
+        assert!(
+            matches!(renewal.await, Ok(Err(error)) if error.code() == ErrorCode::OperationCancelled)
+        );
+        assert!(
+            controller
+                .repository
+                .snapshot()
+                .unwrap_or_else(|_| panic!("snapshot"))
+                .accounts
+                .is_empty()
+        );
+        assert!(controller.repository.refresh_token(id).is_err());
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn duplicate_callback_during_exchange_does_not_cancel_valid_login() {
+        let (client, task, observed, resume) = gated_client(chain());
+        let (paths, controller, id) = saved_microsoft(client);
+        let controller = Arc::new(controller);
+        let launch = controller
+            .begin_login(Some(id))
+            .unwrap_or_else(|_| panic!("login"));
+        let url = url::Url::parse(&launch.browser_url).unwrap_or_else(|_| panic!("url"));
+        let state = url
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .unwrap_or_else(|| panic!("state"));
+        let callback = format!("{}?state={state}&code=fixture", crate::oauth::REDIRECT_URI);
+        let worker = controller.clone();
+        let first_callback = callback.clone();
+        let login = tokio::spawn(async move { worker.callback(&first_callback).await });
+        assert!(observed.await.is_ok());
+        assert!(controller.callback(&callback).await.is_err());
+        assert!(
+            controller
+                .view()
+                .unwrap_or_else(|_| panic!("view"))
+                .login_pending
+        );
+        assert!(resume.send(()).is_ok());
+        assert!(matches!(login.await, Ok(Ok(()))));
+        assert_eq!(
+            controller
+                .view()
+                .unwrap_or_else(|_| panic!("view"))
+                .accounts
+                .len(),
+            1
+        );
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }
 
     #[tokio::test]

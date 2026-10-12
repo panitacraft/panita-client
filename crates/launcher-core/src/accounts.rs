@@ -58,6 +58,15 @@ struct StoredAccount {
     refresh_token: Option<String>,
 }
 
+impl StoredAccount {
+    fn replace_token(&mut self, token: &Secret) {
+        if let Some(mut previous) = self.refresh_token.take() {
+            previous.zeroize();
+        }
+        self.refresh_token = Some(token.expose().to_owned());
+    }
+}
+
 impl Drop for StoredAccount {
     fn drop(&mut self) {
         if let Some(token) = &mut self.refresh_token {
@@ -161,12 +170,12 @@ impl AccountRepository {
             let metadata = if let Some(account) = existing {
                 if account.metadata.kind != AccountKind::Microsoft
                     || account.metadata.profile_id != profile_id
-                    || account.metadata.oauth_client_id.as_deref() != Some(OAUTH_CLIENT_ID)
                 {
                     return Err(CoreError::new(ErrorCode::AccountMismatch));
                 }
                 account.metadata.username = username.to_owned();
-                account.refresh_token = Some(token.expose().to_owned());
+                account.metadata.oauth_client_id = Some(OAUTH_CLIENT_ID.to_owned());
+                account.replace_token(token);
                 account.metadata.clone()
             } else {
                 if intended_account.is_some() {
@@ -291,7 +300,7 @@ impl AccountRepository {
             {
                 return Err(CoreError::new(ErrorCode::AuthenticationRequired));
             }
-            account.refresh_token = Some(token.expose().to_owned());
+            account.replace_token(token);
             save_document(tx, &document)
         })
     }
@@ -602,6 +611,41 @@ mod tests {
         assert_eq!(pending.account_ids, vec![id]);
         assert!(repository.snapshot().is_err());
         assert!(paths.accounts().is_dir());
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
+    fn changed_oauth_client_requires_interactive_identity_matched_reauthentication() {
+        let (paths, repository) = repository();
+        let token = Secret::new("synthetic-token".to_owned()).unwrap_or_else(|_| panic!("fixture"));
+        let account = repository
+            .save_microsoft(Uuid::new_v4(), "PlayerOne", &token, None)
+            .unwrap_or_else(|_| panic!("save"));
+        assert!(
+            repository
+                .store
+                .with_lock(|tx| {
+                    let mut document = load_document(tx)?;
+                    document.accounts[0].metadata.oauth_client_id =
+                        Some(Uuid::new_v4().to_string());
+                    save_document(tx, &document)
+                })
+                .is_ok()
+        );
+        assert!(
+            matches!(repository.refresh_token(account.account_id), Err(error) if error.code() == ErrorCode::AuthenticationRequired)
+        );
+        let confirmed = repository
+            .save_microsoft(
+                account.profile_id,
+                "PlayerOne",
+                &token,
+                Some(account.account_id),
+            )
+            .unwrap_or_else(|_| panic!("reauth"));
+        assert_eq!(confirmed.account_id, account.account_id);
+        assert_eq!(confirmed.oauth_client_id.as_deref(), Some(OAUTH_CLIENT_ID));
         drop(repository);
         assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }

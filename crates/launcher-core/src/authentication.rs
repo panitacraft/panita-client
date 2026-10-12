@@ -169,7 +169,9 @@ impl AuthClient {
             profile,
             access,
             expires_at,
-            expires_wall: SystemTime::now() + expires_at.saturating_duration_since(Instant::now()),
+            expires_wall: SystemTime::now()
+                .checked_add(expires_at.saturating_duration_since(Instant::now()))
+                .ok_or_else(|| CoreError::new(ErrorCode::InvalidData))?,
         })
     }
 
@@ -265,6 +267,9 @@ fn classify_failure(status: StatusCode, stage: Stage, bytes: &[u8]) -> ErrorCode
                 ErrorCode::AuthenticationRequired
             }
             Some("access_denied") => ErrorCode::AuthenticationDenied,
+            Some("invalid_client" | "unauthorized_client" | "invalid_scope") => {
+                ErrorCode::AuthenticationConfiguration
+            }
             Some("temporarily_unavailable" | "server_error") => ErrorCode::ServiceUnavailable,
             _ => ErrorCode::AuthenticationRequired,
         };
@@ -278,7 +283,7 @@ fn classify_failure(status: StatusCode, stage: Stage, bytes: &[u8]) -> ErrorCode
 }
 
 fn deadline(seconds: u64) -> Result<Instant, CoreError> {
-    if seconds == 0 || seconds > 7 * 24 * 60 * 60 {
+    if seconds == 0 {
         return Err(CoreError::new(ErrorCode::InvalidData));
     }
     Instant::now()
@@ -391,6 +396,32 @@ pub(crate) mod tests {
     pub(crate) fn mock_client(
         responses: Vec<(&'static str, u16, String)>,
     ) -> (AuthClient, std::thread::JoinHandle<()>) {
+        mock_client_inner(responses, None)
+    }
+
+    pub(crate) fn gated_client(
+        responses: Vec<(&'static str, u16, String)>,
+    ) -> (
+        AuthClient,
+        std::thread::JoinHandle<()>,
+        tokio::sync::oneshot::Receiver<()>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (seen, observed) = tokio::sync::oneshot::channel();
+        let (resume, wait) = std::sync::mpsc::channel();
+        let (client, task) = mock_client_inner(responses, Some((seen, wait)));
+        (client, task, observed, resume)
+    }
+
+    type Gate = (
+        tokio::sync::oneshot::Sender<()>,
+        std::sync::mpsc::Receiver<()>,
+    );
+
+    fn mock_client_inner(
+        responses: Vec<(&'static str, u16, String)>,
+        mut gate: Option<Gate>,
+    ) -> (AuthClient, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap_or_else(|_| panic!("loopback"));
         let base = format!(
             "http://{}",
@@ -454,7 +485,15 @@ pub(crate) mod tests {
                     "HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
-                assert!(stream.write_all(reply.as_bytes()).is_ok());
+                let gated = gate.is_some();
+                if let Some((seen, wait)) = gate.take() {
+                    assert!(seen.send(()).is_ok());
+                    assert!(wait.recv_timeout(Duration::from_secs(10)).is_ok());
+                }
+                let written = stream.write_all(reply.as_bytes());
+                if !gated {
+                    assert!(written.is_ok());
+                }
             }
         });
         let client = Client::builder()
