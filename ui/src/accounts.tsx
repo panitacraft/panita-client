@@ -21,6 +21,8 @@ export function Accounts() {
   const [notice, setNotice] = useState<string | null>(null);
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const [blocked, setBlocked] = useState(false);
+  const loginStarting = useRef(false);
   const sequence = useRef(0);
   const desktop = isTauri();
 
@@ -33,17 +35,30 @@ export function Accounts() {
     let active = true;
     let stop: (() => void) | undefined;
     void (async () => {
-      const unlisten = await listen<AccountsView>('accounts-changed', event => { if (active) accept(event.payload); });
+      const unlisten = await listen<AccountsView>('accounts-changed', event => {
+        if (!active) return;
+        if (event.payload.login_error) setNotice(null);
+        accept(event.payload);
+      });
       if (!active) { unlisten(); return; }
       stop = unlisten;
       await invoke('initialize');
       const initial = await invoke<AccountsView>('account_snapshot');
       if (active) accept(initial);
-    })().catch(reason => { if (active) setError(messageForError(reason)); });
+    })().catch(reason => {
+      if (!active) return;
+      setError(messageForError(reason));
+      setBlocked(reason === 'accounts_file_invalid');
+    });
     return () => { active = false; stop?.(); sequence.current += 1; };
   }, [desktop]);
 
   async function act(command: string, args?: Record<string, unknown>, success?: string) {
+    if (command === 'start_microsoft_login') {
+      // A second click before the first reply must not report the first login as busy.
+      if (loginStarting.current || view?.login_pending) return;
+      loginStarting.current = true;
+    }
     const current = ++sequence.current;
     setBusy(command); setError(null); setNotice(null);
     try {
@@ -57,6 +72,7 @@ export function Accounts() {
     } catch (reason) {
       if (current === sequence.current) setError(messageForError(reason));
     } finally {
+      if (command === 'start_microsoft_login') loginStarting.current = false;
       if (current === sequence.current) setBusy(null);
     }
   }
@@ -68,7 +84,7 @@ export function Accounts() {
     {notice && <p role="status">{notice}</p>}
     {view?.login_error && <p role="alert" className="account-error">{messageForError(view.login_error)}</p>}
     {desktop && !view && !error && <p role="status">Cargando cuentas…</p>}
-    {desktop && !view && error && <button type="button" onClick={() => void act('initialize')}>Reintentar</button>}
+    {desktop && !view && error && !blocked && <button type="button" onClick={() => void act('initialize')}>Reintentar</button>}
     {view && <>
       {view.login_pending && <div className="login-progress" role="status">
         <p>Completa el inicio de sesión en tu navegador y permite abrir Panita Client. Cuando vuelvas aquí, puedes cerrar la pestaña del navegador. Puedes cancelar o seleccionar otra cuenta.</p>

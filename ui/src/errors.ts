@@ -7,7 +7,8 @@ export type LauncherErrorCode =
   | 'account_mismatch' | 'invalid_username' | 'authentication_denied'
   | 'authentication_timeout' | 'service_unavailable' | 'account_restricted'
   | 'minecraft_not_owned' | 'operation_busy' | 'operation_cancelled'
-  | 'callback_registration_failed' | 'browser_unavailable' | 'authentication_configuration';
+  | 'callback_registration_failed' | 'browser_unavailable' | 'authentication_configuration'
+  | 'accounts_file_invalid' | 'callback_not_active';
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
@@ -28,6 +29,8 @@ const messages: Record<LauncherErrorCode, string> = {
   minecraft_not_owned: 'Esta cuenta no tiene un perfil de Minecraft Java disponible. Comprueba tu licencia y crea el perfil.',
   operation_busy: 'Hay una operación de inicio de sesión en curso. Espera o cancélala.',
   operation_cancelled: 'La operación se canceló. Puedes intentarlo de nuevo.',
+  accounts_file_invalid: 'El archivo de cuentas está dañado o pertenece a una versión no compatible. No lo modificamos para proteger tus datos. Cierra el cliente y restaura una copia de accounts.json en la carpeta PanitaClient de tus datos de aplicación, o elimínalo para empezar de nuevo.',
+  callback_not_active: 'Se ignoró un regreso del navegador que ya no estaba activo. Si querías iniciar sesión, vuelve a intentarlo.',
   callback_registration_failed: 'No pudimos configurar el regreso desde el navegador. Reinicia el cliente e inténtalo de nuevo.',
   browser_unavailable: 'No pudimos abrir el navegador del sistema. Revisa tu navegador predeterminado e inténtalo de nuevo.',
 };
