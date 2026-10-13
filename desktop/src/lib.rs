@@ -89,6 +89,8 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             account_commands::handle_callback(app, args);
             if let Some(window) = app.get_webview_window("main") {
+                // A minimized launcher must come back to show the real login result.
+                let _ = window.unminimize();
                 let _ = window.show();
                 let _ = window.set_focus();
             }

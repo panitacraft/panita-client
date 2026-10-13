@@ -88,6 +88,13 @@ pub(super) fn start_microsoft_login(
     let launch = accounts
         .begin_login_with_redirect(intended, redirect)
         .map_err(|e| e.code())?;
+    // Test builds only: hand the authorization URL to the harness instead of a browser.
+    #[cfg(feature = "test-endpoints")]
+    if let Some(path) = std::env::var_os("PANITA_TEST_URL_OUT") {
+        let _ = std::fs::write(path, &launch.browser_url);
+        emit_accounts(&app, &accounts);
+        return Ok(launch.operation_id.to_string());
+    }
     if app
         .opener()
         .open_url(launch.browser_url, None::<&str>)
@@ -151,7 +158,7 @@ pub(super) fn retry_account_save(
 }
 
 #[tauri::command]
-pub(super) fn remove_account(
+pub(super) async fn remove_account(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
     account_id: String,
@@ -159,6 +166,9 @@ pub(super) fn remove_account(
     let id = Uuid::parse_str(&account_id).map_err(|_| ErrorCode::InvalidData)?;
     let accounts = controller(&state)?;
     let result = accounts.remove(id).map_err(|e| e.code())?;
+    emit_accounts(&app, &accounts);
+    // A Microsoft account that became selected needs its session acquired.
+    let _ = accounts.renew_selected().await;
     emit_accounts(&app, &accounts);
     Ok(result)
 }

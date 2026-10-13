@@ -77,6 +77,10 @@ enum Stage {
 
 impl AuthClient {
     pub fn new() -> Result<Self, CoreError> {
+        #[cfg(feature = "test-endpoints")]
+        if let Ok(base) = std::env::var("PANITA_TEST_AUTH_BASE") {
+            return Self::with_test_base(&base);
+        }
         let client = Client::builder()
             .https_only(true)
             .redirect(reqwest::redirect::Policy::none())
@@ -88,6 +92,28 @@ impl AuthClient {
         Ok(Self {
             client,
             endpoints: Endpoints::default(),
+        })
+    }
+
+    /// Compiled only with `test-endpoints`; production builds cannot redirect services.
+    #[cfg(feature = "test-endpoints")]
+    fn with_test_base(base: &str) -> Result<Self, CoreError> {
+        let client = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(20))
+            .connect_timeout(Duration::from_secs(10))
+            .user_agent("PanitaClient/0.1.0")
+            .build()
+            .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
+        Ok(Self {
+            client,
+            endpoints: Endpoints {
+                microsoft: format!("{base}/token"),
+                xbox: format!("{base}/xbox"),
+                xsts: format!("{base}/xsts"),
+                minecraft: format!("{base}/minecraft"),
+                profile: format!("{base}/profile"),
+            },
         })
     }
 
@@ -246,7 +272,11 @@ impl AuthClient {
 }
 
 fn classify_failure(status: StatusCode, stage: Stage, bytes: &[u8]) -> ErrorCode {
-    if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+    // Redirects are never followed; an unexpected one is a service fault, not a revocation.
+    if status == StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
+        || status.is_redirection()
+    {
         return ErrorCode::ServiceUnavailable;
     }
     #[derive(Deserialize)]
@@ -259,18 +289,20 @@ fn classify_failure(status: StatusCode, stage: Stage, bytes: &[u8]) -> ErrorCode
     if matches!(stage, Stage::Xsts) && parsed.as_ref().and_then(|dto| dto.xbox_error).is_some() {
         return ErrorCode::AccountRestricted;
     }
+    // Only an OAuth error code can say the grant was rejected; a body without one
+    // falls through to the status mapping instead of asking the player to sign in.
     if matches!(stage, Stage::Microsoft)
-        && let Some(dto) = &parsed
+        && let Some(error) = parsed.as_ref().and_then(|dto| dto.error.as_deref())
     {
-        return match dto.error.as_deref() {
-            Some("invalid_grant" | "interaction_required" | "login_required") => {
+        return match error {
+            "invalid_grant" | "interaction_required" | "login_required" => {
                 ErrorCode::AuthenticationRequired
             }
-            Some("access_denied") => ErrorCode::AuthenticationDenied,
-            Some("invalid_client" | "unauthorized_client" | "invalid_scope") => {
+            "access_denied" => ErrorCode::AuthenticationDenied,
+            "invalid_client" | "unauthorized_client" | "invalid_scope" => {
                 ErrorCode::AuthenticationConfiguration
             }
-            Some("temporarily_unavailable" | "server_error") => ErrorCode::ServiceUnavailable,
+            "temporarily_unavailable" | "server_error" => ErrorCode::ServiceUnavailable,
             _ => ErrorCode::AuthenticationRequired,
         };
     }
@@ -623,6 +655,27 @@ pub(crate) mod tests {
                 br#"{"XErr":2148916233}"#
             ),
             ErrorCode::AccountRestricted
+        );
+        // Unexpected shapes from the token endpoint are not a sign-in request.
+        assert_eq!(
+            classify_failure(StatusCode::FOUND, Stage::Microsoft, b"{}"),
+            ErrorCode::ServiceUnavailable
+        );
+        assert_eq!(
+            classify_failure(StatusCode::BAD_REQUEST, Stage::Microsoft, b"{}"),
+            ErrorCode::InvalidData
+        );
+        assert_eq!(
+            classify_failure(StatusCode::BAD_REQUEST, Stage::Microsoft, b"not json"),
+            ErrorCode::InvalidData
+        );
+        assert_eq!(
+            classify_failure(
+                StatusCode::BAD_REQUEST,
+                Stage::Microsoft,
+                br#"{"error":"invalid_client"}"#
+            ),
+            ErrorCode::AuthenticationConfiguration
         );
         for status in [
             StatusCode::TOO_MANY_REQUESTS,

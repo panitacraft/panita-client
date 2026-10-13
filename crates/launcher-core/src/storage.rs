@@ -172,6 +172,10 @@ fn map_private_error(error: PrivateFsError) -> CoreError {
             may_have_published: true,
             ..
         } => CoreError::new(ErrorCode::StorageCommitUncertain),
+        PrivateFsError::InsecureAcl
+        | PrivateFsError::InsecurePermissions { .. }
+        | PrivateFsError::OwnerMismatch
+        | PrivateFsError::WrongOwner { .. } => CoreError::new(ErrorCode::UnsafePermissions),
         _ => CoreError::new(ErrorCode::StorageUnavailable),
     }
 }

@@ -10,6 +10,7 @@ import { Accounts } from './accounts';
 type CatalogState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
+  | { kind: 'blocked' }
   | { kind: 'ready'; instances: CatalogInstance[] };
 
 function App() {
@@ -22,7 +23,9 @@ function App() {
         if (active) setCatalog({ kind: 'ready', instances });
       })
       .catch(error => {
-        if (active) setCatalog({ kind: 'error', message: messageForError(error) });
+        if (!active) return;
+        // The account file problem is explained once, in the accounts section.
+        setCatalog(error === 'accounts_file_invalid' || error === 'unsafe_permissions' ? { kind: 'blocked' } : { kind: 'error', message: messageForError(error) });
       });
     return () => { active = false; };
   }, []);
@@ -38,6 +41,7 @@ function App() {
         <h1 id="instances-heading">Tus instancias</h1>
         <p>Elige una versión de Minecraft para comenzar.</p>
         {catalog.kind === 'loading' && <p role="status">Cargando instancias…</p>}
+        {catalog.kind === 'blocked' && <p role="status">Las instancias estarán disponibles cuando se resuelva el problema con las cuentas.</p>}
         {catalog.kind === 'error' && (
           <div role="alert">
             <p>{catalog.message}</p>

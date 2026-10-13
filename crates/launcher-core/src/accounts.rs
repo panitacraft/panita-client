@@ -182,7 +182,7 @@ pub enum RemovalOutcome {
 }
 
 pub struct AccountRepository {
-    store: PrivateStore,
+    pub(crate) store: PrivateStore,
 }
 
 impl AccountRepository {
@@ -372,6 +372,25 @@ impl AccountRepository {
         })
     }
 
+    /// Keep the saved name in step with the Minecraft profile; identity never changes.
+    pub fn update_username(&self, id: Uuid, name: &str) -> Result<(), CoreError> {
+        validate_name(name)?;
+        self.store.with_lock(|tx| {
+            let mut document = load_reconciled(tx)?;
+            let account = document
+                .accounts
+                .iter_mut()
+                .find(|a| a.metadata.account_id == id)
+                .ok_or_else(|| CoreError::new(ErrorCode::AccountNotFound))?;
+            if account.metadata.kind != AccountKind::Microsoft || account.metadata.username == name
+            {
+                return Ok(());
+            }
+            account.metadata.username = name.to_owned();
+            save_document(tx, &document)
+        })
+    }
+
     /// The caller must invalidate in-memory operations before this method.
     pub fn remove(&self, id: Uuid) -> RemovalOutcome {
         self.store
@@ -434,17 +453,17 @@ fn load_document(tx: &StoreTransaction<'_>) -> Result<AccountDocument, CoreError
     }
     let version = serde_json::from_slice::<Version>(&bytes).map(|v| v.schema_version);
     let migrate = matches!(version, Ok(1));
+    let invalid = || CoreError::new(ErrorCode::AccountsFileInvalid);
     let parsed = match version {
-        Ok(1) => serde_json::from_slice::<AccountDocument>(&bytes)
-            .map_err(|_| CoreError::new(ErrorCode::InvalidData)),
+        Ok(1) => serde_json::from_slice::<AccountDocument>(&bytes).map_err(|_| invalid()),
         Ok(2) => serde_json::from_slice::<AccountFile>(&bytes)
-            .map_err(|_| CoreError::new(ErrorCode::InvalidData))
-            .and_then(AccountFile::into_document),
-        _ => Err(CoreError::new(ErrorCode::InvalidData)),
+            .map_err(|_| invalid())
+            .and_then(|file| file.into_document().map_err(|_| invalid())),
+        _ => Err(invalid()),
     };
     bytes.zeroize();
     let document = parsed?;
-    validate_document(&document)?;
+    validate_document(&document).map_err(|_| invalid())?;
     if migrate {
         save_document(tx, &document)?;
     }
@@ -490,9 +509,8 @@ fn validate_document(document: &AccountDocument) -> Result<(), CoreError> {
 
 fn load_pending(tx: &StoreTransaction<'_>) -> Result<PendingRemovals, CoreError> {
     let pending: PendingRemovals = match tx.read(REMOVAL_FILE)? {
-        Some(bytes) => {
-            serde_json::from_slice(&bytes).map_err(|_| CoreError::new(ErrorCode::InvalidData))?
-        }
+        Some(bytes) => serde_json::from_slice(&bytes)
+            .map_err(|_| CoreError::new(ErrorCode::AccountsFileInvalid))?,
         None => PendingRemovals {
             schema_version: 1,
             account_ids: Vec::new(),
@@ -502,7 +520,7 @@ fn load_pending(tx: &StoreTransaction<'_>) -> Result<PendingRemovals, CoreError>
         || pending.account_ids.len() > 128
         || pending.account_ids.iter().any(Uuid::is_nil)
     {
-        return Err(CoreError::new(ErrorCode::InvalidData));
+        return Err(CoreError::new(ErrorCode::AccountsFileInvalid));
     }
     Ok(pending)
 }
@@ -693,7 +711,10 @@ mod tests {
                 .store
                 .transaction(ACCOUNT_FILE, |_| Ok((bytes.clone(), ())))
                 .unwrap_or_else(|_| panic!("fixture operation failed"));
-            assert!(repository.snapshot().is_err());
+            assert!(matches!(
+                repository.snapshot(),
+                Err(error) if error.code() == ErrorCode::AccountsFileInvalid
+            ));
             assert_eq!(
                 repository
                     .store
@@ -763,7 +784,27 @@ mod tests {
                 .transaction(ACCOUNT_FILE, |_| Ok((bytes.to_vec(), ())))
                 .is_ok()
         );
-        assert!(repository.add_offline("PlayerOne").is_err());
+        assert!(matches!(
+            repository.add_offline("PlayerOne"),
+            Err(error) if error.code() == ErrorCode::AccountsFileInvalid
+        ));
+        let malformed = b"{ not json";
+        assert!(
+            repository
+                .store
+                .transaction(ACCOUNT_FILE, |_| Ok((malformed.to_vec(), ())))
+                .is_ok()
+        );
+        assert!(matches!(
+            repository.snapshot(),
+            Err(error) if error.code() == ErrorCode::AccountsFileInvalid
+        ));
+        assert!(
+            repository
+                .store
+                .transaction(ACCOUNT_FILE, |_| Ok((bytes.to_vec(), ())))
+                .is_ok()
+        );
         assert_eq!(
             repository.store.read(ACCOUNT_FILE).ok().flatten(),
             Some(bytes.to_vec())
