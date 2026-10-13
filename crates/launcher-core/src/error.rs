@@ -29,6 +29,8 @@ pub enum ErrorCode {
     AccountsFileInvalid,
     /// A browser callback arrived when no login was waiting for it.
     CallbackNotActive,
+    /// The data directory or a file in it does not have owner-only permissions.
+    UnsafePermissions,
 }
 
 #[derive(Debug)]
