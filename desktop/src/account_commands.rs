@@ -88,6 +88,13 @@ pub(super) fn start_microsoft_login(
     let launch = accounts
         .begin_login_with_redirect(intended, redirect)
         .map_err(|e| e.code())?;
+    // Test builds only: hand the authorization URL to the harness instead of a browser.
+    #[cfg(feature = "test-endpoints")]
+    if let Some(path) = std::env::var_os("PANITA_TEST_URL_OUT") {
+        let _ = std::fs::write(path, &launch.browser_url);
+        emit_accounts(&app, &accounts);
+        return Ok(launch.operation_id.to_string());
+    }
     if app
         .opener()
         .open_url(launch.browser_url, None::<&str>)

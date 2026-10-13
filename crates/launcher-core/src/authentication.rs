@@ -77,6 +77,10 @@ enum Stage {
 
 impl AuthClient {
     pub fn new() -> Result<Self, CoreError> {
+        #[cfg(feature = "test-endpoints")]
+        if let Ok(base) = std::env::var("PANITA_TEST_AUTH_BASE") {
+            return Self::with_test_base(&base);
+        }
         let client = Client::builder()
             .https_only(true)
             .redirect(reqwest::redirect::Policy::none())
@@ -88,6 +92,28 @@ impl AuthClient {
         Ok(Self {
             client,
             endpoints: Endpoints::default(),
+        })
+    }
+
+    /// Compiled only with `test-endpoints`; production builds cannot redirect services.
+    #[cfg(feature = "test-endpoints")]
+    fn with_test_base(base: &str) -> Result<Self, CoreError> {
+        let client = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(Duration::from_secs(20))
+            .connect_timeout(Duration::from_secs(10))
+            .user_agent("PanitaClient/0.1.0")
+            .build()
+            .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
+        Ok(Self {
+            client,
+            endpoints: Endpoints {
+                microsoft: format!("{base}/token"),
+                xbox: format!("{base}/xbox"),
+                xsts: format!("{base}/xsts"),
+                minecraft: format!("{base}/minecraft"),
+                profile: format!("{base}/profile"),
+            },
         })
     }
 
