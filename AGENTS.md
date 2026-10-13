@@ -97,7 +97,7 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 
 ### 4.2 Accounts and authentication
 
-- Use Microsoft authorization code + PKCE in the system browser with the owner-selected deep-link callback `panitacraft://oauth/callback`. Verify provider acceptance and OS registration before claiming support. Do not use an embedded launcher webview or require manual device-code entry for normal login.
+- Use Microsoft authorization code + PKCE in the system browser with the HTTPS redirect `https://www.panitacraft.com/auth/callback` and `response_mode=fragment`. The website hands the result to `panitacraft://oauth/callback`; Rust validates and completes authentication. Keep the chosen redirect bound to each pending login through token exchange. Direct deep-link authorization is a developer-only fallback. Verify the full handoff and OS registration before claiming support. Do not use an embedded launcher webview or require manual device-code entry for normal login.
 - Never request or store Microsoft passwords or MFA codes. Keep credentials and authentication logic in Rust; expose only necessary account metadata to the UI.
 - Persist account metadata and only the Microsoft refresh token in local `accounts.json`, in plaintext with restricted permissions. Access tokens remain in backend memory. Do not add a keyring requirement, custom encryption, or API-delivered encryption keys without a new owner decision.
 - Associate accounts with stable internal IDs and their issuing public OAuth client ID. Use unique operation and process-session IDs, cancellation, stale-result protection, and proper write coordination.
@@ -168,7 +168,7 @@ panita-client/
 This annex is an integral part of AGENTS.md. It preserves the accepted decision, rationale, recovery cases, and validation requirements from the local source document `docs/account-storage-decision.md` as of 2026-10-08. The complete policy is included below; reading a separate file is not required. Update this annex alongside any owner-approved policy changes.
 Status: Accepted
 Date: 2026-10-05
-Updated: 2026-10-11 (deep-link callback and catalog-outage fallback)
+Updated: 2026-10-12 (HTTPS browser handoff and developer-only direct-link fallback)
 
 ### Decision
 
@@ -189,7 +189,7 @@ The selected design prioritizes automatic session persistence across Windows, Li
 
 ### Interactive authentication
 
-Use the system browser with authorization code + PKCE and the deep-link callback `panitacraft://oauth/callback`, selected by the owner on 2026-10-11. This supersedes the loopback callback decision. Provider acceptance and installed-platform handling remain unverified. Manual device-code entry and an embedded launcher webview are not the normal sign-in experience. Device-code remains diagnostic evidence only.
+Use the system browser with authorization code + PKCE and the HTTPS redirect `https://www.panitacraft.com/auth/callback`, approved by the owner on 2026-10-12. Request `response_mode=fragment`. The website removes the fragment from the visible URL and forwards the authorization response to `panitacraft://oauth/callback`. It displays continuation instructions, not proof of Minecraft authentication. Tokens and the PKCE verifier remain in Rust. The callback page must exclude sensitive parameters from analytics, logs and diagnostics. This supersedes direct deep-link authorization as the default; that flow remains a developer-only fallback without player-facing controls. Bind the chosen redirect to each pending login and use it unchanged in authorization and token exchange. The owner reports successful HTTPS/fragment Microsoft authorization and public-client token exchange, and completed web implementation; the full launcher-to-website-to-Minecraft flow and installed-platform handling still require validation. Manual device-code entry and an embedded launcher webview are not the normal sign-in experience. Device-code remains diagnostic evidence only.
 
 Use PKCE S256, a cryptographically random verifier and state, strict state validation, and cancellation/timeout cleanup. Validate the exact callback scheme, authority, and path; accept callbacks only for an active operation and reject duplicate or stale results. Route callbacks to the owning launcher process and handle authentication entirely in Rust. If that process exits, require a new sign-in. Custom schemes are not exclusive OS ownership; PKCE remains essential. Do not log the callback URL, callback-bearing process arguments, authorization code, verifier, tokens, or sensitive request/response bodies. Configure the native/public-client redirect in Microsoft Entra and verify it with the approved application before declaring this flow implemented. No client secret is distributed.
 
