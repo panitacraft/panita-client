@@ -272,7 +272,11 @@ impl AuthClient {
 }
 
 fn classify_failure(status: StatusCode, stage: Stage, bytes: &[u8]) -> ErrorCode {
-    if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+    // Redirects are never followed; an unexpected one is a service fault, not a revocation.
+    if status == StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
+        || status.is_redirection()
+    {
         return ErrorCode::ServiceUnavailable;
     }
     #[derive(Deserialize)]
@@ -285,18 +289,20 @@ fn classify_failure(status: StatusCode, stage: Stage, bytes: &[u8]) -> ErrorCode
     if matches!(stage, Stage::Xsts) && parsed.as_ref().and_then(|dto| dto.xbox_error).is_some() {
         return ErrorCode::AccountRestricted;
     }
+    // Only an OAuth error code can say the grant was rejected; a body without one
+    // falls through to the status mapping instead of asking the player to sign in.
     if matches!(stage, Stage::Microsoft)
-        && let Some(dto) = &parsed
+        && let Some(error) = parsed.as_ref().and_then(|dto| dto.error.as_deref())
     {
-        return match dto.error.as_deref() {
-            Some("invalid_grant" | "interaction_required" | "login_required") => {
+        return match error {
+            "invalid_grant" | "interaction_required" | "login_required" => {
                 ErrorCode::AuthenticationRequired
             }
-            Some("access_denied") => ErrorCode::AuthenticationDenied,
-            Some("invalid_client" | "unauthorized_client" | "invalid_scope") => {
+            "access_denied" => ErrorCode::AuthenticationDenied,
+            "invalid_client" | "unauthorized_client" | "invalid_scope" => {
                 ErrorCode::AuthenticationConfiguration
             }
-            Some("temporarily_unavailable" | "server_error") => ErrorCode::ServiceUnavailable,
+            "temporarily_unavailable" | "server_error" => ErrorCode::ServiceUnavailable,
             _ => ErrorCode::AuthenticationRequired,
         };
     }
@@ -649,6 +655,27 @@ pub(crate) mod tests {
                 br#"{"XErr":2148916233}"#
             ),
             ErrorCode::AccountRestricted
+        );
+        // Unexpected shapes from the token endpoint are not a sign-in request.
+        assert_eq!(
+            classify_failure(StatusCode::FOUND, Stage::Microsoft, b"{}"),
+            ErrorCode::ServiceUnavailable
+        );
+        assert_eq!(
+            classify_failure(StatusCode::BAD_REQUEST, Stage::Microsoft, b"{}"),
+            ErrorCode::InvalidData
+        );
+        assert_eq!(
+            classify_failure(StatusCode::BAD_REQUEST, Stage::Microsoft, b"not json"),
+            ErrorCode::InvalidData
+        );
+        assert_eq!(
+            classify_failure(
+                StatusCode::BAD_REQUEST,
+                Stage::Microsoft,
+                br#"{"error":"invalid_client"}"#
+            ),
+            ErrorCode::AuthenticationConfiguration
         );
         for status in [
             StatusCode::TOO_MANY_REQUESTS,
