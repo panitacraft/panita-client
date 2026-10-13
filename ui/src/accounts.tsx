@@ -22,6 +22,7 @@ export function Accounts() {
   const [username, setUsername] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [blocked, setBlocked] = useState(false);
+  const [confirming, setConfirming] = useState<string | null>(null);
   const loginStarting = useRef(false);
   const sequence = useRef(0);
   const desktop = isTauri();
@@ -67,10 +68,13 @@ export function Accounts() {
       if (outcome === 'pending') setError('La sesión se cerró en este cliente, pero la eliminación del archivo quedó pendiente. Se reintentará al reiniciar.');
       else if (outcome === 'not_durable') setError('La sesión se cerró en este cliente, pero no pudimos eliminar los datos guardados. La cuenta podría reaparecer al reiniciar.');
       else if (success) setNotice(success);
+      if (command === 'add_offline_account') setUsername('');
       const next = await invoke<AccountsView>('account_snapshot');
       if (current === sequence.current) accept(next);
     } catch (reason) {
-      if (current === sequence.current) setError(messageForError(reason));
+      // Account rows already show the error of these commands.
+      const shownInRow = command === 'renew_account' || command === 'validate_account';
+      if (current === sequence.current && !shownInRow) setError(messageForError(reason));
     } finally {
       if (command === 'start_microsoft_login') loginStarting.current = false;
       if (current === sequence.current) setBusy(null);
@@ -114,7 +118,13 @@ export function Accounts() {
               {selected && account.metadata.kind === 'microsoft' && <button type="button" disabled={view.login_pending || busy === 'renew_account'} onClick={() => void act('renew_account')}>Reintentar sesión</button>}
               {!account.persisted && <button type="button" onClick={() => void act('retry_account_save', { accountId: id }, 'La cuenta se guardó correctamente.')}>Reintentar guardado</button>}
               {selected && account.metadata.kind === 'microsoft' && <button type="button" disabled={view.login_pending || account.status !== 'ready' || busy === 'validate_account'} onClick={() => void act('validate_account', undefined, 'Minecraft autorizó la sesión. Esta comprobación también se realizará al jugar.')}>Comprobar sesión</button>}
-              <button type="button" onClick={() => void act('remove_account', { accountId: id })}>Cerrar sesión y quitar cuenta</button>
+              {confirming === id
+                ? <span role="group" aria-label="Confirmar quitar cuenta">
+                    <span>¿Quitar esta cuenta de este equipo?</span>
+                    <button type="button" onClick={() => { setConfirming(null); void act('remove_account', { accountId: id }); }}>Quitar cuenta</button>
+                    <button type="button" onClick={() => setConfirming(null)}>Conservar</button>
+                  </span>
+                : <button type="button" onClick={() => setConfirming(id)}>Cerrar sesión y quitar cuenta</button>}
             </div>
           </li>;
         })}

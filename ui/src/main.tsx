@@ -25,7 +25,7 @@ function App() {
       .catch(error => {
         if (!active) return;
         // The account file problem is explained once, in the accounts section.
-        setCatalog(error === 'accounts_file_invalid' ? { kind: 'blocked' } : { kind: 'error', message: messageForError(error) });
+        setCatalog(error === 'accounts_file_invalid' || error === 'unsafe_permissions' ? { kind: 'blocked' } : { kind: 'error', message: messageForError(error) });
       });
     return () => { active = false; };
   }, []);
