@@ -438,7 +438,21 @@ impl AccountController {
             let token = if let Some(token) = state.unsaved_refresh.get(&id) {
                 Secret::new(token.expose().to_owned())?
             } else {
-                self.repository.refresh_token(id)?
+                match self.repository.refresh_token(id) {
+                    Ok(token) => token,
+                    Err(error) => {
+                        // For example a changed issuing client: say why, keep the profile.
+                        if let Some(account) = state.accounts.get_mut(&id) {
+                            account.status = if error.code() == ErrorCode::AuthenticationRequired {
+                                SessionStatus::SignInRequired
+                            } else {
+                                SessionStatus::Error
+                            };
+                            account.error = Some(error.code());
+                        }
+                        return Err(error);
+                    }
+                }
             };
             if let Some(account) = state.accounts.get_mut(&id) {
                 account.status = SessionStatus::Authenticating;
@@ -508,6 +522,10 @@ impl AccountController {
             }
             account.metadata.username = session.profile.name.clone();
             account.status = SessionStatus::Ready;
+            if state.saved_ids.contains(&id) {
+                // Best effort and a no-op when unchanged: the next renewal retries a failure.
+                let _ = self.repository.update_username(id, &session.profile.name);
+            }
             let session = Arc::new(session);
             state.sessions.insert(id, session.clone());
             Ok(session)
@@ -593,10 +611,31 @@ impl AccountController {
         state.sessions.remove(&id);
         state.unsaved_refresh.remove(&id);
         state.saved_ids.remove(&id);
-        if state.selected == Some(id) {
+        let was_selected = state.selected == Some(id);
+        if was_selected {
             state.selected = None;
         }
-        Ok(self.repository.remove(id))
+        let outcome = self.repository.remove(id);
+        if was_selected {
+            // Never leave the player without a selection while accounts remain.
+            let next = state
+                .accounts
+                .values()
+                .min_by(|a, b| {
+                    a.metadata
+                        .username
+                        .cmp(&b.metadata.username)
+                        .then(a.metadata.account_id.cmp(&b.metadata.account_id))
+                })
+                .map(|a| (a.metadata.account_id, a.persisted));
+            if let Some((next, persisted)) = next {
+                state.selected = Some(next);
+                if persisted {
+                    let _ = self.repository.select(next);
+                }
+            }
+        }
+        Ok(outcome)
     }
 
     pub fn retry_save(&self, id: Uuid) -> Result<(), CoreError> {
@@ -679,6 +718,7 @@ fn is_storage_error(code: ErrorCode) -> bool {
         ErrorCode::StorageUnavailable
             | ErrorCode::StorageCommitUncertain
             | ErrorCode::PermissionDenied
+            | ErrorCode::UnsafePermissions
     )
 }
 
@@ -791,6 +831,86 @@ mod tests {
             1
         );
         assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn renamed_profile_is_saved_with_the_same_account_id() {
+        let mut responses = chain();
+        responses[4].2 =
+            r#"{"id":"5627dd98e6be3c21b8a8e92344183641","name":"Renamed_1"}"#.to_owned();
+        let (client, task) = mock_client(responses);
+        let (paths, controller, id) = saved_microsoft(client);
+        assert!(controller.renew_selected().await.is_ok());
+        let saved = controller
+            .repository
+            .snapshot()
+            .unwrap_or_else(|_| panic!("snapshot"));
+        assert_eq!(saved.accounts.len(), 1);
+        assert_eq!(saved.accounts[0].account_id, id);
+        assert_eq!(saved.accounts[0].username, "Renamed_1");
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn foreign_issuing_client_explains_that_sign_in_is_required() {
+        let (client, task) = mock_client(Vec::new());
+        let (paths, controller, id) = saved_microsoft(client);
+        let account_file = paths.accounts();
+        let text = std::fs::read_to_string(&account_file).unwrap_or_default();
+        assert!(text.contains(OAUTH_CLIENT_ID));
+        // Same protected file, rewritten in place with a different issuing client.
+        assert!(
+            controller
+                .repository
+                .store
+                .transaction("accounts.json", |_| {
+                    Ok((
+                        text.replace(OAUTH_CLIENT_ID, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+                            .into_bytes(),
+                        (),
+                    ))
+                })
+                .is_ok()
+        );
+        assert!(matches!(
+            controller.renew_selected().await,
+            Err(error) if error.code() == ErrorCode::AuthenticationRequired
+        ));
+        let view = controller.view().unwrap_or_else(|_| panic!("view"));
+        let account = &view.accounts[0];
+        assert_eq!(account.metadata.account_id, id);
+        assert!(matches!(account.status, SessionStatus::SignInRequired));
+        assert_eq!(account.error, Some(ErrorCode::AuthenticationRequired));
+        drop(task);
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn removing_the_selected_account_selects_the_next_one() {
+        let (client, task) = mock_client(Vec::new());
+        let (paths, controller, id) = saved_microsoft(client);
+        let offline = controller
+            .add_offline("Zed_Offline")
+            .unwrap_or_else(|_| panic!("offline"));
+        assert!(controller.select(id).is_ok());
+        assert!(matches!(controller.remove(id), Ok(RemovalOutcome::Removed)));
+        let view = controller.view().unwrap_or_else(|_| panic!("view"));
+        assert_eq!(view.selected_account_id, Some(offline.account_id));
+        let saved = controller
+            .repository
+            .snapshot()
+            .unwrap_or_else(|_| panic!("snapshot"));
+        assert_eq!(saved.selected_account_id, Some(offline.account_id));
+        // Removing the last account leaves an explicit empty selection.
+        assert!(controller.remove(offline.account_id).is_ok());
+        let view = controller.view().unwrap_or_else(|_| panic!("view"));
+        assert_eq!(view.selected_account_id, None);
+        drop(task);
         drop(controller);
         assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }

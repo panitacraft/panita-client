@@ -182,7 +182,7 @@ pub enum RemovalOutcome {
 }
 
 pub struct AccountRepository {
-    store: PrivateStore,
+    pub(crate) store: PrivateStore,
 }
 
 impl AccountRepository {
@@ -368,6 +368,25 @@ impl AccountRepository {
                 return Err(CoreError::new(ErrorCode::AuthenticationRequired));
             }
             account.replace_token(token);
+            save_document(tx, &document)
+        })
+    }
+
+    /// Keep the saved name in step with the Minecraft profile; identity never changes.
+    pub fn update_username(&self, id: Uuid, name: &str) -> Result<(), CoreError> {
+        validate_name(name)?;
+        self.store.with_lock(|tx| {
+            let mut document = load_reconciled(tx)?;
+            let account = document
+                .accounts
+                .iter_mut()
+                .find(|a| a.metadata.account_id == id)
+                .ok_or_else(|| CoreError::new(ErrorCode::AccountNotFound))?;
+            if account.metadata.kind != AccountKind::Microsoft || account.metadata.username == name
+            {
+                return Ok(());
+            }
+            account.metadata.username = name.to_owned();
             save_document(tx, &document)
         })
     }

@@ -158,7 +158,7 @@ pub(super) fn retry_account_save(
 }
 
 #[tauri::command]
-pub(super) fn remove_account(
+pub(super) async fn remove_account(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
     account_id: String,
@@ -166,6 +166,9 @@ pub(super) fn remove_account(
     let id = Uuid::parse_str(&account_id).map_err(|_| ErrorCode::InvalidData)?;
     let accounts = controller(&state)?;
     let result = accounts.remove(id).map_err(|e| e.code())?;
+    emit_accounts(&app, &accounts);
+    // A Microsoft account that became selected needs its session acquired.
+    let _ = accounts.renew_selected().await;
     emit_accounts(&app, &accounts);
     Ok(result)
 }
