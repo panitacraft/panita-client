@@ -156,7 +156,7 @@ impl AccountController {
     }
 
     pub fn report_orphaned_callback(&self) -> Result<(), CoreError> {
-        self.state()?.login_error = Some(ErrorCode::OperationCancelled);
+        self.state()?.login_error = Some(ErrorCode::CallbackNotActive);
         Ok(())
     }
 
@@ -248,9 +248,11 @@ impl AccountController {
     pub async fn callback(&self, callback: &str) -> Result<(), CoreError> {
         let (exchange, ticket, cancellation) = {
             let mut state = self.state()?;
-            let ticket = state
-                .interactive
-                .ok_or_else(|| CoreError::new(ErrorCode::OperationCancelled))?;
+            let Some(ticket) = state.interactive else {
+                // Late, replayed or orphaned callback: tell the player and keep all state.
+                state.login_error = Some(ErrorCode::CallbackNotActive);
+                return Err(CoreError::new(ErrorCode::CallbackNotActive));
+            };
             if !state.pending.is_active() {
                 return Err(CoreError::new(ErrorCode::OperationCancelled));
             }
@@ -790,6 +792,46 @@ mod tests {
         );
         assert!(task.join().is_ok());
         drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn late_callback_is_reported_without_changing_accounts() {
+        let (client, task) = mock_client(Vec::new());
+        let (paths, controller, id) = saved_microsoft(client);
+        let launch = controller
+            .begin_login(Some(id))
+            .unwrap_or_else(|_| panic!("login"));
+        let url = url::Url::parse(&launch.browser_url).unwrap_or_else(|_| panic!("url"));
+        let state = url
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .unwrap_or_else(|| panic!("state"));
+        assert!(controller.cancel_login().is_ok());
+        let callback = format!(
+            "{}?state={state}&code=fixture",
+            crate::oauth::DEEP_LINK_CALLBACK
+        );
+        assert!(matches!(
+            controller.callback(&callback).await,
+            Err(error) if error.code() == ErrorCode::CallbackNotActive
+        ));
+        let view = controller.view().unwrap_or_else(|_| panic!("view"));
+        assert_eq!(view.login_error, Some(ErrorCode::CallbackNotActive));
+        assert!(!view.login_pending);
+        assert_eq!(view.accounts.len(), 1);
+        // The next player action clears the notice.
+        assert!(controller.begin_login(None).is_ok());
+        assert_eq!(
+            controller
+                .view()
+                .unwrap_or_else(|_| panic!("view"))
+                .login_error,
+            None
+        );
+        drop(controller);
+        drop(task);
         assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }
 
