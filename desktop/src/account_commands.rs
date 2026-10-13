@@ -78,7 +78,16 @@ pub(super) fn start_microsoft_login(
         .map_err(|_| ErrorCode::InvalidData)?;
     let accounts = controller(&state)?;
     protocol::register(&app)?;
-    let launch = accounts.begin_login(intended).map_err(|e| e.code())?;
+    // Developer override accepts only this fixed mode, never an arbitrary URI.
+    let redirect = if std::env::var_os("PANITA_AUTH_DIRECT_LINK").is_some_and(|value| value == "1")
+    {
+        launcher_core::oauth::LoginRedirect::DirectDeepLink
+    } else {
+        launcher_core::oauth::LoginRedirect::HttpsHandoff
+    };
+    let launch = accounts
+        .begin_login_with_redirect(intended, redirect)
+        .map_err(|e| e.code())?;
     if app
         .opener()
         .open_url(launch.browser_url, None::<&str>)

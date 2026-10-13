@@ -12,7 +12,31 @@ use crate::accounts::{OAUTH_CLIENT_ID, Secret};
 use crate::error::{CoreError, ErrorCode};
 use crate::operation::{OperationId, ProcessSessionId};
 
-pub const REDIRECT_URI: &str = "panitacraft://oauth/callback";
+pub const REDIRECT_URI: &str = "https://www.panitacraft.com/auth/callback";
+pub const DEEP_LINK_CALLBACK: &str = "panitacraft://oauth/callback";
+
+#[derive(Clone, Copy, Default)]
+pub enum LoginRedirect {
+    #[default]
+    HttpsHandoff,
+    DirectDeepLink,
+}
+
+impl LoginRedirect {
+    fn uri(self) -> &'static str {
+        match self {
+            Self::HttpsHandoff => REDIRECT_URI,
+            Self::DirectDeepLink => DEEP_LINK_CALLBACK,
+        }
+    }
+
+    fn response_mode(self) -> &'static str {
+        match self {
+            Self::HttpsHandoff => "fragment",
+            Self::DirectDeepLink => "query",
+        }
+    }
+}
 pub const SCOPES: &str = "XboxLive.signin offline_access";
 pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(600);
 pub const AUTHORIZE_ENDPOINT: &str =
@@ -23,6 +47,7 @@ pub struct CodeExchange {
     pub intended_account: Option<Uuid>,
     pub(crate) code: Secret,
     pub(crate) verifier: Secret,
+    redirect: LoginRedirect,
 }
 
 impl CodeExchange {
@@ -33,7 +58,7 @@ impl CodeExchange {
             ("grant_type", "authorization_code"),
             ("code", self.code.expose()),
             ("code_verifier", self.verifier.expose()),
-            ("redirect_uri", REDIRECT_URI),
+            ("redirect_uri", self.redirect.uri()),
             ("scope", SCOPES),
         ]
     }
@@ -46,12 +71,21 @@ pub struct PkceLogin {
     state: Secret,
     verifier: Secret,
     deadline: Instant,
+    redirect: LoginRedirect,
 }
 
 impl PkceLogin {
     pub fn new(
         process: ProcessSessionId,
         intended_account: Option<Uuid>,
+    ) -> Result<Self, CoreError> {
+        Self::with_redirect(process, intended_account, LoginRedirect::default())
+    }
+
+    pub fn with_redirect(
+        process: ProcessSessionId,
+        intended_account: Option<Uuid>,
+        redirect: LoginRedirect,
     ) -> Result<Self, CoreError> {
         Ok(Self {
             operation: OperationId::new(),
@@ -60,6 +94,7 @@ impl PkceLogin {
             state: random_secret()?,
             verifier: random_secret()?,
             deadline: Instant::now() + LOGIN_TIMEOUT,
+            redirect,
         })
     }
 
@@ -70,8 +105,8 @@ impl PkceLogin {
         url.query_pairs_mut().extend_pairs([
             ("client_id", OAUTH_CLIENT_ID),
             ("response_type", "code"),
-            ("redirect_uri", REDIRECT_URI),
-            ("response_mode", "query"),
+            ("redirect_uri", self.redirect.uri()),
+            ("response_mode", self.redirect.response_mode()),
             ("scope", SCOPES),
             ("state", self.state.expose()),
             ("code_challenge", &challenge(self.verifier.expose())),
@@ -124,7 +159,7 @@ impl PendingLogin {
             .as_ref()
             .ok_or_else(|| CoreError::new(ErrorCode::OperationCancelled))?;
         // Check spelling before URL normalization (which can erase dot segments).
-        if callback.len() > 32_768 || !callback.starts_with(&format!("{REDIRECT_URI}?")) {
+        if callback.len() > 32_768 || !callback.starts_with(&format!("{DEEP_LINK_CALLBACK}?")) {
             return Err(CoreError::new(ErrorCode::InvalidData));
         }
         let url = Url::parse(callback).map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
@@ -177,6 +212,7 @@ impl PendingLogin {
             intended_account: active.intended_account,
             code,
             verifier: active.verifier,
+            redirect: active.redirect,
         })
     }
 }
@@ -227,17 +263,18 @@ mod tests {
     fn callback_rejects_wrong_state_routes_duplicates_and_replay() {
         let (mut pending, state) = setup();
         for invalid in [
-            format!("{REDIRECT_URI}?state=wrong&code=fixture"),
+            format!("{REDIRECT_URI}?state={state}&code=fixture"),
+            format!("{DEEP_LINK_CALLBACK}?state=wrong&code=fixture"),
             format!("panitacraft://oauth/other/../callback?state={state}&code=fixture"),
             format!("panitacraft://attacker/callback?state={state}&code=fixture"),
-            format!("{REDIRECT_URI}?state={state}&code=fixture&code=duplicate"),
-            format!("{REDIRECT_URI}?code=fixture"),
-            format!("{REDIRECT_URI}?state={state}&code=fixture#error"),
-            format!("{REDIRECT_URI}?state={state}&code=fixture&error=access_denied"),
+            format!("{DEEP_LINK_CALLBACK}?state={state}&code=fixture&code=duplicate"),
+            format!("{DEEP_LINK_CALLBACK}?code=fixture"),
+            format!("{DEEP_LINK_CALLBACK}?state={state}&code=fixture#error"),
+            format!("{DEEP_LINK_CALLBACK}?state={state}&code=fixture&error=access_denied"),
         ] {
             assert!(pending.accept(&invalid).is_err());
         }
-        let valid = format!("{REDIRECT_URI}?state={state}&code=fixture");
+        let valid = format!("{DEEP_LINK_CALLBACK}?state={state}&code=fixture");
         let exchange = pending
             .accept(&valid)
             .unwrap_or_else(|_| panic!("valid callback"));
@@ -252,7 +289,7 @@ mod tests {
         pending.cancel();
         assert!(
             pending
-                .accept(&format!("{REDIRECT_URI}?state={state}&code=fixture"))
+                .accept(&format!("{DEEP_LINK_CALLBACK}?state={state}&code=fixture"))
                 .is_err()
         );
         let (mut pending, state) = setup();
@@ -260,11 +297,11 @@ mod tests {
             active.deadline = Instant::now();
         }
         assert!(
-            matches!(pending.accept(&format!("{REDIRECT_URI}?state={state}&code=fixture")), Err(e) if e.code() == ErrorCode::AuthenticationTimeout)
+            matches!(pending.accept(&format!("{DEEP_LINK_CALLBACK}?state={state}&code=fixture")), Err(e) if e.code() == ErrorCode::AuthenticationTimeout)
         );
         let (mut pending, state) = setup();
         assert!(
-            matches!(pending.accept(&format!("{REDIRECT_URI}?state={state}&error=access_denied")), Err(e) if e.code() == ErrorCode::AuthenticationDenied)
+            matches!(pending.accept(&format!("{DEEP_LINK_CALLBACK}?state={state}&error=access_denied")), Err(e) if e.code() == ErrorCode::AuthenticationDenied)
         );
         assert!(pending.active.is_none());
     }
@@ -284,9 +321,48 @@ mod tests {
             Some(REDIRECT_URI)
         );
         assert_eq!(
+            query.get("response_mode").map(|s| s.as_ref()),
+            Some("fragment")
+        );
+        assert_eq!(
             query.get("code_challenge_method").map(|s| s.as_ref()),
             Some("S256")
         );
         assert!(!query.contains_key("client_secret"));
+    }
+
+    #[test]
+    fn handoff_preserves_each_operations_redirect_and_decodes_callback_once() {
+        for redirect in [LoginRedirect::HttpsHandoff, LoginRedirect::DirectDeepLink] {
+            let login = PkceLogin::with_redirect(ProcessSessionId::new(), None, redirect)
+                .unwrap_or_else(|_| panic!("random"));
+            let authorization =
+                Url::parse(&login.authorization_url().unwrap_or_else(|_| panic!("url")))
+                    .unwrap_or_else(|_| panic!("parse"));
+            let parameters: HashMap<_, _> = authorization.query_pairs().collect();
+            assert_eq!(
+                parameters.get("redirect_uri").map(|s| s.as_ref()),
+                Some(redirect.uri())
+            );
+            assert_eq!(
+                parameters.get("response_mode").map(|s| s.as_ref()),
+                Some(redirect.response_mode())
+            );
+            let state = login.state.expose().to_owned();
+            let mut pending = PendingLogin::default();
+            assert!(pending.begin(login).is_ok());
+            let callback = format!("{DEEP_LINK_CALLBACK}?state={state}&code=%21%2A+%2B%2521");
+            let exchange = pending
+                .accept(&callback)
+                .unwrap_or_else(|_| panic!("handoff"));
+            assert_eq!(exchange.code.expose(), "!* +%21");
+            let fields: HashMap<_, _> = exchange.token_fields().into_iter().collect();
+            assert_eq!(fields.get("redirect_uri").copied(), Some(redirect.uri()));
+            assert_eq!(
+                fields.get("redirect_uri").copied(),
+                parameters.get("redirect_uri").map(|s| s.as_ref())
+            );
+            assert!(pending.accept(&callback).is_err());
+        }
     }
 }

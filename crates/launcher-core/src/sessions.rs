@@ -11,7 +11,7 @@ use crate::accounts::{
 };
 use crate::authentication::{AuthClient, JavaProfile, MinecraftSession};
 use crate::error::{CoreError, ErrorCode};
-use crate::oauth::{PendingLogin, PkceLogin};
+use crate::oauth::{LoginRedirect, PendingLogin, PkceLogin};
 use crate::operation::{OperationId, ProcessSessionId};
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -195,6 +195,14 @@ impl AccountController {
     }
 
     pub fn begin_login(&self, intended_account: Option<Uuid>) -> Result<LoginLaunch, CoreError> {
+        self.begin_login_with_redirect(intended_account, LoginRedirect::default())
+    }
+
+    pub fn begin_login_with_redirect(
+        &self,
+        intended_account: Option<Uuid>,
+        redirect: LoginRedirect,
+    ) -> Result<LoginLaunch, CoreError> {
         let mut state = self.state()?;
         if state.interactive.is_some() {
             return Err(CoreError::new(ErrorCode::OperationBusy));
@@ -209,7 +217,7 @@ impl AccountController {
             }
         }
         invalidate(&mut state);
-        let login = PkceLogin::new(self.process, intended_account)?;
+        let login = PkceLogin::with_redirect(self.process, intended_account, redirect)?;
         let launch = LoginLaunch {
             operation_id: login.operation.value(),
             browser_url: login.authorization_url()?,
@@ -755,7 +763,10 @@ mod tests {
             .find(|(key, _)| key == "state")
             .map(|(_, value)| value.into_owned())
             .unwrap_or_else(|| panic!("state"));
-        let callback = format!("{}?state={state}&code=fixture", crate::oauth::REDIRECT_URI);
+        let callback = format!(
+            "{}?state={state}&code=fixture",
+            crate::oauth::DEEP_LINK_CALLBACK
+        );
         let worker = controller.clone();
         let first_callback = callback.clone();
         let login = tokio::spawn(async move { worker.callback(&first_callback).await });
@@ -806,7 +817,7 @@ mod tests {
             controller
                 .callback(&format!(
                     "{}?state={state}&code=fixture",
-                    crate::oauth::REDIRECT_URI
+                    crate::oauth::DEEP_LINK_CALLBACK
                 ))
                 .await
                 .is_ok()

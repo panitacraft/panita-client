@@ -459,6 +459,20 @@ pub(crate) mod tests {
                     }
                 }
                 let request = String::from_utf8_lossy(&bytes);
+                if path == "/token" && request.contains("grant_type=authorization_code") {
+                    let body = request
+                        .split_once("\r\n\r\n")
+                        .map(|(_, body)| body)
+                        .unwrap_or_else(|| panic!("request body"));
+                    let fields: std::collections::HashMap<_, _> =
+                        url::form_urlencoded::parse(body.as_bytes()).collect();
+                    assert_eq!(
+                        fields.get("redirect_uri").map(|value| value.as_ref()),
+                        Some(crate::oauth::REDIRECT_URI)
+                    );
+                    assert!(fields.contains_key("code_verifier"));
+                    assert!(!fields.contains_key("client_secret"));
+                }
                 assert!(
                     request
                         .lines()

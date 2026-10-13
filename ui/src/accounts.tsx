@@ -71,7 +71,7 @@ export function Accounts() {
     {desktop && !view && error && <button type="button" onClick={() => void act('initialize')}>Reintentar</button>}
     {view && <>
       {view.login_pending && <div className="login-progress" role="status">
-        <p>Completa el inicio de sesión en tu navegador. Puedes cancelar o seleccionar otra cuenta.</p>
+        <p>Completa el inicio de sesión en tu navegador y permite abrir Panita Client. Cuando vuelvas aquí, puedes cerrar la pestaña del navegador. Puedes cancelar o seleccionar otra cuenta.</p>
         <button type="button" onClick={() => void act('cancel_microsoft_login')}>Cancelar inicio de sesión</button>
       </div>}
       <div className="account-actions">
