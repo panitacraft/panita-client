@@ -31,6 +31,14 @@
     "deep-link": { "desktop": { "schemes": ["panitacraft"] } }
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "targets": ["nsis"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Spanish"],
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
   }
 }
