@@ -4,6 +4,7 @@ Name={{name}}
 Exec={{exec}} %u
 Icon={{icon}}
 Terminal=false
+StartupNotify=true
 StartupWMClass=panita-desktop
 MimeType=x-scheme-handler/panitacraft;
 X-PanitaClient-Owner=com.panitacraft.client

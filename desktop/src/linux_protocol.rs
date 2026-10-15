@@ -22,7 +22,7 @@ fn desktop_entry(executable: &Path) -> Result<String, ()> {
         .replace('%', "%%")
         .replace('\\', "\\\\");
     Ok(format!(
-        "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"{escaped}\" %u\nIcon=panita-desktop\nStartupWMClass=panita-desktop\nTerminal=false\nMimeType={MIME};\nX-PanitaClient-Owner=com.panitacraft.client\n"
+        "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"{escaped}\" %u\nIcon=panita-desktop\nStartupWMClass=panita-desktop\nTerminal=false\nStartupNotify=true\nMimeType={MIME};\nX-PanitaClient-Owner=com.panitacraft.client\n"
     ))
 }
 

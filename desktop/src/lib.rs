@@ -2,6 +2,8 @@ use launcher_core::sessions::AccountController;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 mod account_commands;
+#[cfg(any(target_os = "linux", test))]
+mod linux_activation;
 mod protocol;
 
 struct DesktopState {
@@ -70,6 +72,11 @@ fn catalog_snapshot() -> Vec<launcher_core::catalog::CatalogInstance> {
 }
 
 pub fn run() {
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "linux")]
+    if linux_activation::forward_from_environment(&context.config().identifier) {
+        return;
+    }
     let process = launcher_core::operation::ProcessSessionId::new();
     let logs = launcher_core::logging::BoundedLog::default();
     logs.record(launcher_core::logging::LogRecord {
@@ -86,20 +93,14 @@ pub fn run() {
                 .skip(1)
                 .any(|arg| arg.to_string_lossy().starts_with("panitacraft:")),
         })
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            #[cfg(not(target_os = "linux"))]
+            let _ = cwd;
             account_commands::handle_callback(app, args);
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(target_os = "linux")]
                 {
-                    let main_window = window.clone();
-                    let _ = window.run_on_main_thread(move || {
-                        use gtk::prelude::GtkWindowExt;
-                        if let Ok(native_window) = main_window.gtk_window() {
-                            // Tao skips focus while its queued unminimize is pending.
-                            // Present the native window without that stale-state guard.
-                            native_window.present();
-                        }
-                    });
+                    linux_activation::present(window, &cwd);
                 }
                 #[cfg(not(target_os = "linux"))]
                 {
@@ -124,7 +125,7 @@ pub fn run() {
             account_commands::remove_account,
             account_commands::validate_account
         ])
-        .run(tauri::generate_context!());
+        .run(context);
     if result.is_err() {
         eprintln!("Desktop startup failed");
         std::process::exit(1);
