@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name={{name}}
+Exec={{exec}} %u
+Icon={{icon}}
+Terminal=false
+StartupWMClass=panita-desktop
+MimeType=x-scheme-handler/panitacraft;
+X-PanitaClient-Owner=com.panitacraft.client

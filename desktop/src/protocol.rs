@@ -2,6 +2,9 @@
 use launcher_core::error::ErrorCode;
 #[cfg(target_os = "linux")]
 use tauri::Manager;
+#[cfg(any(target_os = "linux", test))]
+#[path = "linux_protocol.rs"]
+mod linux_protocol;
 
 #[cfg(windows)]
 pub fn register(_app: &tauri::AppHandle) -> Result<(), ErrorCode> {
@@ -51,45 +54,13 @@ pub fn register(app: &tauri::AppHandle) -> Result<(), ErrorCode> {
         .appimage
         .map(std::path::PathBuf::from)
         .unwrap_or(std::env::current_exe().map_err(|_| ErrorCode::CallbackRegistrationFailed)?);
-    let executable = executable
-        .to_str()
-        .ok_or(ErrorCode::CallbackRegistrationFailed)?;
-    if executable.contains(['\n', '\r', '\0']) {
-        return Err(ErrorCode::CallbackRegistrationFailed);
-    }
-    let escaped = executable
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('`', "\\`")
-        .replace('$', "\\$")
-        .replace('%', "%%");
     let directory = app
         .path()
         .data_dir()
         .map_err(|_| ErrorCode::CallbackRegistrationFailed)?
         .join("applications");
-    std::fs::create_dir_all(&directory).map_err(|_| ErrorCode::CallbackRegistrationFailed)?;
-    let name = "com.panitacraft.client.desktop";
-    let entry = format!(
-        "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"{escaped}\" %u\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/panitacraft;\n"
-    );
-    std::fs::write(directory.join(name), entry)
-        .map_err(|_| ErrorCode::CallbackRegistrationFailed)?;
-    let status = std::process::Command::new("xdg-mime")
-        .args(["default", name, "x-scheme-handler/panitacraft"])
-        .output()
-        .map_err(|_| ErrorCode::CallbackRegistrationFailed)?;
-    if !status.status.success() {
-        return Err(ErrorCode::CallbackRegistrationFailed);
-    }
-    let query = std::process::Command::new("xdg-mime")
-        .args(["query", "default", "x-scheme-handler/panitacraft"])
-        .output()
-        .map_err(|_| ErrorCode::CallbackRegistrationFailed)?;
-    if !query.status.success() || String::from_utf8_lossy(&query.stdout).trim() != name {
-        return Err(ErrorCode::CallbackRegistrationFailed);
-    }
-    Ok(())
+    linux_protocol::register(&executable, &directory)
+        .map_err(|_| ErrorCode::CallbackRegistrationFailed)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
