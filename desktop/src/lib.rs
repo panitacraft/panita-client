@@ -89,10 +89,24 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             account_commands::handle_callback(app, args);
             if let Some(window) = app.get_webview_window("main") {
-                // A minimized launcher must come back to show the real login result.
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
+                #[cfg(target_os = "linux")]
+                {
+                    let main_window = window.clone();
+                    let _ = window.run_on_main_thread(move || {
+                        use gtk::prelude::GtkWindowExt;
+                        if let Ok(native_window) = main_window.gtk_window() {
+                            // Tao skips focus while its queued unminimize is pending.
+                            // Present the native window without that stale-state guard.
+                            native_window.present();
+                        }
+                    });
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
             }
         }))
         .plugin(tauri_plugin_opener::init())
