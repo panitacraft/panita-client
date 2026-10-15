@@ -4,6 +4,7 @@ use launcher_core::error::ErrorCode;
 use launcher_core::sessions::{AccountController, AccountsView};
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
@@ -95,11 +96,11 @@ pub(super) fn start_microsoft_login(
         emit_accounts(&app, &accounts);
         return Ok(launch.operation_id.to_string());
     }
-    if app
-        .opener()
-        .open_url(launch.browser_url, None::<&str>)
-        .is_err()
-    {
+    #[cfg(target_os = "linux")]
+    let browser_result = super::linux_activation::open_browser(&app, launch.browser_url);
+    #[cfg(not(target_os = "linux"))]
+    let browser_result = app.opener().open_url(launch.browser_url, None::<&str>);
+    if browser_result.is_err() {
         let _ = accounts.cancel_login();
         return Err(ErrorCode::BrowserUnavailable);
     }

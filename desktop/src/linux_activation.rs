@@ -1,7 +1,34 @@
 //! Preserve desktop activation across the Linux single-instance handoff.
 //! The upstream relay sends argv and cwd, but not the launching environment.
+#[cfg(target_os = "linux")]
+use tauri::Manager;
+
 const PREFIX: &str = "panita-activation-v1:";
 const MAX_TOKEN_BYTES: usize = 4096;
+
+#[cfg(target_os = "linux")]
+pub(super) fn open_browser(app: &tauri::AppHandle, url: String) -> Result<(), ()> {
+    let (send, receive) = std::sync::mpsc::sync_channel(1);
+    let handle = app.clone();
+    // Wry executes this inline on the UI thread, or dispatches it there when
+    // called from a worker. GTK objects never leave that thread.
+    app.run_on_main_thread(move || {
+        use gtk::prelude::*;
+        let result = (|| {
+            let window = handle.get_webview_window("main").ok_or(())?;
+            let native = window.gtk_window().map_err(|_| ())?;
+            let context = native.display().app_launch_context().ok_or(())?;
+            context.set_timestamp(gtk::current_event_time());
+            // Let the default browser receive the active launcher's startup
+            // context. A detached xdg-open process loses that user activation.
+            // Errors may contain the authorization URL; expose only a code.
+            gtk::gio::AppInfo::launch_default_for_uri(&url, Some(&context)).map_err(|_| ())
+        })();
+        let _ = send.send(result);
+    })
+    .map_err(|_| ())?;
+    receive.recv().map_err(|_| ())?
+}
 
 fn valid_token(token: &str) -> bool {
     !token.is_empty() && token.len() <= MAX_TOKEN_BYTES && !token.chars().any(char::is_control)
