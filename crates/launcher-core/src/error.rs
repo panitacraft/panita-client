@@ -23,6 +23,7 @@ pub enum ErrorCode {
     CallbackRegistrationFailed,
     BrowserUnavailable,
     InstanceDisabled,
+    InstanceMissing,
     UnsupportedInstance,
     OperationCancelled,
     /// The persisted account file is damaged or unsupported; it is left untouched.
