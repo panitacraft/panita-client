@@ -182,6 +182,52 @@ impl TryFrom<RawInstance> for CatalogInstance {
 }
 
 impl CatalogInstance {
+    pub(crate) fn validate(&self) -> Result<(), CoreError> {
+        let (source_type, project, pack, loader) = match &self.source {
+            CatalogSource::Vanilla { minecraft_version }
+                if Some(minecraft_version) == self.minecraft_version.as_ref() =>
+            {
+                ("vanilla".to_owned(), None, None, None)
+            }
+            CatalogSource::Vanilla { .. } => return Err(invalid()),
+            CatalogSource::Modrinth {
+                project_id,
+                pack_version_id,
+                loader,
+            } => (
+                "modrinth".to_owned(),
+                Some(project_id.clone()),
+                Some(pack_version_id.clone()),
+                loader.clone(),
+            ),
+            CatalogSource::Unsupported { source_type }
+                if !matches!(source_type.as_str(), "vanilla" | "modrinth") =>
+            {
+                (source_type.clone(), None, None, None)
+            }
+            _ => return Err(invalid()),
+        };
+        Self::try_from(RawInstance {
+            id: self.id,
+            slug: self.slug.clone(),
+            name: self.name.clone(),
+            description: self.description.clone(),
+            minecraft_version: self.minecraft_version.clone(),
+            enabled: self.enabled,
+            restricted: self.restricted,
+            min_launcher_version: self.min_launcher_version.clone(),
+            icon_url: self.icon_url.clone(),
+            banner_url: self.banner_url.clone(),
+            sort_order: self.sort_order,
+            updated_at: self.updated_at.clone(),
+            source_type,
+            modrinth_project_id: project,
+            pack_version_id: pack,
+            loader,
+        })?;
+        Ok(())
+    }
+
     pub fn compatible_with(&self, client: &Version) -> bool {
         self.min_launcher_version.as_ref().is_none_or(|minimum| {
             Version::parse(minimum).is_ok_and(|minimum| {

@@ -165,7 +165,7 @@ fn map_io_error(error: std::io::Error) -> CoreError {
     CoreError::new(code)
 }
 
-fn map_private_error(error: PrivateFsError) -> CoreError {
+pub(crate) fn map_private_error(error: PrivateFsError) -> CoreError {
     match error {
         PrivateFsError::Io(error) => map_io_error(error),
         PrivateFsError::AtomicCommit {

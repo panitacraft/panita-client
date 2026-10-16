@@ -104,6 +104,13 @@ impl Default for InstanceSettings {
 }
 
 impl InstanceSettings {
+    pub(crate) fn validate(&self) -> Result<(), CoreError> {
+        if self.schema_version != SETTINGS_SCHEMA_VERSION {
+            return Err(CoreError::new(ErrorCode::InvalidData));
+        }
+        self.effective(&GlobalSettings::default()).validate()
+    }
+
     pub fn effective(&self, global: &GlobalSettings) -> GlobalSettings {
         GlobalSettings {
             schema_version: SETTINGS_SCHEMA_VERSION,
