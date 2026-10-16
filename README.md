@@ -14,6 +14,11 @@ and the WSL atomic-write test failure. Phase 3 catalog and UUID-based local
 registry implementation is in progress; installation and game execution remain
 later work.
 
+Phase 3 catalog startup, disabled/unsupported entries, cached outage behavior,
+local-only records and recovery were verified in an isolated Windows release
+build. [Phase 3](https://github.com/panitacraft/panita-client/issues/5) remains
+open for Linux installed-product checks and owner acceptance.
+
 ## Development
 
 The workspace uses Rust 1.96, Node.js 24, and pnpm 11.25. Tauri v2 requires
