@@ -1,6 +1,9 @@
 # Keep internal plans, contracts, and decision documents local.
 /docs/
 
+# Keep new local test files out of version control.
+/tests/
+
 # Build products and local development state.
 /target/
 /desktop/target/
