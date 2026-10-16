@@ -102,6 +102,7 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 - Persist account metadata and only the Microsoft refresh token in local `accounts.json`, in plaintext with restricted permissions. Access tokens remain in backend memory. Do not add a keyring requirement, custom encryption, or API-delivered encryption keys without a new owner decision.
 - Associate accounts with stable internal IDs and their issuing public OAuth client ID. Use unique operation and process-session IDs, cancellation, stale-result protection, and proper write coordination.
 - Renew the selected Microsoft session at startup and when needed. Validate it remotely with Minecraft Services on every Play request. Attempt at most one renewal and one validation retry after authentication rejection; block launch if unresolved.
+- Authentication network/service failures use explicit manual retry, without an unattended transport retry loop. A Microsoft Play request may initiate session recovery, but game execution waits for successful current validation. Explicit offline accounts bypass Microsoft authentication only; catalog and installation checks still apply.
 - Distinguish service/network failures from revoked credentials. Show actionable Spanish errors without silently deleting accounts or converting Microsoft accounts to offline accounts.
 - Explicit offline accounts may launch fully installed vanilla without connectivity. Microsoft accounts require successful current Play validation.
 - Signing out removes both profile and refresh token, clears in-memory sessions, and invalidates pending work. Report incomplete cleanup honestly and prevent stale operations from restoring credentials.
@@ -168,7 +169,7 @@ panita-client/
 This annex is an integral part of AGENTS.md. It preserves the accepted decision, rationale, recovery cases, and validation requirements from the local source document `docs/account-storage-decision.md` as of 2026-10-08. The complete policy is included below; reading a separate file is not required. Update this annex alongside any owner-approved policy changes.
 Status: Accepted
 Date: 2026-10-05
-Updated: 2026-10-12 (HTTPS browser handoff and developer-only direct-link fallback)
+Updated: 2026-10-15 (manual authentication retries and Microsoft Play recovery; HTTPS browser handoff retained)
 
 ### Decision
 
@@ -200,11 +201,12 @@ Complete Microsoft → Xbox Live → XSTS → Minecraft Services → Java profil
 ### Session lifecycle and Play validation
 
 - At startup, proactively acquire/renew the selected Microsoft account's session using its refresh token. Also acquire a session on account selection; do not refresh every saved account unnecessarily.
-- Disable Play for that Microsoft account until authentication succeeds. On failure, show an actionable error: retry for temporary failures or sign in again when required. Navigation/modal presentation is an implementation UX detail; cancellation and account switching must remain safe.
+- A Microsoft Play request may initiate session acquisition/recovery after a previous failure. Never start the game until authentication and current Play validation succeed. Prevent duplicate requests while work is pending. On failure, show an actionable error: retry for temporary failures or sign in again when required. Cancellation and account switching must remain safe.
 - Track expiration from `expires_in`/`NotAfter` with a safety margin. Proactively renew near expiry and reassess after system resume. Do not invent a guaranteed expiration date for refresh tokens.
 - On every Play request with a Microsoft account, make a current authenticated request to Minecraft Services, such as fetching the Java profile. Local expiration checks alone do not detect early rejection.
 - If that request fails due to invalid authentication, attempt one renewal and repeat validation once. Persistent rejection blocks launch and requests reauthentication. Do not retry every 403 as an expired token: inspect the failure and distinguish account/permission errors.
 - Network/service failures block launch with that account and offer retry; they do not erase credentials or imply revocation. A successful request establishes acceptance by that service at that moment, not immunity from later revocation.
+- Recovery from network/service failures is an explicit manual action, without automatic transport retry/backoff loops. This does not remove normal startup/selection/near-expiry renewal or the bounded authentication-rejection recovery above. Explicit offline accounts skip Microsoft session acquisition and validation, while retaining catalog and installation safety checks. Verify the actual Play UI and game-launch integration in Phase 5.
 - Preserve a newly returned refresh token through an atomic account-file update before continuing subsequent authentication stages. If no replacement is returned, retain the existing token. On write failure preserve the old file, retain the new credential only in memory for retry, and do not claim persistence succeeded.
 - Account removal/sign-out clears in-memory sessions and removes both the persisted profile and refresh token. There is no separate user-facing sign-out that keeps the profile. A running game is a separate process and can retain its own session.
 
