@@ -126,7 +126,7 @@ Use the current user's application-data directory, with platform-specific paths 
 PanitaClient/
 ├─ accounts.json          # sensitive: metadata and Microsoft refresh tokens
 ├─ settings.json          # schema-versioned global settings
-├─ catalog-cache.json
+├─ inst-cache.json
 ├─ libraries/             # shared, verified caches
 ├─ assets/
 ├─ versions/

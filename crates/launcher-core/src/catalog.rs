@@ -13,7 +13,15 @@ use crate::storage::PrivateStore;
 const BASE: &str = "https://api.panitacraft.com";
 const MAX_BODY: usize = 512 * 1024;
 const MAX_RECORDS: usize = 1000;
-const CACHE_FILE: &str = "catalog-cache.json";
+const CACHE_FILE: &str = "inst-cache.json";
+const LEGACY_CACHE_FILE: &str = "catalog-cache.json";
+
+fn read_cache(store: &PrivateStore) -> Result<Option<Vec<u8>>, CoreError> {
+    store.with_lock(|transaction| match transaction.read(CACHE_FILE)? {
+        Some(bytes) => Ok(Some(bytes)),
+        None => transaction.read(LEGACY_CACHE_FILE),
+    })
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -372,8 +380,7 @@ impl CatalogClient {
 
     pub async fn refresh(&self, store: &PrivateStore) -> Result<CatalogSnapshot, CoreError> {
         let key = self.representation();
-        let cached = store
-            .read(CACHE_FILE)?
+        let cached = read_cache(store)?
             .map(|bytes| CachedCatalog::decode(&bytes, &key))
             .transpose();
         let cache_invalid = cached.is_err();
@@ -439,8 +446,7 @@ impl CatalogClient {
                     ErrorCode::NetworkUnavailable | ErrorCode::ServiceUnavailable
                 ) =>
             {
-                if let Some(cache) = store
-                    .read(CACHE_FILE)?
+                if let Some(cache) = read_cache(store)?
                     .map(|bytes| CachedCatalog::decode(&bytes, &key))
                     .transpose()?
                 {

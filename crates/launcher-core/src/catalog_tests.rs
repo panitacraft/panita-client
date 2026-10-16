@@ -149,6 +149,7 @@ async fn catalog_etag_revalidation_and_outage_preserve_disabled_cache() {
     raw["enabled"] = json!(false);
     let (client, task) = server(vec![
         (200, list(vec![raw]), false),
+        (500, String::new(), true),
         (304, String::new(), true),
         (500, "private service detail".to_owned(), true),
     ]);
@@ -169,9 +170,16 @@ async fn catalog_etag_revalidation_and_outage_preserve_disabled_cache() {
     let legacy_bytes = serde_json::to_vec(&legacy).unwrap_or_default();
     assert!(
         store
-            .transaction(CACHE_FILE, |_| Ok((legacy_bytes, ())))
+            .transaction(LEGACY_CACHE_FILE, |_| Ok((legacy_bytes, ())))
             .is_ok()
     );
+    assert!(std::fs::remove_file(paths.catalog_cache()).is_ok());
+    let legacy_fallback = client
+        .refresh(&store)
+        .await
+        .unwrap_or_else(|_| panic!("legacy fallback"));
+    assert!(legacy_fallback.stale && !legacy_fallback.instances[0].enabled);
+    assert!(!paths.catalog_cache().exists());
     let second = client
         .refresh(&store)
         .await
@@ -187,12 +195,44 @@ async fn catalog_etag_revalidation_and_outage_preserve_disabled_cache() {
     .unwrap_or_else(|_| panic!("upgraded cache"));
     assert_eq!(upgraded["schema_version"], json!(2));
     assert!(upgraded["body"].is_object());
+    // Once the new cache exists, an obsolete legacy file cannot affect fallback.
+    assert!(
+        store
+            .transaction(LEGACY_CACHE_FILE, |_| Ok((b"corrupt".to_vec(), ())))
+            .is_ok()
+    );
     let stale = client
         .refresh(&store)
         .await
         .unwrap_or_else(|_| panic!("fallback"));
     assert!(stale.stale && !stale.instances[0].enabled);
     assert!(task.join().is_ok());
+    drop(store);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn catalog_cache_uses_legacy_name_only_when_new_name_is_absent() {
+    let (paths, store) = temporary_store();
+    assert_eq!(paths.catalog_cache(), paths.root().join("inst-cache.json"));
+    assert!(
+        store
+            .transaction(LEGACY_CACHE_FILE, |_| Ok((b"legacy".to_vec(), ())))
+            .is_ok()
+    );
+    assert_eq!(
+        read_cache(&store).unwrap_or_default(),
+        Some(b"legacy".to_vec())
+    );
+    assert!(
+        store
+            .transaction(CACHE_FILE, |_| Ok((b"corrupt".to_vec(), ())))
+            .is_ok()
+    );
+    assert_eq!(
+        read_cache(&store).unwrap_or_default(),
+        Some(b"corrupt".to_vec())
+    );
     drop(store);
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
 }
