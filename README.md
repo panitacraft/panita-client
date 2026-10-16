@@ -7,6 +7,11 @@ catalog, using Microsoft or explicitly selected offline accounts.
 This repository is in development. The current application shell does not yet
 install or launch Minecraft.
 
+Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on
+2026-10-16. See [the closure record](https://github.com/panitacraft/panita-client/issues/4)
+for verification and accepted follow-ups: remaining browser failure observations
+and the WSL atomic-write test failure. Phase 3 implementation has not started.
+
 ## Development
 
 The workspace uses Rust 1.96, Node.js 24, and pnpm 11.25. Tauri v2 requires
