@@ -26,3 +26,6 @@ uuid = { version = "1", features = ["serde", "v4"] }
 [features]
 # Test builds only: PANITA_TEST_AUTH_BASE redirects the service chain to a local mock.
 test-endpoints = []
+
+[dev-dependencies]
+rustls = { version = "=0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }

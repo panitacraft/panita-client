@@ -729,6 +729,10 @@ mod tests {
     use crate::paths::AppPaths;
     use crate::storage::PrivateStore;
 
+    mod network_failures {
+        include!("sessions_network_tests.rs");
+    }
+
     fn saved_microsoft(client: AuthClient) -> (AppPaths, AccountController, Uuid) {
         let paths =
             AppPaths::new(std::env::temp_dir().join(format!("panita-auth-{}", Uuid::new_v4())))

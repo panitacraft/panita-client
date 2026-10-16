@@ -2041,6 +2041,7 @@ dependencies = [
  "md5",
  "private-fs",
  "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",
