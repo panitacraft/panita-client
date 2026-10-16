@@ -158,12 +158,35 @@ async fn catalog_etag_revalidation_and_outage_preserve_disabled_cache() {
         .await
         .unwrap_or_else(|_| panic!("fresh"));
     assert!(!first.stale && !first.instances[0].enabled && first.cache_warning.is_none());
+    // Simulate the pre-formatting cache so revalidation also proves migration.
+    let bytes = store
+        .read(CACHE_FILE)
+        .unwrap_or_default()
+        .unwrap_or_default();
+    let mut legacy: Value = serde_json::from_slice(&bytes).unwrap_or_else(|_| panic!("cache"));
+    legacy["schema_version"] = json!(1);
+    legacy["body"] = json!(legacy["body"].to_string());
+    let legacy_bytes = serde_json::to_vec(&legacy).unwrap_or_default();
+    assert!(
+        store
+            .transaction(CACHE_FILE, |_| Ok((legacy_bytes, ())))
+            .is_ok()
+    );
     let second = client
         .refresh(&store)
         .await
         .unwrap_or_else(|_| panic!("304"));
     assert_eq!(first.instances, second.instances);
     assert!(!second.stale);
+    let upgraded: Value = serde_json::from_slice(
+        &store
+            .read(CACHE_FILE)
+            .unwrap_or_default()
+            .unwrap_or_default(),
+    )
+    .unwrap_or_else(|_| panic!("upgraded cache"));
+    assert_eq!(upgraded["schema_version"], json!(2));
+    assert!(upgraded["body"].is_object());
     let stale = client
         .refresh(&store)
         .await

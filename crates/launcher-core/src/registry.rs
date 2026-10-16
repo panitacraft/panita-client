@@ -88,6 +88,12 @@ fn invalid() -> CoreError {
     CoreError::new(ErrorCode::InvalidData)
 }
 
+fn formatted_json(value: &impl Serialize) -> Result<Vec<u8>, CoreError> {
+    let mut bytes = serde_json::to_vec_pretty(value).map_err(|_| invalid())?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
 fn io(error: std::io::Error) -> CoreError {
     CoreError::new(if error.kind() == std::io::ErrorKind::PermissionDenied {
         ErrorCode::PermissionDenied
@@ -167,7 +173,7 @@ impl InstanceRegistry {
     /// Metadata only: Phase 4 must verify actual installation files before marking completion.
     pub fn save(&self, record: &InstallationRecord) -> Result<(), CoreError> {
         record.validate()?;
-        let bytes = serde_json::to_vec(record).map_err(|_| invalid())?;
+        let bytes = formatted_json(record)?;
         self.store(record.id)?.transaction(RECORD, |existing| {
             if let Some(existing) = existing {
                 InstallationRecord::decode(&existing, record.id)?;
@@ -185,7 +191,7 @@ impl InstanceRegistry {
 
     pub fn save_settings(&self, id: Uuid, settings: &InstanceSettings) -> Result<(), CoreError> {
         settings.validate()?;
-        let bytes = serde_json::to_vec(settings).map_err(|_| invalid())?;
+        let bytes = formatted_json(settings)?;
         self.store(id)?.transaction("settings.json", |existing| {
             if let Some(existing) = existing {
                 decode_settings(&existing)?;
@@ -209,7 +215,7 @@ impl InstanceRegistry {
                     InstallationRecord::decode(&existing.ok_or_else(invalid)?, installed.id)?;
                 current.last_catalog = remote.clone();
                 current.validate()?;
-                Ok((serde_json::to_vec(&current).map_err(|_| invalid())?, ()))
+                Ok((formatted_json(&current)?, ()))
             })?;
         }
         Ok(())

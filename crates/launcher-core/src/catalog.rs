@@ -293,14 +293,36 @@ struct CachedCatalog {
     representation: String,
     etag: Option<String>,
     fetched_at: u64,
-    // Keep the original API representation and revalidate it on every read.
+    // Store the API document as structured JSON; accept the legacy string on read.
+    #[serde(
+        serialize_with = "serialize_cache_body",
+        deserialize_with = "deserialize_cache_body"
+    )]
     body: String,
+}
+
+fn serialize_cache_body<S: serde::Serializer>(
+    body: &str,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let value: serde_json::Value = serde_json::from_str(body).map_err(serde::ser::Error::custom)?;
+    value.serialize(serializer)
+}
+
+fn deserialize_cache_body<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value {
+        serde_json::Value::String(legacy) => legacy,
+        document => document.to_string(),
+    })
 }
 
 impl CachedCatalog {
     fn decode(bytes: &[u8], key: &str) -> Result<Self, CoreError> {
         let cache: Self = serde_json::from_slice(bytes).map_err(|_| invalid())?;
-        if cache.schema_version != 1
+        if !matches!(cache.schema_version, 1 | 2)
             || cache.representation != key
             || cache.body.len() > MAX_BODY
             || cache
@@ -384,7 +406,7 @@ impl CatalogClient {
             let body = body(response).await?;
             parse_list(&body)?;
             Ok(CachedCatalog {
-                schema_version: 1,
+                schema_version: 2,
                 representation: key.clone(),
                 etag,
                 fetched_at: SystemTime::now()
@@ -396,9 +418,11 @@ impl CatalogClient {
         }
         .await;
         match fetched {
-            Ok(cache) => {
+            Ok(mut cache) => {
+                cache.schema_version = 2;
                 let instances = parse_list(cache.body.as_bytes())?;
-                let bytes = serde_json::to_vec(&cache).map_err(|_| invalid())?;
+                let mut bytes = serde_json::to_vec_pretty(&cache).map_err(|_| invalid())?;
+                bytes.push(b'\n');
                 let cache_warning = store
                     .transaction(CACHE_FILE, |_| Ok((bytes, ())))
                     .err()
