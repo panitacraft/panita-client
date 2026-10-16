@@ -11,6 +11,7 @@ struct DesktopState {
     logs: launcher_core::logging::BoundedLog,
     accounts: Mutex<Option<Arc<AccountController>>>,
     orphaned_callback: bool,
+    catalog_fetch: tokio::sync::Mutex<()>,
 }
 
 #[tauri::command]
@@ -67,8 +68,20 @@ fn application_name() -> &'static str {
 }
 
 #[tauri::command]
-fn catalog_snapshot() -> Vec<launcher_core::catalog::CatalogInstance> {
-    launcher_core::catalog::catalog_snapshot()
+async fn catalog_snapshot(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<launcher_core::registry::CatalogOverview, launcher_core::error::ErrorCode> {
+    // Serialize catalog refreshes without holding the account-state lock over network work.
+    let _fetch = state.catalog_fetch.lock().await;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
+    let paths = launcher_core::paths::AppPaths::new(root).map_err(|error| error.code())?;
+    launcher_core::registry::load_catalog(paths)
+        .await
+        .map_err(|error| error.code())
 }
 
 pub fn run() {
@@ -89,6 +102,7 @@ pub fn run() {
             process,
             logs,
             accounts: Mutex::new(None),
+            catalog_fetch: tokio::sync::Mutex::new(()),
             orphaned_callback: std::env::args_os()
                 .skip(1)
                 .any(|arg| arg.to_string_lossy().starts_with("panitacraft:")),

@@ -8,10 +8,14 @@ export type LauncherErrorCode =
   | 'authentication_timeout' | 'service_unavailable' | 'account_restricted'
   | 'minecraft_not_owned' | 'operation_busy' | 'operation_cancelled'
   | 'callback_registration_failed' | 'browser_unavailable' | 'authentication_configuration'
-  | 'accounts_file_invalid' | 'callback_not_active' | 'unsafe_permissions';
+  | 'accounts_file_invalid' | 'callback_not_active' | 'unsafe_permissions'
+  | 'instance_disabled' | 'instance_missing' | 'unsupported_instance';
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
+  instance_disabled: 'Esta instancia está deshabilitada. Conservamos tus datos locales.',
+  instance_missing: 'Esta instancia ya no está disponible en el catálogo. Conservamos tus datos locales.',
+  unsupported_instance: 'Esta instancia requiere otra versión o funciones que todavía no están disponibles.',
   invalid_data: 'No pudimos validar los datos recibidos o guardados. Inténtalo de nuevo.',
   permission_denied: 'No pudimos acceder a los datos locales. Revisa los permisos e inténtalo de nuevo.',
   storage_unavailable: 'Los datos locales no están disponibles. Inténtalo de nuevo.',

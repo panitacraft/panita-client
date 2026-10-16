@@ -24,6 +24,7 @@ section > p { color: #c4d0c8; }
 .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 32px; }
 .instance-card { padding: 24px; border: 1px solid #4c7564; border-radius: 12px; background: #1b392e; }
 .instance-card.disabled { opacity: .65; }
+.catalog-notice { margin-top: 20px; padding: 16px; border: 1px solid #d9bd76; border-radius: 8px; background: #29392c; }
 .card-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .card-heading h2 { margin: 0; }
 .card-heading span { font-size: .8rem; }

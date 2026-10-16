@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { loadCatalog } from './catalog-api';
-import type { CatalogInstance } from './preview-catalog';
+import type { CatalogInstance, CatalogOverview } from './preview-catalog';
 import { messageForError } from './errors';
 import logoWhite from './assets/logo-white.svg';
 import './style.css';
@@ -11,7 +11,13 @@ type CatalogState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'blocked' }
-  | { kind: 'ready'; instances: CatalogInstance[] };
+  | ({ kind: 'ready' } & CatalogOverview);
+
+const localStateText: Record<CatalogInstance['localState'], string> = {
+  not_installed: 'Sin instalar', installing: 'Instalando', installed: 'Instalada',
+  update_available: 'Actualización disponible', needs_repair: 'Necesita reparación',
+  running: 'En ejecución', failed: 'La operación falló', cancelled: 'Operación cancelada',
+};
 
 function App() {
   const [catalog, setCatalog] = useState<CatalogState>({ kind: 'loading' });
@@ -19,8 +25,8 @@ function App() {
   useEffect(() => {
     let active = true;
     loadCatalog()
-      .then(instances => {
-        if (active) setCatalog({ kind: 'ready', instances });
+      .then(snapshot => {
+        if (active) setCatalog({ kind: 'ready', ...snapshot });
       })
       .catch(error => {
         if (!active) return;
@@ -48,10 +54,19 @@ function App() {
             <button type="button" onClick={() => {
               setCatalog({ kind: 'loading' });
               loadCatalog()
-                .then(instances => setCatalog({ kind: 'ready', instances }))
+                .then(snapshot => setCatalog({ kind: 'ready', ...snapshot }))
                 .catch(error => setCatalog({ kind: 'error', message: messageForError(error) }));
             }}>Reintentar</button>
           </div>
+        )}
+        {catalog.kind === 'ready' && catalog.stale && (
+          <div className="catalog-notice" role="status">No pudimos conectar con el servidor. Puedes jugar las instancias que ya tienes instaladas.</div>
+        )}
+        {catalog.kind === 'ready' && catalog.cacheWarning && (
+          <p role="alert">Cargamos el catálogo, pero no pudimos guardar una copia local. {messageForError(catalog.cacheWarning)}</p>
+        )}
+        {catalog.kind === 'ready' && catalog.registryWarning && (
+          <p role="alert">No pudimos guardar el estado actualizado de tus instancias. {messageForError(catalog.registryWarning)}</p>
         )}
         {catalog.kind === 'ready' && catalog.instances.length === 0 && (
           <p role="status">No hay instancias disponibles por ahora.</p>
@@ -59,13 +74,19 @@ function App() {
         {catalog.kind === 'ready' && catalog.instances.length > 0 && (
           <div className="instance-grid">
             {catalog.instances.map(instance => (
-              <article className={`instance-card${instance.enabled ? '' : ' disabled'}`} key={instance.id}>
+              <article className={`instance-card${instance.availability === 'disabled' || !instance.compatible || !instance.supported ? ' disabled' : ''}`} key={instance.id}>
                 <div className="card-heading">
                   <h2>{instance.name}</h2>
-                  {!instance.enabled && <span aria-label="Instancia deshabilitada">🔒 Instancia deshabilitada</span>}
+                  {instance.availability === 'disabled' && <span><span aria-hidden="true">🔒 </span>Instancia deshabilitada</span>}
                 </div>
                 <p>{instance.description}</p>
-                <p className="version">Minecraft {instance.minecraftVersion}</p>
+                {instance.minecraftVersion && <p className="version">Minecraft {instance.minecraftVersion}</p>}
+                <p>{localStateText[instance.localState]}</p>
+                {instance.installedVersion && <p>Versión instalada: {instance.installedVersion}</p>}
+                {instance.availability === 'missing' && <p>Esta instancia ya no está en el catálogo. Conservamos tus datos locales.</p>}
+                {instance.availability === 'unverified' && <p>No pudimos verificar el estado de esta instancia.</p>}
+                {!instance.compatible && <p>Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
+                {!instance.supported && <p>Este tipo de instancia o su acceso todavía no es compatible.</p>}
                 <button type="button" disabled>Disponible próximamente</button>
               </article>
             ))}

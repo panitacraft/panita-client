@@ -179,13 +179,35 @@ async fn catalog_invalid_responses_do_not_replace_last_valid_cache() {
     let (client, task) = server(vec![
         (200, list(vec![record()]), false),
         (200, "malformed".to_owned(), true),
+        (200, String::new(), true),
     ]);
     let (paths, store) = temporary_store();
     assert!(client.refresh(&store).await.is_ok());
     let before = store.read(CACHE_FILE).unwrap_or_default();
     assert!(client.refresh(&store).await.is_err());
     assert_eq!(store.read(CACHE_FILE).unwrap_or_default(), before);
+    assert!(client.refresh(&store).await.is_err());
+    assert_eq!(store.read(CACHE_FILE).unwrap_or_default(), before);
     assert!(task.join().is_ok());
+    drop(store);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
+async fn catalog_cache_validator_is_bound_to_the_request_representation() {
+    let (paths, store) = temporary_store();
+    let (first, first_task) = server(vec![(200, list(vec![record()]), false)]);
+    assert!(first.refresh(&store).await.is_ok());
+    assert!(first_task.join().is_ok());
+    let mut next = record();
+    next["name"] = json!("Otra representación");
+    let (second, second_task) = server(vec![(200, list(vec![next]), false)]);
+    let refreshed = second
+        .refresh(&store)
+        .await
+        .unwrap_or_else(|_| panic!("new representation"));
+    assert_eq!(refreshed.instances[0].name, "Otra representación");
+    assert!(second_task.join().is_ok());
     drop(store);
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
 }

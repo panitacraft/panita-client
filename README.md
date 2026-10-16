@@ -10,7 +10,9 @@ install or launch Minecraft.
 Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on
 2026-10-16. See [the closure record](https://github.com/panitacraft/panita-client/issues/4)
 for verification and accepted follow-ups: remaining browser failure observations
-and the WSL atomic-write test failure. Phase 3 implementation has not started.
+and the WSL atomic-write test failure. Phase 3 catalog and UUID-based local
+registry implementation is in progress; installation and game execution remain
+later work.
 
 ## Development
 
@@ -45,7 +47,9 @@ remain in local `docs/`, which is ignored by Git.
 The desktop stores private application data in `%APPDATA%\PanitaClient` on
 Windows and `${XDG_DATA_HOME:-~/.local/share}/PanitaClient` on Linux. The
 browser-only development preview uses local mock instances; the desktop
-catalog remains empty until the API integration is implemented.
+catalog fetches the public API and keeps a validated local cache for outages.
+Disabled and unsupported instances remain visible with their status; local
+installation metadata is kept separately under each immutable instance UUID.
 
 The public catalog is `https://api.panitacraft.com`. Do not store account
 credentials in the repository. Public integration checks can be run explicitly

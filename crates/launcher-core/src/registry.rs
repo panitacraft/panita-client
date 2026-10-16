@@ -243,6 +243,56 @@ pub struct InstanceView {
     pub supported: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogOverview {
+    pub instances: Vec<InstanceView>,
+    pub stale: bool,
+    pub cache_warning: Option<ErrorCode>,
+    pub registry_warning: Option<ErrorCode>,
+}
+
+pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError> {
+    let store = PrivateStore::open(&paths)?;
+    let registry = InstanceRegistry::new(paths);
+    let local = registry.load()?;
+    let version = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?;
+    let remote = crate::catalog::CatalogClient::new()?.refresh(&store).await;
+    match remote {
+        Ok(snapshot) => {
+            let registry_warning = if snapshot.stale {
+                None
+            } else {
+                registry
+                    .remember_catalog(&snapshot.instances)
+                    .err()
+                    .map(|error| error.code())
+            };
+            Ok(CatalogOverview {
+                instances: reconcile(Some(&snapshot), &local, &version),
+                stale: snapshot.stale,
+                cache_warning: snapshot.cache_warning,
+                registry_warning,
+            })
+        }
+        Err(error)
+            if !local.is_empty()
+                && matches!(
+                    error.code(),
+                    ErrorCode::NetworkUnavailable | ErrorCode::ServiceUnavailable
+                ) =>
+        {
+            Ok(CatalogOverview {
+                instances: reconcile(None, &local, &version),
+                stale: true,
+                cache_warning: None,
+                registry_warning: None,
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub fn reconcile(
     snapshot: Option<&CatalogSnapshot>,
     local: &[InstallationRecord],

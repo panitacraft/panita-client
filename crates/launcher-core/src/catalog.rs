@@ -491,11 +491,6 @@ async fn body(mut response: reqwest::Response) -> Result<Vec<u8>, CoreError> {
     Ok(bytes)
 }
 
-// Retained until desktop catalog integration replaces the Phase 1 facade.
-pub fn catalog_snapshot() -> Vec<CatalogInstance> {
-    Vec::new()
-}
-
 #[cfg(test)]
 #[path = "catalog_tests.rs"]
 mod tests;
