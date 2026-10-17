@@ -331,10 +331,7 @@ pub async fn install(
         private_fs::PrivateDir::ensure(&native_root).map_err(map_private_error)?;
         let mut native_files = Vec::new();
         for native in &plan.version.natives {
-            let relative = format!(
-                "libraries/{}",
-                native.artifact.path.as_ref().ok_or_else(invalid)?
-            );
+            let relative = plan.library_path(&native.artifact)?;
             let (directory, leaf) = ensure_parent(paths.root(), &relative)?;
             if !verified_file(&directory, &leaf, &native.artifact)? {
                 return Err(CoreError::new(ErrorCode::ArtifactMismatch));

@@ -185,6 +185,67 @@ fn cleanup_partials(directory: &PrivateDir, path: &Path) -> Result<(), CoreError
     Ok(())
 }
 
+fn legacy_alias(relative: &str, artifact: &Artifact) -> Result<Option<String>, CoreError> {
+    if artifact.path.is_some() && relative == super::plan::library_cache_path(artifact)? {
+        return Ok(Some(format!(
+            "libraries/{}",
+            artifact.path.as_ref().ok_or_else(invalid)?
+        )));
+    }
+    if let Some(name) = relative.strip_prefix("assets/indexes/")
+        && let Some(id) = name.strip_suffix(&format!("-{}.json", artifact.sha1))
+        && !id.contains('/')
+    {
+        safe_path(id)?;
+        return Ok(Some(format!("assets/indexes/{id}.json")));
+    }
+    Ok(None)
+}
+
+fn import_verified(
+    paths: &AppPaths,
+    alias: &str,
+    directory: &PrivateDir,
+    name: &str,
+    artifact: &Artifact,
+    cancel: &Cancellation,
+) -> Result<bool, CoreError> {
+    let (source, leaf) = ensure_parent(paths.root(), alias)?;
+    let mut input = match source.open_file(leaf) {
+        Ok(file) => file,
+        Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(false);
+        }
+        Err(error) => return Err(map_private_error(error)),
+    };
+    if native_file(&input)?.metadata().map_err(io)?.len() != artifact.size {
+        return Ok(false);
+    }
+    let mut output = directory.atomic_durable(name).map_err(map_private_error)?;
+    let mut hash = Sha1::new();
+    let mut count = 0u64;
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        cancel.check()?;
+        let size = input.read(&mut buffer).map_err(io)?;
+        if size == 0 {
+            break;
+        }
+        count += size as u64;
+        if count > artifact.size {
+            return Ok(false);
+        }
+        hash.update(&buffer[..size]);
+        output.write_all(&buffer[..size]).map_err(io)?;
+    }
+    if count != artifact.size || format!("{:x}", hash.finalize()) != artifact.sha1 {
+        return Ok(false);
+    }
+    cancel.check()?;
+    output.commit().map_err(map_private_error)?;
+    Ok(true)
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct DownloadProgress {
     pub bytes: u64,
@@ -303,6 +364,16 @@ impl Downloader {
         cleanup_partials(&directory, &paths.root().join(parent))?;
         cancel.check()?;
         if verified_file(&directory, &name, artifact)? {
+            progress(DownloadProgress {
+                bytes: artifact.size,
+                total: artifact.size,
+                reused: true,
+            });
+            return Ok(paths.root().join(relative));
+        }
+        if let Some(alias) = legacy_alias(relative, artifact)?
+            && import_verified(paths, &alias, &directory, &name, artifact, cancel)?
+        {
             progress(DownloadProgress {
                 bytes: artifact.size,
                 total: artifact.size,
@@ -474,6 +545,55 @@ mod tests {
             .unwrap_or_else(|_| panic!("repair cache"));
         assert_eq!(std::fs::read(file).ok().as_deref(), Some(bytes.as_slice()));
         assert_eq!(server.requests.load(Ordering::SeqCst), 2);
+    }
+    #[tokio::test]
+    async fn changed_coordinate_hash_keeps_both_blobs_and_imports_legacy_cache() {
+        let paths = paths();
+        let old_bytes = b"old library";
+        let new_bytes = b"new library";
+        let old_server = Server::new(old_bytes.to_vec(), old_bytes.len(), Duration::ZERO);
+        let new_server = Server::new(new_bytes.to_vec(), new_bytes.len(), Duration::ZERO);
+        let mut old = artifact(old_bytes);
+        old.path = Some("group/library/1/library.jar".into());
+        let mut new = artifact(new_bytes);
+        new.path = old.path.clone();
+        let legacy = "libraries/group/library/1/library.jar";
+        let cancel = Cancellation::default();
+        old_server
+            .downloader()
+            .cache(&paths, legacy, &old, &cancel, &|_| {})
+            .await
+            .unwrap_or_else(|_| panic!("legacy"));
+        let old_path =
+            super::super::plan::library_cache_path(&old).unwrap_or_else(|_| panic!("old path"));
+        let new_path =
+            super::super::plan::library_cache_path(&new).unwrap_or_else(|_| panic!("new path"));
+        assert_ne!(old_path, new_path);
+        old_server
+            .downloader()
+            .cache(&paths, &old_path, &old, &cancel, &|progress| {
+                assert!(progress.reused)
+            })
+            .await
+            .unwrap_or_else(|_| panic!("import"));
+        assert_eq!(old_server.requests.load(Ordering::SeqCst), 1);
+        new_server
+            .downloader()
+            .cache(&paths, &new_path, &new, &cancel, &|_| {})
+            .await
+            .unwrap_or_else(|_| panic!("new blob"));
+        assert_eq!(
+            std::fs::read(paths.root().join(old_path)).ok().as_deref(),
+            Some(old_bytes.as_slice())
+        );
+        assert_eq!(
+            std::fs::read(paths.root().join(legacy)).ok().as_deref(),
+            Some(old_bytes.as_slice())
+        );
+        assert_eq!(
+            std::fs::read(paths.root().join(new_path)).ok().as_deref(),
+            Some(new_bytes.as_slice())
+        );
     }
     #[tokio::test]
     async fn hash_mismatch_truncation_and_cancel_leave_old_file_intact() {

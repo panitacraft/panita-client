@@ -37,6 +37,7 @@ fn both_pins_resolve_for_each_target_without_foreign_native_jars() {
                 if id == "26.3" { 25 } else { 21 }
             );
             assert!(resolved.classpath.len() > 30);
+            assert_eq!(resolved.kind, "release");
             let native_paths: Vec<_> = resolved
                 .classpath
                 .iter()
@@ -165,4 +166,63 @@ fn inheritance_replaces_library_versions_preserving_classpath_position() {
     assert_eq!(merged.libraries.len(), parent.libraries.len());
     assert!(merged.libraries[0].name.contains(":999"));
     assert_eq!(merged.libraries[1].name, parent.libraries[1].name);
+}
+
+#[test]
+fn cache_mapping_preserves_legacy_locks_and_qualifies_asset_index_names() {
+    use super::plan::{InstallPlan, PlannedArtifact, asset_index_cache_path, library_cache_path};
+    let version = fixture("1.21.1")
+        .resolve(&Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform")))
+        .unwrap_or_else(|_| panic!("version"));
+    let library = version.classpath[0].clone();
+    let legacy_library = format!(
+        "libraries/{}",
+        library.path.as_ref().unwrap_or_else(|| panic!("path"))
+    );
+    let legacy_index = format!("assets/indexes/{}.json", version.assets.id);
+    let index = version.assets.clone();
+    let mut plan = InstallPlan {
+        schema_version: 1,
+        version,
+        platform: "windows".into(),
+        architecture: "amd64".into(),
+        runtime_root: String::new(),
+        java_executable: String::new(),
+        documents: Vec::new(),
+        artifacts: vec![
+            PlannedArtifact {
+                destination: legacy_library.clone(),
+                artifact: library.clone(),
+                executable: false,
+            },
+            PlannedArtifact {
+                destination: legacy_index,
+                artifact: index.artifact.clone(),
+                executable: false,
+            },
+        ],
+    };
+    assert_eq!(
+        plan.library_path(&library).ok().as_deref(),
+        Some(legacy_library.as_str())
+    );
+    assert_eq!(
+        plan.asset_index_name().ok().as_deref(),
+        Some(index.id.as_str())
+    );
+    plan.artifacts[0].destination =
+        library_cache_path(&library).unwrap_or_else(|_| panic!("content path"));
+    plan.artifacts[1].destination =
+        asset_index_cache_path(&index).unwrap_or_else(|_| panic!("index path"));
+    assert!(plan.library_path(&library).is_ok());
+    assert_eq!(
+        plan.asset_index_name().ok(),
+        Some(format!("{}-{}", index.id, index.artifact.sha1))
+    );
+    let mut changed = index.clone();
+    changed.artifact.sha1 = "0".repeat(40);
+    assert_ne!(
+        asset_index_cache_path(&index).ok(),
+        asset_index_cache_path(&changed).ok()
+    );
 }

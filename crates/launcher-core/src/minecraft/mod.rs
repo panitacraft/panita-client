@@ -530,6 +530,7 @@ impl VersionMetadata {
         }
         Ok(ResolvedVersion {
             id: self.id.clone(),
+            kind: self.kind.clone(),
             main_class,
             java,
             assets,
@@ -585,6 +586,9 @@ pub struct NativeArchive {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ResolvedVersion {
     pub id: String,
+    /// Empty only in earlier development locks; a new resolution preserves Mojang's type.
+    #[serde(default)]
+    pub kind: String,
     pub main_class: String,
     pub java: JavaRequirement,
     pub assets: AssetIndex,

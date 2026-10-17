@@ -57,6 +57,28 @@ struct Assets {
     map_to_resources: bool,
 }
 
+pub fn library_cache_path(artifact: &Artifact) -> Result<String, CoreError> {
+    artifact.validate()?;
+    artifact.path.as_ref().ok_or_else(invalid)?;
+    Ok(format!(
+        "libraries/{}/{}.jar",
+        &artifact.sha1[..2],
+        artifact.sha1
+    ))
+}
+
+pub fn asset_index_cache_path(index: &super::AssetIndex) -> Result<String, CoreError> {
+    index.artifact.validate()?;
+    safe_path(&index.id)?;
+    if index.id.contains('/') {
+        return Err(invalid());
+    }
+    Ok(format!(
+        "assets/indexes/{}-{}.json",
+        index.id, index.artifact.sha1
+    ))
+}
+
 fn identity(url: &str, bytes: &[u8]) -> Artifact {
     Artifact {
         url: url.into(),
@@ -181,7 +203,7 @@ pub async fn resolve(
         .chain(version.natives.iter().map(|native| &native.artifact))
     {
         artifacts.push(PlannedArtifact {
-            destination: format!("libraries/{}", artifact.path.as_ref().ok_or_else(invalid)?),
+            destination: library_cache_path(artifact)?,
             artifact: artifact.clone(),
             executable: false,
         });
@@ -224,7 +246,7 @@ pub async fn resolve(
         return Err(invalid());
     }
     artifacts.push(PlannedArtifact {
-        destination: format!("assets/indexes/{}.json", version.assets.id),
+        destination: asset_index_cache_path(&version.assets)?,
         artifact: version.assets.artifact.clone(),
         executable: false,
     });
@@ -254,6 +276,49 @@ pub async fn resolve(
 }
 
 impl InstallPlan {
+    /// Resolve explicit destinations from the lock, including the earlier development layout.
+    pub fn library_path(&self, artifact: &Artifact) -> Result<String, CoreError> {
+        let canonical = library_cache_path(artifact)?;
+        let legacy = format!("libraries/{}", artifact.path.as_ref().ok_or_else(invalid)?);
+        self.artifact_path(artifact, canonical, legacy)
+    }
+
+    pub fn asset_index_path(&self) -> Result<String, CoreError> {
+        self.artifact_path(
+            &self.version.assets.artifact,
+            asset_index_cache_path(&self.version.assets)?,
+            format!("assets/indexes/{}.json", self.version.assets.id),
+        )
+    }
+
+    /// Phase 5 must use this filename identity for the assets_index_name substitution.
+    pub fn asset_index_name(&self) -> Result<String, CoreError> {
+        let path = self.asset_index_path()?;
+        Ok(path
+            .strip_prefix("assets/indexes/")
+            .and_then(|path| path.strip_suffix(".json"))
+            .ok_or_else(invalid)?
+            .to_owned())
+    }
+
+    fn artifact_path(
+        &self,
+        artifact: &Artifact,
+        canonical: String,
+        legacy: String,
+    ) -> Result<String, CoreError> {
+        for destination in [canonical, legacy] {
+            safe_path(&destination)?;
+            if self.artifacts.iter().any(|file| {
+                file.destination == destination
+                    && file.artifact.sha1 == artifact.sha1
+                    && file.artifact.size == artifact.size
+            }) {
+                return Ok(destination);
+            }
+        }
+        Err(invalid())
+    }
     fn deduplicate(&mut self) -> Result<(), CoreError> {
         let mut paths: BTreeMap<String, (String, String, u64, bool)> = BTreeMap::new();
         let mut deduplicated = Vec::new();
@@ -349,7 +414,7 @@ impl InstallPlan {
         )?;
         require(
             &planned,
-            &format!("assets/indexes/{}.json", self.version.assets.id),
+            &self.asset_index_path()?,
             &self.version.assets.artifact,
         )?;
         for artifact in self
@@ -358,11 +423,7 @@ impl InstallPlan {
             .iter()
             .chain(self.version.natives.iter().map(|native| &native.artifact))
         {
-            require(
-                &planned,
-                &format!("libraries/{}", artifact.path.as_ref().ok_or_else(invalid)?),
-                artifact,
-            )?;
+            require(&planned, &self.library_path(artifact)?, artifact)?;
         }
         if let Some(logging) = &self.version.logging {
             require(
@@ -405,7 +466,7 @@ impl InstallPlan {
                 &file.artifact,
             )?;
         }
-        let asset_path = format!("assets/indexes/{}.json", self.version.assets.id);
+        let asset_path = self.asset_index_path()?;
         let assets: Assets = serde_json::from_slice(&read_document(
             paths,
             &asset_path,
@@ -443,7 +504,7 @@ fn require(
     expected.validate()?;
     if planned
         .get(path)
-        .is_none_or(|artifact| *artifact != expected)
+        .is_none_or(|artifact| artifact.sha1 != expected.sha1 || artifact.size != expected.size)
     {
         return Err(invalid());
     }
