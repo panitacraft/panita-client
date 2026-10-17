@@ -11,7 +11,7 @@ Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on
 2026-10-16. See [the closure record](https://github.com/panitacraft/panita-client/issues/4)
 for verification and accepted follow-ups: remaining browser failure observations
 and the WSL atomic-write test failure. Phase 3 catalog and UUID-based local
-registry implementation is verified and awaiting owner acceptance; installation and game execution remain
+registry implementation was accepted by the owner on 2026-10-16; installation and game execution remain
 later work.
 
 Phase 3 catalog startup, disabled/unsupported entries, cached outage behavior,
@@ -19,8 +19,8 @@ local-only records and recovery were verified in an isolated Windows release
 build and the installed Linux package on BOX. Linux checks also verified cache
 filename/schema migration, pending account-removal migration with synthetic
 offline accounts, owner-only file permissions and unchanged synthetic world
-files. [Phase 3](https://github.com/panitacraft/panita-client/issues/5) remains
-open for owner acceptance. BOX has development packages installed, so this
+files. [Phase 3](https://github.com/panitacraft/panita-client/issues/5) is formally
+accepted, with the previously documented limits retained. BOX has development packages installed, so this
 does not establish clean-install qualification or resolve the deferred WSL
 storage-test failure.
 
