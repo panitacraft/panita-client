@@ -1,24 +1,79 @@
 //! Development validation harness; this is not a supported product CLI.
 //! All output and game files go to the explicitly supplied isolated data root.
 use launcher_core::{
+    accounts::{AccountInfo, AccountKind},
     error::CoreError,
     minecraft::{
         Platform,
         download::{Cancellation, Downloader},
-        install, plan,
+        install,
+        launch::{LaunchIdentity, build_command},
+        plan,
     },
     paths::AppPaths,
+    registry::InstanceRegistry,
+    settings::GlobalSettings,
+    storage::PrivateStore,
 };
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() != 5 {
-        return Err("usage: vanilla_install <plan|install|verify|recover|migrate> <absolute-isolated-root> <version|instance-uuid> <windows|linux> <os-version>".into());
+        return Err("usage: vanilla_install <plan|install|verify|recover|migrate|launch-check> <absolute-isolated-root> <version|instance-uuid> <windows|linux> <os-version>".into());
     }
     let paths = AppPaths::new(&args[1])?;
     let platform = Platform::x64(&args[3], &args[4])?;
     let cancel = Cancellation::default();
+    if args[0] == "launch-check" {
+        let id = uuid::Uuid::parse_str(&args[2])?;
+        let installed = install::verify_installed(&paths, id)?;
+        let settings = InstanceRegistry::new(paths.clone()).load_settings(id)?;
+        let global = GlobalSettings::load(&PrivateStore::open(&paths)?)?;
+        let effective = settings.effective(&global);
+        // Construct an ephemeral identity without reading or writing accounts.
+        let account = AccountInfo {
+            account_id: uuid::Uuid::new_v4(),
+            kind: AccountKind::Offline,
+            username: "Phase5_Check".into(),
+            profile_id: uuid::Uuid::from_u128(1),
+            oauth_client_id: None,
+        };
+        let directory = paths.game_directory(id)?;
+        let command = build_command(
+            &paths,
+            &directory,
+            &installed,
+            &platform,
+            &global,
+            &settings,
+            LaunchIdentity {
+                account: &account,
+                minecraft_token: None,
+                xuid: None,
+            },
+        )?;
+        // Never print arguments, credentials or account data, even in this harness.
+        println!(
+            "{}",
+            serde_json::json!({
+                "instance": id,
+                "version": installed.plan.version.id,
+                "installation_schema": installed.schema_version,
+                "platform": installed.plan.platform,
+                "java_major": installed.plan.version.java.major_version,
+                "java_executable": command.executable(),
+                "game_directory": command.working_directory(),
+                "ram_mib": effective.ram_mib,
+                "window_size": effective.window_size,
+                "verified_artifacts": installed.plan.artifacts.len(),
+                "synthetic_offline_identity": true,
+                "command_built": true,
+                "game_started": false,
+            })
+        );
+        return Ok(());
+    }
     if args[0] == "migrate" {
         let id = uuid::Uuid::parse_str(&args[2])?;
         let directory =

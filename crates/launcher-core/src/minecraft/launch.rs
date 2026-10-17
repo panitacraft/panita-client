@@ -112,7 +112,7 @@ pub fn build_command(
     {
         return Err(invalid());
     }
-    if installed.schema_version != 1
+    if installed.schema_version != 2
         || installed.instance_id.is_nil()
         || installed.operation.is_nil()
         || plan.platform != platform.os

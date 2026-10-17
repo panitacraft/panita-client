@@ -181,9 +181,15 @@ cargo run -p launcher-core --example vanilla_install -- install <absolute-root> 
 cargo run -p launcher-core --example vanilla_install -- verify <absolute-root> <instance-uuid> <windows|linux> <os-version>
 cargo run -p launcher-core --example vanilla_install -- recover <absolute-root> <instance-uuid> <windows|linux> <os-version>
 cargo run -p launcher-core --example vanilla_install -- migrate <absolute-root> <instance-uuid> <windows|linux> <os-version>
+cargo run -p launcher-core --example vanilla_install -- launch-check <absolute-root> <instance-uuid> <windows|linux> <os-version>
 ```
 
 This is a development harness, not a product CLI or a platform-support claim.
+The `launch-check` operation verifies an existing installation and builds its
+launch command using saved instance/global settings and a temporary synthetic
+offline identity. It prints only a non-sensitive summary, reads no accounts,
+downloads no files and starts neither Java nor Minecraft. Run it against an
+isolated practice root; normal registry preparation and coordination locks apply.
 Installation runs only on the matching native x64 host. The `plan` operation can
 inspect either target's artifacts without downloading its game/runtime binaries.
 Libraries and asset indexes use content-qualified cache paths so different

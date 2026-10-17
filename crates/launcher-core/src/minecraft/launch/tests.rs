@@ -76,7 +76,7 @@ fn fixture(id: &str, os: &str) -> (AppPaths, PathBuf, InstalledLock, Platform, A
     let paths = AppPaths::new(root).unwrap_or_else(|_| panic!("root"));
     let directory = paths.root().join("instances/vanilla-test/minecraft");
     let installed = InstalledLock {
-        schema_version: 1,
+        schema_version: 2,
         instance_id: Uuid::new_v4(),
         operation: Uuid::new_v4(),
         plan: InstallPlan {
@@ -107,6 +107,35 @@ fn value_after<'a>(args: &'a [String], flag: &str) -> &'a str {
         .position(|arg| arg == flag)
         .unwrap_or_else(|| panic!("missing {flag}"));
     &args[index + 1]
+}
+
+#[test]
+fn launch_requires_current_flat_installation_schema() {
+    let (paths, directory, mut installed, platform, account) = fixture("1.21.1", "windows");
+    for schema in [2, 0, 1, 3] {
+        installed.schema_version = schema;
+        let result = build_command(
+            &paths,
+            &directory,
+            &installed,
+            &platform,
+            &GlobalSettings::default(),
+            &InstanceSettings::default(),
+            LaunchIdentity {
+                account: &account,
+                minecraft_token: None,
+                xuid: None,
+            },
+        );
+        if schema == 2 {
+            assert!(result.is_ok());
+        } else {
+            assert_eq!(
+                result.err().map(|error| error.code()),
+                Some(ErrorCode::InvalidData)
+            );
+        }
+    }
 }
 
 #[test]
