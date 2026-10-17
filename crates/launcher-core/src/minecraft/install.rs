@@ -44,9 +44,7 @@ fn metadata_root(paths: &AppPaths, id: Uuid) -> Result<std::path::PathBuf, CoreE
     if id.is_nil() {
         return Err(invalid());
     }
-    Ok(InstanceRegistry::new(paths.clone())
-        .prepare_instance(id)?
-        .join(".panita"))
+    InstanceRegistry::new(paths.clone()).prepare_instance(id)
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(
@@ -284,7 +282,7 @@ pub async fn install(
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     };
     cancel.check()?;
-    let root = registry.ensure_catalog_instance(&catalog)?.join(".panita");
+    let root = registry.ensure_catalog_instance(&catalog)?;
     let _guard = lock(&root, ".installation.lock", cancel).await?;
     recover_locked(paths, id, &root)?;
     let previous = registry.get(id)?;
@@ -294,7 +292,7 @@ pub async fn install(
     {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     }
-    if let Some(previous) = read_json::<InstalledLock>(&root, "lock.json")? {
+    if let Some(previous) = read_json::<InstalledLock>(&root, "installed.json")? {
         previous.plan.validate()?;
         if previous.instance_id != id || previous.plan.version.id != *minecraft_version {
             return Err(invalid());
@@ -315,6 +313,7 @@ pub async fn install(
         resolved_source: catalog.source.clone(),
         state: InstallationState::Installing,
         managed_files: Vec::new(),
+        settings: crate::settings::InstanceSettings::default(),
     };
     registry.save_installation(&record)?;
     let result = async {
@@ -322,19 +321,13 @@ pub async fn install(
         let mut plan =
             super::plan::resolve(&downloader, minecraft_version, platform, cancel).await?;
         plan.allocate_runtime(paths)?;
-        write_json(
-            &root,
-            &format!("installations/{operation}/plan.json"),
-            &plan,
-        )?;
         download_all(paths, &downloader, &plan, cancel, progress).await?;
         plan.verify_dependencies(paths)?;
         verify_java(paths, &plan, platform, cancel).await?;
-        let native_root = root.join(format!("installations/{operation}/natives"));
-        private_fs::PrivateDir::ensure(root.join("installations")).map_err(map_private_error)?;
-        private_fs::PrivateDir::ensure(root.join(format!("installations/{operation}")))
-            .map_err(map_private_error)?;
-        private_fs::PrivateDir::ensure(&native_root).map_err(map_private_error)?;
+        let native_root = root.join(format!("natives-{operation}"));
+        if !plan.version.natives.is_empty() {
+            private_fs::PrivateDir::ensure(&native_root).map_err(map_private_error)?;
+        }
         let mut native_files = Vec::new();
         for native in &plan.version.natives {
             let relative = plan.library_path(&native.artifact)?;
@@ -352,7 +345,7 @@ pub async fn install(
         }
         cancel.check()?;
         let installed = InstalledLock {
-            schema_version: 1,
+            schema_version: 2,
             instance_id: id,
             operation,
             plan,
@@ -360,7 +353,7 @@ pub async fn install(
         };
         // Publishing this pointer is the commit point; failed registry/journal writes
         // leave recovery pending, never a falsely complete installation.
-        write_json(&root, "lock.json", &installed)?;
+        write_json(&root, "installed.json", &installed)?;
         record.state = InstallationState::Installed;
         registry.save_installation(&record)?;
         journal.active = false;
@@ -393,8 +386,8 @@ pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, Cor
     if journal.is_some_and(|journal| journal.schema_version != 1 || journal.active) {
         return Err(invalid());
     }
-    let installed = read_json::<InstalledLock>(&root, "lock.json")?.ok_or_else(invalid)?;
-    if installed.schema_version != 1 || installed.instance_id != id || installed.operation.is_nil()
+    let installed = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
+    if installed.schema_version != 2 || installed.instance_id != id || installed.operation.is_nil()
     {
         return Err(invalid());
     }
@@ -406,7 +399,7 @@ pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, Cor
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
     }
-    let native_root = root.join(format!("installations/{}/natives", installed.operation));
+    let native_root = root.join(format!("natives-{}", installed.operation));
     for native in &installed.native_files {
         let artifact = Artifact {
             url: "https://libraries.minecraft.net/native".into(),
@@ -461,6 +454,7 @@ mod tests {
             last_catalog: catalog,
             state: InstallationState::Installing,
             managed_files: Vec::new(),
+            settings: crate::settings::InstanceSettings::default(),
         }
     }
     #[tokio::test]
@@ -475,7 +469,7 @@ mod tests {
             .unwrap_or_else(|_| panic!("record"));
         let root = metadata_root(&paths, id).unwrap_or_else(|_| panic!("root"));
         let (directory, leaf) = ensure_parent(
-            &paths.instance(id).unwrap_or_else(|_| panic!("path")),
+            &paths.game_directory(id).unwrap_or_else(|_| panic!("path")),
             "saves/Test World/level.dat",
         )
         .unwrap_or_else(|_| panic!("world"));
@@ -517,7 +511,7 @@ mod tests {
         assert_eq!(
             std::fs::read(
                 paths
-                    .instance(id)
+                    .game_directory(id)
                     .unwrap_or_else(|_| panic!("path"))
                     .join("saves/Test World/level.dat")
             )

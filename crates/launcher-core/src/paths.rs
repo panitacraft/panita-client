@@ -40,7 +40,15 @@ impl AppPaths {
     }
 
     pub fn instance_settings(&self, id: Uuid) -> Result<PathBuf, CoreError> {
-        Ok(self.instance(id)?.join(".panita").join("settings.json"))
+        Ok(crate::registry::InstanceRegistry::new(self.clone())
+            .prepare_instance(id)?
+            .join("instance.json"))
+    }
+
+    pub fn game_directory(&self, id: Uuid) -> Result<PathBuf, CoreError> {
+        Ok(crate::registry::InstanceRegistry::new(self.clone())
+            .prepare_instance(id)?
+            .join("minecraft"))
     }
 }
 

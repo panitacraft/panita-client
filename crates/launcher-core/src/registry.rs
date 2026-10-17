@@ -13,7 +13,8 @@ use crate::settings::InstanceSettings;
 use crate::storage::PrivateStore;
 use crate::storage::map_private_error;
 
-const RECORD: &str = "installation.json";
+const RECORD: &str = "instance.json";
+const LEGACY_RECORD: &str = "installation.json";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -41,13 +42,16 @@ pub struct InstallationRecord {
     pub resolved_source: CatalogSource,
     pub state: InstallationState,
     pub managed_files: Vec<String>,
+    #[serde(default)]
+    pub settings: InstanceSettings,
 }
 
 impl InstallationRecord {
-    fn validate(&self) -> Result<(), CoreError> {
-        if !matches!(self.schema_version, 1 | 2)
+    pub(crate) fn validate(&self) -> Result<(), CoreError> {
+        self.settings.validate()?;
+        if !matches!(self.schema_version, 1..=3)
             || (self.schema_version == 1 && self.directory_name.is_some())
-            || (self.schema_version == 2 && self.directory_name.is_none())
+            || (self.schema_version >= 2 && self.directory_name.is_none())
             || self
                 .directory_name
                 .as_deref()
@@ -99,7 +103,7 @@ fn invalid() -> CoreError {
     CoreError::new(ErrorCode::InvalidData)
 }
 
-fn valid_directory_name(name: &str) -> bool {
+pub(crate) fn valid_directory_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 85
         && !name.starts_with('-')
@@ -144,10 +148,22 @@ impl InstanceRegistry {
         Self { paths }
     }
 
+    fn record_name(directory: &Path) -> &'static str {
+        if directory.join(".panita/installation.json").exists() {
+            LEGACY_RECORD
+        } else {
+            RECORD
+        }
+    }
+
     fn store_at(directory: &Path) -> Result<PrivateStore, CoreError> {
-        let instance = private_fs::PrivateDir::open(directory).map_err(map_private_error)?;
-        instance.ensure_dir(".panita").map_err(map_private_error)?;
-        PrivateStore::open(&AppPaths::new(directory.join(".panita"))?)
+        private_fs::PrivateDir::open(directory).map_err(map_private_error)?;
+        let root = if Self::record_name(directory) == LEGACY_RECORD {
+            directory.join(".panita")
+        } else {
+            directory.to_path_buf()
+        };
+        PrivateStore::open(&AppPaths::new(root)?)
     }
 
     /// Caller holds the root mutation lock. Only metadata bearing UUID ownership
@@ -171,13 +187,18 @@ impl InstanceRegistry {
                 continue;
             }
             let directory = entry.path();
-            if !directory.join(".panita").try_exists().map_err(io)? {
+            if !directory.join(".panita").try_exists().map_err(io)?
+                && !directory.join(RECORD).try_exists().map_err(io)?
+            {
                 continue;
             }
             private_fs::PrivateDir::open(&directory).map_err(map_private_error)?;
-            private_fs::PrivateDir::open(directory.join(".panita")).map_err(map_private_error)?;
+            if directory.join(".panita").try_exists().map_err(io)? {
+                private_fs::PrivateDir::open(directory.join(".panita"))
+                    .map_err(map_private_error)?;
+            }
             let store = Self::store_at(&directory)?;
-            if let Some(bytes) = store.read(RECORD)? {
+            if let Some(bytes) = store.read(Self::record_name(&directory))? {
                 let record: InstallationRecord =
                     serde_json::from_slice(&bytes).map_err(|_| invalid())?;
                 record.validate()?;
@@ -232,13 +253,19 @@ impl InstanceRegistry {
     ) -> Result<(PathBuf, InstallationRecord), CoreError> {
         if directory.file_name().and_then(|name| name.to_str()) == record.directory_name.as_deref()
         {
+            let record = crate::instance_layout::prepare(&directory, record)?;
             return Ok((directory, record));
         }
         if record.state == InstallationState::Running {
             return Err(CoreError::new(ErrorCode::OperationBusy));
         }
+        let operation_root = if Self::record_name(&directory) == LEGACY_RECORD {
+            directory.join(".panita")
+        } else {
+            directory.clone()
+        };
         let operation =
-            crate::minecraft::download::try_lock(&directory.join(".panita"), ".installation.lock")?
+            crate::minecraft::download::try_lock(&operation_root, ".installation.lock")?
                 .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
         let name = match &record.directory_name {
             Some(name) => name.clone(),
@@ -249,18 +276,19 @@ impl InstanceRegistry {
             return Err(invalid());
         }
         let store = Self::store_at(&directory)?;
+        let record_name = Self::record_name(&directory);
         let next = store.with_lock(|transaction| {
-            let bytes = transaction.read(RECORD)?.ok_or_else(invalid)?;
+            let bytes = transaction.read(record_name)?.ok_or_else(invalid)?;
             let mut current = InstallationRecord::decode(&bytes, record.id)?;
             if current.state == InstallationState::Running
                 || current.directory_name != record.directory_name
             {
                 return Err(CoreError::new(ErrorCode::OperationBusy));
             }
-            current.schema_version = 2;
+            current.schema_version = current.schema_version.max(2);
             current.directory_name = Some(name);
             current.validate()?;
-            transaction.write(RECORD, &formatted_json(&current)?)?;
+            transaction.write(record_name, &formatted_json(&current)?)?;
             Ok(current)
         })?;
         // Windows may refuse a directory move while descendants have open
@@ -287,6 +315,7 @@ impl InstanceRegistry {
                 .and_then(|parent| parent.sync_all())
                 .map_err(io)?;
         }
+        let next = crate::instance_layout::prepare(&destination, next)?;
         Ok((destination, next))
     }
 
@@ -373,10 +402,14 @@ impl InstanceRegistry {
             return Err(invalid());
         } else {
             let name = self.allocate_name(record)?;
-            instances.create_dir(&name).map_err(map_private_error)?;
+            instances
+                .create_dir(&name)
+                .map_err(map_private_error)?
+                .create_dir("minecraft")
+                .map_err(map_private_error)?;
             let store = Self::store_at(&self.paths.root().join("instances").join(&name))?;
             let mut next = record.clone();
-            next.schema_version = 2;
+            next.schema_version = 3;
             next.directory_name = Some(name);
             next.validate()?;
             store.transaction(RECORD, |existing| {
@@ -411,6 +444,7 @@ impl InstanceRegistry {
                 resolved_source: catalog.source.clone(),
                 state: InstallationState::NotInstalled,
                 managed_files: Vec::new(),
+                settings: InstanceSettings::default(),
             })?;
             self.scan()?
                 .into_iter()
@@ -442,12 +476,13 @@ impl InstanceRegistry {
             if record.directory_name.is_some() && record.directory_name != previous.directory_name {
                 return Err(invalid());
             }
-            Self::store_at(&directory)?.transaction(RECORD, |existing| {
+            Self::store_at(&directory)?.transaction(Self::record_name(&directory), |existing| {
                 let current =
                     InstallationRecord::decode(&existing.ok_or_else(invalid)?, record.id)?;
                 let mut next = record.clone();
                 next.schema_version = current.schema_version;
                 next.directory_name = current.directory_name;
+                next.settings = current.settings;
                 if preserve_catalog {
                     next.last_catalog = current.last_catalog;
                 }
@@ -468,10 +503,14 @@ impl InstanceRegistry {
 
     pub fn load_settings(&self, id: Uuid) -> Result<InstanceSettings, CoreError> {
         PrivateStore::open(&self.paths)?.with_lock(|_| {
-            let Some((directory, _)) = self.scan()?.into_iter().find(|(_, record)| record.id == id)
+            let Some((directory, record)) =
+                self.scan()?.into_iter().find(|(_, record)| record.id == id)
             else {
                 return Ok(InstanceSettings::default());
             };
+            if record.schema_version == 3 {
+                return Ok(record.settings);
+            }
             match Self::store_at(&directory)?.read("settings.json")? {
                 None => Ok(InstanceSettings::default()),
                 Some(bytes) => decode_settings(&bytes),
@@ -482,16 +521,17 @@ impl InstanceRegistry {
     pub fn save_settings(&self, id: Uuid, settings: &InstanceSettings) -> Result<(), CoreError> {
         settings.validate()?;
         PrivateStore::open(&self.paths)?.with_lock(|_| {
-            let (directory, _) = self
+            let (directory, record) = self
                 .scan()?
                 .into_iter()
                 .find(|(_, record)| record.id == id)
                 .ok_or_else(|| CoreError::new(ErrorCode::InstanceMissing))?;
-            Self::store_at(&directory)?.transaction("settings.json", |existing| {
-                if let Some(existing) = existing {
-                    decode_settings(&existing)?;
-                }
-                Ok((formatted_json(settings)?, ()))
+            let (directory, _) = self.migrate(directory, record)?;
+            Self::store_at(&directory)?.transaction(RECORD, |existing| {
+                let mut current = InstallationRecord::decode(&existing.ok_or_else(invalid)?, id)?;
+                current.settings = settings.clone();
+                current.validate()?;
+                Ok((formatted_json(&current)?, ()))
             })
         })
     }
@@ -507,13 +547,18 @@ impl InstanceRegistry {
                     continue;
                 }
                 remote.validate()?;
-                Self::store_at(&directory)?.transaction(RECORD, |existing| {
-                    let mut current =
-                        InstallationRecord::decode(&existing.ok_or_else(invalid)?, installed.id)?;
-                    current.last_catalog = remote.clone();
-                    current.validate()?;
-                    Ok((formatted_json(&current)?, ()))
-                })?;
+                Self::store_at(&directory)?.transaction(
+                    Self::record_name(&directory),
+                    |existing| {
+                        let mut current = InstallationRecord::decode(
+                            &existing.ok_or_else(invalid)?,
+                            installed.id,
+                        )?;
+                        current.last_catalog = remote.clone();
+                        current.validate()?;
+                        Ok((formatted_json(&current)?, ()))
+                    },
+                )?;
             }
             Ok(())
         })

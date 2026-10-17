@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod authentication;
 pub mod catalog;
 pub mod error;
+mod instance_layout;
 pub mod logging;
 pub mod minecraft;
 pub mod oauth;

@@ -35,5 +35,8 @@ test-endpoints = []
 [target.'cfg(target_os = "linux")'.dependencies]
 rustix = { version = "=1.1.5", features = ["fs"] }
 
+[target.'cfg(windows)'.dependencies]
+same-file = "=1.0.6"
+
 [dev-dependencies]
 rustls = { version = "=0.23.45", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }

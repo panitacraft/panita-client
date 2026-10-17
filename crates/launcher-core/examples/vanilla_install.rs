@@ -84,12 +84,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "verify" => install::verify_installed(&paths, uuid::Uuid::parse_str(&args[2])?)?.plan,
         _ => return Err("unknown validation command".into()),
     };
-    let root = private_fs::PrivateDir::ensure(paths.root())
-        .map_err(|_| CoreError::new(launcher_core::error::ErrorCode::StorageUnavailable))?;
-    root.write_atomic_durable(
-        format!("plan-{}-{}.json", plan.version.id, plan.platform),
-        &serde_json::to_vec_pretty(&plan)?,
-    )?;
+    if args[0] == "plan" {
+        let root = private_fs::PrivateDir::ensure(paths.root())
+            .map_err(|_| CoreError::new(launcher_core::error::ErrorCode::StorageUnavailable))?;
+        root.write_atomic_durable(
+            format!("plan-{}-{}.json", plan.version.id, plan.platform),
+            &serde_json::to_vec_pretty(&plan)?,
+        )?;
+    }
     println!(
         "{}",
         serde_json::json!({ "version": plan.version.id, "platform": plan.platform, "java_major": plan.version.java.major_version, "artifacts": plan.artifacts.len(), "bytes": plan.artifacts.iter().map(|file| file.artifact.size).sum::<u64>(), "metadata_documents": plan.documents.len(), "instance_directory": if args[0] == "plan" { None } else { Some(paths.instance(uuid::Uuid::parse_str(&args[2])?)?) } })

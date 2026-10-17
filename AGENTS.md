@@ -90,6 +90,8 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 - Assign the directory once and keep it stable across later catalog name/slug changes, disabled states, or removal. Validate directory names for traversal, Windows reserved names, and case-insensitive collisions. If a slug is unsafe or unavailable, use a safe slug-derived name with a deterministic UUID suffix; never adopt, merge, or overwrite another directory based on its name alone.
 - Migrate existing `instances/{id}/` installations through a coordinated, recoverable operation that preserves all worlds, settings, installation metadata, and user-owned files. Do not move a directory during installation, repair, or game execution. Preserve the existing installation and report migration failures; do not silently create an empty replacement or lose discoverability. Record migration verification separately from the original UUID-folder installation evidence.
 - Isolate worlds, settings, mods, configuration, screenshots, resource packs, shaders, logs, and crash reports per instance. Instance settings override global defaults.
+- Use `instances/{slug}/minecraft/` as the game directory. Keep launcher metadata directly in the instance root: schema-versioned `instance.json` combines UUID/directory/catalog/install-state metadata and instance setting overrides; `installed.json` records the exact verified installation. Keep `install-journal.json`, `.installation.lock`, and `.mutation.lock` there for recovery and writer coordination. Extract required natives into `natives-{operation}/` only when needed; do not persist duplicate staged plans or create empty native-generation folders.
+- Migrate legacy `.panita` metadata and inline game files under the root writer lock and instance operation lock. Persist migration intent before moving player files, resume after interruption, reject conflicting destinations and unrecognized metadata without deletion, and remove legacy metadata only after publishing the complete new descriptor/manifest. Preserve UUID identity, settings, worlds, and shared-cache references. Older builds do not understand the new instance schema and must not operate on migrated data.
 - Record resolved versions and managed-file ownership per installation. Share only reusable, verified caches; coordinate writes and cleanup across operations and processes.
 - Store vanilla clients at `versions/{version}/{version}-{client-hash}.jar`. Store Java at `runtime/java-{major}-{platform}/`, using suffixes such as `-build-2` only when different exact builds need separate directories. Persist and verify the authoritative runtime manifest and artifact hashes; readable names are not proof of identity. Reserve runtime builds under an interprocess writer lock before downloads, reuse matching reservations after interruption, and never adopt unowned directories or overwrite a different build. Existing installation manifests keep resolving their recorded legacy cache paths; do not remove referenced caches during layout changes.
 - Consume the public, read-only Panita API. The launcher does not access Supabase directly or need its database credentials.
@@ -136,6 +138,13 @@ PanitaClient/
 ├─ versions/
 ├─ runtime/
 ├─ instances/{slug}/      # stable readable directory mapped to a catalog UUID
+│  ├─ instance.json       # UUID/catalog/state and instance setting overrides
+│  ├─ installed.json      # exact verified installation manifest
+│  ├─ install-journal.json
+│  ├─ .installation.lock
+│  ├─ .mutation.lock
+│  ├─ natives-{operation}/ # only for required extracted natives
+│  └─ minecraft/         # isolated player/game data
 └─ logs/                  # redacted launcher logs
 ```
 

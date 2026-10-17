@@ -31,6 +31,7 @@ fn installed(id: Uuid) -> InstallationRecord {
         last_catalog,
         state: InstallationState::Installed,
         managed_files: vec!["versions/client.jar".to_owned()],
+        settings: InstanceSettings::default(),
     }
 }
 
@@ -64,10 +65,12 @@ fn legacy(paths: &AppPaths, record: &InstallationRecord) -> PathBuf {
         .ensure_dir(".panita")
         .unwrap_or_else(|_| panic!("metadata"));
     let directory = paths.root().join("instances").join(record.id.to_string());
-    InstanceRegistry::store_at(&directory)
-        .unwrap_or_else(|_| panic!("store"))
-        .transaction(RECORD, |_| Ok((formatted_json(record)?, ())))
-        .unwrap_or_else(|_| panic!("legacy record"));
+    PrivateStore::open(
+        &AppPaths::new(directory.join(".panita")).unwrap_or_else(|_| panic!("paths")),
+    )
+    .unwrap_or_else(|_| panic!("store"))
+    .transaction(LEGACY_RECORD, |_| Ok((formatted_json(record)?, ())))
+    .unwrap_or_else(|_| panic!("legacy record"));
     directory
 }
 
@@ -80,7 +83,7 @@ fn fresh_installation_uses_slug_and_persists_identity_across_catalog_renames() {
     assert_eq!(paths.instance(record.id).ok(), Some(expected.clone()));
     assert_eq!(
         paths.instance_settings(record.id).ok(),
-        Some(expected.join(".panita/settings.json"))
+        Some(expected.join("instance.json"))
     );
     let mut renamed = record.last_catalog.clone();
     renamed.slug = "renamed-catalog-slug".into();
@@ -91,7 +94,7 @@ fn fresh_installation_uses_slug_and_persists_identity_across_catalog_renames() {
     let records = InstanceRegistry::new(paths.clone())
         .load()
         .unwrap_or_else(|_| panic!("restart"));
-    assert_eq!(records[0].schema_version, 2);
+    assert_eq!(records[0].schema_version, 3);
     assert_eq!(records[0].directory_name.as_deref(), Some("vanilla-actual"));
     assert_eq!(paths.instance(record.id).ok(), Some(expected));
     assert!(
@@ -112,9 +115,6 @@ fn legacy_migration_preserves_worlds_settings_and_operation_metadata() {
     let files = [
         "saves/Test World/level.dat",
         "options.txt",
-        ".panita/settings.json",
-        ".panita/install-journal.json",
-        ".panita/lock.json",
         ".panita/installations/generation/natives/library.dll",
     ];
     for file in files {
@@ -124,17 +124,32 @@ fn legacy_migration_preserves_worlds_settings_and_operation_metadata() {
             .write_atomic_durable(leaf, file.as_bytes())
             .unwrap_or_else(|_| panic!("sentinel"));
     }
+    let settings = InstanceSettings {
+        ram_mib: Some(6144),
+        ..InstanceSettings::default()
+    };
+    PrivateStore::open(&AppPaths::new(old.join(".panita")).unwrap_or_else(|_| panic!("paths")))
+        .unwrap_or_else(|_| panic!("store"))
+        .transaction("settings.json", |_| Ok((formatted_json(&settings)?, ())))
+        .unwrap_or_else(|_| panic!("settings"));
     let current = registry
         .prepare_instance(record.id)
         .unwrap_or_else(|_| panic!("migration"));
     assert_eq!(current, paths.root().join("instances/vanilla-actual"));
     assert!(!old.exists());
     for file in files {
+        let relocated = if file.starts_with(".panita/") {
+            "natives-generation/library.dll".to_owned()
+        } else {
+            format!("minecraft/{file}")
+        };
         assert_eq!(
-            std::fs::read(current.join(file)).ok().as_deref(),
+            std::fs::read(current.join(relocated)).ok().as_deref(),
             Some(file.as_bytes())
         );
     }
+    assert_eq!(registry.load_settings(record.id).ok(), Some(settings));
+    assert!(!current.join(".panita").exists());
     assert_eq!(registry.prepare_instance(record.id).ok(), Some(current));
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
 }
@@ -184,7 +199,7 @@ fn migration_refuses_busy_or_running_instances_and_preserves_discoverability() {
     record.state = InstallationState::Running;
     InstanceRegistry::store_at(&old)
         .unwrap_or_else(|_| panic!("store"))
-        .transaction(RECORD, |_| Ok((formatted_json(&record)?, ())))
+        .transaction(LEGACY_RECORD, |_| Ok((formatted_json(&record)?, ())))
         .unwrap_or_else(|_| panic!("running record"));
     assert_eq!(
         registry
@@ -297,7 +312,7 @@ fn invalid_or_occupied_pending_destinations_preserve_both_directories() {
         let store = InstanceRegistry::store_at(&old).unwrap_or_else(|_| panic!("store"));
         // Deliberately bypass validation to model corrupt disk metadata.
         store
-            .transaction(RECORD, |_| Ok((formatted_json(&record)?, ())))
+            .transaction(LEGACY_RECORD, |_| Ok((formatted_json(&record)?, ())))
             .unwrap_or_else(|_| panic!("corrupt metadata"));
         let before = std::fs::read(old.join(".panita/installation.json")).unwrap_or_default();
         assert!(registry.load().is_err());
@@ -359,7 +374,7 @@ fn redirected_instance_directory_cannot_supply_ownership_metadata() {
     external
         .ensure_dir(".panita")
         .unwrap_or_else(|_| panic!("metadata"))
-        .write_atomic_durable(RECORD, &formatted_json(&record).unwrap_or_default())
+        .write_atomic_durable(LEGACY_RECORD, &formatted_json(&record).unwrap_or_default())
         .unwrap_or_else(|_| panic!("record"));
     let link = paths.root().join("instances").join("redirected");
     let target = paths.root().join("external");

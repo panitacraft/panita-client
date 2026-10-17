@@ -99,7 +99,8 @@ stable. Reserved names and collisions use a slug with a UUID suffix. Existing
 UUID folders migrate on registry load or before an installation/recovery/audit,
 preserving their contents. Busy or running instances are not moved. A persisted
 destination allows an interrupted move to resume; occupied destinations are never
-merged or replaced. Older launcher builds cannot read schema 2 metadata.
+merged or replaced. Current instances use schema 3; older launcher builds must
+not operate on migrated instance data.
 
 The public catalog is `https://api.panitacraft.com`. Do not store account
 credentials in the repository. Public integration checks can be run explicitly
@@ -147,6 +148,23 @@ continue to accept the catalog UUID. `install` and `verify` summaries include th
 resolved directory. Do not rename folders manually. Unowned folders, duplicate
 UUID records, and corrupt ownership metadata are preserved and reported for
 recovery instead of being adopted or replaced.
+
+Each instance uses a flat launcher root with `instance.json` (schema 3),
+`installed.json` (schema 2), `install-journal.json`, and persistent coordination
+locks. Instance setting overrides live in `instance.json`; all game/player files
+belong in `minecraft/`. Use `AppPaths::game_directory` for the game working
+directory, rather than the instance root. Native generations use
+`natives-<operation>/` only when required. Duplicate staged plans and empty native
+directories are no longer created. The explicit `plan` harness operation alone
+writes developer reports; use a separate evidence root for those reports.
+
+Legacy UUID/slug instances with `.panita` metadata migrate through a durable
+intent before any player files move. Interrupted moves resume without merging
+conflicting destinations; unknown metadata and corrupt inputs are preserved and
+reported. Settings are imported before the new descriptor is committed. Migration
+is blocked during game execution or an active installation. Do not run older
+launcher builds against migrated instances. Account storage and shared-cache
+identities remain separate from this migration.
 
 ## License
 
