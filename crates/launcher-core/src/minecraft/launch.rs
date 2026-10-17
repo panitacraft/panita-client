@@ -26,6 +26,7 @@ pub struct LaunchCommand {
     pub(crate) executable: PathBuf,
     pub(crate) directory: PathBuf,
     pub(crate) args: Vec<String>,
+    pub(crate) redactions: Vec<Secret>,
 }
 
 impl std::fmt::Debug for LaunchCommand {
@@ -239,6 +240,11 @@ pub fn build_command(
             executable: paths.root().join(&plan.java_executable),
             directory: game_directory.to_owned(),
             args: arguments(&metadata.jvm, &launch_platform, &replacements)?,
+            redactions: if account.kind == AccountKind::Microsoft {
+                vec![Secret::new(token.to_owned())?]
+            } else {
+                Vec::new()
+            },
         };
         if let Some(logging) = &version.logging {
             let path = path_text(&paths.root().join(format!(

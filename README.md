@@ -6,7 +6,7 @@ catalog, using Microsoft or explicitly selected offline accounts.
 
 This repository is in development. The desktop interface manages accounts and
 the catalog. Core installation is exercised through the development harness
-described below. Phase 5 has started with core launch-command construction;
+described below. Phase 5 includes core launch-command construction and process supervision;
 game execution and Play-time enforcement remain pending.
 
 Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on

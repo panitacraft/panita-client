@@ -382,11 +382,20 @@ pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, Cor
     let root = metadata_root(paths, id)?;
     let _guard = super::download::try_lock(&root, ".installation.lock")?
         .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
-    let journal = read_json::<Journal>(&root, "install-journal.json")?;
+    verify_under_lock(paths, id, &root)
+}
+
+/// Caller must retain this instance's installation lock for the whole audit.
+pub(super) fn verify_under_lock(
+    paths: &AppPaths,
+    id: Uuid,
+    root: &std::path::Path,
+) -> Result<InstalledLock, CoreError> {
+    let journal = read_json::<Journal>(root, "install-journal.json")?;
     if journal.is_some_and(|journal| journal.schema_version != 1 || journal.active) {
         return Err(invalid());
     }
-    let installed = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
+    let installed = read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)?;
     if installed.schema_version != 2 || installed.instance_id != id || installed.operation.is_nil()
     {
         return Err(invalid());

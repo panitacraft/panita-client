@@ -13,6 +13,7 @@ pub mod install;
 pub mod launch;
 pub mod natives;
 pub mod plan;
+pub mod process;
 pub mod runtime;
 
 pub const VERSION_MANIFEST: &str =

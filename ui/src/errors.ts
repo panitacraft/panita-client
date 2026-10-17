@@ -10,10 +10,13 @@ export type LauncherErrorCode =
   | 'callback_registration_failed' | 'browser_unavailable' | 'authentication_configuration'
   | 'accounts_file_invalid' | 'callback_not_active' | 'unsafe_permissions'
   | 'instance_disabled' | 'instance_missing' | 'unsupported_instance'
-  | 'artifact_mismatch' | 'runtime_unsupported' | 'insufficient_space';
+  | 'artifact_mismatch' | 'runtime_unsupported' | 'insufficient_space'
+  | 'process_start_failed' | 'process_control_failed';
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
+  process_start_failed: 'No pudimos iniciar Minecraft. Revisa la instalación e inténtalo de nuevo.',
+  process_control_failed: 'No pudimos confirmar el estado de Minecraft. Revisa si sigue abierto antes de intentarlo de nuevo.',
   insufficient_space: 'No hay suficiente espacio disponible. Libera espacio e inténtalo de nuevo.',
   artifact_mismatch: 'Un archivo descargado no coincide con el original. Inténtalo de nuevo.',
   runtime_unsupported: 'No hay un Java compatible disponible para esta versión y plataforma.',
