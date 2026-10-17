@@ -61,7 +61,7 @@ impl GlobalSettings {
         Ok(settings)
     }
 
-    fn validate(&self) -> Result<(), CoreError> {
+    pub(crate) fn validate(&self) -> Result<(), CoreError> {
         if self.schema_version != SETTINGS_SCHEMA_VERSION
             || !(512..=262_144).contains(&self.ram_mib)
             || !(320..=16_384).contains(&self.window_size.width)

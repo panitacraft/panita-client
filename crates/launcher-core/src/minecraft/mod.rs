@@ -10,6 +10,7 @@ pub mod download;
 #[cfg(target_os = "linux")]
 mod executable;
 pub mod install;
+pub mod launch;
 pub mod natives;
 pub mod plan;
 pub mod runtime;
