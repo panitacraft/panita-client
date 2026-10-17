@@ -40,6 +40,13 @@ downloads. The workspace suite passed 80 core, two process-writer and three
 desktop tests, with one intentional live-test skip. Linux artifact selection and
 core compilation passed; actual Linux game execution remains unverified.
 
+The slug-folder follow-up migrated both isolated Windows installations to
+`vanilla-actual` and `vanilla-clasica`, preserving all four world/options test
+hashes. The updated Windows suite passed 96 tests with one live-test skip;
+Clippy and the UI build passed. Linux compilation passed, but migration tests
+remain blocked by protected-write failures also seen in the unchanged baseline
+storage test. Linux migration execution is not qualified.
+
 ## Development
 
 The workspace uses Rust 1.96, Node.js 24, and pnpm 11.25. Tauri v2 requires
