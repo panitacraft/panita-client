@@ -1,6 +1,6 @@
 //! UUID-owned metadata; remote catalog changes never rename or remove game directories.
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,7 @@ use crate::error::{CoreError, ErrorCode};
 use crate::paths::AppPaths;
 use crate::settings::InstanceSettings;
 use crate::storage::PrivateStore;
+use crate::storage::map_private_error;
 
 const RECORD: &str = "installation.json";
 
@@ -32,6 +33,10 @@ pub enum InstallationState {
 pub struct InstallationRecord {
     pub schema_version: u32,
     pub id: Uuid,
+    /// Stable physical directory, independent of later catalog slug changes.
+    /// In a legacy UUID folder this is also the durable migration destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory_name: Option<String>,
     pub last_catalog: CatalogInstance,
     pub resolved_source: CatalogSource,
     pub state: InstallationState,
@@ -40,7 +45,13 @@ pub struct InstallationRecord {
 
 impl InstallationRecord {
     fn validate(&self) -> Result<(), CoreError> {
-        if self.schema_version != 1
+        if !matches!(self.schema_version, 1 | 2)
+            || (self.schema_version == 1 && self.directory_name.is_some())
+            || (self.schema_version == 2 && self.directory_name.is_none())
+            || self
+                .directory_name
+                .as_deref()
+                .is_some_and(|name| !valid_directory_name(name))
             || self.id != self.last_catalog.id
             || self.managed_files.len() > 10_000
         {
@@ -88,6 +99,20 @@ fn invalid() -> CoreError {
     CoreError::new(ErrorCode::InvalidData)
 }
 
+fn valid_directory_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 85
+        && !name.starts_with('-')
+        && !name.ends_with('-')
+        && name
+            .bytes()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == b'-')
+        && !matches!(name, "con" | "prn" | "aux" | "nul")
+        && !(name.len() == 4
+            && (name.starts_with("com") || name.starts_with("lpt"))
+            && matches!(name.as_bytes()[3], b'1'..=b'9'))
+}
+
 fn formatted_json(value: &impl Serialize) -> Result<Vec<u8>, CoreError> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|_| invalid())?;
     bytes.push(b'\n');
@@ -119,120 +144,379 @@ impl InstanceRegistry {
         Self { paths }
     }
 
-    fn store(&self, id: Uuid) -> Result<PrivateStore, CoreError> {
-        if id.is_nil() {
-            return Err(invalid());
-        }
-        // Create every level privately; normal recursive mkdir could expose files or follow redirects.
-        use crate::storage::map_private_error;
-        let root = private_fs::PrivateDir::ensure(self.paths.root()).map_err(map_private_error)?;
-        let instances = root.ensure_dir("instances").map_err(map_private_error)?;
-        let instance = instances
-            .ensure_dir(id.to_string())
-            .map_err(map_private_error)?;
+    fn store_at(directory: &Path) -> Result<PrivateStore, CoreError> {
+        let instance = private_fs::PrivateDir::open(directory).map_err(map_private_error)?;
         instance.ensure_dir(".panita").map_err(map_private_error)?;
-        // The protected directory resolver rejects redirected components, including Windows junctions.
-        PrivateStore::open(&AppPaths::new(self.paths.instance(id).join(".panita"))?)
+        PrivateStore::open(&AppPaths::new(directory.join(".panita"))?)
     }
 
-    pub fn load(&self) -> Result<Vec<InstallationRecord>, CoreError> {
+    /// Caller holds the root mutation lock. Only metadata bearing UUID ownership
+    /// is discoverable; arbitrary user folders are never adopted by their slug.
+    fn scan(&self) -> Result<Vec<(PathBuf, InstallationRecord)>, CoreError> {
         let root = self.paths.root().join("instances");
         match std::fs::symlink_metadata(&root) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(io(error)),
             Ok(_) => ensure_not_symlink(&root)?,
         }
+        private_fs::PrivateDir::open(&root).map_err(map_private_error)?;
         let mut records = Vec::new();
+        let mut ids = std::collections::HashSet::new();
         for entry in std::fs::read_dir(root).map_err(io)? {
             let entry = entry.map_err(io)?;
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
-            let Ok(id) = Uuid::parse_str(&name) else {
-                continue;
-            };
-            if name != id.to_string() {
+            if !valid_directory_name(&name) {
                 continue;
             }
-            ensure_not_symlink(&entry.path())?;
-            let metadata = entry.path().join(".panita");
-            match std::fs::symlink_metadata(&metadata) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(io(error)),
-                Ok(_) => ensure_not_symlink(&metadata)?,
+            let directory = entry.path();
+            if !directory.join(".panita").try_exists().map_err(io)? {
+                continue;
             }
-            let store = self.store(id)?;
+            private_fs::PrivateDir::open(&directory).map_err(map_private_error)?;
+            private_fs::PrivateDir::open(directory.join(".panita")).map_err(map_private_error)?;
+            let store = Self::store_at(&directory)?;
             if let Some(bytes) = store.read(RECORD)? {
-                records.push(InstallationRecord::decode(&bytes, id)?);
+                let record: InstallationRecord =
+                    serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+                record.validate()?;
+                // A UUID folder with a different assigned name is an interrupted move.
+                if record.directory_name.as_deref() != Some(name.as_str())
+                    && name != record.id.to_string()
+                {
+                    return Err(invalid());
+                }
+                if !ids.insert(record.id) {
+                    return Err(invalid());
+                }
+                records.push((directory, record));
             }
         }
-        records.sort_by_key(|record| record.id);
+        records.sort_by_key(|(_, record)| record.id);
         Ok(records)
     }
 
-    /// Metadata only: Phase 4 must verify actual installation files before marking completion.
-    pub fn save(&self, record: &InstallationRecord) -> Result<(), CoreError> {
-        record.validate()?;
-        let bytes = formatted_json(record)?;
-        self.store(record.id)?.transaction(RECORD, |existing| {
-            if let Some(existing) = existing {
-                InstallationRecord::decode(&existing, record.id)?;
+    fn available(&self, name: &str) -> Result<bool, CoreError> {
+        for entry in std::fs::read_dir(self.paths.root().join("instances")).map_err(io)? {
+            if entry
+                .map_err(io)?
+                .file_name()
+                .to_string_lossy()
+                .eq_ignore_ascii_case(name)
+            {
+                return Ok(false);
             }
-            Ok((bytes, ()))
+        }
+        Ok(true)
+    }
+
+    fn allocate_name(&self, record: &InstallationRecord) -> Result<String, CoreError> {
+        let slug = &record.last_catalog.slug;
+        if valid_directory_name(slug) && self.available(slug)? {
+            return Ok(slug.clone());
+        }
+        let suffixed = format!("{slug}-{}", record.id);
+        if !valid_directory_name(&suffixed) || !self.available(&suffixed)? {
+            return Err(invalid());
+        }
+        Ok(suffixed)
+    }
+
+    /// Persist the destination before renaming. A crash on either side leaves
+    /// UUID ownership discoverable, without copying or replacing user data.
+    fn migrate(
+        &self,
+        directory: PathBuf,
+        record: InstallationRecord,
+    ) -> Result<(PathBuf, InstallationRecord), CoreError> {
+        if directory.file_name().and_then(|name| name.to_str()) == record.directory_name.as_deref()
+        {
+            return Ok((directory, record));
+        }
+        if record.state == InstallationState::Running {
+            return Err(CoreError::new(ErrorCode::OperationBusy));
+        }
+        let operation =
+            crate::minecraft::download::try_lock(&directory.join(".panita"), ".installation.lock")?
+                .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
+        let name = match &record.directory_name {
+            Some(name) => name.clone(),
+            None => self.allocate_name(&record)?,
+        };
+        let destination = self.paths.root().join("instances").join(&name);
+        if destination != directory && !self.available(&name)? {
+            return Err(invalid());
+        }
+        let store = Self::store_at(&directory)?;
+        let next = store.with_lock(|transaction| {
+            let bytes = transaction.read(RECORD)?.ok_or_else(invalid)?;
+            let mut current = InstallationRecord::decode(&bytes, record.id)?;
+            if current.state == InstallationState::Running
+                || current.directory_name != record.directory_name
+            {
+                return Err(CoreError::new(ErrorCode::OperationBusy));
+            }
+            current.schema_version = 2;
+            current.directory_name = Some(name);
+            current.validate()?;
+            transaction.write(RECORD, &formatted_json(&current)?)?;
+            Ok(current)
+        })?;
+        // Windows may refuse a directory move while descendants have open
+        // handles. Keep the root mutation lock throughout, publish the new
+        // schema first, then close all source handles before the rename.
+        drop(store);
+        drop(operation);
+        if destination != directory {
+            #[cfg(windows)]
+            std::fs::rename(&directory, &destination).map_err(io)?;
+            #[cfg(target_os = "linux")]
+            rustix::fs::renameat_with(
+                rustix::fs::CWD,
+                &directory,
+                rustix::fs::CWD,
+                &destination,
+                rustix::fs::RenameFlags::NOREPLACE,
+            )
+            .map_err(|error| io(error.into()))?;
+            #[cfg(not(any(windows, target_os = "linux")))]
+            return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+            #[cfg(unix)]
+            std::fs::File::open(self.paths.root().join("instances"))
+                .and_then(|parent| parent.sync_all())
+                .map_err(io)?;
+        }
+        Ok((destination, next))
+    }
+
+    pub fn instance_path(&self, id: Uuid) -> Result<PathBuf, CoreError> {
+        PrivateStore::open(&self.paths)?.with_lock(|_| {
+            self.scan()?
+                .into_iter()
+                .find(|(_, record)| record.id == id)
+                .map(|(directory, _)| directory)
+                .ok_or_else(|| CoreError::new(ErrorCode::InstanceMissing))
         })
     }
 
-    /// Installation work may span network requests. Preserve availability learned by
-    /// a concurrent catalog refresh when committing its local installation state.
-    pub(crate) fn save_installation(&self, record: &InstallationRecord) -> Result<(), CoreError> {
-        record.validate()?;
-        self.store(record.id)?.transaction(RECORD, |existing| {
-            let mut next = record.clone();
-            if let Some(bytes) = existing {
-                next.last_catalog = InstallationRecord::decode(&bytes, record.id)?.last_catalog;
-            }
-            next.validate()?;
-            Ok((formatted_json(&next)?, ()))
+    /// Read one identity without attempting unrelated directory migrations.
+    pub fn get(&self, id: Uuid) -> Result<Option<InstallationRecord>, CoreError> {
+        PrivateStore::open(&self.paths)?.with_lock(|_| {
+            Ok(self
+                .scan()?
+                .into_iter()
+                .find(|(_, record)| record.id == id)
+                .map(|(_, record)| record))
         })
+    }
+
+    /// Finish legacy migration before any installation, repair, audit or game lease.
+    pub fn prepare_instance(&self, id: Uuid) -> Result<PathBuf, CoreError> {
+        PrivateStore::open(&self.paths)?.with_lock(|_| {
+            let (directory, record) = self
+                .scan()?
+                .into_iter()
+                .find(|(_, record)| record.id == id)
+                .ok_or_else(|| CoreError::new(ErrorCode::InstanceMissing))?;
+            Ok(self.migrate(directory, record)?.0)
+        })
+    }
+
+    #[cfg(test)]
+    fn store(&self, id: Uuid) -> Result<PrivateStore, CoreError> {
+        Self::store_at(&self.instance_path(id)?)
+    }
+
+    pub fn load(&self) -> Result<Vec<InstallationRecord>, CoreError> {
+        PrivateStore::open(&self.paths)?.with_lock(|_| {
+            self.scan()?
+                .into_iter()
+                .map(|(directory, record)| {
+                    match self.migrate(directory, record.clone()) {
+                        Ok((_, migrated)) => Ok(migrated),
+                        // Keep existing operations discoverable while postponing their move.
+                        Err(error) if error.code() == ErrorCode::OperationBusy => Ok(record),
+                        Err(error) => Err(error),
+                    }
+                })
+                .collect()
+        })
+    }
+
+    /// A failed move must not hide valid installations from the catalog. Read
+    /// their original ownership records and surface a warning; operations still
+    /// require successful preparation before accessing game files.
+    fn load_for_overview(&self) -> Result<(Vec<InstallationRecord>, Option<ErrorCode>), CoreError> {
+        match self.load() {
+            Ok(records) => Ok((records, None)),
+            Err(error) => PrivateStore::open(&self.paths)?.with_lock(|_| {
+                Ok((
+                    self.scan()?.into_iter().map(|(_, record)| record).collect(),
+                    Some(error.code()),
+                ))
+            }),
+        }
+    }
+
+    fn create(&self, record: &InstallationRecord) -> Result<(), CoreError> {
+        let root = private_fs::PrivateDir::ensure(self.paths.root()).map_err(map_private_error)?;
+        let instances = root.ensure_dir("instances").map_err(map_private_error)?;
+        let legacy = self
+            .paths
+            .root()
+            .join("instances")
+            .join(record.id.to_string());
+        if legacy.try_exists().map_err(io)? {
+            // Without an installation record, the UUID-shaped name is not proof
+            // of ownership. Preserve it and require recovery instead of adoption.
+            return Err(invalid());
+        } else {
+            let name = self.allocate_name(record)?;
+            instances.create_dir(&name).map_err(map_private_error)?;
+            let store = Self::store_at(&self.paths.root().join("instances").join(&name))?;
+            let mut next = record.clone();
+            next.schema_version = 2;
+            next.directory_name = Some(name);
+            next.validate()?;
+            store.transaction(RECORD, |existing| {
+                if existing.is_some() {
+                    return Err(invalid());
+                }
+                Ok((formatted_json(&next)?, ()))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Allocate without resetting an installation concurrently started elsewhere.
+    pub(crate) fn ensure_catalog_instance(
+        &self,
+        catalog: &CatalogInstance,
+    ) -> Result<PathBuf, CoreError> {
+        catalog.validate()?;
+        PrivateStore::open(&self.paths)?.with_lock(|_| {
+            if let Some((directory, record)) = self
+                .scan()?
+                .into_iter()
+                .find(|(_, record)| record.id == catalog.id)
+            {
+                return Ok(self.migrate(directory, record)?.0);
+            }
+            self.create(&InstallationRecord {
+                schema_version: 1,
+                id: catalog.id,
+                directory_name: None,
+                last_catalog: catalog.clone(),
+                resolved_source: catalog.source.clone(),
+                state: InstallationState::NotInstalled,
+                managed_files: Vec::new(),
+            })?;
+            self.scan()?
+                .into_iter()
+                .find(|(_, record)| record.id == catalog.id)
+                .map(|(directory, _)| directory)
+                .ok_or_else(invalid)
+        })
+    }
+
+    fn save_record(
+        &self,
+        record: &InstallationRecord,
+        preserve_catalog: bool,
+    ) -> Result<(), CoreError> {
+        record.validate()?;
+        PrivateStore::open(&self.paths)?.with_lock(|_| {
+            let Some((directory, previous)) = self
+                .scan()?
+                .into_iter()
+                .find(|(_, previous)| previous.id == record.id)
+            else {
+                return self.create(record);
+            };
+            let (directory, previous) = match self.migrate(directory.clone(), previous.clone()) {
+                Ok(migrated) => migrated,
+                Err(error) if error.code() == ErrorCode::OperationBusy => (directory, previous),
+                Err(error) => return Err(error),
+            };
+            if record.directory_name.is_some() && record.directory_name != previous.directory_name {
+                return Err(invalid());
+            }
+            Self::store_at(&directory)?.transaction(RECORD, |existing| {
+                let current =
+                    InstallationRecord::decode(&existing.ok_or_else(invalid)?, record.id)?;
+                let mut next = record.clone();
+                next.schema_version = current.schema_version;
+                next.directory_name = current.directory_name;
+                if preserve_catalog {
+                    next.last_catalog = current.last_catalog;
+                }
+                next.validate()?;
+                Ok((formatted_json(&next)?, ()))
+            })
+        })
+    }
+
+    /// Metadata only: actual game files must be verified before completion.
+    pub fn save(&self, record: &InstallationRecord) -> Result<(), CoreError> {
+        self.save_record(record, false)
+    }
+
+    pub(crate) fn save_installation(&self, record: &InstallationRecord) -> Result<(), CoreError> {
+        self.save_record(record, true)
     }
 
     pub fn load_settings(&self, id: Uuid) -> Result<InstanceSettings, CoreError> {
-        match self.store(id)?.read("settings.json")? {
-            None => Ok(InstanceSettings::default()),
-            Some(bytes) => decode_settings(&bytes),
-        }
+        PrivateStore::open(&self.paths)?.with_lock(|_| {
+            let Some((directory, _)) = self.scan()?.into_iter().find(|(_, record)| record.id == id)
+            else {
+                return Ok(InstanceSettings::default());
+            };
+            match Self::store_at(&directory)?.read("settings.json")? {
+                None => Ok(InstanceSettings::default()),
+                Some(bytes) => decode_settings(&bytes),
+            }
+        })
     }
 
     pub fn save_settings(&self, id: Uuid, settings: &InstanceSettings) -> Result<(), CoreError> {
         settings.validate()?;
-        let bytes = formatted_json(settings)?;
-        self.store(id)?.transaction("settings.json", |existing| {
-            if let Some(existing) = existing {
-                decode_settings(&existing)?;
-            }
-            Ok((bytes, ()))
+        PrivateStore::open(&self.paths)?.with_lock(|_| {
+            let (directory, _) = self
+                .scan()?
+                .into_iter()
+                .find(|(_, record)| record.id == id)
+                .ok_or_else(|| CoreError::new(ErrorCode::InstanceMissing))?;
+            Self::store_at(&directory)?.transaction("settings.json", |existing| {
+                if let Some(existing) = existing {
+                    decode_settings(&existing)?;
+                }
+                Ok((formatted_json(settings)?, ()))
+            })
         })
     }
 
-    /// Update known remote availability without overwriting installation pins or concurrent state.
+    /// Catalog changes update availability, never the assigned directory or pin.
     pub fn remember_catalog(&self, records: &[CatalogInstance]) -> Result<(), CoreError> {
-        for installed in self.load()? {
-            let Some(remote) = records.iter().find(|remote| remote.id == installed.id) else {
-                continue;
-            };
-            if remote == &installed.last_catalog {
-                continue;
+        PrivateStore::open(&self.paths)?.with_lock(|_| {
+            for (directory, installed) in self.scan()? {
+                let Some(remote) = records.iter().find(|remote| remote.id == installed.id) else {
+                    continue;
+                };
+                if remote == &installed.last_catalog {
+                    continue;
+                }
+                remote.validate()?;
+                Self::store_at(&directory)?.transaction(RECORD, |existing| {
+                    let mut current =
+                        InstallationRecord::decode(&existing.ok_or_else(invalid)?, installed.id)?;
+                    current.last_catalog = remote.clone();
+                    current.validate()?;
+                    Ok((formatted_json(&current)?, ()))
+                })?;
             }
-            remote.validate()?;
-            self.store(installed.id)?.transaction(RECORD, |existing| {
-                let mut current =
-                    InstallationRecord::decode(&existing.ok_or_else(invalid)?, installed.id)?;
-                current.last_catalog = remote.clone();
-                current.validate()?;
-                Ok((formatted_json(&current)?, ()))
-            })?;
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 
@@ -275,16 +559,22 @@ pub struct CatalogOverview {
 pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError> {
     let store = PrivateStore::open(&paths)?;
     let registry = InstanceRegistry::new(paths.clone());
-    let local = registry.load()?;
-    for record in &local {
-        crate::minecraft::install::recover(
-            &paths,
-            record.id,
-            &crate::minecraft::download::Cancellation::default(),
-        )
-        .await?;
+    let (mut local, migration_warning) = registry.load_for_overview()?;
+    if migration_warning.is_none() {
+        for record in &local {
+            if let Err(error) = crate::minecraft::install::recover(
+                &paths,
+                record.id,
+                &crate::minecraft::download::Cancellation::default(),
+            )
+            .await
+                && error.code() != ErrorCode::OperationBusy
+            {
+                return Err(error);
+            }
+        }
+        local = registry.load()?;
     }
-    let local = registry.load()?;
     let version = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?;
     let remote = crate::catalog::CatalogClient::new()?.refresh(&store).await;
     match remote {
@@ -301,7 +591,7 @@ pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError>
                 instances: reconcile(Some(&snapshot), &local, &version),
                 stale: snapshot.stale,
                 cache_warning: snapshot.cache_warning,
-                registry_warning,
+                registry_warning: migration_warning.or(registry_warning),
             })
         }
         Err(error)
@@ -315,7 +605,7 @@ pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError>
                 instances: reconcile(None, &local, &version),
                 stale: true,
                 cache_warning: None,
-                registry_warning: None,
+                registry_warning: migration_warning,
             })
         }
         Err(error) => Err(error),

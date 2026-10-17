@@ -34,14 +34,13 @@ impl AppPaths {
         self.root.join("insts-cache.json")
     }
 
-    pub fn instance(&self, id: Uuid) -> PathBuf {
-        self.root
-            .join("instances")
-            .join(id.hyphenated().to_string())
+    /// Resolve persisted UUID ownership; never infer identity from a display slug.
+    pub fn instance(&self, id: Uuid) -> Result<PathBuf, CoreError> {
+        crate::registry::InstanceRegistry::new(self.clone()).instance_path(id)
     }
 
-    pub fn instance_settings(&self, id: Uuid) -> PathBuf {
-        self.instance(id).join(".panita").join("settings.json")
+    pub fn instance_settings(&self, id: Uuid) -> Result<PathBuf, CoreError> {
+        Ok(self.instance(id)?.join(".panita").join("settings.json"))
     }
 }
 
@@ -50,22 +49,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn instance_path_uses_immutable_uuid() {
-        let root = std::env::temp_dir().join("panita-test");
+    fn unknown_identity_does_not_invent_an_installation_path() {
+        let root = std::env::temp_dir().join(format!("panita-paths-{}", Uuid::new_v4()));
         let Ok(paths) = AppPaths::new(&root) else {
             panic!("valid absolute root");
         };
         let Ok(id) = Uuid::parse_str("62d7e99d-fb4e-4167-8732-ce3a334d4a58") else {
             panic!("valid catalog UUID");
         };
-        assert_eq!(
-            paths.instance(id),
-            root.join("instances").join(id.to_string())
-        );
-        assert_eq!(
-            paths.instance_settings(id),
-            paths.instance(id).join(".panita/settings.json")
-        );
+        assert!(paths.instance(id).is_err());
+        assert!(paths.instance_settings(id).is_err());
+        assert!(!root.join("instances").join(id.to_string()).exists());
+        assert!(std::fs::remove_dir_all(root).is_ok());
     }
 
     #[test]

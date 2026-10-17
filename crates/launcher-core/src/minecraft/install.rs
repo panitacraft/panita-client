@@ -44,9 +44,9 @@ fn metadata_root(paths: &AppPaths, id: Uuid) -> Result<std::path::PathBuf, CoreE
     if id.is_nil() {
         return Err(invalid());
     }
-    let relative = format!("instances/{id}/.panita/lock.json");
-    ensure_parent(paths.root(), &relative)?;
-    Ok(paths.instance(id).join(".panita"))
+    Ok(InstanceRegistry::new(paths.clone())
+        .prepare_instance(id)?
+        .join(".panita"))
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(
@@ -104,7 +104,7 @@ fn recover_locked(paths: &AppPaths, id: Uuid, root: &std::path::Path) -> Result<
         return Ok(());
     }
     let registry = InstanceRegistry::new(paths.clone());
-    if let Some(mut record) = registry.load()?.into_iter().find(|record| record.id == id) {
+    if let Some(mut record) = registry.get(id)? {
         record.state = InstallationState::NeedsRepair;
         registry.save_installation(&record)?;
     }
@@ -113,8 +113,10 @@ fn recover_locked(paths: &AppPaths, id: Uuid, root: &std::path::Path) -> Result<
 }
 
 pub async fn recover(paths: &AppPaths, id: Uuid, cancel: &Cancellation) -> Result<(), CoreError> {
+    cancel.check()?;
     let root = metadata_root(paths, id)?;
-    let _guard = lock(&root, ".installation.lock", cancel).await?;
+    let _guard = super::download::try_lock(&root, ".installation.lock")?
+        .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
     recover_locked(paths, id, &root)
 }
 
@@ -260,9 +262,6 @@ pub async fn install(
     cancel: &Cancellation,
     progress: Progress,
 ) -> Result<InstalledLock, CoreError> {
-    let root = metadata_root(paths, id)?;
-    let _guard = lock(&root, ".installation.lock", cancel).await?;
-    recover_locked(paths, id, &root)?;
     let catalog_client = CatalogClient::new()?;
     let catalog = tokio::select! {
         _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
@@ -284,7 +283,11 @@ pub async fn install(
     let CatalogSource::Vanilla { minecraft_version } = &catalog.source else {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     };
-    let previous = registry.load()?.into_iter().find(|record| record.id == id);
+    cancel.check()?;
+    let root = registry.ensure_catalog_instance(&catalog)?.join(".panita");
+    let _guard = lock(&root, ".installation.lock", cancel).await?;
+    recover_locked(paths, id, &root)?;
+    let previous = registry.get(id)?;
     if previous
         .as_ref()
         .is_some_and(|record| record.resolved_source != catalog.source)
@@ -307,6 +310,7 @@ pub async fn install(
     let mut record = InstallationRecord {
         schema_version: 1,
         id,
+        directory_name: None,
         last_catalog: catalog.clone(),
         resolved_source: catalog.source.clone(),
         state: InstallationState::Installing,
@@ -381,6 +385,8 @@ pub async fn install(
 /// Local preflight used by tests and the later Play integration; it never repairs.
 pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, CoreError> {
     let root = metadata_root(paths, id)?;
+    let _guard = super::download::try_lock(&root, ".installation.lock")?
+        .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
     let journal = read_json::<Journal>(&root, "install-journal.json")?;
     if journal.is_some_and(|journal| journal.schema_version != 1 || journal.active) {
         return Err(invalid());
@@ -448,6 +454,7 @@ mod tests {
         InstallationRecord {
             schema_version: 1,
             id,
+            directory_name: None,
             resolved_source: catalog.source.clone(),
             last_catalog: catalog,
             state: InstallationState::Installing,
@@ -460,13 +467,16 @@ mod tests {
             AppPaths::new(std::env::temp_dir().join(format!("panita-install-{}", Uuid::new_v4())))
                 .unwrap_or_else(|_| panic!("paths"));
         let id = Uuid::new_v4();
-        let root = metadata_root(&paths, id).unwrap_or_else(|_| panic!("root"));
         let registry = InstanceRegistry::new(paths.clone());
         registry
             .save(&record(id))
             .unwrap_or_else(|_| panic!("record"));
-        let (directory, leaf) = ensure_parent(&paths.instance(id), "saves/Test World/level.dat")
-            .unwrap_or_else(|_| panic!("world"));
+        let root = metadata_root(&paths, id).unwrap_or_else(|_| panic!("root"));
+        let (directory, leaf) = ensure_parent(
+            &paths.instance(id).unwrap_or_else(|_| panic!("path")),
+            "saves/Test World/level.dat",
+        )
+        .unwrap_or_else(|_| panic!("world"));
         directory
             .write_atomic_durable(leaf, b"world data")
             .unwrap_or_else(|_| panic!("world data"));
@@ -480,6 +490,22 @@ mod tests {
             },
         )
         .unwrap_or_else(|_| panic!("journal"));
+        let guard = super::super::download::try_lock(&root, ".installation.lock")
+            .unwrap_or_else(|_| panic!("lock"))
+            .unwrap_or_else(|| panic!("available"));
+        assert_eq!(
+            recover(&paths, id, &Cancellation::default())
+                .await
+                .err()
+                .map(|error| error.code()),
+            Some(ErrorCode::OperationBusy)
+        );
+        assert!(
+            read_json::<Journal>(&root, "install-journal.json")
+                .unwrap_or_default()
+                .is_some_and(|journal| journal.active)
+        );
+        drop(guard);
         recover(&paths, id, &Cancellation::default())
             .await
             .unwrap_or_else(|_| panic!("recover"));
@@ -487,9 +513,14 @@ mod tests {
         assert_eq!(records[0].state, InstallationState::NeedsRepair);
         assert!(verify_installed(&paths, id).is_err());
         assert_eq!(
-            std::fs::read(paths.instance(id).join("saves/Test World/level.dat"))
-                .ok()
-                .as_deref(),
+            std::fs::read(
+                paths
+                    .instance(id)
+                    .unwrap_or_else(|_| panic!("path"))
+                    .join("saves/Test World/level.dat")
+            )
+            .ok()
+            .as_deref(),
             Some(b"world data".as_slice())
         );
         recover(&paths, id, &Cancellation::default())
@@ -506,6 +537,9 @@ mod tests {
             AppPaths::new(std::env::temp_dir().join(format!("panita-install-{}", Uuid::new_v4())))
                 .unwrap_or_else(|_| panic!("paths"));
         let id = Uuid::new_v4();
+        InstanceRegistry::new(paths.clone())
+            .save(&record(id))
+            .unwrap_or_else(|_| panic!("record"));
         let root = metadata_root(&paths, id).unwrap_or_else(|_| panic!("root"));
         let directory = private_fs::PrivateDir::open(&root).unwrap_or_else(|_| panic!("directory"));
         directory

@@ -93,6 +93,38 @@ pub(crate) struct ArtifactLock {
     _source: private_fs::PrivateFile,
 }
 
+/// Nonblocking coordination for directory migration and local audits.
+pub(crate) fn try_lock(root: &Path, relative: &str) -> Result<Option<ArtifactLock>, CoreError> {
+    let (directory, name) = ensure_parent(root, relative)?;
+    let source = match directory.open_file(&name) {
+        Ok(file) => file,
+        Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            match directory.create(&name) {
+                Ok(file) => file,
+                Err(private_fs::Error::Io(error))
+                    if error.kind() == std::io::ErrorKind::AlreadyExists =>
+                {
+                    directory.open_file(&name).map_err(map_private_error)?
+                }
+                Err(error) => return Err(map_private_error(error)),
+            }
+        }
+        Err(error) => return Err(map_private_error(error)),
+    };
+    let file = native_file(&source)?;
+    match file.try_lock() {
+        Ok(()) => {
+            private_fs::verify(&file).map_err(map_private_error)?;
+            Ok(Some(ArtifactLock {
+                _file: file,
+                _source: source,
+            }))
+        }
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(io(error)),
+    }
+}
+
 pub(crate) async fn lock(
     root: &Path,
     relative: &str,

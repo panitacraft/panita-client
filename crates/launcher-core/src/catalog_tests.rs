@@ -388,7 +388,7 @@ async fn live_public_catalog_includes_two_independent_vanilla_records() {
         .filter(|record| matches!(record.source, CatalogSource::Vanilla { .. }))
         .collect();
     assert!(vanilla.len() >= 2);
-    assert_ne!(paths.instance(vanilla[0].id), paths.instance(vanilla[1].id));
+    assert_ne!(vanilla[0].id, vanilla[1].id);
     for record in vanilla {
         assert_eq!(
             &client

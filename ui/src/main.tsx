@@ -66,7 +66,7 @@ function App() {
           <p role="alert">Cargamos el catálogo, pero no pudimos guardar una copia local. {messageForError(catalog.cacheWarning)}</p>
         )}
         {catalog.kind === 'ready' && catalog.registryWarning && (
-          <p role="alert">No pudimos guardar el estado actualizado de tus instancias. {messageForError(catalog.registryWarning)}</p>
+          <p role="alert">No pudimos preparar o actualizar tus instancias. {messageForError(catalog.registryWarning)}</p>
         )}
         {catalog.kind === 'ready' && catalog.instances.length === 0 && (
           <p role="status">No hay instancias disponibles por ahora.</p>

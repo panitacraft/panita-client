@@ -14,18 +14,28 @@ use launcher_core::{
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() != 5 {
-        return Err("usage: vanilla_install <plan|install|verify|recover> <absolute-isolated-root> <version|instance-uuid> <windows|linux> <os-version>".into());
+        return Err("usage: vanilla_install <plan|install|verify|recover|migrate> <absolute-isolated-root> <version|instance-uuid> <windows|linux> <os-version>".into());
     }
     let paths = AppPaths::new(&args[1])?;
     let platform = Platform::x64(&args[3], &args[4])?;
     let cancel = Cancellation::default();
+    if args[0] == "migrate" {
+        let id = uuid::Uuid::parse_str(&args[2])?;
+        let directory =
+            launcher_core::registry::InstanceRegistry::new(paths).prepare_instance(id)?;
+        println!(
+            "{}",
+            serde_json::json!({"instance": id, "directory": directory})
+        );
+        return Ok(());
+    }
     if args[0] == "recover" {
         let id = uuid::Uuid::parse_str(&args[2])?;
         install::recover(&paths, id, &cancel).await?;
-        let records = launcher_core::registry::InstanceRegistry::new(paths).load()?;
+        let record = launcher_core::registry::InstanceRegistry::new(paths).get(id)?;
         println!(
             "{}",
-            serde_json::json!({ "instance": id, "state": records.iter().find(|record| record.id == id).map(|record| record.state) })
+            serde_json::json!({ "instance": id, "state": record.map(|record| record.state) })
         );
         return Ok(());
     }
@@ -82,7 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     println!(
         "{}",
-        serde_json::json!({ "version": plan.version.id, "platform": plan.platform, "java_major": plan.version.java.major_version, "artifacts": plan.artifacts.len(), "bytes": plan.artifacts.iter().map(|file| file.artifact.size).sum::<u64>(), "metadata_documents": plan.documents.len() })
+        serde_json::json!({ "version": plan.version.id, "platform": plan.platform, "java_major": plan.version.java.major_version, "artifacts": plan.artifacts.len(), "bytes": plan.artifacts.iter().map(|file| file.artifact.size).sum::<u64>(), "metadata_documents": plan.documents.len(), "instance_directory": if args[0] == "plan" { None } else { Some(paths.instance(uuid::Uuid::parse_str(&args[2])?)?) } })
     );
     Ok(())
 }

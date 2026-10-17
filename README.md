@@ -75,11 +75,14 @@ Windows and `${XDG_DATA_HOME:-~/.local/share}/PanitaClient` on Linux. The
 browser-only development preview uses local mock instances; the desktop
 catalog fetches the public API and keeps a validated local cache for outages.
 Disabled and unsupported instances remain visible with their status; local
-installation identity remains the immutable catalog UUID. The owner approved
-readable, stable slug-derived folders (`instances/<slug>/`), with safe collision
-handling and preservation of existing installations. The current implementation
-still uses UUID folders; migration and its verification are pending. Catalog slug
-changes must not rename an existing installation directory.
+installation identity remains the immutable catalog UUID. New installations use
+readable folders (`instances/<slug>/`). Schema 2 installation metadata persists
+the UUID and assigned directory name; later catalog slug changes keep that folder
+stable. Reserved names and collisions use a slug with a UUID suffix. Existing
+UUID folders migrate on registry load or before an installation/recovery/audit,
+preserving their contents. Busy or running instances are not moved. A persisted
+destination allows an interrupted move to resume; occupied destinations are never
+merged or replaced. Older launcher builds cannot read schema 2 metadata.
 
 The public catalog is `https://api.panitacraft.com`. Do not store account
 credentials in the repository. Public integration checks can be run explicitly
@@ -98,6 +101,7 @@ cargo run -p launcher-core --example vanilla_install -- plan <absolute-root> <mi
 cargo run -p launcher-core --example vanilla_install -- install <absolute-root> <instance-uuid> <windows|linux> <os-version>
 cargo run -p launcher-core --example vanilla_install -- verify <absolute-root> <instance-uuid> <windows|linux> <os-version>
 cargo run -p launcher-core --example vanilla_install -- recover <absolute-root> <instance-uuid> <windows|linux> <os-version>
+cargo run -p launcher-core --example vanilla_install -- migrate <absolute-root> <instance-uuid> <windows|linux> <os-version>
 ```
 
 This is a development harness, not a product CLI or a platform-support claim.
@@ -107,6 +111,13 @@ Libraries and asset indexes use content-qualified cache paths so different
 resolved hashes cannot replace another installation's files. Consumers must use
 the plan's `library_path` and `asset_index_name` methods when building a launch.
 Earlier development layouts remain readable and can supply verified local copies.
+
+The `migrate` operation completes only the directory/schema migration and prints
+the assigned path; it does not download files or execute Java/Minecraft. Commands
+continue to accept the catalog UUID. `install` and `verify` summaries include the
+resolved directory. Do not rename folders manually. Unowned folders, duplicate
+UUID records, and corrupt ownership metadata are preserved and reported for
+recovery instead of being adopted or replaced.
 
 ## License
 
