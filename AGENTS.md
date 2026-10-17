@@ -86,7 +86,9 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 
 ### 4.1 Instance independence and catalog
 
-- Identify installations by the immutable catalog UUID, using `instances/{id}/`. Names and slugs are presentation metadata, not installation identity.
+- Identify installations internally by the immutable catalog UUID. Use a readable directory derived from the catalog slug, `instances/{slug}/`, and persist its association with the UUID. Folder names are not installation identity.
+- Assign the directory once and keep it stable across later catalog name/slug changes, disabled states, or removal. Validate directory names for traversal, Windows reserved names, and case-insensitive collisions. If a slug is unsafe or unavailable, use a safe slug-derived name with a deterministic UUID suffix; never adopt, merge, or overwrite another directory based on its name alone.
+- Migrate existing `instances/{id}/` installations through a coordinated, recoverable operation that preserves all worlds, settings, installation metadata, and user-owned files. Do not move a directory during installation, repair, or game execution. Preserve the existing installation and report migration failures; do not silently create an empty replacement or lose discoverability. The owner approved this policy change after the original Phase 4 validation; its implementation and migration tests remain pending until separately verified.
 - Isolate worlds, settings, mods, configuration, screenshots, resource packs, shaders, logs, and crash reports per instance. Instance settings override global defaults.
 - Record resolved versions and managed-file ownership per installation. Share only reusable, verified caches; coordinate writes and cleanup across operations and processes.
 - Consume the public, read-only Panita API. The launcher does not access Supabase directly or need its database credentials.
@@ -132,7 +134,7 @@ PanitaClient/
 ├─ assets/
 ├─ versions/
 ├─ runtime/
-├─ instances/{id}/        # isolated game data and .panita settings/lock
+├─ instances/{slug}/      # stable readable directory mapped to a catalog UUID
 └─ logs/                  # redacted launcher logs
 ```
 
@@ -170,7 +172,7 @@ panita-client/
 This annex is an integral part of AGENTS.md. It preserves the accepted decision, rationale, recovery cases, and validation requirements from the local source document `docs/account-storage-decision.md` as of 2026-10-08. The complete policy is included below; reading a separate file is not required. Update this annex alongside any owner-approved policy changes.
 Status: Accepted
 Date: 2026-10-05
-Updated: 2026-10-15 (manual authentication retries and Microsoft Play recovery; HTTPS browser handoff retained)
+Updated: 2026-10-16 (stable slug-derived instance folders with UUID identity; authentication and storage decisions retained)
 
 ### Decision
 
@@ -240,6 +242,8 @@ Complete Microsoft → Xbox Live → XSTS → Minecraft Services → Java profil
 | A renewal completes after sign-out | Discard it; never restore the removed account. |
 
 ### Instance policy
+
+The immutable catalog UUID remains the installation identity. Use a stable, validated slug-derived directory as specified in §4.1, with collision handling and recoverable migration from legacy UUID folders. Catalog renames must not move an installation or change its identity.
 
 Microsoft accounts require successful current Play validation even for installed vanilla. They cannot silently become offline accounts or launch using an expired previously validated profile. Explicit offline accounts may launch fully installed vanilla without connectivity; all required game files, Java, assets, libraries, and natives must be local. Vanilla catalog updates do not force immediate upgrades of installed instances.
 
