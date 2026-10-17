@@ -26,6 +26,8 @@ pub enum ErrorCode {
     InstanceMissing,
     UnsupportedInstance,
     OperationCancelled,
+    ArtifactMismatch,
+    RuntimeUnsupported,
     /// The persisted account file is damaged or unsupported; it is left untouched.
     AccountsFileInvalid,
     /// A browser callback arrived when no login was waiting for it.

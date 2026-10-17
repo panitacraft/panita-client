@@ -5,6 +5,7 @@ pub mod authentication;
 pub mod catalog;
 pub mod error;
 pub mod logging;
+pub mod minecraft;
 pub mod oauth;
 pub mod operation;
 pub mod paths;

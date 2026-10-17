@@ -9,10 +9,13 @@ export type LauncherErrorCode =
   | 'minecraft_not_owned' | 'operation_busy' | 'operation_cancelled'
   | 'callback_registration_failed' | 'browser_unavailable' | 'authentication_configuration'
   | 'accounts_file_invalid' | 'callback_not_active' | 'unsafe_permissions'
-  | 'instance_disabled' | 'instance_missing' | 'unsupported_instance';
+  | 'instance_disabled' | 'instance_missing' | 'unsupported_instance'
+  | 'artifact_mismatch' | 'runtime_unsupported';
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
+  artifact_mismatch: 'Un archivo descargado no coincide con el original. Inténtalo de nuevo.',
+  runtime_unsupported: 'No hay un Java compatible disponible para esta versión y plataforma.',
   instance_disabled: 'Esta instancia está deshabilitada. Conservamos tus datos locales.',
   instance_missing: 'Esta instancia ya no está disponible en el catálogo. Conservamos tus datos locales.',
   unsupported_instance: 'Esta instancia requiere otra versión o funciones que todavía no están disponibles.',
