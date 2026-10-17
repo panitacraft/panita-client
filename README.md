@@ -12,6 +12,12 @@ instances to that workflow, with cancellation, per-attempt outage confirmation
 and game lifecycle status. Real game and installed-platform qualification remain
 separate validation steps; Phase 5 is still in progress.
 
+An isolated Windows build reached the Minecraft 26.3 and 1.21.1 main menus
+through desktop Play with a synthetic offline account. Cancellation, launcher
+close protection, menu exit and restored Play controls passed. Both synthetic
+world files remained unchanged. Microsoft Play and installed Linux game
+qualification remain pending.
+
 Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on
 2026-10-16. See [the closure record](https://github.com/panitacraft/panita-client/issues/4)
 for verification and accepted follow-ups: remaining browser failure observations.
