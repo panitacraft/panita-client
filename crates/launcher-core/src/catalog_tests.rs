@@ -166,6 +166,11 @@ async fn catalog_etag_revalidation_and_outage_preserve_disabled_cache() {
         .unwrap_or_default();
     let mut legacy: Value = serde_json::from_slice(&bytes).unwrap_or_else(|_| panic!("cache"));
     legacy["schema_version"] = json!(1);
+    legacy
+        .as_object_mut()
+        .unwrap_or_else(|| panic!("object"))
+        .remove("source_fingerprint");
+    legacy["representation"] = json!(client.representation());
     legacy["body"] = json!(legacy["body"].to_string());
     let legacy_bytes = serde_json::to_vec(&legacy).unwrap_or_default();
     assert!(
@@ -193,7 +198,13 @@ async fn catalog_etag_revalidation_and_outage_preserve_disabled_cache() {
             .unwrap_or_default(),
     )
     .unwrap_or_else(|_| panic!("upgraded cache"));
-    assert_eq!(upgraded["schema_version"], json!(2));
+    assert_eq!(upgraded["schema_version"], json!(3));
+    assert_eq!(
+        upgraded["source_fingerprint"],
+        json!(source_fingerprint(&client.representation()))
+    );
+    assert!(upgraded.get("representation").is_none());
+    assert!(!upgraded.to_string().contains(&client.base));
     assert!(upgraded["body"].is_object());
     // Once the new cache exists, an obsolete legacy file cannot affect fallback.
     assert!(
@@ -214,7 +225,7 @@ async fn catalog_etag_revalidation_and_outage_preserve_disabled_cache() {
 #[test]
 fn catalog_cache_uses_legacy_name_only_when_new_name_is_absent() {
     let (paths, store) = temporary_store();
-    assert_eq!(paths.catalog_cache(), paths.root().join("inst-cache.json"));
+    assert_eq!(paths.catalog_cache(), paths.root().join("insts-cache.json"));
     assert!(
         store
             .transaction(LEGACY_CACHE_FILE, |_| Ok((b"legacy".to_vec(), ())))
@@ -223,6 +234,15 @@ fn catalog_cache_uses_legacy_name_only_when_new_name_is_absent() {
     assert_eq!(
         read_cache(&store).unwrap_or_default(),
         Some(b"legacy".to_vec())
+    );
+    assert!(
+        store
+            .transaction(PREVIOUS_CACHE_FILE, |_| Ok((b"previous".to_vec(), ())))
+            .is_ok()
+    );
+    assert_eq!(
+        read_cache(&store).unwrap_or_default(),
+        Some(b"previous".to_vec())
     );
     assert!(
         store
@@ -235,6 +255,38 @@ fn catalog_cache_uses_legacy_name_only_when_new_name_is_absent() {
     );
     drop(store);
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn catalog_schema_two_url_binding_upgrades_to_a_fingerprint() {
+    let key = "https://example.invalid/v1/instances|accept:application/json";
+    let legacy = json!({
+        "schema_version": 2,
+        "representation": key,
+        "etag": "\"test\"",
+        "fetched_at": 1,
+        "body": serde_json::from_str::<Value>(&list(vec![record()])).unwrap_or_else(|_| panic!("body")),
+    });
+    let bytes = serde_json::to_vec(&legacy).unwrap_or_default();
+    let mut cache = CachedCatalog::decode(&bytes, key).unwrap_or_else(|_| panic!("legacy cache"));
+    assert!(
+        CachedCatalog::decode(
+            &bytes,
+            "https://other.invalid/v1/instances|accept:application/json"
+        )
+        .is_err()
+    );
+    cache.schema_version = 3;
+    let upgraded = serde_json::to_vec(&cache).unwrap_or_default();
+    assert!(!String::from_utf8_lossy(&upgraded).contains("https://example.invalid"));
+    assert!(CachedCatalog::decode(&upgraded, key).is_ok());
+    assert!(
+        CachedCatalog::decode(
+            &upgraded,
+            "https://other.invalid/v1/instances|accept:application/json"
+        )
+        .is_err()
+    );
 }
 
 #[tokio::test]

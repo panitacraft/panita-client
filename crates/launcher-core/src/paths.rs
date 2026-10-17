@@ -31,7 +31,7 @@ impl AppPaths {
     }
 
     pub fn catalog_cache(&self) -> PathBuf {
-        self.root.join("inst-cache.json")
+        self.root.join("insts-cache.json")
     }
 
     pub fn instance(&self, id: Uuid) -> PathBuf {

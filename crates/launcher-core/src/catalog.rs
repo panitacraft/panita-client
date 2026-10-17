@@ -9,17 +9,23 @@ use uuid::Uuid;
 
 use crate::error::{CoreError, ErrorCode};
 use crate::storage::PrivateStore;
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use sha2::{Digest, Sha256};
 
 const BASE: &str = "https://api.panitacraft.com";
 const MAX_BODY: usize = 512 * 1024;
 const MAX_RECORDS: usize = 1000;
-const CACHE_FILE: &str = "inst-cache.json";
+const CACHE_FILE: &str = "insts-cache.json";
+const PREVIOUS_CACHE_FILE: &str = "inst-cache.json";
 const LEGACY_CACHE_FILE: &str = "catalog-cache.json";
 
 fn read_cache(store: &PrivateStore) -> Result<Option<Vec<u8>>, CoreError> {
     store.with_lock(|transaction| match transaction.read(CACHE_FILE)? {
         Some(bytes) => Ok(Some(bytes)),
-        None => transaction.read(LEGACY_CACHE_FILE),
+        None => match transaction.read(PREVIOUS_CACHE_FILE)? {
+            Some(bytes) => Ok(Some(bytes)),
+            None => transaction.read(LEGACY_CACHE_FILE),
+        },
     })
 }
 
@@ -298,6 +304,7 @@ pub fn parse_list(bytes: &[u8]) -> Result<Vec<CatalogInstance>, CoreError> {
 #[derive(Serialize, Deserialize)]
 struct CachedCatalog {
     schema_version: u32,
+    #[serde(rename = "source_fingerprint", alias = "representation")]
     representation: String,
     etag: Option<String>,
     fetched_at: u64,
@@ -329,9 +336,14 @@ fn deserialize_cache_body<'de, D: serde::Deserializer<'de>>(
 
 impl CachedCatalog {
     fn decode(bytes: &[u8], key: &str) -> Result<Self, CoreError> {
-        let cache: Self = serde_json::from_slice(bytes).map_err(|_| invalid())?;
-        if !matches!(cache.schema_version, 1 | 2)
-            || cache.representation != key
+        let mut cache: Self = serde_json::from_slice(bytes).map_err(|_| invalid())?;
+        let fingerprint = source_fingerprint(key);
+        let expected = match cache.schema_version {
+            1 | 2 => key,
+            3 => &fingerprint,
+            _ => return Err(invalid()),
+        };
+        if cache.representation != expected
             || cache.body.len() > MAX_BODY
             || cache
                 .etag
@@ -341,8 +353,13 @@ impl CachedCatalog {
             return Err(invalid());
         }
         parse_list(cache.body.as_bytes())?;
+        cache.representation = fingerprint;
         Ok(cache)
     }
+}
+
+fn source_fingerprint(representation: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(representation.as_bytes()))
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -413,8 +430,8 @@ impl CatalogClient {
             let body = body(response).await?;
             parse_list(&body)?;
             Ok(CachedCatalog {
-                schema_version: 2,
-                representation: key.clone(),
+                schema_version: 3,
+                representation: source_fingerprint(&key),
                 etag,
                 fetched_at: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -426,7 +443,7 @@ impl CatalogClient {
         .await;
         match fetched {
             Ok(mut cache) => {
-                cache.schema_version = 2;
+                cache.schema_version = 3;
                 let instances = parse_list(cache.body.as_bytes())?;
                 let mut bytes = serde_json::to_vec_pretty(&cache).map_err(|_| invalid())?;
                 bytes.push(b'\n');

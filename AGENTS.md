@@ -127,7 +127,7 @@ PanitaClient/
 ├─ accounts.json          # sensitive: metadata and Microsoft refresh tokens
 ├─ account-removals.json  # nonsecret pending account-removal recovery
 ├─ settings.json          # schema-versioned global settings
-├─ inst-cache.json
+├─ insts-cache.json
 ├─ libraries/             # shared, verified caches
 ├─ assets/
 ├─ versions/
