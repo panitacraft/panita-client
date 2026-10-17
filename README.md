@@ -66,7 +66,7 @@ downloads), and a 26.3 audit (5,626 artifacts). Reports are consolidated under
 `target/phase4-evidence/`; `target/phase4-validation/` contains the installation
 data. Linux flat-layout migration and actual game execution remain unqualified.
 
-The 2026-10-17 Linux retest used a fresh Debian WSL source copy under the normal
+The initial 2026-10-17 Linux retest used a fresh Debian WSL source copy under the normal
 user: 39 core tests passed, 57 failed, and one live test was intentionally ignored.
 Core Clippy passed with warnings denied. A synthetic probe isolated the pinned
 `private-fs` atomic-write failure: anonymous-file publication with
@@ -76,6 +76,21 @@ home filesystem. The documented `/proc/self/fd` linking alternative succeeded
 with a verified owner-only synthetic file, but is not integrated or qualified.
 Linux migration and real installation validation remain blocked; no elevated
 Linux permissions or weaker storage protections were used. BOX was not used.
+
+The subsequent fix pins a local patch of `private-fs` 0.1.0 under
+[`vendor/private-fs`](vendor/private-fs/PANITA-PATCH.md). Linux anonymous-file
+publication now falls back to the documented proc-descriptor method when the
+original call requires unavailable capabilities. Existing private creation,
+identity checks, atomic replacement and durability checks remain in place.
+All 96 Linux core tests and both process-writer tests pass, with one intentional
+live-test skip. The dependency passes all 53 tests under both its default and
+alternate path resolver configurations, including interruption and permission
+regressions. Windows workspace regressions passed all 102 tests. Linux core and
+Windows workspace Clippy pass with warnings denied; formatting passes. These results resolve
+the earlier automated WSL storage/migration blocker; real Linux game-file
+installation, game execution and clean installed-product qualification remain
+unverified. CI now explicitly runs the patched dependency's Linux tests; no new
+CI run or BOX test is claimed.
 
 ## Development
 

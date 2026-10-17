@@ -2822,8 +2822,6 @@ checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 [[package]]
 name = "private-fs"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49f6bde7763e3eaa66974b8e9c1580d06c34c2197353ca7362185d69419471a4"
 dependencies = [
  "getrandom 0.4.3",
  "libc",

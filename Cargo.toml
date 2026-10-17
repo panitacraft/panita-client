@@ -1,6 +1,10 @@
 [workspace]
 members = ["crates/launcher-core", "desktop"]
+exclude = ["vendor/private-fs"]
 resolver = "2"
+
+[patch.crates-io]
+private-fs = { path = "vendor/private-fs" }
 
 [workspace.package]
 edition = "2024"

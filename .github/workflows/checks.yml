@@ -39,6 +39,11 @@ jobs:
         run: cargo check --workspace --locked
       - name: Test Rust
         run: cargo test --workspace --locked
+      - name: Test patched Linux filesystem dependency
+        if: runner.os == 'Linux'
+        run: |
+          cargo test --manifest-path vendor/private-fs/Cargo.toml --lib --locked
+          cargo test --manifest-path vendor/private-fs/Cargo.toml --lib --features force-walk --locked
       - name: Lint Rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build desktop application
