@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 
 use crate::error::{CoreError, ErrorCode};
+pub mod download;
 
 pub const VERSION_MANIFEST: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
