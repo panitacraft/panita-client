@@ -225,4 +225,29 @@ fn cache_mapping_preserves_legacy_locks_and_qualifies_asset_index_names() {
         asset_index_cache_path(&index).ok(),
         asset_index_cache_path(&changed).ok()
     );
+    let legacy_client = format!(
+        "versions/{}/{}/client.jar",
+        plan.version.id, plan.version.client.sha1
+    );
+    plan.artifacts.push(PlannedArtifact {
+        destination: legacy_client.clone(),
+        artifact: plan.version.client.clone(),
+        executable: false,
+    });
+    assert_eq!(plan.client_path().ok(), Some(legacy_client));
+    let readable_client = format!(
+        "versions/{}/{}-{}.jar",
+        plan.version.id, plan.version.id, plan.version.client.sha1
+    );
+    plan.artifacts
+        .last_mut()
+        .unwrap_or_else(|| panic!("client"))
+        .destination = readable_client.clone();
+    assert_eq!(plan.client_path().ok(), Some(readable_client));
+    plan.artifacts
+        .last_mut()
+        .unwrap_or_else(|| panic!("client"))
+        .artifact
+        .sha1 = "0".repeat(40);
+    assert!(plan.client_path().is_err());
 }

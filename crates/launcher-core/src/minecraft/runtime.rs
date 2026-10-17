@@ -5,6 +5,130 @@ use crate::error::{CoreError, ErrorCode};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RuntimeIdentity {
+    schema_version: u32,
+    manifest: Artifact,
+}
+
+pub fn cache_root(java: &JavaRequirement, platform: &Platform) -> Result<String, CoreError> {
+    Ok(format!(
+        "runtime/java-{}-{}",
+        java.major_version,
+        platform.runtime_key()?
+    ))
+}
+
+pub fn valid_cache_root(
+    root: &str,
+    java: &JavaRequirement,
+    platform: &Platform,
+) -> Result<bool, CoreError> {
+    let base = cache_root(java, platform)?;
+    Ok(root == base
+        || root
+            .strip_prefix(&format!("{base}-build-"))
+            .is_some_and(|suffix| {
+                suffix
+                    .parse::<u32>()
+                    .is_ok_and(|number| number >= 2 && number.to_string() == suffix)
+            }))
+}
+
+/// Reserve the exact build before downloads begin, including interrupted builds.
+/// Never infer ownership from a readable directory name or replace another build.
+pub fn allocate_cache(
+    paths: &crate::paths::AppPaths,
+    java: &JavaRequirement,
+    platform: &Platform,
+    source: &Artifact,
+) -> Result<String, CoreError> {
+    use crate::storage::{PrivateStore, map_private_error};
+    use std::io::Read;
+    source.validate()?;
+    let base = cache_root(java, platform)?;
+    let store = PrivateStore::open(paths)?;
+    store.with_lock(|_| {
+        let parent = private_fs::PrivateDir::ensure(paths.root().join("runtime"))
+            .map_err(map_private_error)?;
+        let occupied: Vec<_> = std::fs::read_dir(paths.root().join("runtime"))
+            .map_err(super::download::io)?
+            .map(|entry| entry.map(|entry| entry.file_name().to_string_lossy().into_owned()))
+            .collect::<Result<_, _>>()
+            .map_err(super::download::io)?;
+        let mut available = None;
+        for build in 1..=10_000 {
+            let root = if build == 1 {
+                base.clone()
+            } else {
+                format!("{base}-build-{build}")
+            };
+            let name = root.strip_prefix("runtime/").ok_or_else(invalid)?;
+            if occupied
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(name))
+            {
+                // Case variants, unrelated files, links, and unclaimed directories
+                // remain occupied. Only a protected, matching reservation is reusable.
+                if !occupied.iter().any(|existing| existing == name) {
+                    continue;
+                }
+                if !std::fs::symlink_metadata(paths.root().join(&root))
+                    .map_err(super::download::io)?
+                    .is_dir()
+                {
+                    continue;
+                }
+                let directory = private_fs::PrivateDir::open(paths.root().join(&root))
+                    .map_err(map_private_error)?;
+                let mut file = match directory.open_file(".runtime-identity.json") {
+                    Ok(file) => file,
+                    Err(private_fs::Error::Io(error))
+                        if error.kind() == std::io::ErrorKind::NotFound =>
+                    {
+                        continue;
+                    }
+                    Err(error) => return Err(map_private_error(error)),
+                };
+                let mut bytes = Vec::new();
+                file.by_ref()
+                    .take(64 * 1024 + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(super::download::io)?;
+                if bytes.len() <= 64 * 1024
+                    && let Ok(identity) = serde_json::from_slice::<RuntimeIdentity>(&bytes)
+                    && identity.schema_version == 1
+                    && identity.manifest.sha1 == source.sha1
+                    && identity.manifest.size == source.size
+                {
+                    return Ok(root);
+                }
+                continue;
+            }
+            if available.is_none() {
+                available = Some(root);
+            }
+        }
+        if let Some(root) = available {
+            let name = root.strip_prefix("runtime/").ok_or_else(invalid)?;
+            let directory = parent.create_dir(name).map_err(map_private_error)?;
+            directory
+                .write_atomic_durable(
+                    ".runtime-identity.json",
+                    &serde_json::to_vec(&RuntimeIdentity {
+                        schema_version: 1,
+                        manifest: source.clone(),
+                    })
+                    .map_err(|_| invalid())?,
+                )
+                .map_err(map_private_error)?;
+            return Ok(root);
+        }
+        Err(CoreError::new(ErrorCode::OperationBusy))
+    })
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct RuntimeCandidate {
     pub manifest: Artifact,
@@ -167,6 +291,118 @@ pub fn verify_properties(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn readable_runtime_allocates_conflicts_and_reuses_interrupted_reservations() {
+        let paths = crate::paths::AppPaths::new(
+            std::env::temp_dir().join(format!("panita-runtime-cache-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap_or_else(|_| panic!("paths"));
+        let java = JavaRequirement {
+            component: "java-runtime-delta".into(),
+            major_version: 21,
+        };
+        let platform = Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform"));
+        let source = Artifact {
+            url: "https://piston-meta.mojang.com/runtime.json".into(),
+            sha1: "a".repeat(40),
+            size: 10,
+            path: None,
+        };
+        let first = allocate_cache(&paths, &java, &platform, &source)
+            .unwrap_or_else(|error| panic!("first: {error}"));
+        assert_eq!(first, "runtime/java-21-windows-x64");
+        assert_eq!(
+            allocate_cache(&paths, &java, &platform, &source).ok(),
+            Some(first.clone())
+        );
+        let other = Artifact {
+            sha1: "b".repeat(40),
+            ..source.clone()
+        };
+        let second =
+            allocate_cache(&paths, &java, &platform, &other).unwrap_or_else(|_| panic!("second"));
+        assert_eq!(second, "runtime/java-21-windows-x64-build-2");
+        let original = std::fs::read(paths.root().join(&first).join(".runtime-identity.json"))
+            .unwrap_or_else(|_| panic!("identity"));
+        let paths = std::sync::Arc::new(paths);
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                let (paths, java, platform, source) =
+                    (paths.clone(), java.clone(), platform.clone(), other.clone());
+                std::thread::spawn(move || allocate_cache(&paths, &java, &platform, &source))
+            })
+            .collect();
+        for worker in workers {
+            assert_eq!(
+                worker.join().ok().and_then(Result::ok),
+                Some(second.clone())
+            );
+        }
+        assert_eq!(
+            std::fs::read(paths.root().join(first).join(".runtime-identity.json")).ok(),
+            Some(original)
+        );
+        for invalid in [
+            "runtime/java-21-linux",
+            "runtime/java-25-windows-x64",
+            "runtime/java-21-windows-x64-build-01",
+            "runtime/java-21-windows-x64-build-2/escape",
+        ] {
+            assert!(!valid_cache_root(invalid, &java, &platform).unwrap_or(true));
+        }
+    }
+
+    #[test]
+    fn runtime_cache_preserves_unowned_and_malformed_directories() {
+        let paths = crate::paths::AppPaths::new(
+            std::env::temp_dir().join(format!("panita-runtime-cache-{}", uuid::Uuid::new_v4())),
+        )
+        .unwrap_or_else(|_| panic!("paths"));
+        let java = JavaRequirement {
+            component: "java-runtime-delta".into(),
+            major_version: 21,
+        };
+        let platform = Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform"));
+        crate::storage::PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store"));
+        private_fs::PrivateDir::ensure(paths.root().join("runtime"))
+            .unwrap_or_else(|_| panic!("runtime"));
+        let directory = private_fs::PrivateDir::ensure(
+            paths
+                .root()
+                .join(cache_root(&java, &platform).unwrap_or_default()),
+        )
+        .unwrap_or_else(|_| panic!("directory"));
+        directory
+            .write_atomic_durable("keep.txt", b"unowned")
+            .unwrap_or_else(|_| panic!("sentinel"));
+        let source = Artifact {
+            url: "https://piston-meta.mojang.com/runtime.json".into(),
+            sha1: "a".repeat(40),
+            size: 10,
+            path: None,
+        };
+        assert_eq!(
+            allocate_cache(&paths, &java, &platform, &source)
+                .ok()
+                .as_deref(),
+            Some("runtime/java-21-windows-x64-build-2")
+        );
+        directory
+            .write_atomic_durable(".runtime-identity.json", b"{broken")
+            .unwrap_or_else(|_| panic!("corrupt"));
+        assert_eq!(
+            allocate_cache(&paths, &java, &platform, &source)
+                .ok()
+                .as_deref(),
+            Some("runtime/java-21-windows-x64-build-2")
+        );
+        assert_eq!(
+            std::fs::read(paths.root().join("runtime/java-21-windows-x64/keep.txt"))
+                .ok()
+                .as_deref(),
+            Some(b"unowned".as_slice())
+        );
+    }
     #[test]
     fn all_four_official_runtime_manifests_resolve_links_inside_the_manifest() {
         for (bytes, hash) in [

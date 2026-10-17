@@ -153,12 +153,7 @@ pub async fn resolve(
     runtime_source.verify(&bytes)?;
     let runtime: RuntimeManifest = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
     let runtime_files = runtime.plan()?;
-    let runtime_root = format!(
-        "runtime/{}/{}/{}",
-        version.java.component,
-        platform.runtime_key()?,
-        runtime_source.sha1
-    );
+    let runtime_root = super::runtime::cache_root(&version.java, platform)?;
     documents.push(DocumentIdentity {
         source: runtime_source.clone(),
     });
@@ -193,7 +188,7 @@ pub async fn resolve(
         });
     }
     artifacts.push(PlannedArtifact {
-        destination: format!("versions/{}/{}/client.jar", version.id, version.client.sha1),
+        destination: client_cache_path(&version),
         artifact: version.client.clone(),
         executable: false,
     });
@@ -276,6 +271,53 @@ pub async fn resolve(
 }
 
 impl InstallPlan {
+    /// Reserve a shared runtime build before any artifact writes. Planning alone
+    /// remains read-only; allocation serializes across launcher processes.
+    pub fn allocate_runtime(&mut self, paths: &crate::paths::AppPaths) -> Result<(), CoreError> {
+        self.validate()?;
+        let old_root = self.runtime_root.clone();
+        let manifest_path = format!("{old_root}/.runtime-manifest.json");
+        let source = self
+            .artifacts
+            .iter()
+            .find(|file| file.destination == manifest_path)
+            .ok_or_else(invalid)?
+            .artifact
+            .clone();
+        let platform = Platform {
+            os: self.platform.clone(),
+            arch: self.architecture.clone(),
+            os_version: String::new(),
+            features: BTreeMap::new(),
+        };
+        let root = super::runtime::allocate_cache(paths, &self.version.java, &platform, &source)?;
+        let prefix = format!("{old_root}/");
+        for file in &mut self.artifacts {
+            if let Some(relative) = file.destination.strip_prefix(&prefix) {
+                file.destination = format!("{root}/{relative}");
+            }
+        }
+        self.java_executable = format!(
+            "{root}/{}",
+            self.java_executable
+                .strip_prefix(&prefix)
+                .ok_or_else(invalid)?
+        );
+        self.runtime_root = root;
+        self.validate()
+    }
+
+    pub fn client_path(&self) -> Result<String, CoreError> {
+        self.artifact_path(
+            &self.version.client,
+            client_cache_path(&self.version),
+            format!(
+                "versions/{}/{}/client.jar",
+                self.version.id, self.version.client.sha1
+            ),
+        )
+    }
+
     /// Resolve explicit destinations from the lock, including the earlier development layout.
     pub fn library_path(&self, artifact: &Artifact) -> Result<String, CoreError> {
         let canonical = library_cache_path(artifact)?;
@@ -351,11 +393,13 @@ impl InstallPlan {
             features: BTreeMap::new(),
         };
         let parts: Vec<_> = self.runtime_root.split('/').collect();
-        if parts.len() != 4
-            || parts[0] != "runtime"
-            || parts[1] != self.version.java.component
-            || parts[2] != platform.runtime_key()?
-            || !valid_hash(parts[3])
+        let legacy = parts.len() == 4
+            && parts[0] == "runtime"
+            && parts[1] == self.version.java.component
+            && parts[2] == platform.runtime_key()?
+            && valid_hash(parts[3]);
+        if !legacy
+            && !super::runtime::valid_cache_root(&self.runtime_root, &self.version.java, &platform)?
         {
             return Err(invalid());
         }
@@ -404,14 +448,7 @@ impl InstallPlan {
             .iter()
             .map(|file| (file.destination.as_str(), &file.artifact))
             .collect();
-        require(
-            &planned,
-            &format!(
-                "versions/{}/{}/client.jar",
-                self.version.id, self.version.client.sha1
-            ),
-            &self.version.client,
-        )?;
+        require(&planned, &self.client_path()?, &self.version.client)?;
         require(
             &planned,
             &self.asset_index_path()?,
@@ -448,7 +485,8 @@ impl InstallPlan {
             .collect();
         let runtime_path = format!("{}/.runtime-manifest.json", self.runtime_root);
         let runtime_source = planned.get(runtime_path.as_str()).ok_or_else(invalid)?;
-        if !self.runtime_root.ends_with(&runtime_source.sha1)
+        if (self.runtime_root.split('/').count() == 4
+            && !self.runtime_root.ends_with(&runtime_source.sha1))
             || !self
                 .documents
                 .iter()
@@ -494,6 +532,13 @@ impl InstallPlan {
         }
         Ok(())
     }
+}
+
+fn client_cache_path(version: &ResolvedVersion) -> String {
+    format!(
+        "versions/{}/{}-{}.jar",
+        version.id, version.id, version.client.sha1
+    )
 }
 
 fn require(

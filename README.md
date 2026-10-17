@@ -119,6 +119,18 @@ resolved hashes cannot replace another installation's files. Consumers must use
 the plan's `library_path` and `asset_index_name` methods when building a launch.
 Earlier development layouts remain readable and can supply verified local copies.
 
+New vanilla client downloads use `versions/<version>/<version>-<client-hash>.jar`.
+Java downloads use `runtime/java-<major>-<platform>/`, for example
+`runtime/java-21-windows-x64/`. A protected, schema-versioned
+`.runtime-identity.json` reserves the exact manifest before downloads start.
+Matching builds share the directory, including after interrupted downloads;
+different builds use `-build-2`, `-build-3`, and so on. Unowned directories are
+preserved. Allocation is serialized across processes, while artifact downloads
+retain their own locks and hash/size verification. Older recorded cache paths
+remain supported; consumers must use `client_path` and the recorded
+`java_executable`, never reconstruct a cache path from a display version.
+This cache change does not change the instance layout or migrate normal user data.
+
 The `migrate` operation completes only the directory/schema migration and prints
 the assigned path; it does not download files or execute Java/Minecraft. Commands
 continue to accept the catalog UUID. `install` and `verify` summaries include the

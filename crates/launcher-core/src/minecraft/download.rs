@@ -689,7 +689,10 @@ mod tests {
             downloader.cache(&paths, "libraries/a.jar", &artifact, &cancel, &|_| {}),
             downloader.cache(&paths, "libraries/a.jar", &artifact, &cancel, &|_| {})
         );
-        assert!(first.is_ok() && second.is_ok());
+        assert!(
+            first.is_ok() && second.is_ok(),
+            "cache writers: {first:?}, {second:?}"
+        );
         assert_eq!(server.requests.load(Ordering::SeqCst), 1);
         let _guard = lock(paths.root(), "locks/test", &cancel)
             .await

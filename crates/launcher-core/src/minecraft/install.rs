@@ -319,7 +319,9 @@ pub async fn install(
     registry.save_installation(&record)?;
     let result = async {
         let downloader = Downloader::new()?;
-        let plan = super::plan::resolve(&downloader, minecraft_version, platform, cancel).await?;
+        let mut plan =
+            super::plan::resolve(&downloader, minecraft_version, platform, cancel).await?;
+        plan.allocate_runtime(paths)?;
         write_json(
             &root,
             &format!("installations/{operation}/plan.json"),
