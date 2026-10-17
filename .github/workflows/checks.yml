@@ -33,6 +33,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Check frontend
         run: pnpm build:ui
+      - name: Test frontend state
+        run: pnpm --dir ui test
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
       - name: Check Rust

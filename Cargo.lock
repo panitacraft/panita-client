@@ -2616,6 +2616,7 @@ dependencies = [
  "tokio",
  "uuid",
  "windows-registry",
+ "windows-version",
  "zbus",
 ]
 

@@ -8,7 +8,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
-fn controller(state: &DesktopState) -> Result<Arc<AccountController>, ErrorCode> {
+pub(super) fn controller(state: &DesktopState) -> Result<Arc<AccountController>, ErrorCode> {
     state
         .accounts
         .lock()
@@ -17,7 +17,7 @@ fn controller(state: &DesktopState) -> Result<Arc<AccountController>, ErrorCode>
         .ok_or(ErrorCode::StorageUnavailable)
 }
 
-fn emit_accounts(app: &tauri::AppHandle, accounts: &AccountController) {
+pub(super) fn emit_accounts(app: &tauri::AppHandle, accounts: &AccountController) {
     if let Ok(view) = accounts.view() {
         let _ = app.emit("accounts-changed", view);
     }
@@ -79,6 +79,8 @@ pub(super) fn start_microsoft_login(
         .map_err(|_| ErrorCode::InvalidData)?;
     let accounts = controller(&state)?;
     protocol::register(&app)?;
+    state.plays.cancel_pending();
+    state.plays.publish(&app);
     // Developer override accepts only this fixed mode, never an arbitrary URI.
     let redirect = if std::env::var_os("PANITA_AUTH_DIRECT_LINK").is_some_and(|value| value == "1")
     {
@@ -127,6 +129,8 @@ pub(super) async fn select_account(
 ) -> Result<(), ErrorCode> {
     let id = Uuid::parse_str(&account_id).map_err(|_| ErrorCode::InvalidData)?;
     let accounts = controller(&state)?;
+    state.plays.cancel_pending();
+    state.plays.publish(&app);
     accounts.select(id).map_err(|e| e.code())?;
     emit_accounts(&app, &accounts);
     let result = accounts.renew_selected().await.map_err(|e| e.code());
@@ -166,6 +170,8 @@ pub(super) async fn remove_account(
 ) -> Result<RemovalOutcome, ErrorCode> {
     let id = Uuid::parse_str(&account_id).map_err(|_| ErrorCode::InvalidData)?;
     let accounts = controller(&state)?;
+    state.plays.cancel_pending();
+    state.plays.publish(&app);
     let result = accounts.remove(id).map_err(|e| e.code())?;
     emit_accounts(&app, &accounts);
     // A Microsoft account that became selected needs its session acquired.

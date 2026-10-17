@@ -6,6 +6,7 @@ import { messageForError } from './errors';
 import logoWhite from './assets/logo-white.svg';
 import './style.css';
 import { Accounts } from './accounts';
+import { PlayControls, PlayNotice, PlayProvider } from './play';
 
 type CatalogState =
   | { kind: 'loading' }
@@ -46,6 +47,7 @@ function App() {
       <section aria-labelledby="instances-heading">
         <h1 id="instances-heading">Tus instancias</h1>
         <p>Elige una versión de Minecraft para comenzar.</p>
+        <PlayNotice />
         {catalog.kind === 'loading' && <p role="status">Cargando instancias…</p>}
         {catalog.kind === 'blocked' && <p role="status">Las instancias estarán disponibles cuando se resuelva el problema con las cuentas.</p>}
         {catalog.kind === 'error' && (
@@ -87,7 +89,7 @@ function App() {
                 {instance.availability === 'unverified' && <p>No pudimos verificar el estado de esta instancia.</p>}
                 {!instance.compatible && <p>Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
                 {!instance.supported && <p>Este tipo de instancia o su acceso todavía no es compatible.</p>}
-                <button type="button" disabled>Disponible próximamente</button>
+                <PlayControls instanceId={instance.id} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
               </article>
             ))}
           </div>
@@ -99,6 +101,6 @@ function App() {
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <PlayProvider><App /></PlayProvider>
   </React.StrictMode>,
 );

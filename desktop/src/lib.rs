@@ -4,6 +4,7 @@ use tauri::Manager;
 mod account_commands;
 #[cfg(any(target_os = "linux", test))]
 mod linux_activation;
+mod play_commands;
 mod protocol;
 
 struct DesktopState {
@@ -12,6 +13,7 @@ struct DesktopState {
     accounts: Mutex<Option<Arc<AccountController>>>,
     orphaned_callback: bool,
     catalog_fetch: tokio::sync::Mutex<()>,
+    plays: Arc<play_commands::PlayController>,
 }
 
 #[tauri::command]
@@ -103,6 +105,7 @@ pub fn run() {
             logs,
             accounts: Mutex::new(None),
             catalog_fetch: tokio::sync::Mutex::new(()),
+            plays: Arc::new(play_commands::PlayController::new(process)),
             orphaned_callback: std::env::args_os()
                 .skip(1)
                 .any(|arg| arg.to_string_lossy().starts_with("panitacraft:")),
@@ -125,6 +128,14 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .on_window_event(|window, event| {
+            if window.label() == "main"
+                && let tauri::WindowEvent::CloseRequested { api, .. } = event
+                && play_commands::prevent_close(window.app_handle())
+            {
+                api.prevent_close();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             application_name,
             initialize,
@@ -137,11 +148,25 @@ pub fn run() {
             account_commands::renew_account,
             account_commands::retry_account_save,
             account_commands::remove_account,
-            account_commands::validate_account
+            account_commands::validate_account,
+            play_commands::play_snapshot,
+            play_commands::begin_play,
+            play_commands::confirm_play,
+            play_commands::cancel_play,
+            play_commands::stop_game
         ])
-        .run(context);
-    if result.is_err() {
-        eprintln!("Desktop startup failed");
-        std::process::exit(1);
+        .build(context);
+    match result {
+        Ok(app) => app.run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event
+                && play_commands::prevent_close(app)
+            {
+                api.prevent_exit();
+            }
+        }),
+        Err(_) => {
+            eprintln!("Desktop startup failed");
+            std::process::exit(1);
+        }
     }
 }
