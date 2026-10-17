@@ -66,6 +66,17 @@ downloads), and a 26.3 audit (5,626 artifacts). Reports are consolidated under
 `target/phase4-evidence/`; `target/phase4-validation/` contains the installation
 data. Linux flat-layout migration and actual game execution remain unqualified.
 
+The 2026-10-17 Linux retest used a fresh Debian WSL source copy under the normal
+user: 39 core tests passed, 57 failed, and one live test was intentionally ignored.
+Core Clippy passed with warnings denied. A synthetic probe isolated the pinned
+`private-fs` atomic-write failure: anonymous-file publication with
+`linkat(AT_EMPTY_PATH)` returns `ENOENT` without `CAP_DAC_READ_SEARCH`, before
+publishing the destination. This reproduced on both tmpfs and the native Linux
+home filesystem. The documented `/proc/self/fd` linking alternative succeeded
+with a verified owner-only synthetic file, but is not integrated or qualified.
+Linux migration and real installation validation remain blocked; no elevated
+Linux permissions or weaker storage protections were used. BOX was not used.
+
 ## Development
 
 The workspace uses Rust 1.96, Node.js 24, and pnpm 11.25. Tauri v2 requires
