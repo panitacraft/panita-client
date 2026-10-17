@@ -4,15 +4,17 @@ Panita Client is an unofficial Minecraft launcher for friends. The MVP will
 install and launch two independent vanilla instances from the Panita API
 catalog, using Microsoft or explicitly selected offline accounts.
 
-This repository is in development. The current application shell does not yet
-install or launch Minecraft.
+This repository is in development. The desktop interface manages accounts and
+the catalog. Core installation is exercised through the development harness
+described below; Minecraft execution remains Phase 5.
 
 Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on
 2026-10-16. See [the closure record](https://github.com/panitacraft/panita-client/issues/4)
 for verification and accepted follow-ups: remaining browser failure observations
 and the WSL atomic-write test failure. Phase 3 catalog and UUID-based local
-registry implementation was accepted by the owner on 2026-10-16; installation and game execution remain
-later work.
+registry implementation was accepted by the owner on 2026-10-16. Phase 4 vanilla
+installation is implemented and verified on Windows, pending owner review; game
+execution remains Phase 5.
 
 Phase 3 catalog startup, disabled/unsupported entries, cached outage behavior,
 local-only records and recovery were verified in an isolated Windows release
@@ -23,6 +25,20 @@ files. [Phase 3](https://github.com/panitacraft/panita-client/issues/5) is forma
 accepted, with the previously documented limits retained. BOX has development packages installed, so this
 does not establish clean-install qualification or resolve the deferred WSL
 storage-test failure.
+
+The Phase 4 core resolves official version, asset and Java metadata; verifies
+downloaded hashes and sizes; reuses shared caches; and commits per-instance
+installation journals and locks. Cancellation and interruption preserve user
+files. Installation controls are not yet connected to the desktop interface.
+Game execution and installed-platform qualification are separate later checks.
+
+Windows validation installed both catalog pins (26.3 and 1.21.1) with their
+required Java 25/21 runtimes, audited the installed files, recovered a deliberately
+interrupted installation, and preserved synthetic worlds/options. Final cache
+adoption reused all 5,626 and 4,348 artifacts respectively with no artifact
+downloads. The workspace suite passed 80 core, two process-writer and three
+desktop tests, with one intentional live-test skip. Linux artifact selection and
+core compilation passed; actual Linux game execution remains unverified.
 
 ## Development
 
@@ -65,6 +81,28 @@ The public catalog is `https://api.panitacraft.com`. Do not store account
 credentials in the repository. Public integration checks can be run explicitly
 with `node tests/readiness.mjs`; they require network access and may fail when
 the live catalog changes.
+
+### Vanilla installation validation
+
+Use the development example with an explicit, isolated absolute data root.
+It does not access accounts or start Minecraft. Installation requires a current,
+enabled vanilla catalog entry and runs the provisioned Java version check.
+Changing an installed Minecraft pin requires the later maintenance workflow.
+
+```text
+cargo run -p launcher-core --example vanilla_install -- plan <absolute-root> <minecraft-version> <windows|linux> <os-version>
+cargo run -p launcher-core --example vanilla_install -- install <absolute-root> <instance-uuid> <windows|linux> <os-version>
+cargo run -p launcher-core --example vanilla_install -- verify <absolute-root> <instance-uuid> <windows|linux> <os-version>
+cargo run -p launcher-core --example vanilla_install -- recover <absolute-root> <instance-uuid> <windows|linux> <os-version>
+```
+
+This is a development harness, not a product CLI or a platform-support claim.
+Installation runs only on the matching native x64 host. The `plan` operation can
+inspect either target's artifacts without downloading its game/runtime binaries.
+Libraries and asset indexes use content-qualified cache paths so different
+resolved hashes cannot replace another installation's files. Consumers must use
+the plan's `library_path` and `asset_index_name` methods when building a launch.
+Earlier development layouts remain readable and can supply verified local copies.
 
 ## License
 
