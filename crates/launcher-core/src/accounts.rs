@@ -10,7 +10,8 @@ use crate::storage::{PrivateStore, StoreTransaction};
 
 pub const OAUTH_CLIENT_ID: &str = "cd7a6116-ad43-4eff-aa9b-a177e1101c45";
 const ACCOUNT_FILE: &str = "accounts.json";
-const REMOVAL_FILE: &str = "pending-account-removals.json";
+const REMOVAL_FILE: &str = "account-removals.json";
+const LEGACY_REMOVAL_FILE: &str = "pending-account-removals.json";
 
 /// Intentionally has no Debug or Serialize implementation.
 pub struct Secret(String);
@@ -508,7 +509,39 @@ fn validate_document(document: &AccountDocument) -> Result<(), CoreError> {
 }
 
 fn load_pending(tx: &StoreTransaction<'_>) -> Result<PendingRemovals, CoreError> {
-    let pending: PendingRemovals = match tx.read(REMOVAL_FILE)? {
+    let mut pending = read_pending(tx, REMOVAL_FILE)?;
+    if tx.read(LEGACY_REMOVAL_FILE)?.is_some() {
+        let legacy = read_pending(tx, LEGACY_REMOVAL_FILE)?;
+        for id in legacy.account_ids.iter().copied() {
+            if !pending.account_ids.contains(&id) {
+                pending.account_ids.push(id);
+            }
+        }
+        if pending.account_ids.len() > 128 {
+            return Err(CoreError::new(ErrorCode::AccountsFileInvalid));
+        }
+        if !legacy.account_ids.is_empty() {
+            // Persist every tombstone before retiring the legacy marker. Both writes
+            // share the mutation lock, and interruption leaves a safe duplicate.
+            write_json(tx, REMOVAL_FILE, &pending)?;
+            write_json(
+                tx,
+                LEGACY_REMOVAL_FILE,
+                &PendingRemovals {
+                    schema_version: 1,
+                    account_ids: Vec::new(),
+                },
+            )?;
+        }
+    }
+    Ok(pending)
+}
+
+fn read_pending(
+    tx: &StoreTransaction<'_>,
+    name: &'static str,
+) -> Result<PendingRemovals, CoreError> {
+    let pending: PendingRemovals = match tx.read(name)? {
         Some(bytes) => serde_json::from_slice(&bytes)
             .map_err(|_| CoreError::new(ErrorCode::AccountsFileInvalid))?,
         None => PendingRemovals {
@@ -844,6 +877,120 @@ mod tests {
                 .unwrap_or_else(|_| panic!("snapshot"))
                 .accounts
                 .is_empty()
+        );
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
+    fn legacy_pending_removals_merge_before_reconciliation() {
+        let (paths, repository) = repository();
+        let first = repository
+            .add_offline("PlayerOne")
+            .unwrap_or_else(|_| panic!("first"));
+        let second = repository
+            .add_offline("PlayerTwo")
+            .unwrap_or_else(|_| panic!("second"));
+        assert!(
+            repository
+                .store
+                .with_lock(|tx| {
+                    write_json(
+                        tx,
+                        REMOVAL_FILE,
+                        &PendingRemovals {
+                            schema_version: 1,
+                            account_ids: vec![first.account_id],
+                        },
+                    )?;
+                    write_json(
+                        tx,
+                        LEGACY_REMOVAL_FILE,
+                        &PendingRemovals {
+                            schema_version: 1,
+                            account_ids: vec![second.account_id],
+                        },
+                    )
+                })
+                .is_ok()
+        );
+        assert!(
+            repository
+                .snapshot()
+                .unwrap_or_else(|_| panic!("snapshot"))
+                .accounts
+                .is_empty()
+        );
+        assert!(
+            repository
+                .store
+                .with_lock(|tx| {
+                    assert!(
+                        read_pending(tx, LEGACY_REMOVAL_FILE)?
+                            .account_ids
+                            .is_empty()
+                    );
+                    assert!(read_pending(tx, REMOVAL_FILE)?.account_ids.is_empty());
+                    Ok(())
+                })
+                .is_ok()
+        );
+        assert!(
+            repository
+                .snapshot()
+                .unwrap_or_else(|_| panic!("restart"))
+                .accounts
+                .is_empty()
+        );
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
+    fn failed_marker_migration_preserves_legacy_removals() {
+        let (paths, repository) = repository();
+        let id = Uuid::new_v4();
+        assert!(
+            repository
+                .store
+                .with_lock(|tx| write_json(
+                    tx,
+                    LEGACY_REMOVAL_FILE,
+                    &PendingRemovals {
+                        schema_version: 1,
+                        account_ids: vec![id],
+                    }
+                ))
+                .is_ok()
+        );
+        assert!(std::fs::create_dir(paths.root().join(REMOVAL_FILE)).is_ok());
+        assert!(repository.snapshot().is_err());
+        let legacy = repository
+            .store
+            .with_lock(|tx| read_pending(tx, LEGACY_REMOVAL_FILE))
+            .unwrap_or_else(|_| panic!("legacy marker"));
+        assert_eq!(legacy.account_ids, vec![id]);
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
+    fn malformed_legacy_removal_marker_blocks_restore_and_is_preserved() {
+        let (paths, repository) = repository();
+        assert!(repository.add_offline("PlayerOne").is_ok());
+        assert!(
+            repository
+                .store
+                .transaction(LEGACY_REMOVAL_FILE, |_| Ok((b"corrupt".to_vec(), ())))
+                .is_ok()
+        );
+        assert!(repository.snapshot().is_err());
+        assert_eq!(
+            repository
+                .store
+                .read(LEGACY_REMOVAL_FILE)
+                .unwrap_or_default(),
+            Some(b"corrupt".to_vec())
         );
         drop(repository);
         assert!(std::fs::remove_dir_all(paths.root()).is_ok());
