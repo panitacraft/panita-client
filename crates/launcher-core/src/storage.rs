@@ -157,10 +157,10 @@ fn read_file(root: &PrivateDir, name: &Path) -> Result<Option<Vec<u8>>, CoreErro
 }
 
 fn map_io_error(error: std::io::Error) -> CoreError {
-    let code = if error.kind() == std::io::ErrorKind::PermissionDenied {
-        ErrorCode::PermissionDenied
-    } else {
-        ErrorCode::StorageUnavailable
+    let code = match error.kind() {
+        std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
+        std::io::ErrorKind::StorageFull => ErrorCode::InsufficientSpace,
+        _ => ErrorCode::StorageUnavailable,
     };
     CoreError::new(code)
 }

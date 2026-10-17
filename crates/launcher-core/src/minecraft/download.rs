@@ -19,10 +19,10 @@ use crate::{
 };
 
 pub(crate) fn io(error: std::io::Error) -> CoreError {
-    CoreError::new(if error.kind() == std::io::ErrorKind::PermissionDenied {
-        ErrorCode::PermissionDenied
-    } else {
-        ErrorCode::StorageUnavailable
+    CoreError::new(match error.kind() {
+        std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
+        std::io::ErrorKind::StorageFull => ErrorCode::InsufficientSpace,
+        _ => ErrorCode::StorageUnavailable,
     })
 }
 
@@ -87,11 +87,17 @@ pub(crate) fn ensure_parent(
 }
 
 /// File handles are retained until drop, so another process cannot publish the same artifact.
+pub(crate) struct ArtifactLock {
+    // Retain both handles: closing a duplicate on Windows can release file locks.
+    _file: std::fs::File,
+    _source: private_fs::PrivateFile,
+}
+
 pub(crate) async fn lock(
     root: &Path,
     relative: &str,
     cancel: &Cancellation,
-) -> Result<std::fs::File, CoreError> {
+) -> Result<ArtifactLock, CoreError> {
     let (directory, name) = ensure_parent(root, relative)?;
     let file = match directory.open_file(&name) {
         Ok(file) => file,
@@ -108,13 +114,17 @@ pub(crate) async fn lock(
         }
         Err(error) => return Err(map_private_error(error)),
     };
-    let file = native_file(&file)?;
+    let source = file;
+    let file = native_file(&source)?;
     loop {
         cancel.check()?;
         match file.try_lock() {
             Ok(()) => {
                 private_fs::verify(&file).map_err(map_private_error)?;
-                return Ok(file);
+                return Ok(ArtifactLock {
+                    _file: file,
+                    _source: source,
+                });
             }
             Err(std::fs::TryLockError::WouldBlock) => tokio::select! {
                 _ = cancel.cancelled() => cancel.check()?,
@@ -151,6 +161,28 @@ pub(crate) fn verified_file(
     }
     file.verify().map_err(map_private_error)?;
     Ok(format!("{:x}", hash.finalize()) == artifact.sha1)
+}
+
+fn cleanup_partials(directory: &PrivateDir, path: &Path) -> Result<(), CoreError> {
+    for entry in std::fs::read_dir(path).map_err(io)? {
+        let entry = entry.map_err(io)?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(hex) = name
+            .strip_prefix(".private-fs-")
+            .and_then(|name| name.strip_suffix(".tmp"))
+        else {
+            continue;
+        };
+        if hex.len() != 32 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            continue;
+        }
+        directory.open_file(name).map_err(map_private_error)?;
+        std::fs::remove_file(entry.path()).map_err(io)?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -257,13 +289,18 @@ impl Downloader {
     ) -> Result<PathBuf, CoreError> {
         artifact.validate()?;
         safe_path(relative)?;
-        // The path lock also serializes different hashes requesting the same cache destination.
-        let key = format!(
-            "{:x}",
-            Sha1::digest(relative.to_ascii_lowercase().as_bytes())
-        );
+        if !["libraries/", "assets/", "versions/", "runtime/"]
+            .iter()
+            .any(|prefix| relative.starts_with(prefix))
+        {
+            return Err(invalid());
+        }
+        // A parent-directory lock also protects stale atomic-temporary cleanup.
+        let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
+        let key = format!("{:x}", Sha1::digest(parent.to_ascii_lowercase().as_bytes()));
         let _guard = lock(paths.root(), &format!(".artifact-locks/{key}.lock"), cancel).await?;
         let (directory, name) = ensure_parent(paths.root(), relative)?;
+        cleanup_partials(&directory, &paths.root().join(parent))?;
         cancel.check()?;
         if verified_file(&directory, &name, artifact)? {
             progress(DownloadProgress {
@@ -342,8 +379,17 @@ mod tests {
                 while !flag.load(Ordering::SeqCst) {
                     if let Ok((mut socket, _)) = listener.accept() {
                         let _ = socket.set_read_timeout(Some(Duration::from_secs(2)));
-                        let mut request = [0; 4096];
-                        let _ = socket.read(&mut request);
+                        let mut request = Vec::new();
+                        while !request.ends_with(b"\r\n\r\n") && request.len() < 16 * 1024 {
+                            let mut buffer = [0; 1024];
+                            match socket.read(&mut buffer) {
+                                Ok(0) | Err(_) => break,
+                                Ok(count) => request.extend_from_slice(&buffer[..count]),
+                            }
+                        }
+                        if !request.starts_with(b"GET ") || !request.ends_with(b"\r\n\r\n") {
+                            continue;
+                        }
                         count.fetch_add(1, Ordering::SeqCst);
                         let _ = write!(
                             socket,
@@ -502,5 +548,83 @@ mod tests {
             cancel.cancel();
         };
         assert!(tokio::join!(waiting, trigger).0.is_err());
+    }
+
+    #[tokio::test]
+    async fn lock_child() {
+        let Some(root) = std::env::var_os("PANITA_TEST_ARTIFACT_LOCK_ROOT") else {
+            return;
+        };
+        let root = PathBuf::from(root);
+        let _guard = lock(&root, "locks/process.lock", &Cancellation::default())
+            .await
+            .unwrap_or_else(|_| panic!("child lock"));
+        let directory = PrivateDir::open(&root).unwrap_or_else(|_| panic!("root"));
+        directory
+            .write_atomic_durable("child-acquired", b"yes")
+            .unwrap_or_else(|_| panic!("marker"));
+    }
+
+    #[tokio::test]
+    async fn process_lock_excludes_an_independent_writer() {
+        let paths = paths();
+        let guard = lock(paths.root(), "locks/process.lock", &Cancellation::default())
+            .await
+            .unwrap_or_else(|_| panic!("parent lock"));
+        let executable = std::env::current_exe().unwrap_or_else(|_| panic!("executable"));
+        let mut child = std::process::Command::new(executable)
+            .args([
+                "--exact",
+                "minecraft::download::tests::lock_child",
+                "--nocapture",
+            ])
+            .env("PANITA_TEST_ARTIFACT_LOCK_ROOT", paths.root())
+            .spawn()
+            .unwrap_or_else(|_| panic!("child"));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!paths.root().join("child-acquired").exists());
+        drop(guard);
+        let started = std::time::Instant::now();
+        loop {
+            if let Some(status) = child.try_wait().unwrap_or_else(|_| panic!("wait")) {
+                assert!(status.success());
+                break;
+            }
+            if started.elapsed() > Duration::from_secs(10) {
+                let _ = child.kill();
+                panic!("child lock timeout");
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(paths.root().join("child-acquired").is_file());
+    }
+
+    #[test]
+    fn existing_directory_redirect_is_rejected_before_writing() {
+        let paths = paths();
+        let outside = paths.root().with_extension("outside");
+        PrivateDir::ensure(&outside).unwrap_or_else(|_| panic!("outside fixture"));
+        ensure_parent(paths.root(), "libraries/placeholder")
+            .unwrap_or_else(|_| panic!("libraries"));
+        let link = paths.root().join("libraries").join("redirect");
+        #[cfg(windows)]
+        {
+            let result = std::process::Command::new("cmd")
+                .args(["/D", "/C", "mklink", "/J"])
+                .arg(&link)
+                .arg(&outside)
+                .output()
+                .unwrap_or_else(|_| panic!("junction command"));
+            assert!(
+                result.status.success(),
+                "junction creation failed: {} {}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, &link).unwrap_or_else(|_| panic!("symlink"));
+        assert!(ensure_parent(paths.root(), "libraries/redirect/payload.jar").is_err());
+        assert!(!outside.join("payload.jar").exists());
     }
 }

@@ -7,6 +7,10 @@ use sha1::{Digest, Sha1};
 
 use crate::error::{CoreError, ErrorCode};
 pub mod download;
+pub mod install;
+pub mod natives;
+pub mod plan;
+pub mod runtime;
 
 pub const VERSION_MANIFEST: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
@@ -19,6 +23,7 @@ pub(crate) fn invalid() -> CoreError {
 /// Portable relative paths also reject Windows aliases on Unix hosts.
 pub fn safe_path(path: &str) -> Result<(), CoreError> {
     if path.is_empty()
+        || !path.is_ascii()
         || path.len() > 2048
         || path.contains(['\\', ':'])
         || path.chars().any(|c| c.is_control())

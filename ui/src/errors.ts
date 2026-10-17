@@ -10,10 +10,11 @@ export type LauncherErrorCode =
   | 'callback_registration_failed' | 'browser_unavailable' | 'authentication_configuration'
   | 'accounts_file_invalid' | 'callback_not_active' | 'unsafe_permissions'
   | 'instance_disabled' | 'instance_missing' | 'unsupported_instance'
-  | 'artifact_mismatch' | 'runtime_unsupported';
+  | 'artifact_mismatch' | 'runtime_unsupported' | 'insufficient_space';
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
+  insufficient_space: 'No hay suficiente espacio disponible. Libera espacio e inténtalo de nuevo.',
   artifact_mismatch: 'Un archivo descargado no coincide con el original. Inténtalo de nuevo.',
   runtime_unsupported: 'No hay un Java compatible disponible para esta versión y plataforma.',
   instance_disabled: 'Esta instancia está deshabilitada. Conservamos tus datos locales.',

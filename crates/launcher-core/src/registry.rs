@@ -182,6 +182,20 @@ impl InstanceRegistry {
         })
     }
 
+    /// Installation work may span network requests. Preserve availability learned by
+    /// a concurrent catalog refresh when committing its local installation state.
+    pub(crate) fn save_installation(&self, record: &InstallationRecord) -> Result<(), CoreError> {
+        record.validate()?;
+        self.store(record.id)?.transaction(RECORD, |existing| {
+            let mut next = record.clone();
+            if let Some(bytes) = existing {
+                next.last_catalog = InstallationRecord::decode(&bytes, record.id)?.last_catalog;
+            }
+            next.validate()?;
+            Ok((formatted_json(&next)?, ()))
+        })
+    }
+
     pub fn load_settings(&self, id: Uuid) -> Result<InstanceSettings, CoreError> {
         match self.store(id)?.read("settings.json")? {
             None => Ok(InstanceSettings::default()),
@@ -260,7 +274,16 @@ pub struct CatalogOverview {
 
 pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError> {
     let store = PrivateStore::open(&paths)?;
-    let registry = InstanceRegistry::new(paths);
+    let registry = InstanceRegistry::new(paths.clone());
+    let local = registry.load()?;
+    for record in &local {
+        crate::minecraft::install::recover(
+            &paths,
+            record.id,
+            &crate::minecraft::download::Cancellation::default(),
+        )
+        .await?;
+    }
     let local = registry.load()?;
     let version = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?;
     let remote = crate::catalog::CatalogClient::new()?.refresh(&store).await;

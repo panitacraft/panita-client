@@ -16,9 +16,11 @@ getrandom = "=0.4.3"
 sha2 = "=0.10.9"
 sha1 = "=0.10.6"
 regex = "1"
+fs2 = "=0.4.3"
+zip = { version = "=6.0.0", default-features = false, features = ["deflate"] }
 url = "2"
 reqwest = { version = "=0.13.5", default-features = false, features = ["rustls", "json", "form"] }
-tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
+tokio = { version = "1", features = ["sync", "time", "macros", "rt", "process", "io-util"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
 private-fs = "=0.1.0"
 serde = { version = "1", features = ["derive"] }

@@ -28,6 +28,7 @@ pub enum ErrorCode {
     OperationCancelled,
     ArtifactMismatch,
     RuntimeUnsupported,
+    InsufficientSpace,
     /// The persisted account file is damaged or unsupported; it is left untouched.
     AccountsFileInvalid,
     /// A browser callback arrived when no login was waiting for it.
