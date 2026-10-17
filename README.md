@@ -13,8 +13,8 @@ Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on
 for verification and accepted follow-ups: remaining browser failure observations
 and the WSL atomic-write test failure. Phase 3 catalog and UUID-based local
 registry implementation was accepted by the owner on 2026-10-16. Phase 4 vanilla
-installation is implemented and verified on Windows, pending owner review; game
-execution remains Phase 5.
+installation is implemented and verified on Windows and through the installer
+core on BOX, pending owner review; game execution remains Phase 5.
 
 Phase 3 catalog startup, disabled/unsupported entries, cached outage behavior,
 local-only records and recovery were verified in an isolated Windows release
@@ -43,9 +43,9 @@ core compilation passed; actual Linux game execution remains unverified.
 The slug-folder follow-up migrated both isolated Windows installations to
 `vanilla-actual` and `vanilla-clasica`, preserving all four world/options test
 hashes. The updated Windows suite passed 96 tests with one live-test skip;
-Clippy and the UI build passed. Linux compilation passed, but migration tests
-remain blocked by protected-write failures also seen in the unchanged baseline
-storage test. Linux migration execution is not qualified.
+Clippy and the UI build passed. At that checkpoint Linux compilation passed,
+but migration tests were blocked by the protected-write failure; the subsequent
+fix and BOX verification are recorded below.
 
 The readable-cache follow-up passed 98 Windows workspace tests with one
 intentional live-test skip, plus Clippy and formatting checks. Both isolated
@@ -64,7 +64,7 @@ metadata directly in their root and player/game files in `minecraft/`, with no
 unchanged through migration, a 1.21.1 reinstall (4,348 artifacts reused with zero
 downloads), and a 26.3 audit (5,626 artifacts). Reports are consolidated under
 `target/phase4-evidence/`; `target/phase4-validation/` contains the installation
-data. Linux flat-layout migration and actual game execution remain unqualified.
+data. Linux execution was not qualified at that checkpoint.
 
 The initial 2026-10-17 Linux retest used a fresh Debian WSL source copy under the normal
 user: 39 core tests passed, 57 failed, and one live test was intentionally ignored.
@@ -74,7 +74,7 @@ Core Clippy passed with warnings denied. A synthetic probe isolated the pinned
 publishing the destination. This reproduced on both tmpfs and the native Linux
 home filesystem. The documented `/proc/self/fd` linking alternative succeeded
 with a verified owner-only synthetic file, but is not integrated or qualified.
-Linux migration and real installation validation remain blocked; no elevated
+Linux migration and real installation validation were blocked; no elevated
 Linux permissions or weaker storage protections were used. BOX was not used.
 
 The subsequent fix pins a local patch of `private-fs` 0.1.0 under
@@ -87,10 +87,34 @@ live-test skip. The dependency passes all 53 tests under both its default and
 alternate path resolver configurations, including interruption and permission
 regressions. Windows workspace regressions passed all 102 tests. Linux core and
 Windows workspace Clippy pass with warnings denied; formatting passes. These results resolve
-the earlier automated WSL storage/migration blocker; real Linux game-file
-installation, game execution and clean installed-product qualification remain
-unverified. CI now explicitly runs the patched dependency's Linux tests; no new
-CI run or BOX test is claimed.
+the earlier automated WSL storage/migration blocker. CI now explicitly runs the
+patched dependency's Linux tests; no new remote CI run is claimed.
+
+Owner-authorized BOX installation validation passed on 2026-10-17 using the
+prebuilt debug installer harness from `932f753`, built separately in Debian WSL.
+BOX runs Ubuntu 26.04.1 as a normal user. The first attempt exposed a distinct
+Java-permission bug: executable runtime artifacts require owner-only 0700 while
+metadata remains 0600. The fix preserves hash/owner/type/link checks and atomic
+cache repair; Linux now passes 98 core and two process-writer tests, with one
+intentional live-test skip. Windows still passes all 102 workspace tests; both
+platforms pass the applicable Clippy and formatting checks.
+
+Both pins installed on BOX with their downloaded Java runtimes (1.21.1 with
+Java 21.0.7, and 26.3 with Java 25.0.1; both amd64). Second passes reused all
+4,289/5,569 artifacts respectively with zero artifact downloads. Local integrity,
+specific corruption rejection and restored integrity passed. Four synthetic
+player-file hashes/modes and distinct instance setting overrides were preserved.
+Ownership and private modes passed for 735 directories, 10,129 metadata/cache
+files and 63 runtime executables. Instance roots use the agreed flat metadata
+and minecraft/ layout. Reports are in `target/phase4-evidence/box-phase4/`;
+BOX practice data remains at
+`/home/vboxuser/.cache/panita-phase4-56c1146-20261017/data`.
+
+These are installer-core checks; the installed GUI/package remains unchanged,
+and its package integrity check is clean. BOX was not used for builds, and normal
+accounts/worlds were not accessed. Phase 4 is ready for owner acceptance.
+Game execution remains Phase 5, installation UI remains Phase 6, and BOX's
+existing development packages still prevent clean-install qualification.
 
 ## Development
 
