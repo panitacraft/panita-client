@@ -10,11 +10,12 @@ described below; Minecraft execution remains Phase 5.
 
 Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on
 2026-10-16. See [the closure record](https://github.com/panitacraft/panita-client/issues/4)
-for verification and accepted follow-ups: remaining browser failure observations
-and the WSL atomic-write test failure. Phase 3 catalog and UUID-based local
-registry implementation was accepted by the owner on 2026-10-16. Phase 4 vanilla
-installation is implemented and verified on Windows and through the installer
-core on BOX, pending owner review; game execution remains Phase 5.
+for verification and accepted follow-ups: remaining browser failure observations.
+The original WSL atomic-write failure was resolved in Phase 4. Phase 3 catalog
+and UUID-based local registry implementation was accepted on 2026-10-16.
+[Phase 4 vanilla installation and Java provisioning](https://github.com/panitacraft/panita-client/issues/6)
+was formally accepted by the owner on 2026-10-17, with Windows and BOX installer-core
+verification and the qualification limits below. Game execution remains Phase 5.
 
 Phase 3 catalog startup, disabled/unsupported entries, cached outage behavior,
 local-only records and recovery were verified in an isolated Windows release
@@ -112,7 +113,7 @@ BOX practice data remains at
 
 These are installer-core checks; the installed GUI/package remains unchanged,
 and its package integrity check is clean. BOX was not used for builds, and normal
-accounts/worlds were not accessed. Phase 4 is ready for owner acceptance.
+accounts/worlds were not accessed.
 Game execution remains Phase 5, installation UI remains Phase 6, and BOX's
 existing development packages still prevent clean-install qualification.
 
