@@ -54,8 +54,17 @@ and 5,626 artifacts without artifact downloads and verifying Java 21/25.
 All four synthetic world/options hashes remained unchanged. After coordinated
 validation-only cleanup, every installed artifact reference still exists with
 its expected size; obsolete runtime/client paths, duplicate legacy asset-index
-aliases, and seven completed test generations were removed. Each installation
-retains its current generation and an inactive, matching journal.
+aliases, and seven completed test generations were removed. Installed operation
+identities and inactive, matching journals were preserved.
+
+The flat-instance follow-up passed 102 Windows workspace tests (one intentional
+live-test skip), Clippy, and formatting. Both practice instances now keep launcher
+metadata directly in their root and player/game files in `minecraft/`, with no
+`.panita` directory or duplicate staged plans. The four user-file hashes remained
+unchanged through migration, a 1.21.1 reinstall (4,348 artifacts reused with zero
+downloads), and a 26.3 audit (5,626 artifacts). Reports are consolidated under
+`target/phase4-evidence/`; `target/phase4-validation/` contains the installation
+data. Linux flat-layout migration and actual game execution remain unqualified.
 
 ## Development
 
