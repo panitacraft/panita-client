@@ -71,6 +71,10 @@ fn publish(root: &Path, name: &str, value: &impl Serialize) -> Result<(), CoreEr
 }
 
 fn names(root: &Path) -> Result<Vec<String>, CoreError> {
+    names_with_privacy(root, true)
+}
+
+fn names_with_privacy(root: &Path, protected: bool) -> Result<Vec<String>, CoreError> {
     let mut names = Vec::new();
     for entry in std::fs::read_dir(root).map_err(io)? {
         let entry = entry.map_err(io)?;
@@ -83,10 +87,11 @@ fn names(root: &Path) -> Result<Vec<String>, CoreError> {
         {
             return Err(invalid());
         }
+        verify_entry(&entry.path())?;
         let metadata = std::fs::symlink_metadata(entry.path()).map_err(io)?;
-        if metadata.is_dir() {
+        if protected && metadata.is_dir() {
             private_fs::PrivateDir::open(entry.path()).map_err(map_private_error)?;
-        } else {
+        } else if protected {
             private_fs::PrivateDir::open(root)
                 .map_err(map_private_error)?
                 .open_file(&name)
@@ -145,13 +150,16 @@ fn move_entry(source: &Path, destination: &Path) -> Result<(), CoreError> {
 }
 
 fn verify_entry(path: &Path) -> Result<(), CoreError> {
-    if path.is_dir() {
-        private_fs::PrivateDir::open(path).map_err(map_private_error)?;
-    } else {
-        private_fs::PrivateDir::open(path.parent().ok_or_else(invalid)?)
-            .map_err(map_private_error)?
-            .open_file(path.file_name().ok_or_else(invalid)?)
-            .map_err(map_private_error)?;
+    let metadata = std::fs::symlink_metadata(path).map_err(io)?;
+    if metadata.file_type().is_symlink() || (!metadata.is_dir() && !metadata.is_file()) {
+        return Err(CoreError::new(ErrorCode::UnsafePermissions));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err(CoreError::new(ErrorCode::UnsafePermissions));
+        }
     }
     Ok(())
 }
@@ -192,7 +200,9 @@ fn prepare_intent(root: &Path, mut record: InstallationRecord) -> Result<Intent,
         record.settings.validate()?;
     }
     record.schema_version = 3;
-    let game_entries: Vec<_> = names(root)?
+    // Minecraft creates ordinary player files, not private-fs documents. Preserve
+    // their ACLs; only launcher metadata requires private-file verification.
+    let game_entries: Vec<_> = names_with_privacy(root, false)?
         .into_iter()
         .filter(|name| name != ".panita")
         .collect();
@@ -525,9 +535,8 @@ mod tests {
                 Ok((serde_json::to_vec(&record).map_err(|_| invalid())?, ()))
             })
             .unwrap_or_else(|_| panic!("record"));
-        directory
-            .write_atomic_durable("options.txt", b"player options")
-            .unwrap_or_else(|_| panic!("options"));
+        std::fs::write(root.join("options.txt"), b"player options")
+            .unwrap_or_else(|_| panic!("game-created options"));
         (paths, root, record)
     }
 
