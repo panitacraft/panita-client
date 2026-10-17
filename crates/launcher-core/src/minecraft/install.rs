@@ -92,7 +92,11 @@ fn write_json(
 
 /// A pending journal is conservative: files are retained for verified reuse, but
 /// completion must be retried explicitly. No network access or Java execution occurs.
-fn recover_locked(paths: &AppPaths, id: Uuid, root: &std::path::Path) -> Result<(), CoreError> {
+pub(super) fn recover_locked(
+    paths: &AppPaths,
+    id: Uuid,
+    root: &std::path::Path,
+) -> Result<(), CoreError> {
     let Some(mut journal) = read_json::<Journal>(root, "install-journal.json")? else {
         return Ok(());
     };
@@ -382,7 +386,7 @@ pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, Cor
     let root = metadata_root(paths, id)?;
     let _guard = super::download::try_lock(&root, ".installation.lock")?
         .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
-    verify_under_lock(paths, id, &root)
+    verify_under_lock(paths, id, &root, &Cancellation::default())
 }
 
 /// Caller must retain this instance's installation lock for the whole audit.
@@ -390,7 +394,9 @@ pub(super) fn verify_under_lock(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
+    cancel: &Cancellation,
 ) -> Result<InstalledLock, CoreError> {
+    cancel.check()?;
     let journal = read_json::<Journal>(root, "install-journal.json")?;
     if journal.is_some_and(|journal| journal.schema_version != 1 || journal.active) {
         return Err(invalid());
@@ -403,6 +409,7 @@ pub(super) fn verify_under_lock(
     installed.plan.validate()?;
     installed.plan.verify_dependencies(paths)?;
     for file in &installed.plan.artifacts {
+        cancel.check()?;
         let (directory, leaf) = ensure_parent(paths.root(), &file.destination)?;
         if !verified_planned_file(&directory, &leaf, &file.artifact, file.executable)? {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
@@ -411,6 +418,7 @@ pub(super) fn verify_under_lock(
     }
     let native_root = root.join(format!("natives-{}", installed.operation));
     for native in &installed.native_files {
+        cancel.check()?;
         let artifact = Artifact {
             url: "https://libraries.minecraft.net/native".into(),
             path: None,

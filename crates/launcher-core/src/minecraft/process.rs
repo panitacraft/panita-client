@@ -116,11 +116,31 @@ impl LaunchLease {
     }
 
     pub fn verify_installation(&self) -> Result<super::install::InstalledLock, CoreError> {
+        self.verify_installation_with_cancel(&super::download::Cancellation::default())
+    }
+
+    pub fn verify_installation_with_cancel(
+        &self,
+        cancel: &super::download::Cancellation,
+    ) -> Result<super::install::InstalledLock, CoreError> {
         super::install::verify_under_lock(
             &self.paths,
             self.instance,
             self.directory.parent().ok_or_else(super::invalid)?,
+            cancel,
         )
+    }
+
+    pub(crate) fn recover_installation(&self) -> Result<(), CoreError> {
+        super::install::recover_locked(
+            &self.paths,
+            self.instance,
+            self.directory.parent().ok_or_else(super::invalid)?,
+        )
+    }
+
+    pub fn game_directory(&self) -> &std::path::Path {
+        &self.directory
     }
 
     /// Low-level primitive: the caller must have passed current catalog,

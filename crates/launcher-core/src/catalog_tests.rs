@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 
-fn record() -> Value {
+pub(crate) fn record() -> Value {
     json!({"id":"62d7e99d-fb4e-4167-8732-ce3a334d4a58","slug":"vanilla-actual","name":"Enriquecraft","description":"Versión española, sin cambios.","minecraft_version":"26.3","enabled":true,"restricted":false,"min_launcher_version":null,"icon_url":null,"banner_url":null,"sort_order":10,"updated_at":"2026-10-13T06:22:29Z","source_type":"vanilla","modrinth_project_id":null,"pack_version_id":null,"loader":null})
 }
 
@@ -20,7 +20,9 @@ fn temporary_store() -> (AppPaths, PrivateStore) {
     (paths, store)
 }
 
-fn server(replies: Vec<(u16, String, bool)>) -> (CatalogClient, std::thread::JoinHandle<()>) {
+pub(crate) fn server(
+    replies: Vec<(u16, String, bool)>,
+) -> (CatalogClient, std::thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap_or_else(|_| panic!("loopback"));
     listener
         .set_nonblocking(true)

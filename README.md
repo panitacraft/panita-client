@@ -6,8 +6,9 @@ catalog, using Microsoft or explicitly selected offline accounts.
 
 This repository is in development. The desktop interface manages accounts and
 the catalog. Core installation is exercised through the development harness
-described below. Phase 5 includes core launch-command construction and process supervision;
-game execution and Play-time enforcement remain pending.
+described below. Phase 5 includes core command construction, process supervision
+and launch preflight. Desktop Play integration and actual Minecraft launches
+remain pending.
 
 Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on
 2026-10-16. See [the closure record](https://github.com/panitacraft/panita-client/issues/4)

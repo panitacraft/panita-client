@@ -67,12 +67,47 @@ struct State {
     flights: HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>,
 }
 
+pub(crate) struct PlaySelection {
+    controller: Uuid,
+    id: Uuid,
+    generation: u64,
+}
+
+/// Backend-only, single-use result of this Play request's remote validation.
+pub(crate) struct PlayAuthorization {
+    selection: PlaySelection,
+    profile: JavaProfile,
+    session: Option<Arc<MinecraftSession>>,
+}
+
 pub struct AccountController {
+    controller_id: Uuid,
     snapshot_counter: AtomicU64,
     repository: AccountRepository,
     client: AuthClient,
     process: ProcessSessionId,
     state: Mutex<State>,
+}
+
+/// Dropping an acquisition future must not leave an account permanently busy.
+/// This guard lives inside its single-flight lock and cannot reset newer work.
+struct AcquisitionStatusGuard<'a> {
+    controller: &'a AccountController,
+    account: Uuid,
+    generation: u64,
+}
+
+impl Drop for AcquisitionStatusGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.controller.state()
+            && verify_account_generation(&state, self.account, self.generation).is_ok()
+            && let Some(account) = state.accounts.get_mut(&self.account)
+            && matches!(account.status, SessionStatus::Authenticating)
+        {
+            account.status = SessionStatus::Error;
+            account.error = Some(ErrorCode::OperationCancelled);
+        }
+    }
 }
 
 impl AccountController {
@@ -83,7 +118,7 @@ impl AccountController {
         Self::with_client(repository, process, AuthClient::new()?)
     }
 
-    fn with_client(
+    pub(crate) fn with_client(
         repository: AccountRepository,
         process: ProcessSessionId,
         client: AuthClient,
@@ -111,6 +146,7 @@ impl AccountController {
             .collect();
         let saved_ids = accounts.keys().copied().collect();
         Ok(Self {
+            controller_id: Uuid::new_v4(),
             snapshot_counter: AtomicU64::new(0),
             repository,
             client,
@@ -465,6 +501,11 @@ impl AccountController {
                 state.cancellation.subscribe(),
             )
         };
+        let _acquisition = AcquisitionStatusGuard {
+            controller: self,
+            account: id,
+            generation,
+        };
         let result = async {
             let microsoft = cancellable(cancellation.clone(), self.client.renew(&token)).await?;
             {
@@ -550,8 +591,86 @@ impl AccountController {
         result
     }
 
-    /// Future game execution consumes this validated metadata, never a UI token.
+    /// Validate the selected profile without exposing backend launch credentials.
     pub async fn validate_play(&self) -> Result<JavaProfile, CoreError> {
+        Ok(self.authorize_play().await?.profile)
+    }
+
+    pub(crate) fn play_selection(&self) -> Result<PlaySelection, CoreError> {
+        let state = self.state()?;
+        let id = state
+            .selected
+            .ok_or_else(|| CoreError::new(ErrorCode::AccountNotFound))?;
+        verify_account_generation(&state, id, state.generation)?;
+        Ok(PlaySelection {
+            controller: self.controller_id,
+            id,
+            generation: state.generation,
+        })
+    }
+
+    pub(crate) fn check_play_selection(&self, selection: &PlaySelection) -> Result<(), CoreError> {
+        if selection.controller != self.controller_id {
+            return Err(CoreError::new(ErrorCode::OperationCancelled));
+        }
+        let state = self.state()?;
+        verify_account_generation(&state, selection.id, selection.generation)
+    }
+
+    pub(crate) async fn authorize_selected_play(
+        &self,
+        selection: &PlaySelection,
+    ) -> Result<PlayAuthorization, CoreError> {
+        self.check_play_selection(selection)?;
+        let authorization = self.authorize_play().await?;
+        self.check_play_selection(selection)?;
+        Ok(authorization)
+    }
+
+    /// Commit synchronously while selection/removal are excluded. Never hold this
+    /// lock over network requests or installation verification.
+    pub(crate) fn with_play_authorization<T>(
+        &self,
+        authorization: PlayAuthorization,
+        action: impl FnOnce(crate::minecraft::launch::LaunchIdentity<'_>) -> Result<T, CoreError>,
+    ) -> Result<T, CoreError> {
+        let state = self.state()?;
+        if authorization.selection.controller != self.controller_id {
+            return Err(CoreError::new(ErrorCode::OperationCancelled));
+        }
+        verify_account_generation(
+            &state,
+            authorization.selection.id,
+            authorization.selection.generation,
+        )?;
+        let mut account = state
+            .accounts
+            .get(&authorization.selection.id)
+            .ok_or_else(|| CoreError::new(ErrorCode::AccountNotFound))?
+            .metadata
+            .clone();
+        if account.profile_id != authorization.profile.id {
+            return Err(CoreError::new(ErrorCode::AccountMismatch));
+        }
+        if authorization
+            .session
+            .as_ref()
+            .is_some_and(|session| session.needs_renewal())
+        {
+            return Err(CoreError::new(ErrorCode::AuthenticationRequired));
+        }
+        account.username = authorization.profile.name;
+        action(crate::minecraft::launch::LaunchIdentity {
+            account: &account,
+            minecraft_token: authorization
+                .session
+                .as_ref()
+                .map(|session| session.access_token()),
+            xuid: None,
+        })
+    }
+
+    async fn authorize_play(&self) -> Result<PlayAuthorization, CoreError> {
         let (id, kind, profile, generation, already_renewed, cancellation) = {
             let state = self.state()?;
             let id = state
@@ -577,16 +696,27 @@ impl AccountController {
             )
         };
         if kind == AccountKind::Offline {
-            return Ok(profile);
+            return Ok(PlayAuthorization {
+                selection: PlaySelection {
+                    controller: self.controller_id,
+                    id,
+                    generation,
+                },
+                profile,
+                session: None,
+            });
         }
         let session = self.acquire(id, false).await?;
         let first = cancellable(cancellation.clone(), self.client.validate(&session)).await;
-        let result = match first {
+        let (result, validated_session) = match first {
             Err(error) if error.code() == ErrorCode::AuthenticationRequired && !already_renewed => {
                 let renewed = self.acquire(id, true).await?;
-                cancellable(cancellation, self.client.validate(&renewed)).await
+                (
+                    cancellable(cancellation, self.client.validate(&renewed)).await,
+                    renewed,
+                )
             }
-            other => other,
+            other => (other, session),
         };
         let mut state = self.state()?;
         verify_account_generation(&state, id, generation)?;
@@ -601,7 +731,15 @@ impl AccountController {
         if matches!(&result, Err(error) if error.code() == ErrorCode::AuthenticationRequired) {
             state.sessions.remove(&id);
         }
-        result
+        Ok(PlayAuthorization {
+            selection: PlaySelection {
+                controller: self.controller_id,
+                id,
+                generation,
+            },
+            profile: result?,
+            session: Some(validated_session),
+        })
     }
 
     pub fn remove(&self, id: Uuid) -> Result<RemovalOutcome, CoreError> {
@@ -749,6 +887,198 @@ mod tests {
         let controller = AccountController::with_client(repo, ProcessSessionId::new(), client)
             .unwrap_or_else(|_| panic!("controller"));
         (paths, controller, account.account_id)
+    }
+
+    #[tokio::test]
+    async fn launch_authorization_cannot_survive_account_switch_or_sign_out() {
+        let (client, task) = mock_client(Vec::new());
+        let (paths, controller, microsoft) = saved_microsoft(client);
+        let offline = controller
+            .add_offline("Offline_Player")
+            .unwrap_or_else(|_| panic!("offline"));
+        controller
+            .select(offline.account_id)
+            .unwrap_or_else(|_| panic!("select"));
+        let selection = controller
+            .play_selection()
+            .unwrap_or_else(|_| panic!("selection"));
+        let authorization = controller
+            .authorize_selected_play(&selection)
+            .await
+            .unwrap_or_else(|_| panic!("offline authorization"));
+        controller
+            .select(microsoft)
+            .unwrap_or_else(|_| panic!("switch"));
+        let mut executed = false;
+        let result = controller.with_play_authorization(authorization, |_| {
+            executed = true;
+            Ok(())
+        });
+        assert_eq!(
+            result.err().map(|e| e.code()),
+            Some(ErrorCode::OperationCancelled)
+        );
+        assert!(!executed);
+        assert_eq!(
+            controller
+                .authorize_selected_play(&selection)
+                .await
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::OperationCancelled)
+        );
+        controller
+            .select(offline.account_id)
+            .unwrap_or_else(|_| panic!("select"));
+        let selection = controller
+            .play_selection()
+            .unwrap_or_else(|_| panic!("selection"));
+        let authorization = controller
+            .authorize_selected_play(&selection)
+            .await
+            .unwrap_or_else(|_| panic!("offline authorization"));
+        controller
+            .remove(offline.account_id)
+            .unwrap_or_else(|_| panic!("remove"));
+        let result = controller.with_play_authorization(authorization, |_| {
+            executed = true;
+            Ok(())
+        });
+        assert_eq!(
+            result.err().map(|e| e.code()),
+            Some(ErrorCode::OperationCancelled)
+        );
+        assert!(!executed);
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn microsoft_launch_authorization_uses_the_remotely_validated_token_only_in_backend() {
+        let mut responses = chain();
+        responses.push((
+            "/profile",
+            200,
+            r#"{"id":"5627dd98e6be3c21b8a8e92344183641","name":"PlayerOne"}"#.into(),
+        ));
+        let (client, task) = mock_client(responses);
+        let (paths, controller, id) = saved_microsoft(client);
+        let selection = controller
+            .play_selection()
+            .unwrap_or_else(|_| panic!("selection"));
+        let authorization = controller
+            .authorize_selected_play(&selection)
+            .await
+            .unwrap_or_else(|_| panic!("authorization"));
+        let result = controller.with_play_authorization(authorization, |identity| {
+            assert_eq!(identity.account.account_id, id);
+            assert_eq!(identity.account.kind, AccountKind::Microsoft);
+            assert_eq!(
+                identity.minecraft_token.map(Secret::expose),
+                Some("fixture-minecraft")
+            );
+            Ok(())
+        });
+        assert!(result.is_ok());
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_foreign_controller_cannot_commit_another_controllers_play_authorization() {
+        let mut responses = chain();
+        responses.push((
+            "/profile",
+            200,
+            r#"{"id":"5627dd98e6be3c21b8a8e92344183641","name":"PlayerOne"}"#.into(),
+        ));
+        let (client, task) = mock_client(responses);
+        let (paths, controller, _) = saved_microsoft(client);
+        let second = AccountController::new(
+            AccountRepository::new(PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store"))),
+            controller.process,
+        )
+        .unwrap_or_else(|_| panic!("second controller"));
+        let selection = controller
+            .play_selection()
+            .unwrap_or_else(|_| panic!("selection"));
+        let authorization = controller
+            .authorize_selected_play(&selection)
+            .await
+            .unwrap_or_else(|_| panic!("authorization"));
+        let mut executed = false;
+        let result = second.with_play_authorization(authorization, |_| {
+            executed = true;
+            Ok(())
+        });
+        assert_eq!(
+            result.err().map(|e| e.code()),
+            Some(ErrorCode::OperationCancelled)
+        );
+        assert!(!executed);
+        assert!(task.join().is_ok());
+        drop(second);
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn rejected_play_validation_returns_no_launch_authorization() {
+        let mut responses = chain();
+        responses.push(("/profile", 401, "{}".into()));
+        let (client, task) = mock_client(responses);
+        let (paths, controller, id) = saved_microsoft(client);
+        let selection = controller
+            .play_selection()
+            .unwrap_or_else(|_| panic!("selection"));
+        assert_eq!(
+            controller
+                .authorize_selected_play(&selection)
+                .await
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::AuthenticationRequired)
+        );
+        assert!(controller.repository.refresh_token(id).is_ok());
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn dropping_play_authentication_clears_busy_state_and_preserves_credentials() {
+        let (client, server, observed, resume) = gated_client(vec![("/token", 503, "{}".into())]);
+        let (paths, controller, id) = saved_microsoft(client);
+        let controller = Arc::new(controller);
+        let worker = controller.clone();
+        let task = tokio::spawn(async move {
+            let selection = worker.play_selection()?;
+            worker.authorize_selected_play(&selection).await
+        });
+        assert!(observed.await.is_ok());
+        task.abort();
+        assert!(task.await.is_err());
+        assert!(resume.send(()).is_ok());
+        assert!(server.join().is_ok());
+        let state = controller.state().unwrap_or_else(|_| panic!("state"));
+        let account = state.accounts.get(&id).unwrap_or_else(|| panic!("account"));
+        assert!(matches!(account.status, SessionStatus::Error));
+        assert_eq!(account.error, Some(ErrorCode::OperationCancelled));
+        assert_eq!(state.selected, Some(id));
+        assert!(
+            state
+                .flights
+                .get(&id)
+                .unwrap_or_else(|| panic!("flight"))
+                .try_lock()
+                .is_ok()
+        );
+        drop(state);
+        assert!(controller.repository.refresh_token(id).is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }
 
     fn chain() -> Vec<(&'static str, u16, String)> {

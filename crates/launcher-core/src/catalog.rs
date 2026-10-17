@@ -540,4 +540,4 @@ async fn body(mut response: reqwest::Response) -> Result<Vec<u8>, CoreError> {
 
 #[cfg(test)]
 #[path = "catalog_tests.rs"]
-mod tests;
+pub(crate) mod tests;

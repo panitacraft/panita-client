@@ -45,10 +45,15 @@ pub(crate) fn native_file(file: &private_fs::PrivateFile) -> Result<std::fs::Fil
 
 #[derive(Clone, Default)]
 pub struct Cancellation {
-    inner: Arc<(AtomicBool, Notify)>,
+    inner: Arc<(AtomicBool, Notify, std::sync::Mutex<()>)>,
 }
 impl Cancellation {
     pub fn cancel(&self) {
+        let _commit = self
+            .inner
+            .2
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         self.inner.0.store(true, Ordering::SeqCst);
         self.inner.1.notify_waiters();
     }
@@ -58,6 +63,20 @@ impl Cancellation {
         } else {
             Ok(())
         }
+    }
+    /// Linearize cancellation against synchronous process creation. A cancel
+    /// before commit prevents it; after commit the running process needs stop.
+    pub(crate) fn commit<T>(
+        &self,
+        action: impl FnOnce() -> Result<T, CoreError>,
+    ) -> Result<T, CoreError> {
+        let _commit = self
+            .inner
+            .2
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.check()?;
+        action()
     }
     pub async fn cancelled(&self) {
         loop {

@@ -61,6 +61,10 @@ pub struct MinecraftSession {
 }
 
 impl MinecraftSession {
+    pub(crate) fn access_token(&self) -> &Secret {
+        &self.access
+    }
+
     pub fn needs_renewal(&self) -> bool {
         Instant::now() >= self.expires_at || SystemTime::now() >= self.expires_wall
     }
