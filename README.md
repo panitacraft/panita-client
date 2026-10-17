@@ -47,6 +47,16 @@ Clippy and the UI build passed. Linux compilation passed, but migration tests
 remain blocked by protected-write failures also seen in the unchanged baseline
 storage test. Linux migration execution is not qualified.
 
+The readable-cache follow-up passed 98 Windows workspace tests with one
+intentional live-test skip, plus Clippy and formatting checks. Both isolated
+installations were rebuilt using the new version/Java paths, reusing all 4,348
+and 5,626 artifacts without artifact downloads and verifying Java 21/25.
+All four synthetic world/options hashes remained unchanged. After coordinated
+validation-only cleanup, every installed artifact reference still exists with
+its expected size; obsolete runtime/client paths, duplicate legacy asset-index
+aliases, and seven completed test generations were removed. Each installation
+retains its current generation and an inactive, matching journal.
+
 ## Development
 
 The workspace uses Rust 1.96, Node.js 24, and pnpm 11.25. Tauri v2 requires
