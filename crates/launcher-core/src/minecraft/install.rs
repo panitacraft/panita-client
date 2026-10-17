@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use super::download::{
     Cancellation, DownloadProgress, Downloader, ensure_parent, io, lock, verified_file,
+    verified_planned_file,
 };
 use super::natives::NativeFile;
 use super::plan::{InstallPlan, PlannedArtifact};
@@ -123,15 +124,20 @@ fn executable(paths: &AppPaths, file: &PlannedArtifact) -> Result<(), CoreError>
         return Ok(());
     }
     let (directory, leaf) = ensure_parent(paths.root(), &file.destination)?;
-    let file = directory.open_file(leaf).map_err(map_private_error)?;
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
+    return super::executable::require(&directory, &leaf);
+    #[cfg(not(target_os = "linux"))]
     {
-        use std::os::unix::fs::PermissionsExt;
-        super::download::native_file(&file)?
-            .set_permissions(std::fs::Permissions::from_mode(0o700))
-            .map_err(io)?;
+        let file = directory.open_file(leaf).map_err(map_private_error)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            super::download::native_file(&file)?
+                .set_permissions(std::fs::Permissions::from_mode(0o700))
+                .map_err(io)?;
+        }
+        file.verify().map_err(map_private_error)
     }
-    file.verify().map_err(map_private_error)
 }
 
 async fn verify_java(
@@ -195,7 +201,7 @@ async fn download_all(
     for file in &plan.artifacts {
         cancel.check()?;
         let (directory, leaf) = ensure_parent(paths.root(), &file.destination)?;
-        if !verified_file(&directory, &leaf, &file.artifact)? {
+        if !verified_planned_file(&directory, &leaf, &file.artifact, file.executable)? {
             missing = missing
                 .checked_add(file.artifact.size + 4096)
                 .ok_or_else(invalid)?;
@@ -215,13 +221,7 @@ async fn download_all(
             let progress = progress.clone();
             workers.spawn(async move {
                 downloader
-                    .cache(
-                        &paths,
-                        &file.destination,
-                        &file.artifact,
-                        &cancel,
-                        progress.as_ref(),
-                    )
+                    .cache_planned(&paths, &file, &cancel, progress.as_ref())
                     .await?;
                 executable(&paths, &file)
             });
@@ -395,9 +395,10 @@ pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, Cor
     installed.plan.verify_dependencies(paths)?;
     for file in &installed.plan.artifacts {
         let (directory, leaf) = ensure_parent(paths.root(), &file.destination)?;
-        if !verified_file(&directory, &leaf, &file.artifact)? {
+        if !verified_planned_file(&directory, &leaf, &file.artifact, file.executable)? {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
+        executable(paths, file)?;
     }
     let native_root = root.join(format!("natives-{}", installed.operation));
     for native in &installed.native_files {

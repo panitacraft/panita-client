@@ -7,6 +7,8 @@ use sha1::{Digest, Sha1};
 
 use crate::error::{CoreError, ErrorCode};
 pub mod download;
+#[cfg(target_os = "linux")]
+mod executable;
 pub mod install;
 pub mod natives;
 pub mod plan;

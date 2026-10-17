@@ -195,6 +195,21 @@ pub(crate) fn verified_file(
     Ok(format!("{:x}", hash.finalize()) == artifact.sha1)
 }
 
+pub(crate) fn verified_planned_file(
+    directory: &PrivateDir,
+    name: &str,
+    artifact: &Artifact,
+    executable: bool,
+) -> Result<bool, CoreError> {
+    #[cfg(target_os = "linux")]
+    if executable {
+        return super::executable::matches(directory, name, artifact);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = executable;
+    verified_file(directory, name, artifact)
+}
+
 fn cleanup_partials(directory: &PrivateDir, path: &Path) -> Result<(), CoreError> {
     for entry in std::fs::read_dir(path).map_err(io)? {
         let entry = entry.map_err(io)?;
@@ -292,6 +307,12 @@ pub struct Downloader {
     test_base: Option<String>,
 }
 
+struct CacheRequest<'a> {
+    relative: &'a str,
+    artifact: &'a Artifact,
+    executable: bool,
+}
+
 impl Downloader {
     pub fn new() -> Result<Self, CoreError> {
         let client = reqwest::Client::builder()
@@ -380,8 +401,56 @@ impl Downloader {
         cancel: &Cancellation,
         progress: &(dyn Fn(DownloadProgress) + Sync),
     ) -> Result<PathBuf, CoreError> {
+        self.cache_request(
+            paths,
+            CacheRequest {
+                relative,
+                artifact,
+                executable: false,
+            },
+            cancel,
+            progress,
+        )
+        .await
+    }
+
+    pub(crate) async fn cache_planned(
+        &self,
+        paths: &AppPaths,
+        file: &super::plan::PlannedArtifact,
+        cancel: &Cancellation,
+        progress: &(dyn Fn(DownloadProgress) + Sync),
+    ) -> Result<PathBuf, CoreError> {
+        self.cache_request(
+            paths,
+            CacheRequest {
+                relative: &file.destination,
+                artifact: &file.artifact,
+                executable: file.executable,
+            },
+            cancel,
+            progress,
+        )
+        .await
+    }
+
+    async fn cache_request(
+        &self,
+        paths: &AppPaths,
+        request: CacheRequest<'_>,
+        cancel: &Cancellation,
+        progress: &(dyn Fn(DownloadProgress) + Sync),
+    ) -> Result<PathBuf, CoreError> {
+        let CacheRequest {
+            relative,
+            artifact,
+            executable,
+        } = request;
         artifact.validate()?;
         safe_path(relative)?;
+        if executable && !relative.starts_with("runtime/") {
+            return Err(invalid());
+        }
         if !["libraries/", "assets/", "versions/", "runtime/"]
             .iter()
             .any(|prefix| relative.starts_with(prefix))
@@ -395,7 +464,11 @@ impl Downloader {
         let (directory, name) = ensure_parent(paths.root(), relative)?;
         cleanup_partials(&directory, &paths.root().join(parent))?;
         cancel.check()?;
-        if verified_file(&directory, &name, artifact)? {
+        if verified_planned_file(&directory, &name, artifact, executable)? {
+            #[cfg(target_os = "linux")]
+            if executable {
+                super::executable::enable(&directory, &name)?;
+            }
             progress(DownloadProgress {
                 bytes: artifact.size,
                 total: artifact.size,
@@ -420,7 +493,15 @@ impl Downloader {
         {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
-        let mut output = directory.atomic_durable(&name).map_err(map_private_error)?;
+        let staged = executable && cfg!(target_os = "linux");
+        let target = if staged {
+            format!(".private-fs-{}.tmp", uuid::Uuid::new_v4().simple())
+        } else {
+            name.clone()
+        };
+        let mut output = directory
+            .atomic_durable(&target)
+            .map_err(map_private_error)?;
         let mut hash = Sha1::new();
         let mut count = 0u64;
         loop {
@@ -448,6 +529,10 @@ impl Downloader {
         }
         cancel.check()?;
         output.commit().map_err(map_private_error)?;
+        #[cfg(target_os = "linux")]
+        if staged {
+            super::executable::publish(&directory, &target, &name)?;
+        }
         Ok(paths.root().join(relative))
     }
 }
@@ -544,6 +629,79 @@ mod tests {
             std::env::temp_dir().join(format!("panita-download-{}", uuid::Uuid::new_v4())),
         )
         .unwrap_or_else(|_| panic!("paths"))
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn executable_runtime_download_reuse_and_repair_preserve_protection() {
+        use std::os::unix::fs::PermissionsExt;
+        let bytes = b"verified runtime executable";
+        let server = Server::new(bytes.to_vec(), bytes.len(), Duration::ZERO);
+        let downloader = server.downloader();
+        let paths = paths();
+        let file = super::super::plan::PlannedArtifact {
+            destination: "runtime/java-21-linux/bin/java".into(),
+            artifact: artifact(bytes),
+            executable: true,
+        };
+        let cancel = Cancellation::default();
+        let local = paths.root().join(&file.destination);
+        for _ in 0..2 {
+            downloader
+                .cache_planned(&paths, &file, &cancel, &|_| {})
+                .await
+                .unwrap_or_else(|error| panic!("executable cache: {error:?}"));
+            assert_eq!(
+                std::fs::metadata(&local)
+                    .unwrap_or_else(|_| panic!("metadata"))
+                    .permissions()
+                    .mode()
+                    & 0o7777,
+                0o700
+            );
+            let (directory, leaf) =
+                ensure_parent(paths.root(), &file.destination).unwrap_or_else(|_| panic!("parent"));
+            assert!(
+                verified_planned_file(&directory, &leaf, &file.artifact, true).unwrap_or(false)
+            );
+            assert!(
+                directory.open_file(&leaf).is_err(),
+                "metadata policy must remain 0600"
+            );
+        }
+        assert_eq!(server.requests.load(Ordering::SeqCst), 1);
+        std::fs::write(&local, vec![b'x'; bytes.len()])
+            .unwrap_or_else(|_| panic!("corrupt fixture"));
+        downloader
+            .cache_planned(&paths, &file, &cancel, &|_| {})
+            .await
+            .unwrap_or_else(|error| panic!("repair executable: {error:?}"));
+        assert_eq!(std::fs::read(&local).unwrap_or_default(), bytes);
+        assert_eq!(server.requests.load(Ordering::SeqCst), 2);
+        // Failed download verification must preserve the existing file and mode.
+        let bad_server = Server::new(vec![b'y'; bytes.len()], bytes.len(), Duration::ZERO);
+        std::fs::write(&local, vec![b'x'; bytes.len()])
+            .unwrap_or_else(|_| panic!("corrupt fixture"));
+        assert!(
+            bad_server
+                .downloader()
+                .cache_planned(&paths, &file, &cancel, &|_| {})
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            std::fs::read(&local).unwrap_or_default(),
+            vec![b'x'; bytes.len()]
+        );
+        assert_eq!(
+            std::fs::metadata(&local)
+                .unwrap_or_else(|_| panic!("metadata"))
+                .permissions()
+                .mode()
+                & 0o7777,
+            0o700
+        );
+        std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
     }
 
     #[tokio::test]
