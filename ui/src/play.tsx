@@ -57,7 +57,7 @@ export function PlayNotice() {
   const play = useContext(PlayContext);
   return <>
     {play?.error && <p role="alert">{play.error}</p>}
-    {play?.snapshot?.closeBlocked && <p className="catalog-notice" role="alert">Cierra Minecraft desde su menú o cancela la preparación antes de cerrar Panita Client. Puedes minimizar esta ventana.</p>}
+    {play?.snapshot?.closeBlocked && <p className="catalog-notice" role="alert">No pudimos cerrar esta ventana. Si hay un inicio pendiente, cancélalo y vuelve a intentarlo. Puedes minimizar esta ventana.</p>}
   </>;
 }
 
@@ -93,6 +93,7 @@ export function PlayControls({ instanceId, allowed }: { instanceId: string; allo
     {active && !running && entry?.phase !== 'warning' && <button type="button" disabled={busy || entry?.phase === 'cancelling'} onClick={() => void act('cancel_play', { requestId: entry?.requestId })}>Cancelar inicio</button>}
     {running && entry && <>
       <p>Cierra Minecraft desde su menú para guardar la partida.</p>
+      <p>Si cierras esta ventana, Panita seguirá en segundo plano hasta que cierres los juegos. Abre Panita de nuevo para volver a esta pantalla.</p>
       <div className="account-buttons">
         {play?.snapshot?.gracefulStopSupported && entry.phase !== 'stopping' && <button type="button" disabled={busy} onClick={() => void act('stop_game', { requestId: entry.requestId, force: false })}>Solicitar cierre</button>}
         <button type="button" disabled={busy} onClick={() => setForceQuestion(entry.requestId)}>Cerrar forzosamente…</button>

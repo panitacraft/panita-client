@@ -18,6 +18,16 @@ close protection, menu exit and restored Play controls passed. Both synthetic
 world files remained unchanged. Microsoft Play and installed Linux game
 qualification remain pending.
 
+Closing the launcher window during gameplay now keeps Panita in the background.
+Opening it again restores the same session and active-instance controls. If the
+window remains hidden, Panita exits after the last game closes. Other pending
+launches are cancelled when hiding; preparation alone still requires completion
+or cancellation before closing. Visible and minimized windows remain open.
+Windows acceptance verified hiding during Minecraft 1.21.1, restoring the same
+launcher process and active controls, and automatic background exit after normal
+game shutdown. Multiple-game lifecycle checks pass in automated tests; Linux
+desktop background behavior still requires installed-product validation.
+
 Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on
 2026-10-16. See [the closure record](https://github.com/panitacraft/panita-client/issues/4)
 for verification and accepted follow-ups: remaining browser failure observations.

@@ -1,6 +1,108 @@
 use super::*;
 
 #[test]
+fn hidden_launcher_keeps_all_games_and_exits_only_after_last_exit() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let first = Uuid::new_v4();
+    let second = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    for instance in [first, second] {
+        assert!(controller.reserve(instance, request).is_ok());
+        controller.update(instance, request, |entry| entry.phase = Phase::Running);
+    }
+    assert!(controller.close_window(|| true));
+    assert!(!controller.finish_background());
+    assert_eq!(
+        controller.reserve(Uuid::new_v4(), Uuid::new_v4()).err(),
+        Some(ErrorCode::OperationCancelled)
+    );
+    controller.update(first, request, |entry| entry.phase = Phase::Exited);
+    assert!(!controller.finish_background());
+    controller.update(second, request, |entry| entry.phase = Phase::Exited);
+    assert!(controller.finish_background());
+    assert!(!controller.finish_background());
+    assert!(!controller.restore());
+}
+
+#[test]
+fn reopening_preserves_request_and_game_controls_and_prevents_hidden_exit() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    assert!(controller.reserve(instance, request).is_ok());
+    controller.update(instance, request, |entry| entry.phase = Phase::Stopping);
+    assert!(controller.close_window(|| true));
+    assert!(controller.restore());
+    let snapshot = controller.snapshot().unwrap_or_else(|_| panic!("snapshot"));
+    assert_eq!(snapshot["instances"][0]["requestId"], json!(request));
+    assert_eq!(snapshot["instances"][0]["phase"], json!("stopping"));
+    controller.update(instance, request, |entry| entry.phase = Phase::Exited);
+    assert!(!controller.finish_background());
+    assert!(controller.reserve(instance, Uuid::new_v4()).is_ok());
+}
+
+#[test]
+fn hiding_cancels_pending_work_and_waits_for_its_completion() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let running = Uuid::new_v4();
+    let pending = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    assert!(controller.reserve(running, request).is_ok());
+    controller.update(running, request, |entry| entry.phase = Phase::Running);
+    let cancel = controller
+        .reserve(pending, request)
+        .unwrap_or_else(|_| panic!("reservation"));
+    assert!(controller.close_window(|| true));
+    assert!(cancel.check().is_err());
+    controller.update(running, request, |entry| entry.phase = Phase::Exited);
+    assert!(!controller.finish_background());
+    controller.fail(pending, request, ErrorCode::OperationCancelled);
+    assert!(controller.finish_background());
+}
+
+#[test]
+fn failed_hide_keeps_window_lifecycle_visible() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    assert!(controller.reserve(instance, request).is_ok());
+    controller.update(instance, request, |entry| entry.phase = Phase::Running);
+    assert!(controller.close_window(|| false));
+    assert_eq!(
+        controller.snapshot().unwrap_or_else(|_| panic!("snapshot"))["closeBlocked"],
+        json!(true)
+    );
+    controller.update(instance, request, |entry| entry.phase = Phase::Exited);
+    assert!(!controller.finish_background());
+    assert!(!controller.close_window(|| panic!("idle close must not hide")));
+}
+
+#[test]
+fn restoration_after_last_exit_wins_over_queued_idle_check() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    assert!(controller.reserve(instance, request).is_ok());
+    controller.update(instance, request, |entry| entry.phase = Phase::Running);
+    assert!(controller.close_window(|| true));
+    controller.update(instance, request, |entry| entry.phase = Phase::Exited);
+    assert!(controller.restore());
+    assert!(!controller.finish_background());
+}
+
+#[test]
+fn visible_or_minimized_idle_launcher_does_not_exit_automatically() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    assert!(!controller.finish_background());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    assert!(controller.reserve(instance, request).is_ok());
+    assert!(controller.close_window(|| panic!("preparation must stay visible")));
+    controller.fail(instance, request, ErrorCode::OperationCancelled);
+    assert!(!controller.finish_background());
+}
+
+#[test]
 fn desktop_reservation_rejects_duplicates_and_stale_updates() {
     let controller = PlayController::new(ProcessSessionId::new());
     let instance = Uuid::new_v4();

@@ -61,10 +61,28 @@ struct State {
     revision: u64,
     closing: bool,
     close_blocked: bool,
+    background: bool,
     entries: HashMap<Uuid, Entry>,
 }
 
 impl State {
+    fn cancel_pending(&mut self) {
+        for entry in self.entries.values_mut() {
+            if matches!(
+                entry.phase,
+                Phase::Preparing | Phase::Warning | Phase::Starting | Phase::Cancelling
+            ) {
+                entry.cancel.cancel();
+                entry.phase = if entry.pending.take().is_some() {
+                    Phase::Cancelled
+                } else {
+                    Phase::Cancelling
+                };
+            }
+        }
+        self.changed();
+    }
+
     fn changed(&mut self) {
         self.revision += 1;
         if !self.entries.values().any(|entry| entry.phase.active()) {
@@ -94,7 +112,7 @@ impl PlayController {
             .state
             .lock()
             .map_err(|_| ErrorCode::StorageUnavailable)?;
-        if state.closing {
+        if state.closing || state.background {
             return Err(ErrorCode::OperationCancelled);
         }
         if state
@@ -182,6 +200,71 @@ impl PlayController {
         if let Ok(snapshot) = self.snapshot() {
             let _ = app.emit("play-changed", snapshot);
         }
+        // Window hiding, restoration and idle shutdown are ordered on the UI
+        // thread. Recheck ownership there rather than using a stale snapshot.
+        let handle = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            if handle.state::<DesktopState>().plays.finish_background() {
+                handle.exit(0);
+            }
+        });
+    }
+
+    /// Called on the UI thread. A failed hide must never enable hidden shutdown.
+    fn close_window(&self, hide: impl FnOnce() -> bool) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return true;
+        };
+        if state
+            .entries
+            .values()
+            .any(|entry| matches!(entry.phase, Phase::Running | Phase::Stopping))
+        {
+            if hide() {
+                state.background = true;
+                state.close_blocked = false;
+                state.cancel_pending();
+            } else {
+                state.close_blocked = true;
+                state.changed();
+            }
+            true
+        } else if state.entries.values().any(|entry| entry.phase.active()) {
+            state.close_blocked = true;
+            state.changed();
+            true
+        } else {
+            state.closing = true;
+            false
+        }
+    }
+
+    fn restore(&self) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.closing {
+            return false;
+        }
+        state.background = false;
+        state.close_blocked = false;
+        state.changed();
+        true
+    }
+
+    fn finish_background(&self) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.background
+            && !state.closing
+            && !state.entries.values().any(|entry| entry.phase.active())
+        {
+            state.closing = true;
+            true
+        } else {
+            false
+        }
     }
 
     /// Serialize normal exit against new requests. Fail closed on poisoned state.
@@ -201,20 +284,7 @@ impl PlayController {
 
     pub fn cancel_pending(&self) {
         if let Ok(mut state) = self.state.lock() {
-            for entry in state.entries.values_mut() {
-                if matches!(
-                    entry.phase,
-                    Phase::Preparing | Phase::Warning | Phase::Starting | Phase::Cancelling
-                ) {
-                    entry.cancel.cancel();
-                    entry.phase = if entry.pending.take().is_some() {
-                        Phase::Cancelled
-                    } else {
-                        Phase::Cancelling
-                    };
-                }
-            }
-            state.changed();
+            state.cancel_pending();
         }
     }
 
@@ -496,6 +566,33 @@ pub(super) fn prevent_close(app: &tauri::AppHandle) -> bool {
         controller.publish(app);
     }
     prevent
+}
+
+pub(super) fn close_window(window: &tauri::Window) -> bool {
+    let controller = &window.state::<DesktopState>().plays;
+    let prevent = controller.close_window(|| window.hide().is_ok());
+    controller.publish(window.app_handle());
+    prevent
+}
+
+pub(super) fn restore_window(app: &tauri::AppHandle, context: String) {
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = handle.get_webview_window("main")
+            && handle.state::<DesktopState>().plays.restore()
+        {
+            #[cfg(target_os = "linux")]
+            super::linux_activation::present(window, &context);
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = context;
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            handle.state::<DesktopState>().plays.publish(&handle);
+        }
+    });
 }
 
 #[cfg(test)]

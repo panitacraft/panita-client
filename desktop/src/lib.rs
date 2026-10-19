@@ -111,27 +111,14 @@ pub fn run() {
                 .any(|arg| arg.to_string_lossy().starts_with("panitacraft:")),
         })
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-            #[cfg(not(target_os = "linux"))]
-            let _ = cwd;
             account_commands::handle_callback(app, args);
-            if let Some(window) = app.get_webview_window("main") {
-                #[cfg(target_os = "linux")]
-                {
-                    linux_activation::present(window, &cwd);
-                }
-                #[cfg(not(target_os = "linux"))]
-                {
-                    let _ = window.unminimize();
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
-            }
+            play_commands::restore_window(app, cwd);
         }))
         .plugin(tauri_plugin_opener::init())
         .on_window_event(|window, event| {
             if window.label() == "main"
                 && let tauri::WindowEvent::CloseRequested { api, .. } = event
-                && play_commands::prevent_close(window.app_handle())
+                && play_commands::close_window(window)
             {
                 api.prevent_close();
             }
