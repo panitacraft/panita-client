@@ -10,7 +10,11 @@ described below. Phase 5 game launch and process lifecycle are accepted as of
 2026-10-19. Desktop Play connects installed vanilla instances to verified launch
 preflight, cancellation, per-attempt outage confirmation and game lifecycle
 status. Installation and maintenance workflows remain Phase 6; clean-machine
-and distribution qualification remain Phase 7.
+and distribution qualification remain Phase 7. Phase 6 started on 2026-10-19
+with typed account commands and tested account UI state transitions. Account
+feedback rejects stale results, retries failed initialization, and retains
+incomplete sign-out cleanup warnings across account changes. Installation,
+settings, maintenance, and complete end-to-end acceptance remain pending.
 
 An isolated Windows build reached the Minecraft 26.3 and 1.21.1 main menus
 through desktop Play with a synthetic offline account. Cancellation, launcher
