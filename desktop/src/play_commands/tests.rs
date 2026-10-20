@@ -1,8 +1,44 @@
 use super::*;
 
+#[test]
+fn explicit_update_owns_the_instance_and_its_backup_result_until_completion() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    let cancel = controller
+        .reserve_operation(instance, request, OperationKind::Update)
+        .unwrap_or_else(|_| panic!("update"));
+    assert_eq!(
+        controller.reserve(instance, Uuid::new_v4()).err(),
+        Some(ErrorCode::OperationBusy)
+    );
+    controller.update(instance, request, |entry| entry.backup_requested = true);
+    controller.cancel_pending();
+    assert!(cancel.check().is_ok());
+    let backup = Uuid::new_v4();
+    controller.update(instance, request, |entry| {
+        entry.phase = Phase::Installed;
+        entry.backup_operation = Some(backup);
+    });
+    let snapshot = controller.snapshot().unwrap_or_else(|_| panic!("snapshot"));
+    assert_eq!(snapshot["instances"][0]["operation"], json!("update"));
+    assert_eq!(snapshot["instances"][0]["backupRequested"], json!(true));
+    assert_eq!(snapshot["instances"][0]["backupOperation"], json!(backup));
+    assert!(!controller.installation_progress(
+        instance,
+        request,
+        launcher_core::minecraft::download::DownloadProgress {
+            bytes: 1,
+            total: 1,
+            reused: false
+        }
+    ));
+    assert!(controller.reserve(instance, Uuid::new_v4()).is_ok());
+}
+
 fn installation(controller: &PlayController, instance: Uuid, request: Uuid) -> Cancellation {
     controller
-        .reserve_operation(instance, request, true)
+        .reserve_operation(instance, request, OperationKind::Install)
         .unwrap_or_else(|_| panic!("reservation"))
 }
 
@@ -301,6 +337,8 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
             "exitCode",
             "exitSuccess",
             "operation",
+            "backupRequested",
+            "backupOperation",
             "receivedFiles",
             "reusedFiles",
         ];

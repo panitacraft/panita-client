@@ -20,6 +20,9 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupReceipt {
+    pub schema_version: u32,
+    pub instance_id: Uuid,
+    pub installed_version: String,
     pub operation: Uuid,
     pub files: u64,
     pub bytes: u64,
@@ -202,13 +205,20 @@ fn capability(directory: &private_fs::PrivateDir) -> Result<Dir, CoreError> {
 /// Partial directories are preserved without a completion receipt after failure.
 pub(super) fn create(
     root: &Path,
+    instance_id: Uuid,
+    installed_version: &str,
     operation: Uuid,
     cancel: &Cancellation,
 ) -> Result<Option<BackupReceipt>, CoreError> {
     cancel.check()?;
-    if operation.is_nil() {
+    if operation.is_nil()
+        || instance_id.is_nil()
+        || installed_version.len() > 128
+        || installed_version.contains('/')
+    {
         return Err(invalid());
     }
+    super::safe_path(installed_version)?;
     let private = private_fs::PrivateDir::open(root).map_err(map_private_error)?;
     let game = capability(&private)?
         .open_dir_nofollow("minecraft")
@@ -302,6 +312,9 @@ pub(super) fn create(
         }
     }
     let receipt = BackupReceipt {
+        schema_version: 1,
+        instance_id,
+        installed_version: installed_version.to_owned(),
         operation,
         files,
         bytes,
@@ -318,6 +331,13 @@ pub(super) fn create(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn backup(
+        root: &Path,
+        operation: Uuid,
+        cancel: &Cancellation,
+    ) -> Result<Option<BackupReceipt>, CoreError> {
+        create(root, Uuid::from_u128(1), "1.21.1", operation, cancel)
+    }
     fn fixture() -> std::path::PathBuf {
         let root = std::env::temp_dir().join(format!("panita-world-backup-{}", Uuid::new_v4()));
         let private =
@@ -349,9 +369,13 @@ mod tests {
                 .unwrap_or_else(|_| panic!("ordinary game directory permissions"));
         }
         let operation = Uuid::new_v4();
-        let receipt = create(&root, operation, &Cancellation::default())
+        let receipt = backup(&root, operation, &Cancellation::default())
             .unwrap_or_else(|error| panic!("backup: {error}"));
-        assert!(receipt.is_some_and(|receipt| receipt.files == 1 && receipt.bytes == 13));
+        assert!(receipt.is_some_and(|receipt| receipt.schema_version == 1
+            && receipt.instance_id == Uuid::from_u128(1)
+            && receipt.installed_version == "1.21.1"
+            && receipt.files == 1
+            && receipt.bytes == 13));
         let mut archive = zip::ZipArchive::new(
             std::fs::File::open(root.join(format!("world-backups/{operation}/worlds.zip")))
                 .unwrap_or_else(|_| panic!("archive")),
@@ -376,14 +400,14 @@ mod tests {
             Some(b"keep options".as_slice())
         );
         assert!(archive.by_name("accounts.json").is_err());
-        assert!(create(&root, operation, &Cancellation::default()).is_err());
+        assert!(backup(&root, operation, &Cancellation::default()).is_err());
     }
 
     #[test]
     fn missing_worlds_and_cancellation_do_not_create_empty_backup_directories() {
         let root = fixture();
         assert!(
-            create(&root, Uuid::new_v4(), &Cancellation::default())
+            backup(&root, Uuid::new_v4(), &Cancellation::default())
                 .ok()
                 .flatten()
                 .is_none()
@@ -392,7 +416,7 @@ mod tests {
         let cancel = Cancellation::default();
         cancel.cancel();
         assert_eq!(
-            create(&root, Uuid::new_v4(), &cancel)
+            backup(&root, Uuid::new_v4(), &cancel)
                 .err()
                 .map(|error| error.code()),
             Some(ErrorCode::OperationCancelled)
@@ -410,7 +434,7 @@ mod tests {
         std::fs::hard_link(root.join("outside-fixture"), world.join("level.dat"))
             .unwrap_or_else(|_| panic!("link"));
         assert_eq!(
-            create(&root, Uuid::new_v4(), &Cancellation::default())
+            backup(&root, Uuid::new_v4(), &Cancellation::default())
                 .err()
                 .map(|error| error.code()),
             Some(ErrorCode::WorldBackupUnsafe)
@@ -420,7 +444,7 @@ mod tests {
         std::fs::write(world.join("accounts.json"), b"excluded fixture")
             .unwrap_or_else(|_| panic!("credential-named fixture"));
         assert_eq!(
-            create(&root, Uuid::new_v4(), &Cancellation::default())
+            backup(&root, Uuid::new_v4(), &Cancellation::default())
                 .err()
                 .map(|error| error.code()),
             Some(ErrorCode::WorldBackupUnsafe)
@@ -436,7 +460,7 @@ mod tests {
         std::os::unix::fs::symlink(&root, root.join("minecraft/saves/redirect"))
             .unwrap_or_else(|_| panic!("redirect"));
         assert_eq!(
-            create(&root, Uuid::new_v4(), &Cancellation::default())
+            backup(&root, Uuid::new_v4(), &Cancellation::default())
                 .err()
                 .map(|error| error.code()),
             Some(ErrorCode::WorldBackupUnsafe)

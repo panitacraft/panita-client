@@ -30,6 +30,23 @@ saved on close/hide; minimized or hidden state is not restored on the next launc
 Custom Java paths remain unsupported by launch preflight; the settings UI can clear
 an existing override. Older builds cannot read the new global settings schema.
 
+Vanilla version changes use an explicit update confirmation for the displayed
+installed/catalog versions. The installed version stays available until a verified
+new generation is published. A durable update journal recovers an interrupted
+publication before Play; old caches and player files are retained. Updates require
+a current enabled catalog response and do not use the offline Play fallback.
+
+The confirmation defaults to backing up worlds. Completed backups contain only
+`minecraft/saves/`, stored as `world-backups/{operation}/worlds.zip` inside the
+instance, with a schema-versioned `backup.json` receipt written after ZIP read-back
+verification. The receipt identifies the instance and version installed when the
+copy was made. Linked/redirected entries, unsafe names and detected source changes
+block backup creation. Partial directories are preserved without a completed
+receipt. Backups exclude launcher account data; update never restores or deletes
+worlds. Opening a world in a new Minecraft version may change it; reverting game
+files cannot undo those world changes. Live update and native confirmation/restart
+acceptance remain pending.
+
 An isolated Windows build reached the Minecraft 26.3 and 1.21.1 main menus
 through desktop Play with a synthetic offline account. Cancellation, launcher
 close protection, menu exit and restored Play controls passed. Both synthetic

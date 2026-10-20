@@ -7,3 +7,11 @@ export function canInstall(instance: CatalogInstance, stale: boolean): boolean {
     // pin is safe; changing it belongs to the explicit update workflow.
     && (instance.installedVersion === null || instance.installedVersion === instance.minecraftVersion);
 }
+
+export type UpdateTarget = { fromVersion: string; toVersion: string };
+export function updateTarget(instance: CatalogInstance, stale: boolean): UpdateTarget | null {
+  if (stale || instance.availability !== 'enabled' || !instance.compatible || !instance.supported
+    || instance.localState !== 'update_available' || !instance.installedVersion || !instance.minecraftVersion
+    || instance.installedVersion === instance.minecraftVersion) return null;
+  return { fromVersion: instance.installedVersion, toVersion: instance.minecraftVersion };
+}

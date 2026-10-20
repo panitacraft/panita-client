@@ -1,4 +1,5 @@
 export type LauncherErrorCode =
+  | 'world_backup_unsafe' | 'update_selection_changed'
   | 'invalid_data'
   | 'permission_denied'
   | 'storage_unavailable'
@@ -15,6 +16,8 @@ export type LauncherErrorCode =
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
+  world_backup_unsafe: 'No pudimos crear una copia segura de tus mundos. Revisa si hay archivos enlazados o cambios en la carpeta de mundos y vuelve a intentarlo.',
+  update_selection_changed: 'La versión instalada o la versión del catálogo cambió. Actualiza el catálogo y revisa la actualización antes de confirmarla de nuevo.',
   catalog_confirmation_required: 'No pudimos comprobar el estado actual de esta instancia. Confirma la advertencia para jugar con la instalación local.',
   process_start_failed: 'No pudimos iniciar Minecraft. Revisa la instalación e inténtalo de nuevo.',
   process_control_failed: 'No pudimos confirmar el estado de Minecraft. Revisa si sigue abierto antes de intentarlo de nuevo.',

@@ -45,3 +45,12 @@ test('failed installation refreshes local state and out-of-order progress cannot
   assert.notEqual(installationRefreshKey(failure), installationRefreshKey(progress));
   assert.equal(acceptPlaySnapshot(failure, progress), failure);
 });
+
+test('update results refresh installed pins while preserving request-scoped backup information', () => {
+  const active = { ...snapshot(10), instances: [{ instanceId: 'first', requestId: 'update-1', operation: 'update', phase: 'installing', backupRequested: true, backupOperation: null }] };
+  const complete = { ...snapshot(11), instances: [{ ...active.instances[0], phase: 'installed', backupOperation: 'backup-1' }] };
+  assert.equal(installationRefreshKey(active), '');
+  assert.notEqual(installationRefreshKey(complete), '');
+  assert.equal(acceptPlaySnapshot(complete, active), complete);
+  assert.equal(complete.instances[0].backupOperation, 'backup-1');
+});

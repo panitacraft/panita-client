@@ -7,7 +7,9 @@ export type PlayEntry = {
   error: string | null;
   exitCode: number | null;
   exitSuccess: boolean | null;
-  operation: 'install' | 'play';
+  operation: 'install' | 'update' | 'play';
+  backupRequested: boolean;
+  backupOperation: string | null;
   receivedFiles: number;
   reusedFiles: number;
 };
@@ -29,6 +31,6 @@ export function playActive(phase: PlayPhase): boolean {
 }
 
 export function installationRefreshKey(snapshot: PlaySnapshot | null): string {
-  return snapshot?.instances.filter(entry => entry.operation === 'install' && !playActive(entry.phase))
+  return snapshot?.instances.filter(entry => entry.operation !== 'play' && !playActive(entry.phase))
     .map(entry => `${entry.instanceId}:${entry.requestId}:${entry.phase}`).sort().join('|') ?? '';
 }

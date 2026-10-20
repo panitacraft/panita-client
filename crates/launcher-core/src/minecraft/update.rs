@@ -63,10 +63,13 @@ impl Journal {
             || self.previous_operation.is_nil()
             || self.operation == self.previous_operation
             || self.from_version == self.to_version
-            || self
-                .backup
-                .as_ref()
-                .is_some_and(|backup| !self.backup_requested || backup.operation != self.operation)
+            || self.backup.as_ref().is_some_and(|backup| {
+                backup.schema_version != 1
+                    || backup.instance_id != id
+                    || backup.installed_version != self.from_version
+                    || !self.backup_requested
+                    || backup.operation != self.operation
+            })
             || (!self.active && self.prepared.is_some())
         {
             return Err(invalid());
@@ -297,7 +300,8 @@ async fn update_with_catalog(
         )
         .await?;
         if journal.backup_requested {
-            journal.backup = world_backup::create(&root, operation, cancel)?;
+            journal.backup =
+                world_backup::create(&root, id, &journal.from_version, operation, cancel)?;
         }
         journal.prepared = Some(installed.clone());
         journal.validate(id)?;

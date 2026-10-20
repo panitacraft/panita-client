@@ -241,8 +241,9 @@ fn cancellation_before_publication_retains_old_installation_and_completed_world_
     let mut journal = staging(&paths, id, &previous);
     journal.backup_requested = true;
     let cancel = Cancellation::default();
-    journal.backup = world_backup::create(&root, journal.operation, &cancel)
-        .unwrap_or_else(|error| panic!("backup: {error}"));
+    journal.backup =
+        world_backup::create(&root, id, &journal.from_version, journal.operation, &cancel)
+            .unwrap_or_else(|error| panic!("backup: {error}"));
     assert!(journal.backup.is_some());
     write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("intent"));
     cancel.cancel();

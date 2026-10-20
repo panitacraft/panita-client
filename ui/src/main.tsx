@@ -8,7 +8,7 @@ import './style.css';
 import { Accounts } from './accounts';
 import { PlayControls, PlayNotice, PlayProvider, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
-import { canInstall } from './library-state';
+import { canInstall, updateTarget } from './library-state';
 import { PreferencesProvider, SettingsPanel, usePreferences } from './settings';
 
 type CatalogState =
@@ -104,6 +104,7 @@ function App() {
                 {!instance.supported && <p>Este tipo de instancia o su acceso todavía no es compatible.</p>}
                 <PlayControls instanceId={instance.id}
                   installAllowed={canInstall(instance, catalog.stale)}
+                  updateTarget={updateTarget(instance, catalog.stale)}
                   allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
               </article>
             ))}

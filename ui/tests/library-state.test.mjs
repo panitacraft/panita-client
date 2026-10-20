@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canInstall } from '../src/library-state.ts';
+import { canInstall, updateTarget } from '../src/library-state.ts';
 
 const instance = { availability: 'enabled', compatible: true, supported: true, localState: 'not_installed', installedVersion: null, minecraftVersion: '1.21.1' };
 
@@ -9,6 +9,17 @@ test('fresh and interrupted installations can install or resume the same recorde
     for (const installedVersion of [null, '1.21.1']) {
       assert.equal(canInstall({ ...instance, localState, installedVersion }, false), true);
     }
+  }
+});
+
+test('update offers a specific installed-to-catalog transition without replacing Play or permitting implicit installation', () => {
+  const updating = { ...instance, localState: 'update_available', installedVersion: '1.20.1', minecraftVersion: '1.21.1' };
+  assert.deepEqual(updateTarget(updating, false), { fromVersion: '1.20.1', toVersion: '1.21.1' });
+  assert.equal(canInstall(updating, false), false);
+  assert.equal(updateTarget(updating, true), null);
+  for (const availability of ['disabled', 'missing', 'unverified']) assert.equal(updateTarget({ ...updating, availability }, false), null);
+  for (const patch of [{ compatible: false }, { supported: false }, { installedVersion: null }, { minecraftVersion: null }, { installedVersion: '1.21.1' }, { localState: 'installed' }, { localState: 'needs_repair' }]) {
+    assert.equal(updateTarget({ ...updating, ...patch }, false), null);
   }
 });
 

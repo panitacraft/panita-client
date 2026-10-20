@@ -14,6 +14,22 @@ use uuid::Uuid;
 
 use super::{DesktopState, account_commands};
 
+#[derive(Clone, Copy, PartialEq)]
+enum OperationKind {
+    Play,
+    Install,
+    Update,
+}
+impl OperationKind {
+    fn text(self) -> &'static str {
+        match self {
+            Self::Play => "play",
+            Self::Install => "install",
+            Self::Update => "update",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Preparing,
@@ -61,7 +77,9 @@ struct Entry {
     game: Option<Arc<RunningGame>>,
     error: Option<ErrorCode>,
     exit: Option<launcher_core::minecraft::process::GameExit>,
-    installation: bool,
+    kind: OperationKind,
+    backup_requested: bool,
+    backup_operation: Option<Uuid>,
     received_files: u64,
     reused_files: u64,
     last_progress: std::time::Instant,
@@ -79,7 +97,7 @@ struct State {
 impl State {
     fn cancel_pending(&mut self, include_installations: bool) {
         for entry in self.entries.values_mut() {
-            if entry.installation && !include_installations {
+            if entry.kind != OperationKind::Play && !include_installations {
                 continue;
             }
             if matches!(
@@ -123,14 +141,14 @@ impl PlayController {
     }
 
     fn reserve(&self, instance: Uuid, request: Uuid) -> Result<Cancellation, ErrorCode> {
-        self.reserve_operation(instance, request, false)
+        self.reserve_operation(instance, request, OperationKind::Play)
     }
 
     fn reserve_operation(
         &self,
         instance: Uuid,
         request: Uuid,
-        installation: bool,
+        kind: OperationKind,
     ) -> Result<Cancellation, ErrorCode> {
         if instance.is_nil() || request.is_nil() {
             return Err(ErrorCode::InvalidData);
@@ -161,7 +179,7 @@ impl PlayController {
             instance,
             Entry {
                 request,
-                phase: if installation {
+                phase: if kind != OperationKind::Play {
                     Phase::Installing
                 } else {
                     Phase::Preparing
@@ -171,7 +189,9 @@ impl PlayController {
                 game: None,
                 error: None,
                 exit: None,
-                installation,
+                kind,
+                backup_requested: false,
+                backup_operation: None,
                 received_files: 0,
                 reused_files: 0,
                 last_progress: std::time::Instant::now(),
@@ -255,7 +275,8 @@ impl PlayController {
                     "confirmationId": entry.pending.as_ref().map(PendingPlay::operation_id),
                     "error": entry.error, "exitCode": entry.exit.and_then(|exit| exit.code),
                     "exitSuccess": entry.exit.map(|exit| exit.success),
-                    "operation": if entry.installation { "install" } else { "play" },
+                    "operation": entry.kind.text(),
+                    "backupRequested": entry.backup_requested, "backupOperation": entry.backup_operation,
                     "receivedFiles": entry.received_files, "reusedFiles": entry.reused_files,
                 })
             })
@@ -485,6 +506,27 @@ pub(super) fn begin_install(
     instance_id: Uuid,
     request_id: Uuid,
 ) -> Result<(), ErrorCode> {
+    begin_maintenance(app, state, instance_id, request_id, None)
+}
+
+#[tauri::command]
+pub(super) fn begin_update(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+    update: launcher_core::minecraft::update::UpdateRequest,
+) -> Result<(), ErrorCode> {
+    begin_maintenance(app, state, instance_id, request_id, Some(update))
+}
+
+fn begin_maintenance(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+    update: Option<launcher_core::minecraft::update::UpdateRequest>,
+) -> Result<(), ErrorCode> {
     let platform = native_platform()?;
     let paths = AppPaths::new(
         app.path()
@@ -495,7 +537,15 @@ pub(super) fn begin_install(
     // Use the same initialized private root as the other desktop workflows.
     account_commands::controller(&state)?;
     let controller = state.plays.clone();
-    let cancel = controller.reserve_operation(instance_id, request_id, true)?;
+    let kind = if update.is_some() {
+        OperationKind::Update
+    } else {
+        OperationKind::Install
+    };
+    let cancel = controller.reserve_operation(instance_id, request_id, kind)?;
+    controller.update(instance_id, request_id, |entry| {
+        entry.backup_requested = update.as_ref().is_some_and(|request| request.backup_worlds)
+    });
     controller.publish(&app);
     tauri::async_runtime::spawn(async move {
         let result = async {
@@ -503,14 +553,16 @@ pub(super) fn begin_install(
             let record = InstanceRegistry::new(paths.clone())
                 .get(instance_id)
                 .map_err(|error| error.code())?;
-            if record.is_some_and(|record| {
-                matches!(
-                    record.state,
-                    InstallationState::Installed
-                        | InstallationState::UpdateAvailable
-                        | InstallationState::Running
-                )
-            }) {
+            if update.is_none()
+                && record.is_some_and(|record| {
+                    matches!(
+                        record.state,
+                        InstallationState::Installed
+                            | InstallationState::UpdateAvailable
+                            | InstallationState::Running
+                    )
+                })
+            {
                 return Err(ErrorCode::OperationBusy);
             }
             cancel.check().map_err(|error| error.code())?;
@@ -521,23 +573,38 @@ pub(super) fn begin_install(
                     progress_controller.publish(&progress_app);
                 }
             });
-            launcher_core::minecraft::install::install(
-                &paths,
-                instance_id,
-                &platform,
-                &cancel,
-                progress,
-            )
-            .await
-            .map_err(|error| error.code())?;
-            Ok(())
+            if let Some(update) = update {
+                let outcome = launcher_core::minecraft::update::update(
+                    &paths,
+                    instance_id,
+                    &platform,
+                    update,
+                    &cancel,
+                    progress,
+                )
+                .await
+                .map_err(|error| error.code())?;
+                Ok(outcome.backup.map(|backup| backup.operation))
+            } else {
+                launcher_core::minecraft::install::install(
+                    &paths,
+                    instance_id,
+                    &platform,
+                    &cancel,
+                    progress,
+                )
+                .await
+                .map_err(|error| error.code())?;
+                Ok(None)
+            }
         }
         .await;
         match result {
             // The published manifest is authoritative if cancellation races
             // successful completion. Never report committed data as cancelled.
-            Ok(()) => controller.update(instance_id, request_id, |entry| {
-                entry.phase = Phase::Installed
+            Ok(backup) => controller.update(instance_id, request_id, |entry| {
+                entry.phase = Phase::Installed;
+                entry.backup_operation = backup;
             }),
             Err(error) => controller.fail(instance_id, request_id, error),
         }

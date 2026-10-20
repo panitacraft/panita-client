@@ -157,6 +157,7 @@ pub fn run() {
             account_commands::validate_account,
             play_commands::play_snapshot,
             play_commands::begin_install,
+            play_commands::begin_update,
             play_commands::begin_play,
             play_commands::confirm_play,
             play_commands::cancel_play,
