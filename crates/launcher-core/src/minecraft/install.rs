@@ -41,14 +41,14 @@ pub struct InstalledLock {
 
 pub type Progress = Arc<dyn Fn(DownloadProgress) + Send + Sync>;
 
-fn metadata_root(paths: &AppPaths, id: Uuid) -> Result<std::path::PathBuf, CoreError> {
+pub(super) fn metadata_root(paths: &AppPaths, id: Uuid) -> Result<std::path::PathBuf, CoreError> {
     if id.is_nil() {
         return Err(invalid());
     }
     InstanceRegistry::new(paths.clone()).prepare_instance(id)
 }
 
-fn read_json<T: serde::de::DeserializeOwned>(
+pub(super) fn read_json<T: serde::de::DeserializeOwned>(
     root: &std::path::Path,
     name: &str,
 ) -> Result<Option<T>, CoreError> {
@@ -70,7 +70,7 @@ fn read_json<T: serde::de::DeserializeOwned>(
     }
     Ok(Some(serde_json::from_slice(&bytes).map_err(|_| invalid())?))
 }
-fn write_json(
+pub(super) fn write_json(
     root: &std::path::Path,
     relative: &str,
     value: &impl Serialize,
@@ -97,6 +97,9 @@ pub(super) fn recover_locked(
     id: Uuid,
     root: &std::path::Path,
 ) -> Result<(), CoreError> {
+    if super::update::recover_locked(paths, id, root)? {
+        return Ok(());
+    }
     let Some(mut journal) = read_json::<Journal>(root, "install-journal.json")? else {
         return Ok(());
     };
@@ -320,41 +323,17 @@ pub async fn install(
         settings: crate::settings::InstanceSettings::default(),
     };
     registry.save_installation(&record)?;
-    let result = async {
-        let downloader = Downloader::new()?;
-        let mut plan =
-            super::plan::resolve(&downloader, minecraft_version, platform, cancel).await?;
-        plan.allocate_runtime(paths)?;
-        download_all(paths, &downloader, &plan, cancel, progress).await?;
-        plan.verify_dependencies(paths)?;
-        verify_java(paths, &plan, platform, cancel).await?;
-        let native_root = root.join(format!("natives-{operation}"));
-        if !plan.version.natives.is_empty() {
-            private_fs::PrivateDir::ensure(&native_root).map_err(map_private_error)?;
-        }
-        let mut native_files = Vec::new();
-        for native in &plan.version.natives {
-            let relative = plan.library_path(&native.artifact)?;
-            let (directory, leaf) = ensure_parent(paths.root(), &relative)?;
-            if !verified_file(&directory, &leaf, &native.artifact)? {
-                return Err(CoreError::new(ErrorCode::ArtifactMismatch));
-            }
-            let file = directory.open_file(leaf).map_err(map_private_error)?;
-            native_files.extend(super::natives::extract(
-                file,
-                &native_root,
-                &native.excludes,
-                cancel,
-            )?);
-        }
-        cancel.check()?;
-        let installed = InstalledLock {
-            schema_version: 2,
-            instance_id: id,
+    let result: Result<InstalledLock, CoreError> = async {
+        let installed = prepare(
+            paths,
+            id,
             operation,
-            plan,
-            native_files,
-        };
+            platform,
+            minecraft_version,
+            cancel,
+            progress,
+        )
+        .await?;
         // Publishing this pointer is the commit point; failed registry/journal writes
         // leave recovery pending, never a falsely complete installation.
         write_json(&root, "installed.json", &installed)?;
@@ -381,6 +360,53 @@ pub async fn install(
     result
 }
 
+/// Prepare a fresh immutable generation without publishing an installed pointer.
+/// The caller retains the instance operation lock through preparation and commit.
+pub(super) async fn prepare(
+    paths: &AppPaths,
+    id: Uuid,
+    operation: Uuid,
+    platform: &Platform,
+    version: &str,
+    cancel: &Cancellation,
+    progress: Progress,
+) -> Result<InstalledLock, CoreError> {
+    let root = metadata_root(paths, id)?;
+    let downloader = Downloader::new()?;
+    let mut plan = super::plan::resolve(&downloader, version, platform, cancel).await?;
+    plan.allocate_runtime(paths)?;
+    download_all(paths, &downloader, &plan, cancel, progress).await?;
+    plan.verify_dependencies(paths)?;
+    verify_java(paths, &plan, platform, cancel).await?;
+    let native_root = root.join(format!("natives-{operation}"));
+    if !plan.version.natives.is_empty() {
+        private_fs::PrivateDir::ensure(&native_root).map_err(map_private_error)?;
+    }
+    let mut native_files = Vec::new();
+    for native in &plan.version.natives {
+        cancel.check()?;
+        let relative = plan.library_path(&native.artifact)?;
+        let (directory, leaf) = ensure_parent(paths.root(), &relative)?;
+        if !verified_file(&directory, &leaf, &native.artifact)? {
+            return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+        }
+        native_files.extend(super::natives::extract(
+            directory.open_file(leaf).map_err(map_private_error)?,
+            &native_root,
+            &native.excludes,
+            cancel,
+        )?);
+    }
+    cancel.check()?;
+    Ok(InstalledLock {
+        schema_version: 2,
+        instance_id: id,
+        operation,
+        plan,
+        native_files,
+    })
+}
+
 /// Local preflight used by tests and the later Play integration; it never repairs.
 pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, CoreError> {
     let root = metadata_root(paths, id)?;
@@ -397,11 +423,30 @@ pub(super) fn verify_under_lock(
     cancel: &Cancellation,
 ) -> Result<InstalledLock, CoreError> {
     cancel.check()?;
-    let journal = read_json::<Journal>(root, "install-journal.json")?;
-    if journal.is_some_and(|journal| journal.schema_version != 1 || journal.active) {
+    let journal = read_json::<serde_json::Value>(root, "install-journal.json")?;
+    if journal.is_some_and(|journal| {
+        if journal["schema_version"] == 2 {
+            !super::update::journal_inactive(journal, id)
+        } else {
+            serde_json::from_value::<Journal>(journal).map_or(true, |journal| {
+                journal.schema_version != 1 || journal.active || journal.operation.is_nil()
+            })
+        }
+    }) {
         return Err(invalid());
     }
     let installed = read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)?;
+    verify_manifest(paths, id, root, &installed, cancel)?;
+    Ok(installed)
+}
+
+pub(super) fn verify_manifest(
+    paths: &AppPaths,
+    id: Uuid,
+    root: &std::path::Path,
+    installed: &InstalledLock,
+    cancel: &Cancellation,
+) -> Result<(), CoreError> {
     if installed.schema_version != 2 || installed.instance_id != id || installed.operation.is_nil()
     {
         return Err(invalid());
@@ -430,7 +475,7 @@ pub(super) fn verify_under_lock(
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
     }
-    Ok(installed)
+    Ok(())
 }
 
 #[cfg(test)]

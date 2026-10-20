@@ -218,7 +218,7 @@ fn local() -> CatalogInstance {
     }
 }
 
-fn fixture() -> (AppPaths, Arc<AccountController>, Uuid) {
+pub(crate) fn fixture() -> (AppPaths, Arc<AccountController>, Uuid) {
     let paths = AppPaths::new(std::env::temp_dir().join(format!("panita-play-{}", Uuid::new_v4())))
         .unwrap_or_else(|_| panic!("paths"));
     let catalog = local();
@@ -249,7 +249,7 @@ fn fixture() -> (AppPaths, Arc<AccountController>, Uuid) {
 
 /// A tiny integrity-valid installation with an intentionally non-executable Java
 /// placeholder. Tests can exercise preflight without launching a game or shell.
-fn complete_installation(paths: &AppPaths, id: Uuid) {
+pub(crate) fn complete_installation(paths: &AppPaths, id: Uuid) {
     use crate::minecraft::plan::{
         DocumentIdentity, InstallPlan, PlannedArtifact, asset_index_cache_path,
     };
