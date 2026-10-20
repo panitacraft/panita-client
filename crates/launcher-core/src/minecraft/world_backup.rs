@@ -184,7 +184,7 @@ fn walk<W: Write + Seek>(
     Ok(())
 }
 
-fn capability(directory: &private_fs::PrivateDir) -> Result<Dir, CoreError> {
+pub(super) fn capability(directory: &private_fs::PrivateDir) -> Result<Dir, CoreError> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsHandle;

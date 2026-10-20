@@ -97,6 +97,9 @@ pub(super) fn recover_locked(
     id: Uuid,
     root: &std::path::Path,
 ) -> Result<(), CoreError> {
+    if super::maintenance::recover_locked(paths, id, root)? {
+        return Ok(());
+    }
     if super::update::recover_locked(paths, id, root)? {
         return Ok(());
     }
@@ -300,7 +303,11 @@ pub async fn install(
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     }
     if let Some(previous) = read_json::<InstalledLock>(&root, "installed.json")? {
+        super::maintenance::validate_manifest(&previous, id)?;
         previous.plan.validate()?;
+        if previous.schema_version == 3 && !previous_record_requires_installation(paths, id)? {
+            return Err(invalid());
+        }
         if previous.instance_id != id || previous.plan.version.id != *minecraft_version {
             return Err(invalid());
         }
@@ -371,10 +378,40 @@ pub(super) async fn prepare(
     cancel: &Cancellation,
     progress: Progress,
 ) -> Result<InstalledLock, CoreError> {
-    let root = metadata_root(paths, id)?;
     let downloader = Downloader::new()?;
     let mut plan = super::plan::resolve(&downloader, version, platform, cancel).await?;
     plan.allocate_runtime(paths)?;
+    prepare_recorded(paths, id, operation, platform, plan, cancel, progress).await
+}
+
+fn previous_record_requires_installation(paths: &AppPaths, id: Uuid) -> Result<bool, CoreError> {
+    Ok(InstanceRegistry::new(paths.clone())
+        .get(id)?
+        .is_some_and(|record| {
+            !matches!(
+                record.state,
+                InstallationState::Installed
+                    | InstallationState::UpdateAvailable
+                    | InstallationState::Running
+            )
+        }))
+}
+
+pub(super) async fn prepare_recorded(
+    paths: &AppPaths,
+    id: Uuid,
+    operation: Uuid,
+    platform: &Platform,
+    plan: InstallPlan,
+    cancel: &Cancellation,
+    progress: Progress,
+) -> Result<InstalledLock, CoreError> {
+    let root = metadata_root(paths, id)?;
+    plan.validate()?;
+    if plan.platform != platform.os || plan.architecture != platform.arch {
+        return Err(CoreError::new(ErrorCode::RuntimeUnsupported));
+    }
+    let downloader = Downloader::new()?;
     download_all(paths, &downloader, &plan, cancel, progress).await?;
     plan.verify_dependencies(paths)?;
     verify_java(paths, &plan, platform, cancel).await?;
@@ -425,7 +462,9 @@ pub(super) fn verify_under_lock(
     cancel.check()?;
     let journal = read_json::<serde_json::Value>(root, "install-journal.json")?;
     if journal.is_some_and(|journal| {
-        if journal["schema_version"] == 2 {
+        if journal["schema_version"] == 3 {
+            !super::maintenance::journal_inactive(journal, id)
+        } else if journal["schema_version"] == 2 {
             !super::update::journal_inactive(journal, id)
         } else {
             serde_json::from_value::<Journal>(journal).map_or(true, |journal| {
@@ -481,6 +520,33 @@ pub(super) fn verify_manifest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn uninstalled_descriptor_can_retry_after_reinstallation_failure_or_interruption() {
+        let (paths, accounts, id) = super::super::play::tests::fixture();
+        drop(accounts);
+        super::super::play::tests::complete_installation(&paths, id);
+        super::super::maintenance::uninstall(&paths, id, &Cancellation::default())
+            .unwrap_or_else(|_| panic!("uninstall"));
+        let registry = InstanceRegistry::new(paths.clone());
+        for state in [
+            InstallationState::NotInstalled,
+            InstallationState::Failed,
+            InstallationState::Cancelled,
+            InstallationState::NeedsRepair,
+            InstallationState::Installing,
+        ] {
+            let mut record = registry
+                .get(id)
+                .unwrap_or_else(|_| panic!("registry"))
+                .unwrap_or_else(|| panic!("record"));
+            record.state = state;
+            registry
+                .save_installation(&record)
+                .unwrap_or_else(|_| panic!("save"));
+            assert!(previous_record_requires_installation(&paths, id).unwrap_or(false));
+        }
+        std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+    }
     #[test]
     fn capacity_reserves_atomic_write_space_and_disk_full_is_actionable() {
         assert!(check_capacity(1024, 64 * 1024 * 1024).is_err());

@@ -14,11 +14,11 @@ status. Installation and maintenance workflows remain Phase 6; clean-machine
 and distribution qualification remain Phase 7. Phase 6 started on 2026-10-19
 with typed account commands and tested account UI state transitions. Account
 feedback rejects stale results, retries failed initialization, and retains
-incomplete sign-out cleanup warnings across account changes. The next checkpoint
-connects the core installer, same-version retries, progress, cancellation, and
-catalog refresh to the desktop. Automated lifecycle/state checks pass; native
-installation UI acceptance, maintenance, and full end-to-end validation remain
-pending. Phase 6 now also provides global/per-instance RAM, Minecraft window size
+incomplete sign-out cleanup warnings across account changes. The desktop connects
+the core installer, same-version retries, progress, cancellation, and catalog
+refresh. Automated lifecycle/state checks pass; native installation and maintenance
+UI acceptance and full end-to-end validation remain pending. Phase 6 also provides
+global/per-instance RAM, Minecraft window size
 and JVM settings, remembered instance selection, and launcher size/maximized-state
 persistence. These desktop additions still require native Windows/Linux acceptance.
 
@@ -35,6 +35,22 @@ installed/catalog versions. The installed version stays available until a verifi
 new generation is published. A durable update journal recovers an interrupted
 publication before Play; old caches and player files are retained. Updates require
 a current enabled catalog response and do not use the offline Play fallback.
+
+Repair uses the recorded installation plan and exact Minecraft version, checks
+Minecraft/Java caches, probes Java, and prepares a fresh native generation before
+publication. Player files and previous native generations are preserved; modified
+or unverifiable old native files are reported. Repair requires a current enabled
+catalog response. Failed preparation keeps the previous installation descriptor.
+
+Uninstall is available locally and preserves worlds, settings, screenshots,
+backups, unknown/modified files, and shared Minecraft/Java caches. It removes only
+unchanged manifest-owned native files and marks the installation unavailable for
+Play. A schema-3 `installed.json` tombstone retains the exact plan and stable UUID/
+directory association for reinstallation. Maintenance journal schema 3 coordinates
+repair publication and recoverable uninstall under the instance operation lock.
+Older builds cannot operate on these descriptors. Reinstalling a changed catalog
+pin uses the explicit version-transition/backup workflow. Full player-data removal
+and shared-cache cleanup are outside these controls.
 
 The confirmation defaults to backing up worlds. Completed backups contain only
 `minecraft/saves/`, stored as `world-backups/{operation}/worlds.zip` inside the

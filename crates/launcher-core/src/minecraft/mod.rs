@@ -11,6 +11,7 @@ pub mod download;
 mod executable;
 pub mod install;
 pub mod launch;
+pub mod maintenance;
 pub mod natives;
 pub mod plan;
 pub mod play;

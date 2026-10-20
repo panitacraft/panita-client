@@ -4,6 +4,44 @@ use std::sync::Arc;
 const TARGET: &str = "26.3-update-fixture";
 
 #[test]
+fn explicit_reinstallation_transition_recovers_from_uninstalled_tombstone() {
+    let (paths, id, root, previous) = fixture();
+    super::super::maintenance::uninstall(&paths, id, &Cancellation::default())
+        .unwrap_or_else(|_| panic!("uninstall"));
+    let mut journal = staging(&paths, id, &previous);
+    write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("intent"));
+    // A cancelled transition retains the tombstone and all original worlds.
+    install::recover_locked(&paths, id, &root).unwrap_or_else(|_| panic!("abandon"));
+    assert_eq!(
+        InstanceRegistry::new(paths.clone())
+            .get(id)
+            .ok()
+            .flatten()
+            .map(|record| record.state),
+        Some(InstallationState::NotInstalled)
+    );
+    journal.active = true;
+    journal.prepared = staging(&paths, id, &previous).prepared;
+    if let Some(prepared) = &mut journal.prepared {
+        prepared.operation = journal.operation;
+    }
+    write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("intent"));
+    let prepared = journal
+        .prepared
+        .as_ref()
+        .unwrap_or_else(|| panic!("prepared"));
+    write_json(&root, "installed.json", prepared).unwrap_or_else(|_| panic!("pointer"));
+    install::recover_locked(&paths, id, &root).unwrap_or_else(|_| panic!("publish recovery"));
+    assert_eq!(
+        install::verify_installed(&paths, id)
+            .ok()
+            .map(|installed| installed.plan.version.id),
+        Some(TARGET.into())
+    );
+    preserved(&paths, id, &root);
+}
+
+#[test]
 fn updating_one_instance_retains_other_instance_files_settings_and_shared_cache_references() {
     let (paths, id, root, previous) = fixture();
     let registry = InstanceRegistry::new(paths.clone());

@@ -108,7 +108,7 @@ pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
         return Ok(true);
     }
     let installed = read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)?;
-    if installed.schema_version != 2 || installed.instance_id != id {
+    if !matches!(installed.schema_version, 2 | 3) || installed.instance_id != id {
         return Err(invalid());
     }
     installed.plan.validate()?;
@@ -127,6 +127,9 @@ pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
         }
         // Nothing changed in the game directory or old installation descriptor.
     } else if installed.operation == journal.operation {
+        if installed.schema_version != 2 {
+            return Err(invalid());
+        }
         let prepared = journal.prepared.as_ref().ok_or_else(invalid)?;
         if serde_json::to_value(prepared).map_err(|_| invalid())?
             != serde_json::to_value(&installed).map_err(|_| invalid())?
@@ -142,6 +145,25 @@ pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
     journal.prepared = None;
     write_json(root, "install-journal.json", &journal)?;
     Ok(true)
+}
+
+/// A broken published update may be explicitly uninstalled, but only when its
+/// private intent and current pointer prove ownership of the same generation.
+pub(super) fn validate_for_uninstall(root: &Path, id: Uuid) -> Result<(), CoreError> {
+    let journal = read_json::<Journal>(root, "install-journal.json")?.ok_or_else(invalid)?;
+    journal.validate(id)?;
+    let installed = read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)?;
+    super::maintenance::validate_manifest(&installed, id)?;
+    let previous = installed.operation == journal.previous_operation
+        && installed.plan.version.id == journal.from_version;
+    let published = journal.prepared.as_ref().is_some_and(|prepared| {
+        serde_json::to_value(prepared).ok() == serde_json::to_value(&installed).ok()
+    });
+    if previous || published {
+        Ok(())
+    } else {
+        Err(invalid())
+    }
 }
 
 fn publish_record(
@@ -258,8 +280,21 @@ async fn update_with_catalog(
     let _lease = try_lock(&root, ".installation.lock")?
         .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
     install::recover_locked(paths, id, &root)?;
-    let previous = install::verify_under_lock(paths, id, &root, cancel)?;
     let record = registry.get(id)?.ok_or_else(invalid)?;
+    let stored = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
+    let uninstalled = stored.schema_version == 3
+        && !matches!(
+            record.state,
+            InstallationState::Installed
+                | InstallationState::UpdateAvailable
+                | InstallationState::Running
+        );
+    let previous = if uninstalled {
+        super::maintenance::validate_manifest(&stored, id)?;
+        stored
+    } else {
+        install::verify_under_lock(paths, id, &root, cancel)?
+    };
     if previous.plan.version.id != request.from_version
         || record.resolved_source
             != (CatalogSource::Vanilla {
@@ -268,10 +303,14 @@ async fn update_with_catalog(
     {
         return Err(CoreError::new(ErrorCode::UpdateSelectionChanged));
     }
-    if !matches!(
-        record.state,
-        InstallationState::Installed | InstallationState::UpdateAvailable
-    ) {
+    if !uninstalled
+        && !matches!(
+            record.state,
+            InstallationState::Installed
+                | InstallationState::UpdateAvailable
+                | InstallationState::NotInstalled
+        )
+    {
         return Err(invalid());
     }
     let operation = Uuid::new_v4();
