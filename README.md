@@ -17,8 +17,18 @@ feedback rejects stale results, retries failed initialization, and retains
 incomplete sign-out cleanup warnings across account changes. The next checkpoint
 connects the core installer, same-version retries, progress, cancellation, and
 catalog refresh to the desktop. Automated lifecycle/state checks pass; native
-installation UI acceptance, settings, maintenance, and full end-to-end validation
-remain pending.
+installation UI acceptance, maintenance, and full end-to-end validation remain
+pending. Phase 6 now also provides global/per-instance RAM, Minecraft window size
+and JVM settings, remembered instance selection, and launcher size/maximized-state
+persistence. These desktop additions still require native Windows/Linux acceptance.
+
+Global `settings.json` schema 1 is read without rewriting it; the next successful
+settings/preference save upgrades it to schema 2 while retaining launch values.
+Per-instance settings keep their existing schema. Selection/window writers preserve
+the latest launch settings under the shared writer lock. Launcher window state is
+saved on close/hide; minimized or hidden state is not restored on the next launch.
+Custom Java paths remain unsupported by launch preflight; the settings UI can clear
+an existing override. Older builds cannot read the new global settings schema.
 
 An isolated Windows build reached the Minecraft 26.3 and 1.21.1 main menus
 through desktop Play with a synthetic offline account. Cancellation, launcher

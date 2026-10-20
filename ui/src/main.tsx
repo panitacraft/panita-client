@@ -9,6 +9,7 @@ import { Accounts } from './accounts';
 import { PlayControls, PlayNotice, PlayProvider, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
 import { canInstall } from './library-state';
+import { PreferencesProvider, SettingsPanel, usePreferences } from './settings';
 
 type CatalogState =
   | { kind: 'loading' }
@@ -28,6 +29,8 @@ function App() {
   const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const installationChanges = installationRefreshKey(usePlaySnapshot());
+  const preferences = usePreferences();
+  const selectedInstance = catalog.kind === 'ready' ? catalog.instances.find(instance => instance.id === preferences?.id) : undefined;
 
   useEffect(() => {
     let active = true;
@@ -85,12 +88,13 @@ function App() {
         {catalog.kind === 'ready' && catalog.instances.length > 0 && (
           <div className="instance-grid">
             {catalog.instances.map(instance => (
-              <article className={`instance-card${instance.availability === 'disabled' || !instance.compatible || !instance.supported ? ' disabled' : ''}`} key={instance.id}>
+              <article className={`instance-card${instance.availability === 'disabled' || !instance.compatible || !instance.supported ? ' disabled' : ''}${instance.id === preferences?.id ? ' selected-instance' : ''}`} key={instance.id}>
                 <div className="card-heading">
                   <h2>{instance.name}</h2>
                   {instance.availability === 'disabled' && <span><span aria-hidden="true">🔒 </span>Instancia deshabilitada</span>}
                 </div>
                 <p>{instance.description}</p>
+                <button type="button" aria-pressed={instance.id === preferences?.id} disabled={!preferences || preferences.busy || instance.id === preferences.id} onClick={() => void preferences?.select(instance.id)}>{instance.id === preferences?.id ? 'Instancia seleccionada' : 'Seleccionar instancia'}</button>
                 {instance.minecraftVersion && <p className="version">Minecraft {instance.minecraftVersion}</p>}
                 <p>{localStateText[instance.localState]}</p>
                 {instance.installedVersion && <p>{['installed', 'update_available', 'running'].includes(instance.localState) ? 'Versión instalada' : 'Versión de la instalación'}: {instance.installedVersion}</p>}
@@ -106,12 +110,13 @@ function App() {
           </div>
         )}
       </section>
+      <SettingsPanel instanceId={preferences?.id ?? null} name={selectedInstance?.name ?? null} local={selectedInstance?.installedVersion != null} />
     </main>
   );
 }
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <PlayProvider><App /></PlayProvider>
+    <PreferencesProvider><PlayProvider><App /></PlayProvider></PreferencesProvider>
   </React.StrictMode>,
 );

@@ -6,6 +6,7 @@ mod account_commands;
 mod linux_activation;
 mod play_commands;
 mod protocol;
+mod settings_commands;
 
 struct DesktopState {
     process: launcher_core::operation::ProcessSessionId,
@@ -14,6 +15,7 @@ struct DesktopState {
     orphaned_callback: bool,
     catalog_fetch: tokio::sync::Mutex<()>,
     plays: Arc<play_commands::PlayController>,
+    window: Mutex<settings_commands::WindowPreferences>,
 }
 
 #[tauri::command]
@@ -39,7 +41,7 @@ fn initialize(
             .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
         let paths = AppPaths::new(root).map_err(|error| error.code())?;
         let store = PrivateStore::open(&paths).map_err(|error| error.code())?;
-        GlobalSettings::load(&store).map_err(|error| error.code())?;
+        let settings = GlobalSettings::load(&store).map_err(|error| error.code())?;
         let accounts = Arc::new(
             AccountController::new(
                 launcher_core::accounts::AccountRepository::new(store),
@@ -51,6 +53,7 @@ fn initialize(
             accounts.report_orphaned_callback().map_err(|e| e.code())?;
         }
         *slot = Some(accounts.clone());
+        settings_commands::restore_window(&app, &settings);
         account_commands::start_maintenance(app.clone(), accounts);
         Ok(())
     })();
@@ -106,6 +109,7 @@ pub fn run() {
             accounts: Mutex::new(None),
             catalog_fetch: tokio::sync::Mutex::new(()),
             plays: Arc::new(play_commands::PlayController::new(process)),
+            window: Mutex::new(settings_commands::WindowPreferences::default()),
             orphaned_callback: std::env::args_os()
                 .skip(1)
                 .any(|arg| arg.to_string_lossy().starts_with("panitacraft:")),
@@ -116,6 +120,17 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .on_window_event(|window, event| {
+            if window.label() == "main" {
+                match event {
+                    tauri::WindowEvent::Resized(_) => {
+                        settings_commands::remember_window_size(window)
+                    }
+                    tauri::WindowEvent::CloseRequested { .. } => {
+                        settings_commands::persist_window(window)
+                    }
+                    _ => (),
+                }
+            }
             if window.label() == "main"
                 && let tauri::WindowEvent::CloseRequested { api, .. } = event
                 && play_commands::close_window(window)
@@ -127,6 +142,10 @@ pub fn run() {
             application_name,
             initialize,
             catalog_snapshot,
+            settings_commands::settings_snapshot,
+            settings_commands::save_global_settings,
+            settings_commands::save_instance_settings,
+            settings_commands::select_instance,
             account_commands::account_snapshot,
             account_commands::add_offline_account,
             account_commands::start_microsoft_login,

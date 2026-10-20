@@ -45,3 +45,13 @@ input:focus-visible { outline: 3px solid #f2cf74; outline-offset: 2px; }
 .account-list li.selected-account { border-color: #f2cf74; }
 .account-list span { color: #bdc9bd; font-size: .85rem; margin-left: 8px; }
 .account-error { color: #ffb7af; }
+.instance-card.selected-instance { border-color: #f2cf74; }
+.settings-section { padding-top: 16px; }
+.settings-form { margin-top: 20px; }
+.settings-form fieldset { display: grid; gap: 12px; border: 1px solid #4c7564; border-radius: 8px; padding: 20px; }
+.settings-form label { display: flex; align-items: center; gap: 8px; }
+.settings-form input[type="checkbox"] { width: auto; }
+.settings-form textarea { display: block; width: 100%; max-width: 720px; padding: 10px; font: inherit; color: #efece5; background: #142d24; border: 1px solid #6c9380; border-radius: 4px; }
+.settings-form textarea:focus-visible, summary:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
+.settings-form summary { cursor: pointer; padding: 8px 0; }
+.settings-form button { justify-self: start; }
