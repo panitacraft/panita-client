@@ -61,31 +61,6 @@ fn path_text(path: &Path) -> Result<String, CoreError> {
 
 /// A limited JVM option grammar prevents user settings from replacing the
 /// classpath, main class, managed heap/native paths, or injecting argument files.
-fn validate_extra(arg: &str) -> Result<(), CoreError> {
-    let option = arg.split('=').next().unwrap_or_default();
-    if arg.chars().any(char::is_control)
-        || !(arg.starts_with("-XX:") || arg.starts_with("-D"))
-        || matches!(
-            option,
-            "-XX:Flags"
-                | "-XX:VMOptionsFile"
-                | "-XX:MaxHeapSize"
-                | "-XX:InitialHeapSize"
-                | "-Djava.class.path"
-                | "-Djava.library.path"
-                | "-Dorg.lwjgl.librarypath"
-                | "-Djna.tmpdir"
-                | "-Dlog4j.configurationFile"
-                | "-Djava.system.class.loader"
-                | "-Dorg.lwjgl.system.SharedLibraryExtractPath"
-                | "-Dio.netty.native.workdir"
-        )
-    {
-        return Err(invalid());
-    }
-    Ok(())
-}
-
 /// Construct direct process arguments from the installed manifest. Filesystem
 /// integrity, runtime overrides, authentication, catalog status and locking are
 /// separate preflight responsibilities. No files are changed or processes run.
@@ -124,15 +99,7 @@ pub fn build_command(
     global.validate()?;
     instance.validate()?;
     let settings = instance.effective(global);
-    settings.validate()?;
-    // Custom runtimes need independent version/architecture/integrity checks.
-    // Do not silently ignore an override or execute it before that exists.
-    if settings.java_path_override.is_some() {
-        return Err(CoreError::new(ErrorCode::RuntimeUnsupported));
-    }
-    for arg in &settings.extra_jvm_args {
-        validate_extra(arg)?;
-    }
+    settings.validate_launch()?;
     let account = identity.account;
     if account.account_id.is_nil()
         || account.profile_id.is_nil()
