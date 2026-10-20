@@ -16,6 +16,7 @@ const phaseText: Record<PlayPhase, string> = {
   preparing: 'Comprobando la instancia y sus archivos…',
   installing: 'Preparando Minecraft y Java. Descargando y comprobando archivos…',
   installed: 'Instalación completa. Ya puedes jugar.',
+  uninstalled: 'Desinstalación completa. Conservamos tus mundos, ajustes y archivos personales.',
   warning: 'Necesitamos tu confirmación para continuar.',
   starting: 'Verificando la cuenta e iniciando Minecraft…',
   running: 'Minecraft está en ejecución.',
@@ -69,12 +70,13 @@ export function usePlaySnapshot() {
   return useContext(PlayContext)?.snapshot ?? null;
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null }) {
+export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [forceQuestion, setForceQuestion] = useState<string | null>(null);
   const [updateQuestion, setUpdateQuestion] = useState<(UpdateTarget & { backupWorlds: boolean }) | null>(null);
+  const [uninstallQuestion, setUninstallQuestion] = useState(false);
   const entry = play?.snapshot?.instances.find(entry => entry.instanceId === instanceId);
   const active = entry && playActive(entry.phase);
   const running = entry && (entry.phase === 'running' || entry.phase === 'stopping');
@@ -96,13 +98,21 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       : entry.operation === 'update' && entry.phase === 'installed' ? 'Actualización completa. Ya puedes jugar.'
       : entry.operation === 'update' && entry.phase === 'failed' ? 'No pudimos completar la actualización.'
       : entry.operation === 'update' && entry.phase === 'cancelled' ? 'Actualización cancelada.'
+      : entry.operation === 'repair' && entry.phase === 'installing' ? 'Reparando los archivos de la versión registrada…'
+      : entry.operation === 'repair' && entry.phase === 'installed' ? 'Reparación completa. Ya puedes jugar.'
+      : entry.operation === 'repair' && entry.phase === 'failed' ? 'No pudimos completar la reparación.'
+      : entry.operation === 'repair' && entry.phase === 'cancelled' ? 'Reparación cancelada.'
+      : entry.operation === 'uninstall' && entry.phase === 'installing' ? 'Desinstalando y conservando tus datos…'
+      : entry.operation === 'uninstall' && entry.phase === 'failed' ? 'No pudimos completar la desinstalación. Conservamos los archivos restantes para recuperar la operación.'
+      : entry.operation === 'uninstall' && entry.phase === 'cancelled' ? 'Desinstalación cancelada.'
       : phaseText[entry.phase]}</p>}
-    {entry && entry.operation !== 'play' && active && <div>
-      <progress aria-label={entry.operation === 'update' ? 'Actualización de Minecraft y Java' : 'Instalación de Minecraft y Java'} />
+    {entry && entry.operation !== 'play' && entry.operation !== 'uninstall' && active && <div>
+      <progress aria-label={entry.operation === 'update' ? 'Actualización de Minecraft y Java' : entry.operation === 'repair' ? 'Reparación de Minecraft y Java' : 'Instalación de Minecraft y Java'} />
       <p>Archivos recibidos: {entry.receivedFiles}. Archivos reutilizados: {entry.reusedFiles}.</p>
       <p>La instalación termina cuando se comprueban todos los archivos y Java.</p>
       {entry.operation === 'update' && entry.backupRequested && <p>La copia de mundos debe completarse antes de cambiar la versión.</p>}
     </div>}
+    {entry && (entry.operation === 'repair' || entry.operation === 'uninstall') && !active && entry.retainedFiles > 0 && <p role="status">Conservamos {entry.retainedFiles} archivos nativos modificados o que no pudimos comprobar.</p>}
     {entry?.operation === 'update' && entry.phase === 'installed' && <p>{entry.backupOperation
       ? `Copia de mundos guardada en la carpeta de esta instancia: world-backups/${entry.backupOperation}/worlds.zip.`
       : entry.backupRequested ? 'No había mundos locales para copiar.' : 'Actualizaste sin crear una copia de mundos.'}</p>}
@@ -114,7 +124,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         <button type="button" disabled={busy} onClick={() => void act('cancel_play', { requestId: entry.requestId })}>Cancelar</button>
       </div>
     </div>}
-    {active && entry && !running && entry.phase !== 'warning' && <button type="button" disabled={busy || entry.phase === 'cancelling'} onClick={() => void act('cancel_play', { requestId: entry.requestId })}>{entry.operation === 'update' ? 'Cancelar actualización' : entry.operation === 'install' ? 'Cancelar instalación' : 'Cancelar inicio'}</button>}
+    {active && entry && !running && entry.phase !== 'warning' && <button type="button" disabled={busy || entry.phase === 'cancelling'} onClick={() => void act('cancel_play', { requestId: entry.requestId })}>{entry.operation === 'update' ? 'Cancelar actualización' : entry.operation === 'install' ? 'Cancelar instalación' : entry.operation === 'repair' ? 'Cancelar reparación' : entry.operation === 'uninstall' ? 'Cancelar desinstalación' : 'Cancelar inicio'}</button>}
     {running && entry && <>
       <p>Cierra Minecraft desde su menú para guardar la partida.</p>
       <p>Si cierras esta ventana, Panita seguirá en segundo plano hasta que cierres los juegos. Abre Panita de nuevo para volver a esta pantalla.</p>
@@ -131,8 +141,19 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       </div>}
     </>}
     {!active && installAllowed && entry?.phase !== 'installed' && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}>{entry?.operation === 'install' ? 'Reintentar instalación' : 'Instalar'}</button>}
-    {!active && !installAllowed && <button type="button" disabled={busy || !allowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}>{allowed ? 'Jugar' : 'No disponible para jugar'}</button>}
+    {!active && !installAllowed && <button type="button" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}>{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</button>}
     {!active && updateTarget && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUpdateQuestion({ ...updateTarget, backupWorlds: true })}>Actualizar…</button>}
+    {!active && repairAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_repair', { requestId: crypto.randomUUID() })}>Reparar archivos</button>}
+    {!active && uninstallAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUninstallQuestion(true)}>Desinstalar…</button>}
+    {!active && uninstallQuestion && <fieldset className="catalog-notice">
+      <legend>Desinstalar conservando mis datos</legend>
+      <p>Quitaremos esta instalación de las disponibles para jugar y eliminaremos solo sus archivos nativos verificados. Conservaremos tus mundos, ajustes, capturas, copias de mundos y archivos personales. Los archivos compartidos de Minecraft y Java también se conservan.</p>
+      <p>Puedes reinstalar esta instancia cuando esté habilitada en el catálogo. Esta acción no elimina todos sus archivos ni libera el espacio de las cachés compartidas.</p>
+      <div className="account-buttons">
+        <button type="button" disabled={busy} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID() }); }}>Confirmar desinstalación</button>
+        <button type="button" disabled={busy} onClick={() => setUninstallQuestion(false)}>Volver</button>
+      </div>
+    </fieldset>}
     {!active && updateQuestion && <fieldset className="catalog-notice">
       <legend>Actualizar de Minecraft {updateQuestion.fromVersion} a {updateQuestion.toVersion}</legend>
       <p>Una versión nueva puede modificar tus mundos cuando los abras. Volver a los archivos de una versión anterior no recupera los cambios en tus mundos.</p>

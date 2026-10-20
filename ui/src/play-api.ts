@@ -4,6 +4,8 @@ type InstanceRequest = { instanceId: string; requestId: string };
 export type PlayArguments = {
   begin_play: InstanceRequest;
   begin_install: InstanceRequest;
+  begin_repair: InstanceRequest;
+  begin_uninstall: InstanceRequest;
   begin_update: InstanceRequest & { update: { from_version: string; to_version: string; backup_worlds: boolean } };
   cancel_play: InstanceRequest;
   confirm_play: InstanceRequest & { confirmationId: string };

@@ -1,4 +1,4 @@
-export type PlayPhase = 'preparing' | 'installing' | 'installed' | 'warning' | 'starting' | 'running' | 'stopping' | 'cancelling' | 'exited' | 'failed' | 'cancelled';
+export type PlayPhase = 'preparing' | 'installing' | 'installed' | 'uninstalled' | 'warning' | 'starting' | 'running' | 'stopping' | 'cancelling' | 'exited' | 'failed' | 'cancelled';
 export type PlayEntry = {
   instanceId: string;
   requestId: string;
@@ -7,11 +7,12 @@ export type PlayEntry = {
   error: string | null;
   exitCode: number | null;
   exitSuccess: boolean | null;
-  operation: 'install' | 'update' | 'play';
+  operation: 'install' | 'update' | 'repair' | 'uninstall' | 'play';
   backupRequested: boolean;
   backupOperation: string | null;
   receivedFiles: number;
   reusedFiles: number;
+  retainedFiles: number;
 };
 export type PlaySnapshot = {
   revision: number;
@@ -27,7 +28,7 @@ export function acceptPlaySnapshot(previous: PlaySnapshot | null, next: PlaySnap
 }
 
 export function playActive(phase: PlayPhase): boolean {
-  return phase !== 'installed' && phase !== 'exited' && phase !== 'failed' && phase !== 'cancelled';
+  return phase !== 'installed' && phase !== 'uninstalled' && phase !== 'exited' && phase !== 'failed' && phase !== 'cancelled';
 }
 
 export function installationRefreshKey(snapshot: PlaySnapshot | null): string {

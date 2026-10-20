@@ -18,7 +18,18 @@ test('a restarted desktop process starts its own revision sequence', () => {
 
 test('only terminal states allow a new Play request', () => {
   for (const phase of ['preparing', 'installing', 'warning', 'starting', 'running', 'stopping', 'cancelling']) assert.equal(playActive(phase), true);
-  for (const phase of ['installed', 'failed', 'exited', 'cancelled']) assert.equal(playActive(phase), false);
+  for (const phase of ['installed', 'uninstalled', 'failed', 'exited', 'cancelled']) assert.equal(playActive(phase), false);
+});
+
+test('repair and uninstall terminal results refresh catalog state and reject stale progress', () => {
+  for (const [operation, phase] of [['repair', 'installed'], ['uninstall', 'uninstalled']]) {
+    const active = { ...snapshot(10), instances: [{ instanceId: 'first', requestId: 'maintenance-1', operation, phase: 'installing' }] };
+    const complete = { ...snapshot(11), instances: [{ ...active.instances[0], phase, retainedFiles: 2 }] };
+    assert.equal(installationRefreshKey(active), '');
+    assert.notEqual(installationRefreshKey(complete), '');
+    assert.equal(acceptPlaySnapshot(complete, active), complete);
+    assert.equal(complete.instances[0].retainedFiles, 2);
+  }
 });
 
 test('catalog reconciliation waits for terminal installation results and ignores download ticks', () => {

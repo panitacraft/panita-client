@@ -19,6 +19,8 @@ enum OperationKind {
     Play,
     Install,
     Update,
+    Repair,
+    Uninstall,
 }
 impl OperationKind {
     fn text(self) -> &'static str {
@@ -26,6 +28,8 @@ impl OperationKind {
             Self::Play => "play",
             Self::Install => "install",
             Self::Update => "update",
+            Self::Repair => "repair",
+            Self::Uninstall => "uninstall",
         }
     }
 }
@@ -35,6 +39,7 @@ enum Phase {
     Preparing,
     Installing,
     Installed,
+    Uninstalled,
     Warning,
     Starting,
     Running,
@@ -49,7 +54,7 @@ impl Phase {
     fn active(self) -> bool {
         !matches!(
             self,
-            Self::Installed | Self::Exited | Self::Failed | Self::Cancelled
+            Self::Installed | Self::Uninstalled | Self::Exited | Self::Failed | Self::Cancelled
         )
     }
     fn text(self) -> &'static str {
@@ -57,6 +62,7 @@ impl Phase {
             Self::Preparing => "preparing",
             Self::Installing => "installing",
             Self::Installed => "installed",
+            Self::Uninstalled => "uninstalled",
             Self::Warning => "warning",
             Self::Starting => "starting",
             Self::Running => "running",
@@ -82,6 +88,7 @@ struct Entry {
     backup_operation: Option<Uuid>,
     received_files: u64,
     reused_files: u64,
+    retained_files: u32,
     last_progress: std::time::Instant,
 }
 
@@ -194,6 +201,7 @@ impl PlayController {
                 backup_operation: None,
                 received_files: 0,
                 reused_files: 0,
+                retained_files: 0,
                 last_progress: std::time::Instant::now(),
             },
         );
@@ -278,6 +286,7 @@ impl PlayController {
                     "operation": entry.kind.text(),
                     "backupRequested": entry.backup_requested, "backupOperation": entry.backup_operation,
                     "receivedFiles": entry.received_files, "reusedFiles": entry.reused_files,
+                    "retainedFiles": entry.retained_files,
                 })
             })
             .collect();
@@ -506,7 +515,14 @@ pub(super) fn begin_install(
     instance_id: Uuid,
     request_id: Uuid,
 ) -> Result<(), ErrorCode> {
-    begin_maintenance(app, state, instance_id, request_id, None)
+    begin_maintenance(
+        app,
+        state,
+        instance_id,
+        request_id,
+        OperationKind::Install,
+        None,
+    )
 }
 
 #[tauri::command]
@@ -517,7 +533,48 @@ pub(super) fn begin_update(
     request_id: Uuid,
     update: launcher_core::minecraft::update::UpdateRequest,
 ) -> Result<(), ErrorCode> {
-    begin_maintenance(app, state, instance_id, request_id, Some(update))
+    begin_maintenance(
+        app,
+        state,
+        instance_id,
+        request_id,
+        OperationKind::Update,
+        Some(update),
+    )
+}
+
+#[tauri::command]
+pub(super) fn begin_repair(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+) -> Result<(), ErrorCode> {
+    begin_maintenance(
+        app,
+        state,
+        instance_id,
+        request_id,
+        OperationKind::Repair,
+        None,
+    )
+}
+
+#[tauri::command]
+pub(super) fn begin_uninstall(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+) -> Result<(), ErrorCode> {
+    begin_maintenance(
+        app,
+        state,
+        instance_id,
+        request_id,
+        OperationKind::Uninstall,
+        None,
+    )
 }
 
 fn begin_maintenance(
@@ -525,9 +582,14 @@ fn begin_maintenance(
     state: tauri::State<'_, DesktopState>,
     instance_id: Uuid,
     request_id: Uuid,
+    kind: OperationKind,
     update: Option<launcher_core::minecraft::update::UpdateRequest>,
 ) -> Result<(), ErrorCode> {
-    let platform = native_platform()?;
+    let platform = if kind == OperationKind::Uninstall {
+        None
+    } else {
+        Some(native_platform()?)
+    };
     let paths = AppPaths::new(
         app.path()
             .app_data_dir()
@@ -537,11 +599,6 @@ fn begin_maintenance(
     // Use the same initialized private root as the other desktop workflows.
     account_commands::controller(&state)?;
     let controller = state.plays.clone();
-    let kind = if update.is_some() {
-        OperationKind::Update
-    } else {
-        OperationKind::Install
-    };
     let cancel = controller.reserve_operation(instance_id, request_id, kind)?;
     controller.update(instance_id, request_id, |entry| {
         entry.backup_requested = update.as_ref().is_some_and(|request| request.backup_worlds)
@@ -553,7 +610,7 @@ fn begin_maintenance(
             let record = InstanceRegistry::new(paths.clone())
                 .get(instance_id)
                 .map_err(|error| error.code())?;
-            if update.is_none()
+            if kind == OperationKind::Install
                 && record.is_some_and(|record| {
                     matches!(
                         record.state,
@@ -566,6 +623,16 @@ fn begin_maintenance(
                 return Err(ErrorCode::OperationBusy);
             }
             cancel.check().map_err(|error| error.code())?;
+            if kind == OperationKind::Uninstall {
+                let outcome = tauri::async_runtime::spawn_blocking(move || {
+                    launcher_core::minecraft::maintenance::uninstall(&paths, instance_id, &cancel)
+                })
+                .await
+                .map_err(|_| ErrorCode::StorageCommitUncertain)?
+                .map_err(|error| error.code())?;
+                return Ok((None, outcome.retained_files));
+            }
+            let platform = platform.as_ref().ok_or(ErrorCode::RuntimeUnsupported)?;
             let progress_controller = controller.clone();
             let progress_app = app.clone();
             let progress = Arc::new(move |progress| {
@@ -573,38 +640,54 @@ fn begin_maintenance(
                     progress_controller.publish(&progress_app);
                 }
             });
-            if let Some(update) = update {
+            if kind == OperationKind::Repair {
+                let outcome = launcher_core::minecraft::maintenance::repair(
+                    &paths,
+                    instance_id,
+                    platform,
+                    &cancel,
+                    progress,
+                )
+                .await
+                .map_err(|error| error.code())?;
+                Ok((None, outcome.retained_files))
+            } else if let Some(update) = update {
                 let outcome = launcher_core::minecraft::update::update(
                     &paths,
                     instance_id,
-                    &platform,
+                    platform,
                     update,
                     &cancel,
                     progress,
                 )
                 .await
                 .map_err(|error| error.code())?;
-                Ok(outcome.backup.map(|backup| backup.operation))
+                Ok((outcome.backup.map(|backup| backup.operation), 0))
             } else {
                 launcher_core::minecraft::install::install(
                     &paths,
                     instance_id,
-                    &platform,
+                    platform,
                     &cancel,
                     progress,
                 )
                 .await
                 .map_err(|error| error.code())?;
-                Ok(None)
+                Ok((None, 0))
             }
         }
         .await;
         match result {
             // The published manifest is authoritative if cancellation races
             // successful completion. Never report committed data as cancelled.
-            Ok(backup) => controller.update(instance_id, request_id, |entry| {
-                entry.phase = Phase::Installed;
+            Ok((backup, retained)) => controller.update(instance_id, request_id, |entry| {
+                entry.phase = if kind == OperationKind::Uninstall {
+                    Phase::Uninstalled
+                } else {
+                    Phase::Installed
+                };
                 entry.backup_operation = backup;
+                entry.retained_files = retained;
             }),
             Err(error) => controller.fail(instance_id, request_id, error),
         }

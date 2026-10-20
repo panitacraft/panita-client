@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn maintenance_owns_instance_until_worker_reports_committed_result() {
+    for kind in [OperationKind::Repair, OperationKind::Uninstall] {
+        let controller = PlayController::new(ProcessSessionId::new());
+        let instance = Uuid::new_v4();
+        let request = Uuid::new_v4();
+        let cancel = controller
+            .reserve_operation(instance, request, kind)
+            .unwrap_or_else(|_| panic!("reservation"));
+        controller.cancel_pending();
+        assert!(cancel.check().is_ok());
+        assert_eq!(
+            controller.reserve(instance, Uuid::new_v4()).err(),
+            Some(ErrorCode::OperationBusy)
+        );
+        assert!(controller.close_window(|| panic!("preparation guard")));
+        assert!(controller.cancel(instance, request).is_ok());
+        assert!(cancel.check().is_err());
+        assert!(!controller.allow_close());
+        controller.update(instance, request, |entry| {
+            entry.phase = if kind == OperationKind::Repair {
+                Phase::Installed
+            } else {
+                Phase::Uninstalled
+            };
+            entry.retained_files = 2;
+        });
+        let snapshot = controller.snapshot().unwrap_or_else(|_| panic!("snapshot"));
+        assert_eq!(snapshot["instances"][0]["retainedFiles"], json!(2));
+        assert_eq!(snapshot["instances"][0]["operation"], json!(kind.text()));
+        assert!(controller.reserve(instance, Uuid::new_v4()).is_ok());
+    }
+}
+
+#[test]
 fn explicit_update_owns_the_instance_and_its_backup_result_until_completion() {
     let controller = PlayController::new(ProcessSessionId::new());
     let instance = Uuid::new_v4();
@@ -341,6 +375,7 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
             "backupOperation",
             "receivedFiles",
             "reusedFiles",
+            "retainedFiles",
         ];
         expected.sort_unstable();
         assert_eq!(keys, expected);

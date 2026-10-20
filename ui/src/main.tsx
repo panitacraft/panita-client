@@ -8,7 +8,7 @@ import './style.css';
 import { Accounts } from './accounts';
 import { PlayControls, PlayNotice, PlayProvider, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
-import { canInstall, updateTarget } from './library-state';
+import { canInstall, canRepair, canUninstall, updateTarget } from './library-state';
 import { PreferencesProvider, SettingsPanel, usePreferences } from './settings';
 
 type CatalogState =
@@ -105,6 +105,8 @@ function App() {
                 <PlayControls instanceId={instance.id}
                   installAllowed={canInstall(instance, catalog.stale)}
                   updateTarget={updateTarget(instance, catalog.stale)}
+                  repairAllowed={canRepair(instance, catalog.stale)}
+                  uninstallAllowed={canUninstall(instance)}
                   allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
               </article>
             ))}
