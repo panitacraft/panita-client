@@ -6,17 +6,21 @@ catalog, using Microsoft or explicitly selected offline accounts.
 
 This repository is in development. The desktop interface manages accounts and
 the catalog. Core installation is exercised through the development harness
-described below. Phase 5 includes core command construction, process supervision
-and launch preflight. Desktop Play controls now connect installed vanilla
-instances to that workflow, with cancellation, per-attempt outage confirmation
-and game lifecycle status. Real game and installed-platform qualification remain
-separate validation steps; Phase 5 is still in progress.
+described below. Phase 5 game launch and process lifecycle are accepted as of
+2026-10-19. Desktop Play connects installed vanilla instances to verified launch
+preflight, cancellation, per-attempt outage confirmation and game lifecycle
+status. Installation and maintenance workflows remain Phase 6; clean-machine
+and distribution qualification remain Phase 7.
 
 An isolated Windows build reached the Minecraft 26.3 and 1.21.1 main menus
 through desktop Play with a synthetic offline account. Cancellation, launcher
 close protection, menu exit and restored Play controls passed. Both synthetic
-world files remained unchanged. Microsoft Play and installed Linux game
-qualification remain pending.
+world files remained unchanged. The owner confirmed Microsoft Play, restart,
+offline/outage behavior, account switching, instance independence and stop
+controls on Windows, followed by successful tests and actual Minecraft launches
+with the separately built Linux acceptance package on BOX. These owner-reported
+results establish the tested setup; BOX's development packages still prevent
+clean-machine qualification.
 
 Closing the launcher window during gameplay now keeps Panita in the background.
 Opening it again restores the same session and active-instance controls. If the
@@ -25,8 +29,10 @@ launches are cancelled when hiding; preparation alone still requires completion
 or cancellation before closing. Visible and minimized windows remain open.
 Windows acceptance verified hiding during Minecraft 1.21.1, restoring the same
 launcher process and active controls, and automatic background exit after normal
-game shutdown. Multiple-game lifecycle checks pass in automated tests; Linux
-desktop background behavior still requires installed-product validation.
+game shutdown. Multiple-game lifecycle checks pass in automated tests, and the
+owner confirms the background regression and supplied Linux acceptance tests
+passed. Controlled authentication rejection/recovery and catalog-only outages
+pass in composed core tests using synthetic accounts and loopback services.
 
 Phase 2 (accounts, PKCE and session persistence) was accepted by the owner on
 2026-10-16. See [the closure record](https://github.com/panitacraft/panita-client/issues/4)
@@ -35,7 +41,8 @@ The original WSL atomic-write failure was resolved in Phase 4. Phase 3 catalog
 and UUID-based local registry implementation was accepted on 2026-10-16.
 [Phase 4 vanilla installation and Java provisioning](https://github.com/panitacraft/panita-client/issues/6)
 was formally accepted by the owner on 2026-10-17, with Windows and BOX installer-core
-verification and the qualification limits below. Game execution remains Phase 5.
+verification and the qualification limits below. Game execution was subsequently
+verified and accepted in Phase 5.
 
 Phase 3 catalog startup, disabled/unsupported entries, cached outage behavior,
 local-only records and recovery were verified in an isolated Windows release
@@ -51,7 +58,8 @@ The Phase 4 core resolves official version, asset and Java metadata; verifies
 downloaded hashes and sizes; reuses shared caches; and commits per-instance
 installation journals and locks. Cancellation and interruption preserve user
 files. Installation controls are not yet connected to the desktop interface.
-Game execution and installed-platform qualification are separate later checks.
+Game execution was subsequently verified in Phase 5; final installed-platform
+qualification remains separate.
 
 Windows validation installed both catalog pins (26.3 and 1.21.1) with their
 required Java 25/21 runtimes, audited the installed files, recovered a deliberately
@@ -59,7 +67,8 @@ interrupted installation, and preserved synthetic worlds/options. Final cache
 adoption reused all 5,626 and 4,348 artifacts respectively with no artifact
 downloads. The workspace suite passed 80 core, two process-writer and three
 desktop tests, with one intentional live-test skip. Linux artifact selection and
-core compilation passed; actual Linux game execution remains unverified.
+core compilation passed; actual Linux game execution was subsequently confirmed
+by the owner during Phase 5.
 
 The slug-folder follow-up migrated both isolated Windows installations to
 `vanilla-actual` and `vanilla-clasica`, preserving all four world/options test
@@ -134,7 +143,7 @@ BOX practice data remains at
 These are installer-core checks; the installed GUI/package remains unchanged,
 and its package integrity check is clean. BOX was not used for builds, and normal
 accounts/worlds were not accessed.
-Game execution remains Phase 5, installation UI remains Phase 6, and BOX's
+Game execution is accepted in Phase 5, installation UI remains Phase 6, and BOX's
 existing development packages still prevent clean-install qualification.
 
 ## Development
