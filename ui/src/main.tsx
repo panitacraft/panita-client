@@ -6,7 +6,9 @@ import { messageForError } from './errors';
 import logoWhite from './assets/logo-white.svg';
 import './style.css';
 import { Accounts } from './accounts';
-import { PlayControls, PlayNotice, PlayProvider } from './play';
+import { PlayControls, PlayNotice, PlayProvider, usePlaySnapshot } from './play';
+import { installationRefreshKey } from './play-state';
+import { canInstall } from './library-state';
 
 type CatalogState =
   | { kind: 'loading' }
@@ -22,9 +24,15 @@ const localStateText: Record<CatalogInstance['localState'], string> = {
 
 function App() {
   const [catalog, setCatalog] = useState<CatalogState>({ kind: 'loading' });
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const installationChanges = installationRefreshKey(usePlaySnapshot());
 
   useEffect(() => {
     let active = true;
+    setRefreshing(true);
+    setRefreshError(null);
     loadCatalog()
       .then(snapshot => {
         if (active) setCatalog({ kind: 'ready', ...snapshot });
@@ -32,10 +40,11 @@ function App() {
       .catch(error => {
         if (!active) return;
         // The account file problem is explained once, in the accounts section.
-        setCatalog(error === 'accounts_file_invalid' || error === 'unsafe_permissions' ? { kind: 'blocked' } : { kind: 'error', message: messageForError(error) });
-      });
+        setRefreshError(messageForError(error));
+        setCatalog(previous => previous.kind === 'ready' ? previous : error === 'accounts_file_invalid' || error === 'unsafe_permissions' ? { kind: 'blocked' } : { kind: 'error', message: messageForError(error) });
+      }).finally(() => { if (active) setRefreshing(false); });
     return () => { active = false; };
-  }, []);
+  }, [installationChanges, catalogAttempt]);
 
   return (
     <main>
@@ -47,7 +56,9 @@ function App() {
       <section aria-labelledby="instances-heading">
         <h1 id="instances-heading">Tus instancias</h1>
         <p>Elige una versión de Minecraft para comenzar.</p>
+        {catalog.kind === 'ready' && <button type="button" disabled={refreshing} onClick={() => setCatalogAttempt(previous => previous + 1)}>{refreshing ? 'Actualizando catálogo…' : 'Actualizar catálogo'}</button>}
         <PlayNotice />
+        {catalog.kind === 'ready' && refreshError && <p role="alert">No pudimos actualizar el estado de las instancias. {refreshError}</p>}
         {catalog.kind === 'loading' && <p role="status">Cargando instancias…</p>}
         {catalog.kind === 'blocked' && <p role="status">Las instancias estarán disponibles cuando se resuelva el problema con las cuentas.</p>}
         {catalog.kind === 'error' && (
@@ -55,9 +66,7 @@ function App() {
             <p>{catalog.message}</p>
             <button type="button" onClick={() => {
               setCatalog({ kind: 'loading' });
-              loadCatalog()
-                .then(snapshot => setCatalog({ kind: 'ready', ...snapshot }))
-                .catch(error => setCatalog({ kind: 'error', message: messageForError(error) }));
+              setCatalogAttempt(previous => previous + 1);
             }}>Reintentar</button>
           </div>
         )}
@@ -84,12 +93,14 @@ function App() {
                 <p>{instance.description}</p>
                 {instance.minecraftVersion && <p className="version">Minecraft {instance.minecraftVersion}</p>}
                 <p>{localStateText[instance.localState]}</p>
-                {instance.installedVersion && <p>Versión instalada: {instance.installedVersion}</p>}
+                {instance.installedVersion && <p>{['installed', 'update_available', 'running'].includes(instance.localState) ? 'Versión instalada' : 'Versión de la instalación'}: {instance.installedVersion}</p>}
                 {instance.availability === 'missing' && <p>Esta instancia ya no está en el catálogo. Conservamos tus datos locales.</p>}
                 {instance.availability === 'unverified' && <p>No pudimos verificar el estado de esta instancia.</p>}
                 {!instance.compatible && <p>Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
                 {!instance.supported && <p>Este tipo de instancia o su acceso todavía no es compatible.</p>}
-                <PlayControls instanceId={instance.id} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
+                <PlayControls instanceId={instance.id}
+                  installAllowed={canInstall(instance, catalog.stale)}
+                  allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
               </article>
             ))}
           </div>

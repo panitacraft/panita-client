@@ -1,4 +1,4 @@
-export type PlayPhase = 'preparing' | 'warning' | 'starting' | 'running' | 'stopping' | 'cancelling' | 'exited' | 'failed' | 'cancelled';
+export type PlayPhase = 'preparing' | 'installing' | 'installed' | 'warning' | 'starting' | 'running' | 'stopping' | 'cancelling' | 'exited' | 'failed' | 'cancelled';
 export type PlayEntry = {
   instanceId: string;
   requestId: string;
@@ -7,6 +7,9 @@ export type PlayEntry = {
   error: string | null;
   exitCode: number | null;
   exitSuccess: boolean | null;
+  operation: 'install' | 'play';
+  receivedFiles: number;
+  reusedFiles: number;
 };
 export type PlaySnapshot = {
   revision: number;
@@ -22,5 +25,10 @@ export function acceptPlaySnapshot(previous: PlaySnapshot | null, next: PlaySnap
 }
 
 export function playActive(phase: PlayPhase): boolean {
-  return phase !== 'exited' && phase !== 'failed' && phase !== 'cancelled';
+  return phase !== 'installed' && phase !== 'exited' && phase !== 'failed' && phase !== 'cancelled';
+}
+
+export function installationRefreshKey(snapshot: PlaySnapshot | null): string {
+  return snapshot?.instances.filter(entry => entry.operation === 'install' && !playActive(entry.phase))
+    .map(entry => `${entry.instanceId}:${entry.requestId}:${entry.phase}`).sort().join('|') ?? '';
 }

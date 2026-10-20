@@ -12,6 +12,8 @@ type PlayContextValue = {
 const PlayContext = createContext<PlayContextValue | null>(null);
 const phaseText: Record<PlayPhase, string> = {
   preparing: 'Comprobando la instancia y sus archivos…',
+  installing: 'Preparando Minecraft y Java. Descargando y comprobando archivos…',
+  installed: 'Instalación completa. Ya puedes jugar.',
   warning: 'Necesitamos tu confirmación para continuar.',
   starting: 'Verificando la cuenta e iniciando Minecraft…',
   running: 'Minecraft está en ejecución.',
@@ -57,11 +59,15 @@ export function PlayNotice() {
   const play = useContext(PlayContext);
   return <>
     {play?.error && <p role="alert">{play.error}</p>}
-    {play?.snapshot?.closeBlocked && <p className="catalog-notice" role="alert">No pudimos cerrar esta ventana. Si hay un inicio pendiente, cancélalo y vuelve a intentarlo. Puedes minimizar esta ventana.</p>}
+    {play?.snapshot?.closeBlocked && <p className="catalog-notice" role="alert">No pudimos cerrar esta ventana. Cancela la instalación o el inicio pendiente y vuelve a intentarlo. Puedes minimizar esta ventana.</p>}
   </>;
 }
 
-export function PlayControls({ instanceId, allowed }: { instanceId: string; allowed: boolean }) {
+export function usePlaySnapshot() {
+  return useContext(PlayContext)?.snapshot ?? null;
+}
+
+export function PlayControls({ instanceId, allowed, installAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -81,7 +87,14 @@ export function PlayControls({ instanceId, allowed }: { instanceId: string; allo
   return <div className="play-controls">
     {entry && <p role="status">{entry.phase === 'exited' && entry.exitSuccess === false
       ? `Minecraft se cerró de forma inesperada.${entry.exitCode !== null ? ` Código: ${entry.exitCode}.` : ''}`
+      : entry.operation === 'install' && entry.phase === 'failed' ? 'No pudimos completar la instalación.'
+      : entry.operation === 'install' && entry.phase === 'cancelled' ? 'Instalación cancelada. Puedes reintentarla.'
       : phaseText[entry.phase]}</p>}
+    {entry?.operation === 'install' && active && <div>
+      <progress aria-label="Instalación de Minecraft y Java" />
+      <p>Archivos recibidos: {entry.receivedFiles}. Archivos reutilizados: {entry.reusedFiles}.</p>
+      <p>La instalación termina cuando se comprueban todos los archivos y Java.</p>
+    </div>}
     {entry?.error && entry.error !== 'operation_cancelled' && <p className="account-error" role="alert">{messageForError(entry.error)}</p>}
     {entry?.phase === 'warning' && <div className="catalog-notice" role="alert">
       <p>No pudimos comprobar si esta instancia sigue habilitada. Usaremos la instalación local verificada. Si usas una cuenta Microsoft, necesitas conexión para verificarla.</p>
@@ -90,7 +103,7 @@ export function PlayControls({ instanceId, allowed }: { instanceId: string; allo
         <button type="button" disabled={busy} onClick={() => void act('cancel_play', { requestId: entry.requestId })}>Cancelar</button>
       </div>
     </div>}
-    {active && !running && entry?.phase !== 'warning' && <button type="button" disabled={busy || entry?.phase === 'cancelling'} onClick={() => void act('cancel_play', { requestId: entry?.requestId })}>Cancelar inicio</button>}
+    {active && !running && entry?.phase !== 'warning' && <button type="button" disabled={busy || entry?.phase === 'cancelling'} onClick={() => void act('cancel_play', { requestId: entry?.requestId })}>{entry?.operation === 'install' ? 'Cancelar instalación' : 'Cancelar inicio'}</button>}
     {running && entry && <>
       <p>Cierra Minecraft desde su menú para guardar la partida.</p>
       <p>Si cierras esta ventana, Panita seguirá en segundo plano hasta que cierres los juegos. Abre Panita de nuevo para volver a esta pantalla.</p>
@@ -106,6 +119,7 @@ export function PlayControls({ instanceId, allowed }: { instanceId: string; allo
         </div>
       </div>}
     </>}
-    {!active && <button type="button" disabled={busy || !allowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}>{allowed ? 'Jugar' : 'No disponible para jugar'}</button>}
+    {!active && installAllowed && entry?.phase !== 'installed' && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}>{entry?.operation === 'install' ? 'Reintentar instalación' : 'Instalar'}</button>}
+    {!active && !installAllowed && <button type="button" disabled={busy || !allowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}>{allowed ? 'Jugar' : 'No disponible para jugar'}</button>}
   </div>;
 }

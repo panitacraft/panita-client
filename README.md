@@ -4,17 +4,21 @@ Panita Client is an unofficial Minecraft launcher for friends. The MVP will
 install and launch two independent vanilla instances from the Panita API
 catalog, using Microsoft or explicitly selected offline accounts.
 
-This repository is in development. The desktop interface manages accounts and
-the catalog. Core installation is exercised through the development harness
-described below. Phase 5 game launch and process lifecycle are accepted as of
+This repository is in development. The desktop interface manages accounts,
+the catalog, vanilla installation progress/cancellation, and Play. The core
+development harness described below remains available for isolated checks.
+Phase 5 game launch and process lifecycle are accepted as of
 2026-10-19. Desktop Play connects installed vanilla instances to verified launch
 preflight, cancellation, per-attempt outage confirmation and game lifecycle
 status. Installation and maintenance workflows remain Phase 6; clean-machine
 and distribution qualification remain Phase 7. Phase 6 started on 2026-10-19
 with typed account commands and tested account UI state transitions. Account
 feedback rejects stale results, retries failed initialization, and retains
-incomplete sign-out cleanup warnings across account changes. Installation,
-settings, maintenance, and complete end-to-end acceptance remain pending.
+incomplete sign-out cleanup warnings across account changes. The next checkpoint
+connects the core installer, same-version retries, progress, cancellation, and
+catalog refresh to the desktop. Automated lifecycle/state checks pass; native
+installation UI acceptance, settings, maintenance, and full end-to-end validation
+remain pending.
 
 An isolated Windows build reached the Minecraft 26.3 and 1.21.1 main menus
 through desktop Play with a synthetic offline account. Cancellation, launcher

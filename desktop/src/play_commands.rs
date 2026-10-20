@@ -17,6 +17,8 @@ use super::{DesktopState, account_commands};
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Preparing,
+    Installing,
+    Installed,
     Warning,
     Starting,
     Running,
@@ -29,11 +31,16 @@ enum Phase {
 
 impl Phase {
     fn active(self) -> bool {
-        !matches!(self, Self::Exited | Self::Failed | Self::Cancelled)
+        !matches!(
+            self,
+            Self::Installed | Self::Exited | Self::Failed | Self::Cancelled
+        )
     }
     fn text(self) -> &'static str {
         match self {
             Self::Preparing => "preparing",
+            Self::Installing => "installing",
+            Self::Installed => "installed",
             Self::Warning => "warning",
             Self::Starting => "starting",
             Self::Running => "running",
@@ -54,6 +61,10 @@ struct Entry {
     game: Option<Arc<RunningGame>>,
     error: Option<ErrorCode>,
     exit: Option<launcher_core::minecraft::process::GameExit>,
+    installation: bool,
+    received_files: u64,
+    reused_files: u64,
+    last_progress: std::time::Instant,
 }
 
 #[derive(Default)]
@@ -66,11 +77,18 @@ struct State {
 }
 
 impl State {
-    fn cancel_pending(&mut self) {
+    fn cancel_pending(&mut self, include_installations: bool) {
         for entry in self.entries.values_mut() {
+            if entry.installation && !include_installations {
+                continue;
+            }
             if matches!(
                 entry.phase,
-                Phase::Preparing | Phase::Warning | Phase::Starting | Phase::Cancelling
+                Phase::Preparing
+                    | Phase::Installing
+                    | Phase::Warning
+                    | Phase::Starting
+                    | Phase::Cancelling
             ) {
                 entry.cancel.cancel();
                 entry.phase = if entry.pending.take().is_some() {
@@ -105,6 +123,15 @@ impl PlayController {
     }
 
     fn reserve(&self, instance: Uuid, request: Uuid) -> Result<Cancellation, ErrorCode> {
+        self.reserve_operation(instance, request, false)
+    }
+
+    fn reserve_operation(
+        &self,
+        instance: Uuid,
+        request: Uuid,
+        installation: bool,
+    ) -> Result<Cancellation, ErrorCode> {
         if instance.is_nil() || request.is_nil() {
             return Err(ErrorCode::InvalidData);
         }
@@ -134,12 +161,20 @@ impl PlayController {
             instance,
             Entry {
                 request,
-                phase: Phase::Preparing,
+                phase: if installation {
+                    Phase::Installing
+                } else {
+                    Phase::Preparing
+                },
                 cancel: cancel.clone(),
                 pending: None,
                 game: None,
                 error: None,
                 exit: None,
+                installation,
+                received_files: 0,
+                reused_files: 0,
+                last_progress: std::time::Instant::now(),
             },
         );
         state.close_blocked = false;
@@ -173,6 +208,39 @@ impl PlayController {
         });
     }
 
+    fn installation_progress(
+        &self,
+        instance: Uuid,
+        request: Uuid,
+        progress: launcher_core::minecraft::download::DownloadProgress,
+    ) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        let Some(entry) = state
+            .entries
+            .get_mut(&instance)
+            .filter(|entry| entry.request == request && entry.phase == Phase::Installing)
+        else {
+            return false;
+        };
+        if progress.bytes == progress.total {
+            if progress.reused {
+                entry.reused_files += 1;
+            } else {
+                entry.received_files += 1;
+            }
+        }
+        // Progress is per artifact, with up to four concurrent downloads. Do not
+        // sum partial byte counts or describe received files as verified yet.
+        let publish = entry.last_progress.elapsed() >= std::time::Duration::from_millis(250);
+        if publish {
+            entry.last_progress = std::time::Instant::now();
+        }
+        state.changed();
+        publish
+    }
+
     pub fn snapshot(&self) -> Result<Value, ErrorCode> {
         let state = self
             .state
@@ -187,6 +255,8 @@ impl PlayController {
                     "confirmationId": entry.pending.as_ref().map(PendingPlay::operation_id),
                     "error": entry.error, "exitCode": entry.exit.and_then(|exit| exit.code),
                     "exitSuccess": entry.exit.map(|exit| exit.success),
+                    "operation": if entry.installation { "install" } else { "play" },
+                    "receivedFiles": entry.received_files, "reusedFiles": entry.reused_files,
                 })
             })
             .collect();
@@ -223,7 +293,7 @@ impl PlayController {
             if hide() {
                 state.background = true;
                 state.close_blocked = false;
-                state.cancel_pending();
+                state.cancel_pending(true);
             } else {
                 state.close_blocked = true;
                 state.changed();
@@ -284,7 +354,7 @@ impl PlayController {
 
     pub fn cancel_pending(&self) {
         if let Ok(mut state) = self.state.lock() {
-            state.cancel_pending();
+            state.cancel_pending(false);
         }
     }
 
@@ -300,7 +370,11 @@ impl PlayController {
             .ok_or(ErrorCode::OperationCancelled)?;
         if !matches!(
             entry.phase,
-            Phase::Preparing | Phase::Warning | Phase::Starting | Phase::Cancelling
+            Phase::Preparing
+                | Phase::Installing
+                | Phase::Warning
+                | Phase::Starting
+                | Phase::Cancelling
         ) {
             return Err(ErrorCode::OperationBusy);
         }
@@ -402,6 +476,74 @@ async fn start_and_monitor(
 #[tauri::command]
 pub(super) fn play_snapshot(state: tauri::State<'_, DesktopState>) -> Result<Value, ErrorCode> {
     state.plays.snapshot()
+}
+
+#[tauri::command]
+pub(super) fn begin_install(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+) -> Result<(), ErrorCode> {
+    let platform = native_platform()?;
+    let paths = AppPaths::new(
+        app.path()
+            .app_data_dir()
+            .map_err(|_| ErrorCode::StorageUnavailable)?,
+    )
+    .map_err(|error| error.code())?;
+    // Use the same initialized private root as the other desktop workflows.
+    account_commands::controller(&state)?;
+    let controller = state.plays.clone();
+    let cancel = controller.reserve_operation(instance_id, request_id, true)?;
+    controller.publish(&app);
+    tauri::async_runtime::spawn(async move {
+        let result = async {
+            use launcher_core::registry::{InstallationState, InstanceRegistry};
+            let record = InstanceRegistry::new(paths.clone())
+                .get(instance_id)
+                .map_err(|error| error.code())?;
+            if record.is_some_and(|record| {
+                matches!(
+                    record.state,
+                    InstallationState::Installed
+                        | InstallationState::UpdateAvailable
+                        | InstallationState::Running
+                )
+            }) {
+                return Err(ErrorCode::OperationBusy);
+            }
+            cancel.check().map_err(|error| error.code())?;
+            let progress_controller = controller.clone();
+            let progress_app = app.clone();
+            let progress = Arc::new(move |progress| {
+                if progress_controller.installation_progress(instance_id, request_id, progress) {
+                    progress_controller.publish(&progress_app);
+                }
+            });
+            launcher_core::minecraft::install::install(
+                &paths,
+                instance_id,
+                &platform,
+                &cancel,
+                progress,
+            )
+            .await
+            .map_err(|error| error.code())?;
+            Ok(())
+        }
+        .await;
+        match result {
+            // The published manifest is authoritative if cancellation races
+            // successful completion. Never report committed data as cancelled.
+            Ok(()) => controller.update(instance_id, request_id, |entry| {
+                entry.phase = Phase::Installed
+            }),
+            Err(error) => controller.fail(instance_id, request_id, error),
+        }
+        controller.publish(&app);
+    });
+    Ok(())
 }
 
 #[tauri::command]

@@ -1,5 +1,92 @@
 use super::*;
 
+fn installation(controller: &PlayController, instance: Uuid, request: Uuid) -> Cancellation {
+    controller
+        .reserve_operation(instance, request, true)
+        .unwrap_or_else(|_| panic!("reservation"))
+}
+
+#[test]
+fn installation_blocks_duplicate_play_and_close_until_worker_finishes() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    let cancel = installation(&controller, instance, request);
+    assert_eq!(
+        controller.reserve(instance, Uuid::new_v4()).err(),
+        Some(ErrorCode::OperationBusy)
+    );
+    assert!(controller.close_window(|| panic!("installation must not hide")));
+    assert!(controller.cancel(instance, request).is_ok());
+    assert!(cancel.check().is_err());
+    assert!(!controller.allow_close());
+    controller.fail(instance, request, ErrorCode::OperationCancelled);
+    assert!(controller.allow_close());
+}
+
+#[test]
+fn account_change_keeps_installation_but_hiding_cancels_it_and_waits() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    let cancel = installation(&controller, instance, request);
+    controller.cancel_pending();
+    assert!(cancel.check().is_ok());
+    let game = Uuid::new_v4();
+    assert!(controller.reserve(game, request).is_ok());
+    controller.update(game, request, |entry| entry.phase = Phase::Running);
+    assert!(controller.close_window(|| true));
+    assert!(cancel.check().is_err());
+    controller.update(game, request, |entry| entry.phase = Phase::Exited);
+    assert!(!controller.finish_background());
+    controller.fail(instance, request, ErrorCode::OperationCancelled);
+    assert!(controller.finish_background());
+}
+
+#[test]
+fn installation_progress_is_bounded_scoped_and_terminal_results_are_authoritative() {
+    use launcher_core::minecraft::download::DownloadProgress;
+    let controller = PlayController::new(ProcessSessionId::new());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    let _cancel = installation(&controller, instance, request);
+    let progress = DownloadProgress {
+        bytes: 10,
+        total: 10,
+        reused: false,
+    };
+    assert!(!controller.installation_progress(instance, Uuid::new_v4(), progress));
+    controller.installation_progress(
+        instance,
+        request,
+        DownloadProgress {
+            bytes: 5,
+            ..progress
+        },
+    );
+    controller.installation_progress(instance, request, progress);
+    controller.installation_progress(
+        instance,
+        request,
+        DownloadProgress {
+            reused: true,
+            ..progress
+        },
+    );
+    let snapshot = controller.snapshot().unwrap_or_else(|_| panic!("snapshot"));
+    assert_eq!(snapshot["instances"][0]["receivedFiles"], json!(1));
+    assert_eq!(snapshot["instances"][0]["reusedFiles"], json!(1));
+    assert_eq!(snapshot["instances"][0]["operation"], json!("install"));
+    // Cancellation after publication cannot undo a completed manifest.
+    assert!(controller.cancel(instance, request).is_ok());
+    controller.update(instance, request, |entry| entry.phase = Phase::Installed);
+    let completed = controller.snapshot().unwrap_or_else(|_| panic!("snapshot"));
+    assert!(!controller.installation_progress(instance, request, progress));
+    assert_eq!(controller.snapshot().ok(), Some(completed));
+    assert!(controller.reserve(instance, Uuid::new_v4()).is_ok());
+    assert!(!controller.installation_progress(instance, request, progress));
+}
+
 #[test]
 fn hidden_launcher_keeps_all_games_and_exits_only_after_last_exit() {
     let controller = PlayController::new(ProcessSessionId::new());
@@ -199,10 +286,26 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
         .as_array()
         .unwrap_or_else(|| panic!("instances"))
     {
-        assert_eq!(
-            entry.as_object().unwrap_or_else(|| panic!("entry")).len(),
-            7
-        );
+        let keys: Vec<_> = entry
+            .as_object()
+            .unwrap_or_else(|| panic!("entry"))
+            .keys()
+            .map(String::as_str)
+            .collect();
+        let mut expected = vec![
+            "instanceId",
+            "requestId",
+            "phase",
+            "confirmationId",
+            "error",
+            "exitCode",
+            "exitSuccess",
+            "operation",
+            "receivedFiles",
+            "reusedFiles",
+        ];
+        expected.sort_unstable();
+        assert_eq!(keys, expected);
         assert!(entry.get("game").is_none());
         assert!(entry.get("pending").is_none());
         assert!(entry.get("args").is_none());
