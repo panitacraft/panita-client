@@ -2,6 +2,201 @@ use super::*;
 use crate::accounts::AccountRepository;
 use crate::registry::InstallationRecord;
 
+fn successful_auth_chain() -> Vec<(&'static str, u16, String)> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let expiry = chrono::DateTime::<chrono::Utc>::from_timestamp((now + 3600) as i64, 0)
+        .unwrap_or_default()
+        .to_rfc3339();
+    vec![
+        ("/token", 200, r#"{"access_token":"fixture-microsoft","refresh_token":"fixture-rotated","expires_in":3600,"token_type":"Bearer"}"#.into()),
+        ("/xbox", 200, serde_json::json!({"Token":"fixture-xbox","NotAfter":expiry,"DisplayClaims":{"xui":[{"uhs":"1234"}]}}).to_string()),
+        ("/xsts", 200, serde_json::json!({"Token":"fixture-xsts","NotAfter":expiry,"DisplayClaims":{"xui":[{"uhs":"1234"}]}}).to_string()),
+        ("/minecraft", 200, r#"{"access_token":"fixture-minecraft","expires_in":3600,"token_type":"Bearer"}"#.into()),
+        ("/profile", 200, fixture_profile()),
+    ]
+}
+
+fn fixture_profile() -> String {
+    r#"{"id":"5627dd98e6be3c21b8a8e92344183641","name":"PlayerOne"}"#.into()
+}
+
+fn microsoft_fixture(
+    responses: Vec<(&'static str, u16, String)>,
+) -> (
+    AppPaths,
+    Arc<AccountController>,
+    Uuid,
+    std::thread::JoinHandle<()>,
+) {
+    use crate::accounts::Secret;
+    let (paths, offline, instance) = fixture();
+    drop(offline);
+    complete_installation(&paths, instance);
+    let repository =
+        AccountRepository::new(PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store")));
+    repository
+        .save_microsoft(
+            Uuid::parse_str("5627dd98-e6be-3c21-b8a8-e92344183641")
+                .unwrap_or_else(|_| panic!("profile")),
+            "PlayerOne",
+            &Secret::new("fixture-refresh".into()).unwrap_or_else(|_| panic!("refresh")),
+            None,
+        )
+        .unwrap_or_else(|_| panic!("account"));
+    let (client, server) = crate::authentication::tests::mock_client(responses);
+    let accounts = Arc::new(
+        AccountController::with_client(repository, ProcessSessionId::new(), client)
+            .unwrap_or_else(|_| panic!("controller")),
+    );
+    // Save_microsoft selects the profile. No real accounts or endpoint overrides.
+    (paths, accounts, instance, server)
+}
+
+async fn controlled_attempt(
+    paths: &AppPaths,
+    accounts: &Arc<AccountController>,
+    instance: Uuid,
+    status: u16,
+) -> PendingPlay {
+    let body = if status == 200 {
+        serde_json::json!({"data":crate::catalog::tests::record()}).to_string()
+    } else {
+        "{}".into()
+    };
+    let (catalog, server) = crate::catalog::tests::server(vec![(status, body, false)]);
+    let pending = prepare_with_catalog(
+        paths.clone(),
+        instance,
+        accounts.clone(),
+        Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform")),
+        ProcessSessionId::new(),
+        Cancellation::default(),
+        catalog,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("preflight: {error}"));
+    assert!(server.join().is_ok());
+    pending
+}
+
+async fn controlled_profile_rejection(final_status: u16, expected: ErrorCode) {
+    let mut replies = successful_auth_chain();
+    replies.push(("/profile", 401, r#"{"secret":"fixture-error-body"}"#.into()));
+    replies.extend(successful_auth_chain());
+    replies.push((
+        "/profile",
+        final_status,
+        if final_status == 200 {
+            fixture_profile()
+        } else {
+            "{}".into()
+        },
+    ));
+    let (paths, accounts, instance, server) = microsoft_fixture(replies);
+    assert!(accounts.renew_selected().await.is_ok());
+    let store = PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store"));
+    let before = store
+        .read("accounts.json")
+        .unwrap_or_else(|_| panic!("before"));
+    let game = paths
+        .game_directory(instance)
+        .unwrap_or_else(|_| panic!("game"));
+    let marker = game.join("controlled-player-data.txt");
+    assert!(std::fs::write(&marker, b"preserve player data").is_ok());
+    let pending = controlled_attempt(&paths, &accounts, instance, 200).await;
+    assert!(!pending.catalog_warning_required());
+    let error = pending
+        .start(None)
+        .await
+        .err()
+        .unwrap_or_else(|| panic!("synthetic Java must never execute"));
+    assert_eq!(error.code(), expected);
+    assert!(!format!("{error:?}").contains("fixture-error-body"));
+    // The strict server consumes exactly one rejected validation, one renewal
+    // chain and one retry. Extra requests cannot turn this into a passing case.
+    assert!(server.join().is_ok());
+    assert!(
+        before
+            == store
+                .read("accounts.json")
+                .unwrap_or_else(|_| panic!("after"))
+    );
+    let view = serde_json::to_string(&accounts.view().unwrap_or_else(|_| panic!("view")))
+        .unwrap_or_else(|_| panic!("view serialization"));
+    for secret in [
+        "fixture-refresh",
+        "fixture-rotated",
+        "fixture-minecraft",
+        "fixture-microsoft",
+        "fixture-xbox",
+        "fixture-xsts",
+    ] {
+        assert!(!view.contains(secret));
+    }
+    assert_eq!(
+        std::fs::read(&marker).unwrap_or_else(|_| panic!("marker")),
+        b"preserve player data"
+    );
+    assert!(LaunchLease::acquire(&paths, instance).is_ok());
+    drop(accounts);
+    drop(store);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
+async fn controlled_persistent_microsoft_rejection_blocks_composed_play_after_one_renewal() {
+    controlled_profile_rejection(401, ErrorCode::AuthenticationRequired).await;
+}
+
+#[tokio::test]
+async fn controlled_microsoft_rejection_recovers_once_before_reaching_process_boundary() {
+    controlled_profile_rejection(200, ErrorCode::ProcessStartFailed).await;
+}
+
+#[tokio::test]
+async fn controlled_catalog_only_outage_requires_fresh_warning_and_still_validates_microsoft() {
+    let mut replies = successful_auth_chain();
+    replies.push(("/profile", 200, fixture_profile()));
+    let (paths, accounts, instance, server) = microsoft_fixture(replies);
+    assert!(accounts.renew_selected().await.is_ok());
+    let first = controlled_attempt(&paths, &accounts, instance, 503).await;
+    assert!(first.catalog_warning_required());
+    let stale = first.operation_id();
+    assert_eq!(
+        first.start(None).await.err().map(|error| error.code()),
+        Some(ErrorCode::CatalogConfirmationRequired)
+    );
+    let second = controlled_attempt(&paths, &accounts, instance, 503).await;
+    assert_ne!(second.operation_id(), stale);
+    assert_eq!(
+        second
+            .start(Some(stale))
+            .await
+            .err()
+            .map(|error| error.code()),
+        Some(ErrorCode::CatalogConfirmationRequired)
+    );
+    let third = controlled_attempt(&paths, &accounts, instance, 503).await;
+    let confirmation = third.operation_id();
+    // Positive control: authentication stays available during catalog failure.
+    // A valid warning reaches the invalid-Java sentinel, never a real game.
+    assert_eq!(
+        third
+            .start(Some(confirmation))
+            .await
+            .err()
+            .map(|error| error.code()),
+        Some(ErrorCode::ProcessStartFailed)
+    );
+    assert!(server.join().is_ok());
+    assert!(LaunchLease::acquire(&paths, instance).is_ok());
+    drop(accounts);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
 fn local() -> CatalogInstance {
     CatalogInstance {
         id: Uuid::parse_str("62d7e99d-fb4e-4167-8732-ce3a334d4a58")
