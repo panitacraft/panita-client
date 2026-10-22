@@ -104,7 +104,10 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
       }
       if (mounted.current) { setSnapshot(saved); setDraft(settingsDraft(saved)); setNotice('Los ajustes se guardaron. Se aplicarán al próximo inicio de Minecraft.'); }
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? messageForError(cause.message) : messageForError(cause));
+      const code = cause instanceof Error ? cause.message : cause;
+      if (mounted.current) setError(code === 'invalid_data'
+        ? 'Comprueba la RAM y el tamaño de la ventana. En los argumentos JVM, usa solo opciones -D o -XX: compatibles; configura la memoria en el campo RAM, sin añadir opciones -Xmx o -Xms.'
+        : messageForError(code));
     } finally { saving.current = false; if (mounted.current) setBusy(false); }
   }
   const prefix = instance ? 'instance-settings' : 'global-settings';
