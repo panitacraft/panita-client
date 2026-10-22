@@ -10,6 +10,7 @@ import { PlayControls, PlayNotice, PlayProvider, usePlaySnapshot } from './play'
 import { installationRefreshKey } from './play-state';
 import { canInstall, canRepair, canUninstall, updateTarget } from './library-state';
 import { PreferencesProvider, SettingsPanel, usePreferences } from './settings';
+import { DiagnosticsPanel } from './diagnostics';
 
 type CatalogState =
   | { kind: 'loading' }
@@ -114,6 +115,7 @@ function App() {
         )}
       </section>
       <SettingsPanel instanceId={preferences?.id ?? null} name={selectedInstance?.name ?? null} local={selectedInstance?.installedVersion != null} />
+      <DiagnosticsPanel />
     </main>
   );
 }

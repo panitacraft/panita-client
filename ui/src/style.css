@@ -58,3 +58,9 @@ input:focus-visible { outline: 3px solid #f2cf74; outline-offset: 2px; }
 .play-controls fieldset { min-width: 0; }
 .play-controls fieldset label { display: flex; align-items: start; gap: 8px; margin: 12px 0; }
 .play-controls input[type="radio"] { width: auto; flex-shrink: 0; }
+.diagnostics-section { padding-top: 16px; }
+.diagnostics-section summary { cursor: pointer; padding: 8px 0; }
+.diagnostic-list { max-height: 420px; overflow-y: auto; padding-inline: 28px 12px; }
+.diagnostic-list li { border-bottom: 1px solid #4c7564; padding: 8px 0; overflow-wrap: anywhere; }
+.diagnostic-list dd { margin-inline-start: 0; font-size: .85rem; }
+.diagnostic-list:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }

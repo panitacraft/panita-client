@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use launcher_core::error::ErrorCode;
+use launcher_core::logging::{BoundedLog, LogEvent, LogRecord, Workflow, WorkflowPhase};
 use launcher_core::minecraft::{
     Platform, download::Cancellation, play::PendingPlay, process::RunningGame,
 };
@@ -23,6 +24,15 @@ enum OperationKind {
     Uninstall,
 }
 impl OperationKind {
+    fn diagnostic(self) -> Workflow {
+        match self {
+            Self::Play => Workflow::Play,
+            Self::Install => Workflow::Install,
+            Self::Update => Workflow::Update,
+            Self::Repair => Workflow::Repair,
+            Self::Uninstall => Workflow::Uninstall,
+        }
+    }
     fn text(self) -> &'static str {
         match self {
             Self::Play => "play",
@@ -51,6 +61,23 @@ enum Phase {
 }
 
 impl Phase {
+    fn diagnostic(self, exit_success: Option<bool>) -> WorkflowPhase {
+        match self {
+            Self::Preparing => WorkflowPhase::Preparing,
+            Self::Installing => WorkflowPhase::Installing,
+            Self::Installed => WorkflowPhase::Installed,
+            Self::Uninstalled => WorkflowPhase::Uninstalled,
+            Self::Warning => WorkflowPhase::Warning,
+            Self::Starting => WorkflowPhase::Starting,
+            Self::Running => WorkflowPhase::Running,
+            Self::Stopping => WorkflowPhase::Stopping,
+            Self::Cancelling => WorkflowPhase::Cancelling,
+            Self::Exited if exit_success == Some(false) => WorkflowPhase::ExitedWithError,
+            Self::Exited => WorkflowPhase::Exited,
+            Self::Failed => WorkflowPhase::Failed,
+            Self::Cancelled => WorkflowPhase::Cancelled,
+        }
+    }
     fn active(self) -> bool {
         !matches!(
             self,
@@ -90,10 +117,13 @@ struct Entry {
     reused_files: u64,
     retained_files: u32,
     last_progress: std::time::Instant,
+    last_logged: Option<(WorkflowPhase, Option<ErrorCode>)>,
 }
 
 #[derive(Default)]
 struct State {
+    process: ProcessSessionId,
+    logs: Arc<BoundedLog>,
     revision: u64,
     closing: bool,
     close_blocked: bool,
@@ -127,6 +157,25 @@ impl State {
     }
 
     fn changed(&mut self) {
+        for entry in self.entries.values_mut() {
+            let current = (
+                entry.phase.diagnostic(entry.exit.map(|exit| exit.success)),
+                entry.error,
+            );
+            if entry.last_logged != Some(current) {
+                self.logs.record(LogRecord {
+                    process: self.process,
+                    operation: None,
+                    event: LogEvent::WorkflowChanged {
+                        request: entry.request,
+                        workflow: entry.kind.diagnostic(),
+                        phase: current.0,
+                        error: current.1,
+                    },
+                });
+                entry.last_logged = Some(current);
+            }
+        }
         self.revision += 1;
         if !self.entries.values().any(|entry| entry.phase.active()) {
             self.close_blocked = false;
@@ -140,10 +189,19 @@ pub(super) struct PlayController {
 }
 
 impl PlayController {
+    #[cfg(test)]
     pub fn new(process: ProcessSessionId) -> Self {
+        Self::with_logs(process, Arc::new(BoundedLog::default()))
+    }
+
+    pub(super) fn with_logs(process: ProcessSessionId, logs: Arc<BoundedLog>) -> Self {
         Self {
             process,
-            state: Mutex::new(State::default()),
+            state: Mutex::new(State {
+                process,
+                logs,
+                ..Default::default()
+            }),
         }
     }
 
@@ -203,10 +261,11 @@ impl PlayController {
                 reused_files: 0,
                 retained_files: 0,
                 last_progress: std::time::Instant::now(),
+                last_logged: None,
             },
         );
         state.close_blocked = false;
-        state.revision += 1;
+        state.changed();
         Ok(cancel)
     }
 
@@ -441,7 +500,7 @@ impl PlayController {
         }
         let pending = entry.pending.take().ok_or(ErrorCode::OperationBusy)?;
         entry.phase = Phase::Starting;
-        state.revision += 1;
+        state.changed();
         Ok(pending)
     }
 }

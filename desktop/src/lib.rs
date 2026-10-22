@@ -10,7 +10,7 @@ mod settings_commands;
 
 struct DesktopState {
     process: launcher_core::operation::ProcessSessionId,
-    logs: launcher_core::logging::BoundedLog,
+    logs: Arc<launcher_core::logging::BoundedLog>,
     accounts: Mutex<Option<Arc<AccountController>>>,
     orphaned_callback: bool,
     catalog_fetch: tokio::sync::Mutex<()>,
@@ -73,6 +73,14 @@ fn application_name() -> &'static str {
 }
 
 #[tauri::command]
+fn diagnostic_snapshot(
+    state: tauri::State<'_, DesktopState>,
+) -> launcher_core::logging::DiagnosticSnapshot {
+    // Available even when initialization fails; no storage or authentication work.
+    state.logs.view()
+}
+
+#[tauri::command]
 async fn catalog_snapshot(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
@@ -84,9 +92,21 @@ async fn catalog_snapshot(
         .app_data_dir()
         .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
     let paths = launcher_core::paths::AppPaths::new(root).map_err(|error| error.code())?;
-    launcher_core::registry::load_catalog(paths)
+    let result = launcher_core::registry::load_catalog(paths)
         .await
-        .map_err(|error| error.code())
+        .map_err(|error| error.code());
+    let warning = match &result {
+        Err(code) => Some(*code),
+        Ok(snapshot) => snapshot.cache_warning.or(snapshot.registry_warning),
+    };
+    if let Some(code) = warning {
+        state.logs.record(launcher_core::logging::LogRecord {
+            process: state.process,
+            operation: None,
+            event: launcher_core::logging::LogEvent::CatalogFailure(code),
+        });
+    }
+    result
 }
 
 pub fn run() {
@@ -96,7 +116,7 @@ pub fn run() {
         return;
     }
     let process = launcher_core::operation::ProcessSessionId::new();
-    let logs = launcher_core::logging::BoundedLog::default();
+    let logs = Arc::new(launcher_core::logging::BoundedLog::default());
     logs.record(launcher_core::logging::LogRecord {
         process,
         operation: None,
@@ -105,10 +125,10 @@ pub fn run() {
     let result = tauri::Builder::default()
         .manage(DesktopState {
             process,
-            logs,
+            logs: logs.clone(),
             accounts: Mutex::new(None),
             catalog_fetch: tokio::sync::Mutex::new(()),
-            plays: Arc::new(play_commands::PlayController::new(process)),
+            plays: Arc::new(play_commands::PlayController::with_logs(process, logs)),
             window: Mutex::new(settings_commands::WindowPreferences::default()),
             orphaned_callback: std::env::args_os()
                 .skip(1)
@@ -141,6 +161,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             application_name,
             initialize,
+            diagnostic_snapshot,
             catalog_snapshot,
             settings_commands::settings_snapshot,
             settings_commands::save_global_settings,

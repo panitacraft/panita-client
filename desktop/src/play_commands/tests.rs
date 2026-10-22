@@ -1,6 +1,59 @@
 use super::*;
 
 #[test]
+fn diagnostics_record_transitions_without_progress_spam_or_stale_requests() {
+    let logs = Arc::new(BoundedLog::default());
+    let process = ProcessSessionId::new();
+    let controller = PlayController::with_logs(process, logs.clone());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    assert!(
+        controller
+            .reserve_operation(instance, request, OperationKind::Repair)
+            .is_ok()
+    );
+    for _ in 0..300 {
+        controller.installation_progress(
+            instance,
+            request,
+            launcher_core::minecraft::download::DownloadProgress {
+                bytes: 1,
+                total: 1,
+                reused: true,
+            },
+        );
+    }
+    assert_eq!(logs.snapshot().len(), 1);
+    assert!(controller.cancel(instance, request).is_ok());
+    controller.fail(instance, request, ErrorCode::OperationCancelled);
+    assert_eq!(logs.snapshot().len(), 3);
+    let next = Uuid::new_v4();
+    assert!(controller.reserve(instance, next).is_ok());
+    controller.fail(instance, request, ErrorCode::NetworkUnavailable);
+    assert_eq!(
+        logs.snapshot().len(),
+        4,
+        "stale workers cannot add diagnostics for a new request"
+    );
+    controller.update(instance, next, |entry| entry.phase = Phase::Running);
+    controller.update(instance, next, |entry| {
+        entry.phase = Phase::Exited;
+        entry.exit = Some(launcher_core::minecraft::process::GameExit {
+            code: Some(1),
+            success: false,
+        });
+    });
+    assert!(
+        matches!(logs.snapshot().last().map(|record| record.event), Some(LogEvent::WorkflowChanged { request, workflow: Workflow::Play, phase: WorkflowPhase::ExitedWithError, error: None }) if request == next)
+    );
+    let json = serde_json::to_string(&logs.view()).unwrap_or_else(|_| panic!("view"));
+    assert!(
+        !json.contains(&instance.to_string()),
+        "instance metadata is not collected"
+    );
+}
+
+#[test]
 fn maintenance_owns_instance_until_worker_reports_committed_result() {
     for kind in [OperationKind::Repair, OperationKind::Uninstall] {
         let controller = PlayController::new(ProcessSessionId::new());

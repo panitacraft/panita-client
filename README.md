@@ -30,6 +30,16 @@ saved on close/hide; minimized or hidden state is not restored on the next launc
 Custom Java paths remain unsupported by launch preflight; the settings UI can clear
 an existing override. Older builds cannot read the new global settings schema.
 
+The Spanish client-event viewer reads the latest 256 structured events from the
+current launcher process on demand. Startup, storage/catalog errors and Play/install/
+update/repair/uninstall transitions use fixed event categories and error codes.
+Download ticks do not add duplicate events. Optional support details contain only
+process/session and operation UUIDs. This command remains available when account
+initialization fails. It does not read account storage, callbacks, launch arguments
+or raw Minecraft log/console files, and provides no export. These in-memory events
+are cleared on process exit; this is not a persistent crash-log viewer. Native
+keyboard/layout acceptance and full desktop E2E remain pending.
+
 Vanilla version changes use an explicit update confirmation for the displayed
 installed/catalog versions. The installed version stays available until a verified
 new generation is published. A durable update journal recovers an interrupted
