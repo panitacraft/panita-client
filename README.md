@@ -38,7 +38,38 @@ process/session and operation UUIDs. This command remains available when account
 initialization fails. It does not read account storage, callbacks, launch arguments
 or raw Minecraft log/console files, and provides no export. These in-memory events
 are cleared on process exit; this is not a persistent crash-log viewer. Native
-keyboard/layout acceptance and full desktop E2E remain pending.
+keyboard/layout and full desktop E2E qualification remain incomplete.
+
+Native validation on 2026-10-22 used an isolated Windows x64 debug build and a
+synthetic offline account. It verified account/preferences restart, maximized-window
+restoration, diagnostic keyboard navigation, installation cancellation/retry,
+the preparation close guard, and Minecraft 1.21.1 reaching its actual main menu
+with launcher-managed Java 21. Reopening reused the supervising process; normal
+game exit also stopped the hidden launcher. No production account/world files or
+catalog entries were changed. These observations do not establish installed-package,
+clean-machine, Microsoft-login, second-version, Linux or complete maintenance
+acceptance.
+
+Native cancellation testing also exposed maintenance buttons on a never-completed
+installation. Catalog snapshots now include a structurally validated installation-
+manifest hint: Repair/Uninstall require an active recorded plan, while damaged cache
+files remain repairable. Incomplete installs retain their install/retry control;
+backend ownership and operation checks remain authoritative. Settings validation
+also explains rejected JVM memory overrides in Spanish. Both corrections were
+verified in the rebuilt native candidate.
+
+The corrected Windows candidate also restored a deliberately damaged recorded
+Minecraft client cache through native Repair. The pinned plan, game options and a
+synthetic saves marker retained their hashes while a new generation was published.
+Native instance RAM override saving kept its 4096 MiB value separate from the
+6144 MiB global default. Broader maintenance, interruption and platform acceptance
+remain pending.
+
+The repaired installation again reached the real main menu. Normal game exit kept
+an open launcher alive, and its diagnostic viewer showed the ordered repair/launch/
+exit transitions without download-progress spam. The token-free launch-check
+harness confirmed the 4096 MiB instance value. These checks remain separate from
+Microsoft, two-version and installed-platform qualification.
 
 Vanilla version changes use an explicit update confirmation for the displayed
 installed/catalog versions. The installed version stays available until a verified
