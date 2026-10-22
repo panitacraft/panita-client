@@ -1,6 +1,32 @@
 #![allow(clippy::expect_used)]
 
 use super::*;
+
+#[test]
+fn maintenance_hint_requires_an_active_owned_manifest_but_not_healthy_cache_files() {
+    let (paths, accounts, id) = fixture();
+    drop(accounts);
+    let root = install::metadata_root(&paths, id).expect("root");
+    assert!(!has_installation_manifest(&paths, id).expect("incomplete"));
+    complete_installation(&paths, id);
+    assert!(has_installation_manifest(&paths, id).expect("installed"));
+    let installed: InstalledLock = read_json(&root, "installed.json")
+        .expect("read")
+        .expect("manifest");
+    std::fs::write(
+        paths.root().join(&installed.plan.artifacts[0].destination),
+        b"corrupt",
+    )
+    .expect("corrupt cache");
+    assert!(has_installation_manifest(&paths, id).expect("repairable"));
+    uninstall(&paths, id, &Cancellation::default()).expect("uninstall");
+    assert!(!has_installation_manifest(&paths, id).expect("tombstone"));
+    let mut foreign = installed;
+    foreign.instance_id = Uuid::new_v4();
+    write_json(&root, "installed.json", &foreign).expect("foreign manifest");
+    assert!(has_installation_manifest(&paths, id).is_err());
+    std::fs::remove_dir_all(paths.root()).expect("cleanup");
+}
 use crate::minecraft::{
     natives::NativeFile,
     play::tests::{complete_installation, fixture},

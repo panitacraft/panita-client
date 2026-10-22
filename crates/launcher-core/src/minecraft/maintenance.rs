@@ -22,6 +22,17 @@ pub struct MaintenanceOutcome {
     pub retained_files: u32,
 }
 
+/// Presentation hint only: a recorded active plan may still need artifact repair.
+/// Missing/tombstoned plans must not expose operations that require that plan.
+pub(crate) fn has_installation_manifest(paths: &AppPaths, id: Uuid) -> Result<bool, CoreError> {
+    let root = paths.instance(id)?;
+    let Some(installed) = read_json::<InstalledLock>(&root, "installed.json")? else {
+        return Ok(false);
+    };
+    validate_manifest(&installed, id)?;
+    Ok(installed.schema_version == 2)
+}
+
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum Kind {

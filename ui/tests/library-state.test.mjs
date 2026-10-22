@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canInstall, canRepair, canUninstall, updateTarget } from '../src/library-state.ts';
 
-const instance = { availability: 'enabled', compatible: true, supported: true, localState: 'not_installed', installedVersion: null, minecraftVersion: '1.21.1' };
+const instance = { availability: 'enabled', compatible: true, supported: true, localState: 'not_installed', installedVersion: null, hasInstallationManifest: false, minecraftVersion: '1.21.1' };
 
 test('fresh and interrupted installations can install or resume the same recorded pin', () => {
   for (const localState of ['not_installed', 'installing', 'failed', 'cancelled', 'needs_repair']) {
@@ -32,7 +32,7 @@ test('uninstalled and interrupted reinstalls require an explicit version transit
 });
 
 test('repair requires current catalog permission while preserving uninstall remains available offline or disabled', () => {
-  const local = { ...instance, localState: 'installed', installedVersion: '1.20.1' };
+  const local = { ...instance, localState: 'installed', installedVersion: '1.20.1', hasInstallationManifest: true };
   assert.equal(canRepair(local, false), true);
   assert.equal(canRepair(local, true), false);
   for (const availability of ['disabled', 'missing', 'unverified']) {
@@ -43,6 +43,18 @@ test('repair requires current catalog permission while preserving uninstall rema
   assert.equal(canRepair({ ...local, localState: 'not_installed' }, false), false);
   assert.equal(canUninstall({ ...local, localState: 'running' }), false);
   assert.equal(canRepair({ ...local, installedVersion: null }, false), false);
+});
+
+test('an interrupted first installation offers retry but not maintenance requiring a published plan', () => {
+  for (const localState of ['installing', 'failed', 'cancelled', 'needs_repair']) {
+    const interrupted = { ...instance, localState, installedVersion: '1.21.1' };
+    assert.equal(canInstall(interrupted, false), true);
+    assert.equal(canRepair(interrupted, false), false);
+    assert.equal(canUninstall(interrupted), false);
+  }
+  const damaged = { ...instance, localState: 'needs_repair', installedVersion: '1.21.1', hasInstallationManifest: true };
+  assert.equal(canRepair(damaged, false), true);
+  assert.equal(canUninstall(damaged), true);
 });
 
 test('installation cannot bypass catalog restrictions, offline mode or explicit updates', () => {

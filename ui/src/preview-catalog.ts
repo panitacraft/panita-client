@@ -7,6 +7,7 @@ export interface CatalogInstance {
   availability: 'enabled' | 'disabled' | 'missing' | 'unverified';
   localState: 'not_installed' | 'installing' | 'installed' | 'update_available' | 'needs_repair' | 'running' | 'failed' | 'cancelled';
   installedVersion: string | null;
+  hasInstallationManifest: boolean;
   compatible: boolean;
   supported: boolean;
   minLauncherVersion: string | null;
@@ -19,7 +20,7 @@ export interface CatalogOverview {
   registryWarning: string | null;
 }
 
-const defaults = { availability: 'enabled' as const, localState: 'not_installed' as const, installedVersion: null, compatible: true, supported: true, minLauncherVersion: null };
+const defaults = { availability: 'enabled' as const, localState: 'not_installed' as const, installedVersion: null, hasInstallationManifest: false, compatible: true, supported: true, minLauncherVersion: null };
 
 const previewInstances: CatalogInstance[] = [
   {

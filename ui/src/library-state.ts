@@ -17,11 +17,11 @@ export function updateTarget(instance: CatalogInstance, stale: boolean): UpdateT
 }
 
 export function canRepair(instance: CatalogInstance, stale: boolean): boolean {
-  return !stale && instance.availability === 'enabled' && instance.compatible && instance.supported
+  return instance.hasInstallationManifest && !stale && instance.availability === 'enabled' && instance.compatible && instance.supported
     && instance.installedVersion !== null
     && ['installed', 'update_available', 'needs_repair', 'failed', 'cancelled'].includes(instance.localState);
 }
 
 export function canUninstall(instance: CatalogInstance): boolean {
-  return instance.installedVersion !== null && instance.localState !== 'not_installed' && instance.localState !== 'running';
+  return instance.hasInstallationManifest && instance.installedVersion !== null && instance.localState !== 'not_installed' && instance.localState !== 'running';
 }

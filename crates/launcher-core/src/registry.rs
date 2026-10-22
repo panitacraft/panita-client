@@ -588,6 +588,7 @@ pub struct InstanceView {
     pub availability: Availability,
     pub local_state: InstallationState,
     pub installed_version: Option<String>,
+    pub has_installation_manifest: bool,
     pub compatible: bool,
     pub supported: bool,
 }
@@ -622,7 +623,7 @@ pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError>
     }
     let version = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?;
     let remote = crate::catalog::CatalogClient::new()?.refresh(&store).await;
-    match remote {
+    let mut overview = match remote {
         Ok(snapshot) => {
             let registry_warning = if snapshot.stale {
                 None
@@ -632,12 +633,12 @@ pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError>
                     .err()
                     .map(|error| error.code())
             };
-            Ok(CatalogOverview {
+            CatalogOverview {
                 instances: reconcile(Some(&snapshot), &local, &version),
                 stale: snapshot.stale,
                 cache_warning: snapshot.cache_warning,
                 registry_warning: migration_warning.or(registry_warning),
-            })
+            }
         }
         Err(error)
             if !local.is_empty()
@@ -646,15 +647,31 @@ pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError>
                     ErrorCode::NetworkUnavailable | ErrorCode::ServiceUnavailable
                 ) =>
         {
-            Ok(CatalogOverview {
+            CatalogOverview {
                 instances: reconcile(None, &local, &version),
                 stale: true,
                 cache_warning: None,
                 registry_warning: migration_warning,
-            })
+            }
         }
-        Err(error) => Err(error),
+        Err(error) => return Err(error),
+    };
+    if migration_warning.is_none() {
+        for view in &mut overview.instances {
+            if local.iter().any(|record| record.id == view.catalog.id) {
+                match crate::minecraft::maintenance::has_installation_manifest(
+                    &paths,
+                    view.catalog.id,
+                ) {
+                    Ok(has_manifest) => view.has_installation_manifest = has_manifest,
+                    Err(error) => {
+                        overview.registry_warning.get_or_insert(error.code());
+                    }
+                }
+            }
+        }
     }
+    Ok(overview)
 }
 
 pub fn reconcile(
@@ -734,6 +751,7 @@ fn view(
         availability,
         local_state,
         installed_version,
+        has_installation_manifest: false,
         compatible,
         supported,
     }
