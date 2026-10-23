@@ -62,6 +62,7 @@ pub(super) fn validate_manifest(manifest: &InstalledLock, id: Uuid) -> Result<()
     {
         return Err(invalid());
     }
+    manifest.native_directory()?;
     manifest.plan.validate()?;
     let mut seen = std::collections::HashSet::new();
     let mut total = 0u64;
@@ -230,12 +231,14 @@ fn natives(root: &Path, installed: &InstalledLock, remove: bool) -> Result<u32, 
     }
     let directory = private_fs::PrivateDir::open(root).map_err(map_private_error)?;
     let capability = super::world_backup::capability(&directory)?;
-    let generation = match capability.open_dir_nofollow(format!("natives-{}", installed.operation))
-    {
-        Ok(directory) => directory,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
-        Err(_) => return Ok(installed.native_files.len() as u32),
-    };
+    let mut generation = capability;
+    for part in installed.native_directory()?.split('/') {
+        generation = match generation.open_dir_nofollow(part) {
+            Ok(directory) => directory,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+            Err(_) => return Ok(installed.native_files.len() as u32),
+        };
+    }
     let mut retained = 0;
     for native in &installed.native_files {
         let mut parent = generation.try_clone().map_err(io)?;

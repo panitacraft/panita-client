@@ -90,6 +90,7 @@ fn fixture(id: &str, os: &str) -> (AppPaths, PathBuf, InstalledLock, Platform, A
             artifacts,
         },
         native_files: vec![],
+        native_directory: None,
     };
     let account = AccountInfo {
         account_id: Uuid::new_v4(),
@@ -195,7 +196,14 @@ fn golden_argument_array_preserves_order_spaces_and_literal_values() {
 fn both_pins_build_direct_arguments_for_both_platforms() {
     for id in ["1.21.1", "26.3"] {
         for os in ["windows", "linux"] {
-            let (paths, directory, installed, platform, account) = fixture(id, os);
+            let (paths, directory, mut installed, platform, account) = fixture(id, os);
+            let native_path = if id == "26.3" {
+                let path = format!("natives/{}", installed.operation);
+                installed.native_directory = Some(path.clone());
+                path
+            } else {
+                format!("natives-{}", installed.operation)
+            };
             let instance = InstanceSettings {
                 ram_mib: Some(6144),
                 ..Default::default()
@@ -243,6 +251,14 @@ fn both_pins_build_direct_arguments_for_both_platforms() {
                 installed.plan.asset_index_name().unwrap_or_default()
             );
             assert!(command.args.contains(&"-Xmx6144M".into()));
+            assert!(command.args.contains(&format!(
+                    "-Djava.library.path={}",
+                    directory
+                        .parent()
+                        .unwrap_or(&directory)
+                    .join(if id == "26.3" { format!("{native_path}/java") } else { native_path })
+                        .display()
+                )));
             let separator = if os == "windows" { ";" } else { ":" };
             let classpath = value_after(&command.args, "-cp");
             assert_eq!(

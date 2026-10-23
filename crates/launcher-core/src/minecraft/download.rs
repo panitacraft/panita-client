@@ -105,6 +105,26 @@ pub(crate) fn ensure_parent(
     Err(invalid())
 }
 
+/// Inspect an optional cache alias without creating its directory hierarchy.
+pub(crate) fn existing_parent(
+    root: &Path,
+    relative: &str,
+) -> Result<Option<(PrivateDir, String)>, CoreError> {
+    safe_path(relative)?;
+    let path = Path::new(relative);
+    let leaf = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(invalid)?;
+    match PrivateDir::open(root.join(path.parent().ok_or_else(invalid)?)) {
+        Ok(directory) => Ok(Some((directory, leaf.into()))),
+        Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(None)
+        }
+        Err(error) => Err(map_private_error(error)),
+    }
+}
+
 /// File handles are retained until drop, so another process cannot publish the same artifact.
 pub(crate) struct ArtifactLock {
     // Retain both handles: closing a duplicate on Windows can release file locks.
@@ -191,20 +211,24 @@ pub(crate) fn verified_file(
     name: &str,
     artifact: &Artifact,
 ) -> Result<bool, CoreError> {
-    let mut file = match directory.open_file(name) {
+    let file = match directory.open_file(name) {
         Ok(file) => file,
         Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(false);
         }
         Err(error) => return Err(map_private_error(error)),
     };
-    if native_file(&file)?.metadata().map_err(io)?.len() != artifact.size {
+    // These are public game artifacts, not credential files. Retain the private
+    // handle and verify its identity/permissions at both boundaries; hash through
+    // a duplicate of that same handle instead of repeating ACL queries per chunk.
+    let mut input = native_file(&file)?;
+    if input.metadata().map_err(io)?.len() != artifact.size {
         return Ok(false);
     }
     let mut buffer = [0; 64 * 1024];
     let mut hash = Sha1::new();
     loop {
-        let count = file.read(&mut buffer).map_err(io)?;
+        let count = input.read(&mut buffer).map_err(io)?;
         if count == 0 {
             break;
         }
@@ -276,7 +300,9 @@ fn import_verified(
     artifact: &Artifact,
     cancel: &Cancellation,
 ) -> Result<bool, CoreError> {
-    let (source, leaf) = ensure_parent(paths.root(), alias)?;
+    let Some((source, leaf)) = existing_parent(paths.root(), alias)? else {
+        return Ok(false);
+    };
     let mut input = match source.open_file(leaf) {
         Ok(file) => file,
         Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -803,6 +829,28 @@ mod tests {
             std::fs::read(paths.root().join(new_path)).ok().as_deref(),
             Some(new_bytes.as_slice())
         );
+    }
+
+    #[test]
+    fn missing_legacy_cache_lookup_does_not_create_coordinate_directories() {
+        let paths = paths();
+        let (directory, _) = ensure_parent(paths.root(), "libraries/ab/blob.jar")
+            .unwrap_or_else(|_| panic!("cache"));
+        assert!(
+            !import_verified(
+                &paths,
+                "libraries/group/library/1/library.jar",
+                &directory,
+                "blob.jar",
+                &artifact(b"jar"),
+                &Cancellation::default()
+            )
+            .unwrap_or_else(|_| panic!("lookup"))
+        );
+        assert!(!paths.root().join("libraries/group").exists());
+        assert!(existing_parent(paths.root(), "../escape.jar").is_err());
+        drop(directory);
+        std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
     }
     #[tokio::test]
     async fn hash_mismatch_truncation_and_cancel_leave_old_file_intact() {

@@ -27,7 +27,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cancel = Cancellation::default();
     if args[0] == "launch-check" {
         let id = uuid::Uuid::parse_str(&args[2])?;
+        let started = std::time::Instant::now();
         let installed = install::verify_installed(&paths, id)?;
+        let verification_ms = started.elapsed().as_millis();
+        let constructing = std::time::Instant::now();
         let settings = InstanceRegistry::new(paths.clone()).load_settings(id)?;
         let global = GlobalSettings::load(&PrivateStore::open(&paths)?)?;
         let effective = settings.effective(&global);
@@ -67,6 +70,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "ram_mib": effective.ram_mib,
                 "window_size": effective.window_size,
                 "verified_artifacts": installed.plan.artifacts.len(),
+                "verification_ms": verification_ms,
+                "command_build_ms": constructing.elapsed().as_millis(),
                 "synthetic_offline_identity": true,
                 "command_built": true,
                 "game_started": false,

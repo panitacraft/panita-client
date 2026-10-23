@@ -323,6 +323,7 @@ pub(crate) fn complete_installation(paths: &AppPaths, id: Uuid) {
         operation: Uuid::new_v4(),
         plan,
         native_files: vec![],
+        native_directory: None,
     };
     paths
         .game_directory(id)

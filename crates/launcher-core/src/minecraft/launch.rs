@@ -150,7 +150,7 @@ pub fn build_command(
     let native_directory = game_directory
         .parent()
         .ok_or_else(invalid)?
-        .join(format!("natives-{}", installed.operation));
+        .join(installed.native_directory()?);
     let mut replacements = BTreeMap::from([
         ("auth_player_name".into(), account.username.clone()),
         ("auth_uuid".into(), account.profile_id.simple().to_string()),

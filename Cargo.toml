@@ -17,3 +17,7 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 unwrap_used = "deny"
 expect_used = "deny"
+
+# Keep full game-file hashing practical in native development/validation builds.
+[profile.dev.package.sha1]
+opt-level = 3

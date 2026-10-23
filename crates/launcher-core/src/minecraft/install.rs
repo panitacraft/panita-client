@@ -37,6 +37,19 @@ pub struct InstalledLock {
     pub operation: Uuid,
     pub plan: InstallPlan,
     pub native_files: Vec<NativeFile>,
+    /// Missing in older manifests, which retain their original generation path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_directory: Option<String>,
+}
+
+impl InstalledLock {
+    pub fn native_directory(&self) -> Result<String, CoreError> {
+        match &self.native_directory {
+            None => Ok(format!("natives-{}", self.operation)),
+            Some(path) if *path == format!("natives/{}", self.operation) => Ok(path.clone()),
+            _ => Err(invalid()),
+        }
+    }
 }
 
 pub type Progress = Arc<dyn Fn(DownloadProgress) + Send + Sync>;
@@ -415,9 +428,15 @@ pub(super) async fn prepare_recorded(
     download_all(paths, &downloader, &plan, cancel, progress).await?;
     plan.verify_dependencies(paths)?;
     verify_java(paths, &plan, platform, cancel).await?;
-    let native_root = root.join(format!("natives-{operation}"));
+    let native_directory = format!("natives/{operation}");
+    let native_root = root.join(&native_directory);
     if !plan.version.natives.is_empty() {
-        private_fs::PrivateDir::ensure(&native_root).map_err(map_private_error)?;
+        let parent = private_fs::PrivateDir::open(&root).map_err(map_private_error)?;
+        parent
+            .ensure_dir("natives")
+            .map_err(map_private_error)?
+            .ensure_dir(operation.to_string())
+            .map_err(map_private_error)?;
     }
     let mut native_files = Vec::new();
     for native in &plan.version.natives {
@@ -441,6 +460,7 @@ pub(super) async fn prepare_recorded(
         operation,
         plan,
         native_files,
+        native_directory: Some(native_directory),
     })
 }
 
@@ -492,15 +512,24 @@ pub(super) fn verify_manifest(
     }
     installed.plan.validate()?;
     installed.plan.verify_dependencies(paths)?;
+    // Retain one verified parent handle per artifact group. Every file still has
+    // its permissions, size and full hash checked on every Play request.
+    let mut parents = std::collections::HashMap::new();
     for file in &installed.plan.artifacts {
         cancel.check()?;
-        let (directory, leaf) = ensure_parent(paths.root(), &file.destination)?;
-        if !verified_planned_file(&directory, &leaf, &file.artifact, file.executable)? {
+        let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+        if !parents.contains_key(parent) {
+            let (directory, _) = super::download::existing_parent(paths.root(), &file.destination)?
+                .ok_or_else(|| CoreError::new(ErrorCode::ArtifactMismatch))?;
+            parents.insert(parent, directory);
+        }
+        let directory = parents.get(parent).ok_or_else(invalid)?;
+        if !verified_planned_file(directory, leaf, &file.artifact, file.executable)? {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
         executable(paths, file)?;
     }
-    let native_root = root.join(format!("natives-{}", installed.operation));
+    let native_root = root.join(installed.native_directory()?);
     for native in &installed.native_files {
         cancel.check()?;
         let artifact = Artifact {
@@ -520,6 +549,48 @@ pub(super) fn verify_manifest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha1::Digest;
+    #[test]
+    fn native_generation_paths_preserve_legacy_manifests_and_reject_arbitrary_locations() {
+        let (paths, accounts, id) = super::super::play::tests::fixture();
+        drop(accounts);
+        super::super::play::tests::complete_installation(&paths, id);
+        let root = metadata_root(&paths, id).unwrap_or_else(|_| panic!("root"));
+        let mut installed = read_json::<InstalledLock>(&root, "installed.json")
+            .unwrap_or_else(|_| panic!("read"))
+            .unwrap_or_else(|| panic!("manifest"));
+        assert_eq!(
+            installed.native_directory().ok(),
+            Some(format!("natives-{}", installed.operation))
+        );
+        installed.native_directory = Some(format!("natives/{}", installed.operation));
+        let generation = private_fs::PrivateDir::open(&root)
+            .unwrap_or_else(|_| panic!("instance"))
+            .ensure_dir("natives")
+            .unwrap_or_else(|_| panic!("natives"))
+            .ensure_dir(installed.operation.to_string())
+            .unwrap_or_else(|_| panic!("generation"));
+        generation
+            .write_atomic_durable("owned.dll", b"native")
+            .unwrap_or_else(|_| panic!("native"));
+        installed.native_files.push(NativeFile {
+            path: "owned.dll".into(),
+            size: 6,
+            sha1: format!("{:x}", sha1::Sha1::digest(b"native")),
+        });
+        assert!(super::super::maintenance::validate_manifest(&installed, id).is_ok());
+        assert!(verify_manifest(&paths, id, &root, &installed, &Cancellation::default()).is_ok());
+        for path in [
+            "../other".to_owned(),
+            format!("natives/{}", Uuid::new_v4()),
+            "minecraft".into(),
+        ] {
+            installed.native_directory = Some(path);
+            assert!(super::super::maintenance::validate_manifest(&installed, id).is_err());
+        }
+        drop(generation);
+        std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+    }
     #[test]
     fn uninstalled_descriptor_can_retry_after_reinstallation_failure_or_interruption() {
         let (paths, accounts, id) = super::super::play::tests::fixture();
