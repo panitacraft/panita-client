@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { settingsApi } from './settings-api';
-import { globalSettingsPayload, instanceSettingsPayload, settingsDraft, type SettingsDraft, type SettingsSnapshot } from './settings-state';
+import { globalSettingsPayload, instanceSettingsPayload, settingsDraft, updateSettingsDraft, type SettingsDraft, type SettingsSnapshot } from './settings-state';
 import { messageForError } from './errors';
 
 type Selection = { id: string | null; busy: boolean; error: string | null; warning: string | null; select: (id: string) => Promise<void>; retry: () => void };
@@ -87,7 +87,7 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
     return () => { active = false; mounted.current = false; };
   }, [instanceId, desktop, attempt]);
 
-  function change(patch: Partial<SettingsDraft>) { setDraft(previous => previous && { ...previous, ...patch }); setNotice(null); setError(null); }
+  function change(patch: Partial<SettingsDraft>) { setDraft(previous => previous && snapshot && updateSettingsDraft(previous, patch, snapshot)); setNotice(null); setError(null); }
   async function save() {
     if (!snapshot || !draft || saving.current) return;
     saving.current = true; setBusy(true); setError(null); setNotice(null);
@@ -106,7 +106,7 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
     } catch (cause) {
       const code = cause instanceof Error ? cause.message : cause;
       if (mounted.current) setError(code === 'invalid_data'
-        ? 'Comprueba la RAM y el tamaño de la ventana. En los argumentos JVM, usa solo opciones -D o -XX: compatibles; configura la memoria en el campo RAM, sin añadir opciones -Xmx o -Xms.'
+        ? 'Comprueba la RAM y el tamaño de la ventana. Usa un solo argumento -Xmx con M o G (por ejemplo, -Xmx4G) y opciones -D o -XX: compatibles. No añadas -Xms ni otros argumentos que sustituyan la memoria o las bibliotecas.'
         : messageForError(code));
     } finally { saving.current = false; if (mounted.current) setBusy(false); }
   }
@@ -122,7 +122,9 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
         <legend>{instance ? 'Valores propios de esta instancia' : 'Valores predeterminados de Minecraft'}</legend>
         {instance && <label><input type="checkbox" checked={draft.inheritRam} onChange={event => change({ inheritRam: event.target.checked })} /> Usar RAM global ({snapshot.global.ram_mib} MiB)</label>}
         <label htmlFor={`${prefix}-ram`}>RAM para Minecraft (MiB)</label>
+        <input aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={Math.min(262144, Math.max(32768, Number(draft.ram) || 0))} step="1" disabled={instance && draft.inheritRam} value={/^\d+$/.test(draft.ram) ? draft.ram : '512'} onChange={event => change({ ram: event.target.value })} />
         <input id={`${prefix}-ram`} type="number" min="512" max="262144" step="1" required disabled={instance && draft.inheritRam} value={draft.ram} onChange={event => change({ ram: event.target.value })} />
+        <output htmlFor={`${prefix}-ram`}>{Number(draft.ram) / 1024 || 0} GiB</output>
         {instance && <label><input type="checkbox" checked={draft.inheritWindow} onChange={event => change({ inheritWindow: event.target.checked })} /> Usar tamaño de Minecraft global ({snapshot.global.window_size.width} × {snapshot.global.window_size.height})</label>}
         <label htmlFor={`${prefix}-width`}>Ancho de Minecraft (píxeles)</label>
         <input id={`${prefix}-width`} type="number" min="320" max="16384" step="1" required disabled={instance && draft.inheritWindow} value={draft.width} onChange={event => change({ width: event.target.value })} />
@@ -136,9 +138,9 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
               : <p>Quita la ruta desde los ajustes globales.</p>}
           </div>}
           {instance && <label><input type="checkbox" checked={draft.inheritJvm} onChange={event => change({ inheritJvm: event.target.checked })} /> Usar argumentos JVM globales</label>}
-          <label htmlFor={`${prefix}-jvm`}>Argumentos JVM adicionales (uno por línea)</label>
-          <textarea id={`${prefix}-jvm`} rows={5} aria-describedby={`${prefix}-jvm-help`} disabled={instance && draft.inheritJvm} value={draft.jvm} onChange={event => change({ jvm: event.target.value })} />
-          <p id={`${prefix}-jvm-help`}>Usa opciones -D o -XX:. Los argumentos que sustituyen la memoria, las bibliotecas o el comando de inicio se rechazan. Deja este campo vacío si no necesitas opciones adicionales.</p>
+          <label htmlFor={`${prefix}-jvm`}>Memoria y argumentos JVM adicionales (uno por línea)</label>
+          <textarea id={`${prefix}-jvm`} rows={5} aria-describedby={`${prefix}-jvm-help`} value={draft.jvm} onChange={event => change({ jvm: event.target.value })} />
+          <p id={`${prefix}-jvm-help`}>-Xmx se sincroniza con la RAM. Puedes usar M o G, por ejemplo -Xmx4G. Editar un valor heredado crea un ajuste propio. Para opciones adicionales, usa -D o -XX:. No se muestra el comando completo de inicio.</p>
         </details>
         <button type="submit">{busy ? 'Guardando ajustes…' : 'Guardar ajustes'}</button>
       </fieldset>

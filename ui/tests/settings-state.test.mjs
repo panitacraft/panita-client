@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { settingsDraft, globalSettingsPayload, instanceSettingsPayload } from '../src/settings-state.ts';
+import { settingsDraft, globalSettingsPayload, instanceSettingsPayload, updateSettingsDraft } from '../src/settings-state.ts';
 
 function snapshot(instance = null) {
   return { instanceId: instance ? 'instance' : null, instance, windowWarning: null,
@@ -25,7 +25,7 @@ test('inherited instance values remain null while explicit empty JVM options ove
   const view = snapshot(inherited());
   const draft = settingsDraft(view);
   assert.equal(draft.ram, '4096');
-  assert.equal(draft.jvm, '-Dlabel=value with spaces');
+  assert.equal(draft.jvm, '-Xmx4096M\n-Dlabel=value with spaces');
   assert.deepEqual(instanceSettingsPayload(draft, view), inherited());
   draft.inheritJvm = false;
   draft.jvm = '';
@@ -38,11 +38,40 @@ test('instance overrides keep their own RAM and window without copying inherited
   assert.equal(draft.inheritRam, false);
   assert.equal(draft.inheritWindow, false);
   assert.equal(draft.inheritJvm, true);
-  draft.ram = '8192';
+  Object.assign(draft, updateSettingsDraft(draft, { ram: '8192' }, view));
   assert.deepEqual(instanceSettingsPayload(draft, view), { ...view.instance, ram_mib: 8192 });
-  draft.inheritRam = true;
+  Object.assign(draft, updateSettingsDraft(draft, { inheritRam: true }, view));
   draft.ram = 'invalid unused input';
   assert.equal(instanceSettingsPayload(draft, view).ram_mib, null);
+});
+
+test('RAM input and JVM edits share one memory value without duplicate launch arguments', () => {
+  const view = snapshot();
+  let draft = settingsDraft(view);
+  draft = updateSettingsDraft(draft, { ram: '6144' }, view);
+  assert.equal(draft.jvm, '-Xmx6144M\n-Dlabel=value with spaces');
+  draft = updateSettingsDraft(draft, { jvm: '-Xmx8G\n-Dlabel=value with spaces' }, view);
+  assert.equal(draft.ram, '8192');
+  assert.equal(globalSettingsPayload(draft, view).ram_mib, 8192);
+  assert.deepEqual(globalSettingsPayload(draft, view).extra_jvm_args, ['-Dlabel=value with spaces']);
+  for (const jvm of ['-Xmx', '-Xmx0G', '-Xmx4G\n-Xmx8G', '-Xmx4T']) {
+    const bad = updateSettingsDraft(draft, { jvm }, view);
+    assert.throws(() => globalSettingsPayload(bad, view), /invalid_data/);
+  }
+});
+
+test('editing inherited RAM in the text creates only a RAM override and rejects incomplete edits', () => {
+  const view = snapshot(inherited());
+  const draft = updateSettingsDraft(settingsDraft(view), { jvm: '-Xmx6G\n-Dlabel=value with spaces' }, view);
+  assert.equal(draft.inheritRam, false);
+  assert.equal(draft.inheritJvm, true);
+  assert.equal(instanceSettingsPayload(draft, view).ram_mib, 6144);
+  assert.equal(instanceSettingsPayload(draft, view).extra_jvm_args, null);
+  const bad = updateSettingsDraft(settingsDraft(view), { jvm: '-Xmx\n-Dlabel=value with spaces' }, view);
+  assert.throws(() => instanceSettingsPayload(bad, view), /invalid_data/);
+  const reset = updateSettingsDraft(draft, { inheritRam: true }, view);
+  assert.equal(reset.ram, '4096');
+  assert.match(reset.jvm, /^-Xmx4096M/);
 });
 
 test('invalid numeric input is rejected instead of truncating or coercing it', () => {
