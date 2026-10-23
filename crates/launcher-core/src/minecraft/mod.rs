@@ -17,6 +17,7 @@ pub mod plan;
 pub mod play;
 pub mod process;
 pub mod runtime;
+pub mod support;
 pub mod update;
 mod world_backup;
 

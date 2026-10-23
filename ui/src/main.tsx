@@ -11,6 +11,10 @@ import { installationRefreshKey } from './play-state';
 import { canInstall, canRepair, canUninstall, updateTarget } from './library-state';
 import { PreferencesProvider, SettingsPanel, usePreferences } from './settings';
 import { DiagnosticsPanel } from './diagnostics';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { isTauri } from '@tauri-apps/api/core';
+import { CrashNotifications, GameLogWindow } from './game-output';
+import { logWindowIdentity } from './game-output-state';
 
 type CatalogState =
   | { kind: 'loading' }
@@ -57,6 +61,7 @@ function App() {
         <span className="preview-label">Vista previa de desarrollo</span>
       </header>
       <Accounts />
+      <CrashNotifications names={catalog.kind === 'ready' ? Object.fromEntries(catalog.instances.map(instance => [instance.id, instance.name])) : {}} />
       <section aria-labelledby="instances-heading">
         <h1 id="instances-heading">Tus instancias</h1>
         <p>Elige una versión de Minecraft para comenzar.</p>
@@ -120,8 +125,9 @@ function App() {
   );
 }
 
+const logIdentity = isTauri() ? logWindowIdentity(getCurrentWindow().label) : null;
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <PreferencesProvider><PlayProvider><App /></PlayProvider></PreferencesProvider>
+    {logIdentity ? <GameLogWindow {...logIdentity} /> : <PreferencesProvider><PlayProvider><App /></PlayProvider></PreferencesProvider>}
   </React.StrictMode>,
 );

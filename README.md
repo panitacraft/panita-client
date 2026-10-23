@@ -341,7 +341,7 @@ Each instance uses a flat launcher root with `instance.json` (schema 3),
 locks. Instance setting overrides live in `instance.json`; all game/player files
 belong in `minecraft/`. Use `AppPaths::game_directory` for the game working
 directory, rather than the instance root. Native generations use
-`natives-<operation>/` only when required. Duplicate staged plans and empty native
+`natives/<operation>/` only when required. Duplicate staged plans and empty native
 directories are no longer created. The explicit `plan` harness operation alone
 writes developer reports; use a separate evidence root for those reports.
 
@@ -357,3 +357,45 @@ identities remain separate from this migration.
 
 Copyright © 2026 Panitacraft. Licensed under GPL-3.0-or-later; see
 [COPYRIGHT](COPYRIGHT) and [LICENSE](LICENSE).
+
+### Phase 6 owner-requested refinements
+
+The owner reported successful Windows manual checks for the supplied offline/game,
+settings, two-instance, lifecycle, repair, preserving uninstall/reinstall and
+keyboard/layout scenarios on 2026-10-23. This report does not establish the separate
+Microsoft authentication, controlled update, Linux or clean-machine checks.
+
+RAM now has synchronized slider, numeric and editable JVM memory controls. A
+single `-Xmx` value accepts MiB (`M`) or GiB (`G`), becomes the authoritative RAM
+setting, and is excluded from additional JVM options so the launch command never
+gets duplicate heap arguments. Global and instance inheritance remain independent.
+
+Unexpected game exits show a Spanish modal with the exit code and a short redacted
+console excerpt. The launcher restores its hidden main window for this notification;
+requested stops do not produce crash dialogs. The report-folder action opens only
+the current instance's existing `minecraft/crash-reports/` directory and explains
+when no report folder exists. A separate per-execution Minecraft log window shows
+a bounded, redacted stdout/stderr snapshot, follows new output while running and
+remains readable after exit until the launcher closes. It does not read historical
+log files, export output or include account data or launch commands. Structured
+launcher diagnostics remain separate.
+
+New installations, updates and repairs record `natives/<operation>/` as their
+native-generation location. Existing manifests continue to resolve their original
+`natives-<operation>/` paths without moving or deleting files during launch. These
+are installation-generation UUIDs, not artifact hashes. Runtime libraries may
+extract their own DLLs there when Minecraft starts.
+
+Optional legacy library-cache probes no longer create absent Maven directory
+trees. JARs continue to use the verified `libraries/<hash-prefix>/<hash>.jar` cache;
+referenced legacy JARs remain supported. Play still checks every managed artifact's
+full hash and permissions, with parent handles reused within the audit and public
+artifact reads checked at their boundaries. Credential-file I/O is unchanged.
+SHA-1 is optimized in development builds to reduce debug verification overhead.
+
+A local Windows debug preparation check on the same installed Minecraft 1.21.1
+profile fell from 96.8 seconds to 8.65 seconds while verifying all 4348 artifacts.
+The final result includes 6132 ms of verification and 231 ms of command construction;
+Minecraft's own startup follows separately. This is a single-host measurement,
+not a platform-wide timing guarantee. File Explorer launch uses a bounded wait so
+a slow Windows shell cannot keep the crash dialog busy indefinitely.

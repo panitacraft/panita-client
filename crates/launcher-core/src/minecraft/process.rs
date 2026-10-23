@@ -391,6 +391,24 @@ impl LineBuffer {
                 text.zeroize();
                 text = clean;
             }
+            let lower = text.to_ascii_lowercase();
+            if [
+                "accesstoken",
+                "access_token",
+                "refresh_token",
+                "authorization",
+                "bearer ",
+                "panitacraft://",
+                "oauth/callback",
+                "client_secret",
+                "password",
+            ]
+            .iter()
+            .any(|marker| lower.contains(marker))
+            {
+                text.zeroize();
+                text = "[sensitive output omitted]".into();
+            }
             let text = text
                 .chars()
                 .filter(|ch| !ch.is_control() || *ch == '\t')

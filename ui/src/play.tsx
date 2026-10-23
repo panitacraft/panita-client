@@ -77,6 +77,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   const [forceQuestion, setForceQuestion] = useState<string | null>(null);
   const [updateQuestion, setUpdateQuestion] = useState<(UpdateTarget & { backupWorlds: boolean }) | null>(null);
   const [uninstallQuestion, setUninstallQuestion] = useState(false);
+  const [logError, setLogError] = useState<string | null>(null);
   const entry = play?.snapshot?.instances.find(entry => entry.instanceId === instanceId);
   const active = entry && playActive(entry.phase);
   const running = entry && (entry.phase === 'running' || entry.phase === 'stopping');
@@ -90,6 +91,11 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   }
 
   return <div className="play-controls">
+    {entry?.operation === 'play' && (running || entry.phase === 'exited') && <button type="button" disabled={busy || !isTauri()} onClick={() => {
+      setLogError(null);
+      void invoke('open_game_log', { instanceId, requestId: entry.requestId }).catch(cause => setLogError(messageForError(cause)));
+    }}>Ver registro de Minecraft</button>}
+    {logError && <p role="alert">{logError}</p>}
     {entry && <p role="status">{entry.phase === 'exited' && entry.exitSuccess === false
       ? `Minecraft se cerró de forma inesperada.${entry.exitCode !== null ? ` Código: ${entry.exitCode}.` : ''}`
       : entry.operation === 'install' && entry.phase === 'failed' ? 'No pudimos completar la instalación.'

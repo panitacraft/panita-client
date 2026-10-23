@@ -108,6 +108,8 @@ struct Entry {
     cancel: Cancellation,
     pending: Option<PendingPlay>,
     game: Option<Arc<RunningGame>>,
+    last_game: Option<Arc<RunningGame>>,
+    exit_expected: bool,
     error: Option<ErrorCode>,
     exit: Option<launcher_core::minecraft::process::GameExit>,
     kind: OperationKind,
@@ -189,6 +191,60 @@ pub(super) struct PlayController {
 }
 
 impl PlayController {
+    fn complete_game(
+        &self,
+        instance: Uuid,
+        request: Uuid,
+        exit: launcher_core::minecraft::process::GameExit,
+    ) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        let Some(entry) = state
+            .entries
+            .get_mut(&instance)
+            .filter(|entry| entry.request == request)
+        else {
+            return false;
+        };
+        let unexpected = !exit.success && !entry.exit_expected;
+        entry.phase = Phase::Exited;
+        entry.exit = Some(exit);
+        entry.game = None;
+        entry.error = None;
+        if unexpected {
+            // Make the crash visible before any queued idle-shutdown check can run.
+            state.background = false;
+        }
+        state.changed();
+        unexpected
+    }
+
+    fn game_output(&self, instance: Uuid, request: Uuid) -> Result<Value, ErrorCode> {
+        use launcher_core::minecraft::process::{OutputStream, ProcessEventKind};
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| ErrorCode::StorageUnavailable)?;
+        let entry = state
+            .entries
+            .get(&instance)
+            .filter(|entry| entry.request == request)
+            .ok_or(ErrorCode::OperationCancelled)?;
+        let game = entry
+            .last_game
+            .as_ref()
+            .ok_or(ErrorCode::OperationCancelled)?;
+        let lines: Vec<_> = game.events().into_iter().filter_map(|event| match event.kind {
+            ProcessEventKind::Output { stream, text } => Some(json!({"stream": if stream == OutputStream::Stdout { "stdout" } else { "stderr" }, "text": if text == "[sensitive output omitted]" { "[salida sensible omitida]" } else { &text }})),
+            ProcessEventKind::OutputDiscarded { .. } => Some(json!({"stream": "notice", "text": "Se omitió una línea demasiado larga o una salida que no pudo leerse."})),
+            _ => None,
+        }).collect();
+        Ok(
+            json!({"lines":lines, "running":entry.game.is_some(), "exitCode":entry.exit.and_then(|exit|exit.code)}),
+        )
+    }
+
     #[cfg(test)]
     pub fn new(process: ProcessSessionId) -> Self {
         Self::with_logs(process, Arc::new(BoundedLog::default()))
@@ -252,6 +308,8 @@ impl PlayController {
                 cancel: cancel.clone(),
                 pending: None,
                 game: None,
+                last_game: None,
+                exit_expected: false,
                 error: None,
                 exit: None,
                 kind,
@@ -342,6 +400,7 @@ impl PlayController {
                     "confirmationId": entry.pending.as_ref().map(PendingPlay::operation_id),
                     "error": entry.error, "exitCode": entry.exit.and_then(|exit| exit.code),
                     "exitSuccess": entry.exit.map(|exit| exit.success),
+                    "exitExpected": entry.exit_expected,
                     "operation": entry.kind.text(),
                     "backupRequested": entry.backup_requested, "backupOperation": entry.backup_operation,
                     "receivedFiles": entry.received_files, "reusedFiles": entry.reused_files,
@@ -541,16 +600,17 @@ async fn start_and_monitor(
             controller.update(instance, request, |entry| {
                 entry.phase = Phase::Running;
                 entry.game = Some(game.clone());
+                entry.last_game = Some(game.clone());
             });
             controller.publish(&app);
             account_commands::emit_accounts(&app, &accounts);
             match game.wait().await {
-                Ok(exit) => controller.update(instance, request, |entry| {
-                    entry.phase = Phase::Exited;
-                    entry.exit = Some(exit);
-                    entry.game = None;
-                    entry.error = None;
-                }),
+                Ok(exit) => {
+                    if controller.complete_game(instance, request, exit) {
+                        // A crash must remain visible even when the main window was hidden.
+                        restore_window(&app, String::new());
+                    }
+                }
                 Err(error) => controller.update(instance, request, |entry| {
                     entry.error = Some(error.code());
                 }),
@@ -565,6 +625,99 @@ async fn start_and_monitor(
 #[tauri::command]
 pub(super) fn play_snapshot(state: tauri::State<'_, DesktopState>) -> Result<Value, ErrorCode> {
     state.plays.snapshot()
+}
+
+fn log_label(instance: Uuid, request: Uuid) -> String {
+    format!("game-log-{instance}-{request}")
+}
+
+#[tauri::command]
+pub(super) fn game_log_snapshot(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+) -> Result<Value, ErrorCode> {
+    if window.label() != "main" && window.label() != log_label(instance_id, request_id) {
+        return Err(ErrorCode::InvalidData);
+    }
+    state.plays.game_output(instance_id, request_id)
+}
+
+#[tauri::command]
+pub(super) async fn open_game_log(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+) -> Result<(), ErrorCode> {
+    if window.label() != "main" {
+        return Err(ErrorCode::InvalidData);
+    }
+    state.plays.game_output(instance_id, request_id)?;
+    let label = log_label(instance_id, request_id);
+    if let Some(window) = app.get_webview_window(&label) {
+        window
+            .unminimize()
+            .map_err(|_| ErrorCode::StorageUnavailable)?;
+        window
+            .set_focus()
+            .map_err(|_| ErrorCode::StorageUnavailable)?;
+    } else {
+        tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App("index.html".into()))
+            .title("Registro de Minecraft — Panita Client")
+            .inner_size(900.0, 600.0)
+            .min_inner_size(520.0, 360.0)
+            .build()
+            .map_err(|_| ErrorCode::StorageUnavailable)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(super) async fn open_crash_reports(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+) -> Result<Value, ErrorCode> {
+    use tauri_plugin_opener::OpenerExt;
+    if window.label() != "main" {
+        return Err(ErrorCode::InvalidData);
+    }
+    // Require the current owned execution; never accept a frontend-provided path.
+    state.plays.game_output(instance_id, request_id)?;
+    let paths = AppPaths::new(
+        app.path()
+            .app_data_dir()
+            .map_err(|_| ErrorCode::StorageUnavailable)?,
+    )
+    .map_err(|error| error.code())?;
+    let directory = tokio::task::spawn_blocking(move || {
+        launcher_core::minecraft::support::crash_report_directory(&paths, instance_id)
+    })
+    .await
+    .map_err(|_| ErrorCode::StorageUnavailable)?
+    .map_err(|error| error.code())?;
+    let Some(directory) = directory else {
+        return Ok(json!(false));
+    };
+    // Windows shell integration may keep waiting even after Explorer appears.
+    // Keep the runtime and dialog usable, and report an indeterminate result honestly.
+    let opening = tokio::task::spawn_blocking(move || {
+        app.opener()
+            .open_path(directory.to_string_lossy(), None::<&str>)
+            .map_err(|_| ErrorCode::StorageUnavailable)
+    });
+    match tokio::time::timeout(std::time::Duration::from_secs(5), opening).await {
+        Ok(result) => {
+            result.map_err(|_| ErrorCode::StorageUnavailable)??;
+            Ok(json!(true))
+        }
+        Err(_) => Ok(json!("pending")),
+    }
 }
 
 #[tauri::command]
@@ -869,16 +1022,18 @@ pub(super) async fn stop_game(
 ) -> Result<(), ErrorCode> {
     let controller = state.plays.clone();
     let game = {
-        let state = controller
+        let mut state = controller
             .state
             .lock()
             .map_err(|_| ErrorCode::StorageUnavailable)?;
-        state
+        let entry = state
             .entries
-            .get(&instance_id)
+            .get_mut(&instance_id)
             .filter(|entry| entry.request == request_id)
-            .and_then(|entry| entry.game.clone())
-            .ok_or(ErrorCode::OperationCancelled)?
+            .ok_or(ErrorCode::OperationCancelled)?;
+        let game = entry.game.clone().ok_or(ErrorCode::OperationCancelled)?;
+        entry.exit_expected = true;
+        game
     };
     let result = if force {
         game.force_stop().await
@@ -890,16 +1045,19 @@ pub(super) async fn stop_game(
             controller.update(instance_id, request_id, |entry| {
                 if entry.game.is_some() {
                     entry.phase = Phase::Stopping;
+                    entry.exit_expected = true;
                     entry.error = None;
                 }
             })
         }
         Ok(launcher_core::minecraft::process::StopOutcome::Unsupported) => {
+            controller.update(instance_id, request_id, |entry| entry.exit_expected = false);
             return Err(ErrorCode::RuntimeUnsupported);
         }
         Ok(_) => {}
         Err(error) => {
             controller.update(instance_id, request_id, |entry| {
+                entry.exit_expected = false;
                 entry.error = Some(error.code())
             });
             controller.publish(&app);
@@ -922,6 +1080,14 @@ pub(super) fn prevent_close(app: &tauri::AppHandle) -> bool {
 pub(super) fn close_window(window: &tauri::Window) -> bool {
     let controller = &window.state::<DesktopState>().plays;
     let prevent = controller.close_window(|| window.hide().is_ok());
+    if !prevent {
+        // Auxiliary viewers must not keep an idle launcher without its main window.
+        for (label, viewer) in window.app_handle().webview_windows() {
+            if label.starts_with("game-log-") {
+                let _ = viewer.close();
+            }
+        }
+    }
     controller.publish(window.app_handle());
     prevent
 }

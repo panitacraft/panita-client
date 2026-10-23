@@ -64,3 +64,11 @@ input:focus-visible { outline: 3px solid #f2cf74; outline-offset: 2px; }
 .diagnostic-list li { border-bottom: 1px solid #4c7564; padding: 8px 0; overflow-wrap: anywhere; }
 .diagnostic-list dd { margin-inline-start: 0; font-size: .85rem; }
 .diagnostic-list:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
+dialog { max-width: min(680px, 90vw); color: #efece5; background: #1b392e; border: 1px solid #6c9380; border-radius: 12px; padding: 24px; }
+dialog::backdrop { background: #000a; }
+.settings-form input[type="range"] { width: 100%; max-width: 720px; }
+.game-log-section { padding: 24px; }
+.game-log-lines { height: 60vh; overflow: auto; background: #10231e; border: 1px solid #4c7564; padding: 12px; }
+.game-log-lines pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+.game-log-lines:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
+.crash-summary { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

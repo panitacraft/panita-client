@@ -1,6 +1,43 @@
 use super::*;
 
 #[test]
+fn unexpected_exit_prevents_hidden_shutdown_but_requested_stop_does_not() {
+    use launcher_core::minecraft::process::GameExit;
+    for expected in [false, true] {
+        let controller = PlayController::new(ProcessSessionId::new());
+        let instance = Uuid::new_v4();
+        let request = Uuid::new_v4();
+        assert!(controller.reserve(instance, request).is_ok());
+        controller.update(instance, request, |entry| {
+            entry.phase = Phase::Running;
+            entry.exit_expected = expected;
+        });
+        assert!(controller.close_window(|| true));
+        assert!(!controller.complete_game(
+            instance,
+            Uuid::new_v4(),
+            GameExit {
+                code: Some(1),
+                success: false
+            }
+        ));
+        assert!(controller.snapshot().unwrap_or_default()["instances"][0]["phase"] == "running");
+        assert_eq!(
+            controller.complete_game(
+                instance,
+                request,
+                GameExit {
+                    code: Some(1),
+                    success: false
+                }
+            ),
+            !expected
+        );
+        assert_eq!(controller.finish_background(), expected);
+    }
+}
+
+#[test]
 fn diagnostics_record_transitions_without_progress_spam_or_stale_requests() {
     let logs = Arc::new(BoundedLog::default());
     let process = ProcessSessionId::new();
@@ -422,6 +459,7 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
             "confirmationId",
             "error",
             "exitCode",
+            "exitExpected",
             "exitSuccess",
             "operation",
             "backupRequested",
