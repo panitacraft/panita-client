@@ -218,10 +218,17 @@ pub(crate) fn verified_file(
         }
         Err(error) => return Err(map_private_error(error)),
     };
+    verified_open_file(&file, artifact)
+}
+
+pub(super) fn verified_open_file(
+    file: &private_fs::PrivateFile,
+    artifact: &Artifact,
+) -> Result<bool, CoreError> {
     // These are public game artifacts, not credential files. Retain the private
     // handle and verify its identity/permissions at both boundaries; hash through
     // a duplicate of that same handle instead of repeating ACL queries per chunk.
-    let mut input = native_file(&file)?;
+    let mut input = native_file(file)?;
     if input.metadata().map_err(io)?.len() != artifact.size {
         return Ok(false);
     }

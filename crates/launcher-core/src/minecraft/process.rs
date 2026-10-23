@@ -123,7 +123,7 @@ impl LaunchLease {
         &self,
         cancel: &super::download::Cancellation,
     ) -> Result<super::install::InstalledLock, CoreError> {
-        super::install::verify_under_lock(
+        super::install::verify_play_under_lock(
             &self.paths,
             self.instance,
             self.directory.parent().ok_or_else(super::invalid)?,

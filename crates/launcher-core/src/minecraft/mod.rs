@@ -19,6 +19,7 @@ pub mod process;
 pub mod runtime;
 pub mod support;
 pub mod update;
+mod verification_cache;
 mod world_backup;
 
 pub const VERSION_MANIFEST: &str =

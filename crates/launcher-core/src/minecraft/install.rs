@@ -464,7 +464,7 @@ pub(super) async fn prepare_recorded(
     })
 }
 
-/// Local preflight used by tests and the later Play integration; it never repairs.
+/// Explicit full local audit. Never consults Play receipts and never repairs.
 pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, CoreError> {
     let root = metadata_root(paths, id)?;
     let _guard = super::download::try_lock(&root, ".installation.lock")?
@@ -475,6 +475,31 @@ pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, Cor
 /// Caller must retain this instance's installation lock for the whole audit.
 pub(super) fn verify_under_lock(
     paths: &AppPaths,
+    id: Uuid,
+    root: &std::path::Path,
+    cancel: &Cancellation,
+) -> Result<InstalledLock, CoreError> {
+    let installed = read_installed_under_lock(id, root, cancel)?;
+    verify_manifest(paths, id, root, &installed, cancel)?;
+    Ok(installed)
+}
+
+/// Cached Play preflight. Installation, repair and recovery use the full audit above.
+pub(super) fn verify_play_under_lock(
+    paths: &AppPaths,
+    id: Uuid,
+    root: &std::path::Path,
+    cancel: &Cancellation,
+) -> Result<InstalledLock, CoreError> {
+    let installed = read_installed_under_lock(id, root, cancel)?;
+    let mut cache = super::verification_cache::VerificationCache::load(root, &installed)?;
+    verify_manifest_inner(paths, id, root, &installed, cancel, Some(&mut cache))?;
+    cancel.check()?;
+    cache.save(root);
+    Ok(installed)
+}
+
+fn read_installed_under_lock(
     id: Uuid,
     root: &std::path::Path,
     cancel: &Cancellation,
@@ -494,9 +519,7 @@ pub(super) fn verify_under_lock(
     }) {
         return Err(invalid());
     }
-    let installed = read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)?;
-    verify_manifest(paths, id, root, &installed, cancel)?;
-    Ok(installed)
+    read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)
 }
 
 pub(super) fn verify_manifest(
@@ -506,14 +529,25 @@ pub(super) fn verify_manifest(
     installed: &InstalledLock,
     cancel: &Cancellation,
 ) -> Result<(), CoreError> {
+    verify_manifest_inner(paths, id, root, installed, cancel, None)
+}
+
+fn verify_manifest_inner(
+    paths: &AppPaths,
+    id: Uuid,
+    root: &std::path::Path,
+    installed: &InstalledLock,
+    cancel: &Cancellation,
+    mut cache: Option<&mut super::verification_cache::VerificationCache>,
+) -> Result<(), CoreError> {
     if installed.schema_version != 2 || installed.instance_id != id || installed.operation.is_nil()
     {
         return Err(invalid());
     }
     installed.plan.validate()?;
     installed.plan.verify_dependencies(paths)?;
-    // Retain one verified parent handle per artifact group. Every file still has
-    // its permissions, size and full hash checked on every Play request.
+    // Retain verified parent handles only within this audit. Play receipts skip
+    // unchanged content reads, while every file still crosses the private boundary.
     let mut parents = std::collections::HashMap::new();
     for file in &installed.plan.artifacts {
         cancel.check()?;
@@ -524,7 +558,17 @@ pub(super) fn verify_manifest(
             parents.insert(parent, directory);
         }
         let directory = parents.get(parent).ok_or_else(invalid)?;
-        if !verified_planned_file(directory, leaf, &file.artifact, file.executable)? {
+        let matches = match cache.as_deref_mut() {
+            Some(cache) => cache.verify(
+                directory,
+                leaf,
+                &format!("managed/{}", file.destination),
+                &file.artifact,
+                file.executable,
+            )?,
+            None => verified_planned_file(directory, leaf, &file.artifact, file.executable)?,
+        };
+        if !matches {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
         executable(paths, file)?;
@@ -539,12 +583,26 @@ pub(super) fn verify_manifest(
             size: native.size,
         };
         let (directory, leaf) = ensure_parent(&native_root, &native.path)?;
-        if !verified_file(&directory, &leaf, &artifact)? {
+        let matches = match cache.as_deref_mut() {
+            Some(cache) => cache.verify(
+                &directory,
+                &leaf,
+                &format!("native/{}/{}", installed.native_directory()?, native.path),
+                &artifact,
+                false,
+            )?,
+            None => verified_file(&directory, &leaf, &artifact)?,
+        };
+        if !matches {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "install/cache_tests.rs"]
+mod cache_tests;
 
 #[cfg(test)]
 mod tests {

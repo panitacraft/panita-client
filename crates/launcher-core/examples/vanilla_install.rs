@@ -20,15 +20,21 @@ use launcher_core::{
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.len() != 5 {
-        return Err("usage: vanilla_install <plan|install|verify|recover|migrate|launch-check> <absolute-isolated-root> <version|instance-uuid> <windows|linux> <os-version>".into());
+        return Err("usage: vanilla_install <plan|install|verify|recover|migrate|launch-check|cached-launch-check> <absolute-isolated-root> <version|instance-uuid> <windows|linux> <os-version>".into());
     }
     let paths = AppPaths::new(&args[1])?;
     let platform = Platform::x64(&args[3], &args[4])?;
     let cancel = Cancellation::default();
-    if args[0] == "launch-check" {
+    if args[0] == "launch-check" || args[0] == "cached-launch-check" {
         let id = uuid::Uuid::parse_str(&args[2])?;
         let started = std::time::Instant::now();
-        let installed = install::verify_installed(&paths, id)?;
+        let _lease;
+        let installed = if args[0] == "cached-launch-check" {
+            _lease = launcher_core::minecraft::process::LaunchLease::acquire(&paths, id)?;
+            _lease.verify_installation()?
+        } else {
+            install::verify_installed(&paths, id)?
+        };
         let verification_ms = started.elapsed().as_millis();
         let constructing = std::time::Instant::now();
         let settings = InstanceRegistry::new(paths.clone()).load_settings(id)?;
@@ -71,6 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "window_size": effective.window_size,
                 "verified_artifacts": installed.plan.artifacts.len(),
                 "verification_ms": verification_ms,
+                "verification_mode": if args[0] == "cached-launch-check" { "cached" } else { "full" },
                 "command_build_ms": constructing.elapsed().as_millis(),
                 "synthetic_offline_identity": true,
                 "command_built": true,

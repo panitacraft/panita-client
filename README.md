@@ -388,17 +388,43 @@ extract their own DLLs there when Minecraft starts.
 
 Optional legacy library-cache probes no longer create absent Maven directory
 trees. JARs continue to use the verified `libraries/<hash-prefix>/<hash>.jar` cache;
-referenced legacy JARs remain supported. Play still checks every managed artifact's
-full hash and permissions, with parent handles reused within the audit and public
-artifact reads checked at their boundaries. Credential-file I/O is unchanged.
+referenced legacy JARs remain supported. Play checks each managed file's protection,
+size and metadata, reusing a previous full-hash result when they are unchanged.
+Unknown or changed files receive full content checks. Parent handles are reused
+within the audit and public artifact reads are checked at their boundaries.
+Credential-file I/O is unchanged.
 SHA-1 is optimized in development builds to reduce debug verification overhead.
 
-A local Windows debug preparation check on the same installed Minecraft 1.21.1
+Before cached Play checks, a local Windows debug preparation check on Minecraft 1.21.1
 profile fell from 96.8 seconds to 8.65 seconds while verifying all 4348 artifacts.
 The final result includes 6132 ms of verification and 231 ms of command construction;
 Minecraft's own startup follows separately. This is a single-host measurement,
 not a platform-wide timing guarantee. File Explorer launch uses a bounded wait so
 a slow Windows shell cannot keep the crash dialog busy indefinitely.
+
+The owner approved Prism as the cached Play-check reference on 2026-10-23.
+`verification-cache.json` contains disposable per-instance receipts bound to the
+complete installation manifest, expected artifact hashes and sizes, and file
+metadata. The first Play without usable receipts performs full verification;
+subsequent attempts reuse unchanged results. Unlike Prism's size-only asset check,
+Panita rehashes assets when their metadata changes, too. Windows stamps include
+creation/write times and attributes; Unix stamps also include device/inode and
+change time. File protections and authenticated dependency indexes remain checked.
+Linux executable files retain their dedicated full verification path.
+
+Installation, repair, recovery and explicit audits do not trust Play receipts.
+Missing/corrupt receipts rebuild safely; failed receipt writes leave the completed
+audit valid but may require repeated hashing later. Missing game files and detected
+content mismatches still block Play and require explicit Repair. Metadata-preserving
+corruption may escape cached checks. These receipts are an optimization, not an
+anti-malware guarantee, and contain no account data or launch arguments.
+
+On the same isolated 1.21.1 profile, two cached preflights took 3844 and 3788 ms;
+a full audit with the same build took 13425 ms. Initial receipt creation took
+64694 ms while other build/validation work was active. These are uncontrolled
+local debug observations, exclude game startup, and do not predict slower-machine
+timings. The harness built a synthetic offline command without reading accounts
+or starting Minecraft.
 
 The global launch settings now include “Mostrar la consola cuando se inicie
 Minecraft”, off by default. Each instance inherits this setting unless it has an
