@@ -460,6 +460,7 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
             "error",
             "exitCode",
             "exitExpected",
+            "consoleError",
             "exitSuccess",
             "operation",
             "backupRequested",

@@ -8,6 +8,7 @@ export type PlayEntry = {
   exitCode: number | null;
   exitSuccess: boolean | null;
   exitExpected?: boolean;
+  consoleError?: string | null;
   operation: 'install' | 'update' | 'repair' | 'uninstall' | 'play';
   backupRequested: boolean;
   backupOperation: string | null;

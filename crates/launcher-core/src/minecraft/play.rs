@@ -153,6 +153,13 @@ async fn prepare_with_catalog(
 }
 
 impl PendingPlay {
+    /// Presentation preference captured with the launch settings for this attempt.
+    pub fn show_console_on_start(&self) -> bool {
+        self.settings
+            .show_console_on_start
+            .unwrap_or(self.global.show_console_on_start)
+    }
+
     pub fn operation_id(&self) -> Uuid {
         self.operation.value()
     }

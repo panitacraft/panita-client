@@ -43,6 +43,8 @@ pub struct GlobalSettings {
     pub java_path_override: Option<String>,
     pub window_size: WindowSize,
     #[serde(default)]
+    pub show_console_on_start: bool,
+    #[serde(default)]
     pub launcher: LauncherPreferences,
 }
 
@@ -58,6 +60,7 @@ impl Default for GlobalSettings {
                 height: 720,
             },
             launcher: LauncherPreferences::default(),
+            show_console_on_start: false,
         }
     }
 }
@@ -213,6 +216,8 @@ pub struct InstanceSettings {
     pub extra_jvm_args: Option<Vec<String>>,
     pub java_path_override: Option<String>,
     pub window_size: Option<WindowSize>,
+    #[serde(default)]
+    pub show_console_on_start: Option<bool>,
 }
 
 impl Default for InstanceSettings {
@@ -223,6 +228,7 @@ impl Default for InstanceSettings {
             extra_jvm_args: None,
             java_path_override: None,
             window_size: None,
+            show_console_on_start: None,
         }
     }
 }
@@ -257,6 +263,9 @@ impl InstanceSettings {
                 .clone()
                 .unwrap_or_else(|| global.window_size.clone()),
             launcher: global.launcher.clone(),
+            show_console_on_start: self
+                .show_console_on_start
+                .unwrap_or(global.show_console_on_start),
         }
     }
 }
@@ -287,6 +296,7 @@ mod tests {
         let migrated = GlobalSettings::load(&store).unwrap_or_else(|_| panic!("migration"));
         assert_eq!(migrated.schema_version, 2);
         assert_eq!(migrated.ram_mib, 8192);
+        assert!(!migrated.show_console_on_start);
         assert_eq!(migrated.extra_jvm_args, vec!["-Dtest=value"]);
         assert_eq!(migrated.window_size.width, 1024);
         assert_eq!(
@@ -410,6 +420,34 @@ mod tests {
         let effective = instance.effective(&global);
         assert_eq!(effective.ram_mib, 6144);
         assert_eq!(effective.window_size, global.window_size);
+    }
+
+    #[test]
+    fn console_preference_round_trip_and_instance_inheritance_preserve_explicit_false() {
+        let (paths, store) = isolated_store();
+        let global = GlobalSettings {
+            show_console_on_start: true,
+            ..GlobalSettings::default()
+        };
+        assert!(global.save_launch_settings(&store).is_ok());
+        let saved = GlobalSettings::load(&store).unwrap_or_else(|_| panic!("reload"));
+        assert!(saved.show_console_on_start);
+        let inherited = InstanceSettings::default();
+        assert!(inherited.effective(&saved).show_console_on_start);
+        for enabled in [false, true] {
+            let explicit = InstanceSettings {
+                show_console_on_start: Some(enabled),
+                ..InstanceSettings::default()
+            };
+            let bytes = serde_json::to_vec(&explicit).unwrap_or_else(|_| panic!("encode"));
+            let restored: InstanceSettings =
+                serde_json::from_slice(&bytes).unwrap_or_else(|_| panic!("decode"));
+            assert_eq!(restored.effective(&saved).show_console_on_start, enabled);
+        }
+        let old: InstanceSettings = serde_json::from_str(r#"{"schema_version":1,"ram_mib":null,"extra_jvm_args":null,"java_path_override":null,"window_size":null}"#).unwrap_or_else(|_| panic!("legacy"));
+        assert_eq!(old.show_console_on_start, None);
+        drop(store);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }
 
     #[test]

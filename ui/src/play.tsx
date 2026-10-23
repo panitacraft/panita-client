@@ -96,6 +96,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       void invoke('open_game_log', { instanceId, requestId: entry.requestId }).catch(cause => setLogError(messageForError(cause)));
     }}>Ver registro de Minecraft</button>}
     {logError && <p role="alert">{logError}</p>}
+    {entry?.consoleError && <p role="alert">Minecraft se inició, pero no pudimos abrir su consola automáticamente. Puedes volver a intentarlo con «Ver registro de Minecraft». {messageForError(entry.consoleError)}</p>}
     {entry && <p role="status">{entry.phase === 'exited' && entry.exitSuccess === false
       ? `Minecraft se cerró de forma inesperada.${entry.exitCode !== null ? ` Código: ${entry.exitCode}.` : ''}`
       : entry.operation === 'install' && entry.phase === 'failed' ? 'No pudimos completar la instalación.'

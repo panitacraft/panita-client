@@ -110,6 +110,7 @@ struct Entry {
     game: Option<Arc<RunningGame>>,
     last_game: Option<Arc<RunningGame>>,
     exit_expected: bool,
+    console_error: Option<ErrorCode>,
     error: Option<ErrorCode>,
     exit: Option<launcher_core::minecraft::process::GameExit>,
     kind: OperationKind,
@@ -310,6 +311,7 @@ impl PlayController {
                 game: None,
                 last_game: None,
                 exit_expected: false,
+                console_error: None,
                 error: None,
                 exit: None,
                 kind,
@@ -401,6 +403,7 @@ impl PlayController {
                     "error": entry.error, "exitCode": entry.exit.and_then(|exit| exit.code),
                     "exitSuccess": entry.exit.map(|exit| exit.success),
                     "exitExpected": entry.exit_expected,
+                    "consoleError": entry.console_error,
                     "operation": entry.kind.text(),
                     "backupRequested": entry.backup_requested, "backupOperation": entry.backup_operation,
                     "receivedFiles": entry.received_files, "reusedFiles": entry.reused_files,
@@ -592,6 +595,7 @@ async fn start_and_monitor(
     confirmation: Option<Uuid>,
     accounts: Arc<launcher_core::sessions::AccountController>,
 ) {
+    let show_console = pending.show_console_on_start();
     match pending.start(confirmation).await {
         Ok(game) => {
             // Always retain a committed child, even if cancellation arrived after
@@ -604,6 +608,10 @@ async fn start_and_monitor(
             });
             controller.publish(&app);
             account_commands::emit_accounts(&app, &accounts);
+            if show_console && let Err(error) = show_game_log(&app, instance, request) {
+                controller.update(instance, request, |entry| entry.console_error = Some(error));
+                controller.publish(&app);
+            }
             match game.wait().await {
                 Ok(exit) => {
                     if controller.complete_game(instance, request, exit) {
@@ -656,6 +664,14 @@ pub(super) async fn open_game_log(
         return Err(ErrorCode::InvalidData);
     }
     state.plays.game_output(instance_id, request_id)?;
+    show_game_log(&app, instance_id, request_id)
+}
+
+fn show_game_log(
+    app: &tauri::AppHandle,
+    instance_id: Uuid,
+    request_id: Uuid,
+) -> Result<(), ErrorCode> {
     let label = log_label(instance_id, request_id);
     if let Some(window) = app.get_webview_window(&label) {
         window
@@ -665,7 +681,7 @@ pub(super) async fn open_game_log(
             .set_focus()
             .map_err(|_| ErrorCode::StorageUnavailable)?;
     } else {
-        tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App("index.html".into()))
+        tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
             .title("Registro de Minecraft — Panita Client")
             .inner_size(900.0, 600.0)
             .min_inner_size(520.0, 360.0)

@@ -399,3 +399,10 @@ The final result includes 6132 ms of verification and 231 ms of command construc
 Minecraft's own startup follows separately. This is a single-host measurement,
 not a platform-wide timing guarantee. File Explorer launch uses a bounded wait so
 a slow Windows shell cannot keep the crash dialog busy indefinitely.
+
+The global launch settings now include “Mostrar la consola cuando se inicie
+Minecraft”, off by default. Each instance inherits this setting unless it has an
+explicit on/off override. The effective preference is captured for each Play
+attempt, and the existing execution log window opens automatically after process
+creation. A viewer-opening failure is reported separately and never stops the
+owned game. The console's existing bounded redaction and lifecycle rules apply.

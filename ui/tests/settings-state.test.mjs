@@ -4,10 +4,30 @@ import { settingsDraft, globalSettingsPayload, instanceSettingsPayload, updateSe
 
 function snapshot(instance = null) {
   return { instanceId: instance ? 'instance' : null, instance, windowWarning: null,
-    global: { schema_version: 2, ram_mib: 4096, extra_jvm_args: ['-Dlabel=value with spaces'], java_path_override: null,
+    global: { schema_version: 2, ram_mib: 4096, extra_jvm_args: ['-Dlabel=value with spaces'], java_path_override: null, show_console_on_start: false,
       window_size: { width: 1280, height: 720 }, launcher: { selected_instance_id: 'selected', window: { width: 1000, height: 600, maximized: true } } } };
 }
-const inherited = () => ({ schema_version: 1, ram_mib: null, extra_jvm_args: null, java_path_override: null, window_size: null });
+const inherited = () => ({ schema_version: 1, ram_mib: null, extra_jvm_args: null, java_path_override: null, window_size: null, show_console_on_start: null });
+
+test('automatic console settings preserve inheritance and explicit on/off overrides', () => {
+  const global = snapshot();
+  assert.equal(settingsDraft(global).showConsole, false);
+  const enabled = updateSettingsDraft(settingsDraft(global), { showConsole: true }, global);
+  assert.equal(globalSettingsPayload(enabled, global).show_console_on_start, true);
+  const view = snapshot(inherited());
+  view.global.show_console_on_start = true;
+  let draft = settingsDraft(view);
+  assert.equal(draft.showConsole, true);
+  assert.equal(instanceSettingsPayload(draft, view).show_console_on_start, null);
+  draft = updateSettingsDraft(draft, { inheritConsole: false, showConsole: false }, view);
+  assert.equal(instanceSettingsPayload(draft, view).show_console_on_start, false);
+  draft = updateSettingsDraft(draft, { inheritConsole: true }, view);
+  assert.equal(draft.showConsole, true);
+  assert.equal(instanceSettingsPayload(draft, view).show_console_on_start, null);
+  const explicit = snapshot({ ...inherited(), show_console_on_start: true });
+  assert.equal(settingsDraft(explicit).inheritConsole, false);
+  assert.equal(settingsDraft(explicit).showConsole, true);
+});
 
 test('global edits keep literal JVM arguments and exclude launcher preferences from the editable payload', () => {
   const view = snapshot();

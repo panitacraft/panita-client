@@ -120,6 +120,9 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
     {snapshot && draft && <form className="settings-form" onSubmit={event => { event.preventDefault(); void save(); }}>
       <fieldset disabled={busy}>
         <legend>{instance ? 'Valores propios de esta instancia' : 'Valores predeterminados de Minecraft'}</legend>
+        {instance && <label><input type="checkbox" checked={draft.inheritConsole} onChange={event => change({ inheritConsole: event.target.checked })} /> Usar la opción global de consola ({snapshot.global.show_console_on_start ? 'activada' : 'desactivada'})</label>}
+        <label><input type="checkbox" checked={draft.showConsole} disabled={instance && draft.inheritConsole} onChange={event => change({ showConsole: event.target.checked })} /> Mostrar la consola cuando se inicie Minecraft</label>
+        <p>Abre el registro del juego en una ventana separada. Los cambios se aplican al próximo inicio.</p>
         {instance && <label><input type="checkbox" checked={draft.inheritRam} onChange={event => change({ inheritRam: event.target.checked })} /> Usar RAM global ({snapshot.global.ram_mib} MiB)</label>}
         <label htmlFor={`${prefix}-ram`}>RAM para Minecraft (MiB)</label>
         <input aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={Math.min(262144, Math.max(32768, Number(draft.ram) || 0))} step="1" disabled={instance && draft.inheritRam} value={/^\d+$/.test(draft.ram) ? draft.ram : '512'} onChange={event => change({ ram: event.target.value })} />
