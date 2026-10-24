@@ -57,6 +57,23 @@ impl PrivateStore {
             }
             Err(error) => return Err(map_private_error(error)),
         }
+        #[cfg(windows)]
+        root.open_file(LOCK_NAME)
+            .and_then(|file| file.set_hidden())
+            .map_err(map_private_error)?;
+        #[cfg(windows)]
+        {
+            match root.open_file(".installation.lock") {
+                Ok(file) => file.set_hidden().map_err(map_private_error)?,
+                Err(PrivateFsError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(map_private_error(error)),
+            }
+            match root.open_dir(".artifact-locks") {
+                Ok(directory) => directory.set_hidden().map_err(map_private_error)?,
+                Err(PrivateFsError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(map_private_error(error)),
+            }
+        }
         let store = Self {
             root,
             root_path: paths.root().to_path_buf(),
@@ -188,6 +205,44 @@ mod tests {
     fn test_paths() -> AppPaths {
         let path = std::env::temp_dir().join(format!("panita-storage-{}", Uuid::new_v4()));
         AppPaths::new(path).unwrap_or_else(|_| panic!("absolute test path"))
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn mutation_lock_is_hidden_and_remains_private_after_reopening() {
+        use std::os::windows::fs::MetadataExt;
+        let paths = test_paths();
+        let root = PrivateDir::ensure(paths.root()).unwrap_or_else(|_| panic!("root"));
+        root.create(".installation.lock")
+            .unwrap_or_else(|_| panic!("installation lock"));
+        root.ensure_dir(".artifact-locks")
+            .unwrap_or_else(|_| panic!("artifact locks"));
+        drop(root);
+        for _ in 0..2 {
+            let store = PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store"));
+            let lock = store.lock().unwrap_or_else(|_| panic!("lock"));
+            assert_ne!(
+                lock.metadata()
+                    .unwrap_or_else(|_| panic!("metadata"))
+                    .file_attributes()
+                    & 2,
+                0
+            );
+            assert!(private_fs::verify(&lock).is_ok());
+            for path in [
+                paths.root().join(".installation.lock"),
+                paths.root().join(".artifact-locks"),
+            ] {
+                assert_ne!(
+                    std::fs::metadata(path)
+                        .unwrap_or_else(|_| panic!("metadata"))
+                        .file_attributes()
+                        & 2,
+                    0
+                );
+            }
+        }
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }
 
     #[test]

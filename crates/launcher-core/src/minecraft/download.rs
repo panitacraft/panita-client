@@ -101,6 +101,10 @@ pub(crate) fn ensure_parent(
             return Ok((directory, part.into()));
         }
         directory = directory.ensure_dir(part).map_err(map_private_error)?;
+        #[cfg(windows)]
+        if part == ".artifact-locks" {
+            directory.set_hidden().map_err(map_private_error)?;
+        }
     }
     Err(invalid())
 }
@@ -150,6 +154,8 @@ pub(crate) fn try_lock(root: &Path, relative: &str) -> Result<Option<ArtifactLoc
         }
         Err(error) => return Err(map_private_error(error)),
     };
+    #[cfg(windows)]
+    source.set_hidden().map_err(map_private_error)?;
     let file = native_file(&source)?;
     match file.try_lock() {
         Ok(()) => {
@@ -186,6 +192,8 @@ pub(crate) async fn lock(
         Err(error) => return Err(map_private_error(error)),
     };
     let source = file;
+    #[cfg(windows)]
+    source.set_hidden().map_err(map_private_error)?;
     let file = native_file(&source)?;
     loop {
         cancel.check()?;
@@ -909,6 +917,33 @@ mod tests {
             );
         }
     }
+    #[tokio::test]
+    #[cfg(windows)]
+    async fn artifact_lock_files_and_directory_are_hidden_and_reusable() {
+        use std::os::windows::fs::MetadataExt;
+        let paths = paths();
+        let relative = ".artifact-locks/visibility.lock";
+        for _ in 0..2 {
+            let guard = lock(paths.root(), relative, &Cancellation::default())
+                .await
+                .unwrap_or_else(|_| panic!("lock"));
+            for path in [
+                paths.root().join(".artifact-locks"),
+                paths.root().join(relative),
+            ] {
+                assert_ne!(
+                    std::fs::metadata(path)
+                        .unwrap_or_else(|_| panic!("metadata"))
+                        .file_attributes()
+                        & 2,
+                    0
+                );
+            }
+            assert!(private_fs::verify(&guard._file).is_ok());
+        }
+        assert!(try_lock(paths.root(), relative).ok().flatten().is_some());
+    }
+
     #[tokio::test]
     async fn racing_cache_writers_download_once_and_lock_wait_is_cancellable() {
         let bytes = b"verified";

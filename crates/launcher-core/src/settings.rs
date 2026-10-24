@@ -5,6 +5,26 @@ use crate::storage::PrivateStore;
 
 pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
 
+/// Disk names are independent of the frontend command contract.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SettingsDocument {
+    schema: u32,
+    ram_mib: u32,
+    jvm_args: Vec<String>,
+    java_path: Option<String>,
+    game_window: WindowSize,
+    console_on_start: bool,
+    launcher: LauncherDocument,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LauncherDocument {
+    selected_instance: Option<uuid::Uuid>,
+    window: Option<LauncherWindow>,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LauncherPreferences {
@@ -75,7 +95,7 @@ impl GlobalSettings {
 
     pub fn save(&self, store: &PrivateStore) -> Result<(), CoreError> {
         self.validate()?;
-        let bytes = serde_json::to_vec(self).map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
+        let bytes = self.encode()?;
         store.transaction("settings.json", |previous| {
             if let Some(existing) = previous {
                 Self::decode(&existing)?;
@@ -85,6 +105,29 @@ impl GlobalSettings {
     }
 
     fn decode(bytes: &[u8]) -> Result<Self, CoreError> {
+        let value: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
+        if value.get("schema").is_some() {
+            let document: SettingsDocument = serde_json::from_slice(bytes)
+                .map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
+            if document.schema != 3 {
+                return Err(CoreError::new(ErrorCode::InvalidData));
+            }
+            let settings = Self {
+                schema_version: SETTINGS_SCHEMA_VERSION,
+                ram_mib: document.ram_mib,
+                extra_jvm_args: document.jvm_args,
+                java_path_override: document.java_path,
+                window_size: document.game_window,
+                show_console_on_start: document.console_on_start,
+                launcher: LauncherPreferences {
+                    selected_instance_id: document.launcher.selected_instance,
+                    window: document.launcher.window,
+                },
+            };
+            settings.validate()?;
+            return Ok(settings);
+        }
         let mut settings: Self =
             serde_json::from_slice(bytes).map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
         if settings.schema_version == 1 {
@@ -92,6 +135,25 @@ impl GlobalSettings {
         }
         settings.validate()?;
         Ok(settings)
+    }
+
+    fn encode(&self) -> Result<Vec<u8>, CoreError> {
+        let document = SettingsDocument {
+            schema: 3,
+            ram_mib: self.ram_mib,
+            jvm_args: self.extra_jvm_args.clone(),
+            java_path: self.java_path_override.clone(),
+            game_window: self.window_size.clone(),
+            console_on_start: self.show_console_on_start,
+            launcher: LauncherDocument {
+                selected_instance: self.launcher.selected_instance_id,
+                window: self.launcher.window.clone(),
+            },
+        };
+        let mut bytes = serde_json::to_vec_pretty(&document)
+            .map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
+        bytes.push(b'\n');
+        Ok(bytes)
     }
 
     pub(crate) fn validate(&self) -> Result<(), CoreError> {
@@ -177,8 +239,7 @@ impl GlobalSettings {
                 .unwrap_or_default();
             change(&mut current)?;
             current.validate()?;
-            let bytes =
-                serde_json::to_vec(&current).map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
+            let bytes = current.encode()?;
             Ok((bytes, current))
         })
     }
@@ -282,6 +343,58 @@ mod tests {
                 .unwrap_or_else(|_| panic!("paths"));
         let store = PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store"));
         (paths, store)
+    }
+
+    #[test]
+    fn disk_settings_are_pretty_compact_and_independent_of_ipc() {
+        let (paths, store) = isolated_store();
+        let original = GlobalSettings {
+            ram_mib: 8192,
+            extra_jvm_args: vec!["-Dtest=value".into()],
+            java_path_override: Some("C:/custom/java.exe".into()),
+            show_console_on_start: true,
+            launcher: LauncherPreferences {
+                selected_instance_id: Some(Uuid::new_v4()),
+                window: Some(LauncherWindow {
+                    width: 1000,
+                    height: 600,
+                    maximized: true,
+                }),
+            },
+            ..GlobalSettings::default()
+        };
+        let legacy = serde_json::to_vec(&original).unwrap_or_default();
+        store
+            .transaction("settings.json", |_| Ok((legacy.clone(), ())))
+            .unwrap_or_else(|_| panic!("legacy fixture"));
+        assert_eq!(GlobalSettings::load(&store).ok(), Some(original.clone()));
+        assert_eq!(store.read("settings.json").ok().flatten(), Some(legacy));
+        GlobalSettings::select_instance(&store, original.launcher.selected_instance_id)
+            .unwrap_or_else(|_| panic!("migrate on preference save"));
+        let bytes = store
+            .read("settings.json")
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.starts_with("{\n  \"schema\": 3,"));
+        assert!(text.ends_with('\n'));
+        assert!(!text.contains("schema_version"));
+        assert!(!text.contains("extra_jvm_args"));
+        assert!(!text.contains("selected_instance_id"));
+        assert_eq!(GlobalSettings::load(&store).ok(), Some(original.clone()));
+        let ipc = serde_json::to_value(&original).unwrap_or_default();
+        assert_eq!(ipc["schema_version"], 2);
+        assert!(ipc.get("extra_jvm_args").is_some());
+        for invalid in [
+            text.replace("\"schema\": 3", "\"schema\": 99"),
+            text.replace("\"schema\": 3", "\"schema\": 3, \"schema_version\": 2"),
+            text.replace("\"schema\": 3", "\"schema\": 99, \"schema\": 3"),
+        ] {
+            assert!(GlobalSettings::decode(invalid.as_bytes()).is_err());
+        }
+        drop(store);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }
 
     #[test]

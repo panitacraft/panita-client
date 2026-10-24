@@ -50,6 +50,10 @@ fn harden(handle: impl AsHandle, directory: bool, id: nt::Identity, user: &Sid) 
     nt::validate(handle, directory, Some(id), user).map(|_| ())
 }
 impl PrivateDir {
+    /// Mark this verified directory hidden without changing its permissions.
+    pub fn set_hidden(&self) -> Result<()> {
+        nt::hide(&self.handle, true, self.id, &self.user)
+    }
     /// Explicitly restore owner-only access through this retained handle.
     pub fn harden(&self) -> Result<()> {
         harden(&self.handle, true, self.id, &self.user)
@@ -176,6 +180,11 @@ impl PrivateDir {
             user: self.user.clone(),
         })
     }
+    /// Open an existing private directory relative to this retained capability.
+    pub fn open_dir(&self, path: impl AsRef<Path>) -> Result<Self> {
+        let (parent, name) = self.parent(path.as_ref())?;
+        Self::directory_at(&parent, name, FILE_OPEN as u32, &self.user)
+    }
     /// Exclusively create the final private directory; private parents must exist.
     pub fn create_dir(&self, path: impl AsRef<Path>) -> Result<Self> {
         let (parent, name) = self.parent(path.as_ref())?;
@@ -188,6 +197,10 @@ impl PrivateDir {
     }
 }
 impl PrivateFile {
+    /// Mark this verified file hidden without changing its permissions.
+    pub fn set_hidden(&self) -> Result<()> {
+        nt::hide(&self.file, false, self.id, &self.user)
+    }
     /// Explicitly restore owner-only access through this retained handle.
     pub fn harden(&self) -> Result<()> {
         harden(&self.file, false, self.id, &self.user)

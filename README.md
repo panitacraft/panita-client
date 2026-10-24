@@ -22,13 +22,22 @@ global/per-instance RAM, Minecraft window size
 and JVM settings, remembered instance selection, and launcher size/maximized-state
 persistence. These desktop additions still require native Windows/Linux acceptance.
 
-Global `settings.json` schema 1 is read without rewriting it; the next successful
-settings/preference save upgrades it to schema 2 while retaining launch values.
+Global `settings.json` schemas 1 and 2 are read without rewriting them; the next
+successful settings/preference save writes indented disk schema 3 with a trailing
+newline while retaining launch values. Disk keys are `schema`, `ram_mib`,
+`jvm_args`, `java_path`, `game_window`, `console_on_start`, and `launcher` (containing
+`selected_instance` and `window`). The frontend command contract is unchanged.
 Per-instance settings keep their existing schema. Selection/window writers preserve
 the latest launch settings under the shared writer lock. Launcher window state is
 saved on close/hide; minimized or hidden state is not restored on the next launch.
 Custom Java paths remain unsupported by launch preflight; the settings UI can clear
 an existing override. Older builds cannot read the new global settings schema.
+
+On Windows, the launcher marks its mutation/installation/artifact lock files and
+`.artifact-locks` directory hidden when opening them. Existing coordination objects
+are updated through verified handles without changing permissions. Explorer still
+shows them when “Hidden items” is enabled. Unix dot-prefixed coordination entries
+already follow the platform's hidden-file convention.
 
 The Spanish client-event viewer reads the latest 256 structured events from the
 current launcher process on demand. Startup, storage/catalog errors and Play/install/

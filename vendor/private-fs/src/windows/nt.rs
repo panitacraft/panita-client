@@ -340,3 +340,48 @@ pub(super) fn security_handle(handle: impl AsHandle) -> Result<OwnedHandle> {
         Some((READ_CONTROL | WRITE_DAC) as u32),
     )
 }
+
+/// Change visibility through the retained object, never through its pathname.
+pub(super) fn hide(handle: impl AsHandle, directory: bool, id: Identity, user: &Sid) -> Result<()> {
+    const WRITE_ATTRIBUTES: u32 = 0x100;
+    const HIDDEN: u32 = 2;
+    const BASIC_INFO: FILE_INFO_BY_HANDLE_CLASS = 0;
+    validate(handle.as_handle(), directory, Some(id), user)?;
+    let owned = handle.as_handle().try_clone_to_owned()?;
+    let writable = open_access(
+        Some(&owned),
+        OsStr::new(""),
+        directory,
+        FILE_OPEN as u32,
+        None,
+        Some((FILE_READ_ATTRIBUTES | READ_CONTROL) as u32 | WRITE_ATTRIBUTES),
+    )?;
+    validate(&writable, directory, Some(id), user)?;
+    #[repr(C)]
+    #[derive(Default)]
+    struct BasicInfo {
+        creation: i64,
+        access: i64,
+        write: i64,
+        change: i64,
+        attributes: u32,
+    }
+    let mut basic: BasicInfo = info(&writable, BASIC_INFO)?;
+    if basic.attributes & HIDDEN == 0 {
+        // Zero timestamps preserve the existing values, including concurrent writes.
+        basic = BasicInfo {
+            attributes: (basic.attributes & !(FILE_ATTRIBUTE_NORMAL as u32)) | HIDDEN,
+            ..BasicInfo::default()
+        };
+        // SAFETY: writable is verified and basic has the FILE_BASIC_INFO layout.
+        security::bool_result(unsafe {
+            SetFileInformationByHandle(
+                writable.as_raw_handle(),
+                BASIC_INFO,
+                (&basic as *const BasicInfo).cast(),
+                size_of::<BasicInfo>() as u32,
+            )
+        })?;
+    }
+    validate(&writable, directory, Some(id), user).map(|_| ())
+}

@@ -133,7 +133,7 @@ Use the current user's application-data directory, with platform-specific paths 
 PanitaClient/
 ├─ accounts.json          # sensitive: metadata and Microsoft refresh tokens
 ├─ account-removals.json  # nonsecret pending account-removal recovery
-├─ settings.json          # schema-versioned global settings
+├─ settings.json          # indented disk schema 3; compact, explicit keys
 ├─ insts-cache.json
 ├─ libraries/             # shared, verified caches
 ├─ assets/
@@ -154,6 +154,14 @@ PanitaClient/
 Do not introduce a separate plaintext keychain-fallback `secrets.json`; the chosen persistence mechanism is `accounts.json`.
 
 ## 5. Architecture
+
+Global settings use indented disk schema 3 with `schema`, `ram_mib`, `jvm_args`,
+`java_path`, `game_window`, `console_on_start`, and `launcher` (`selected_instance`,
+`window`). Preserve schema 1/2 values when saving in the new format; keep storage
+names separate from the frontend command contract. Mark verified launcher
+coordination files and `.artifact-locks` hidden on Windows without changing their
+permissions or locking behavior. Unix dot-prefixed coordination entries remain hidden
+by convention. These owner-requested refinements were accepted on 2026-10-23.
 
 ```text
 panita-client/
