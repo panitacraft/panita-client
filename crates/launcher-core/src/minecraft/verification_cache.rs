@@ -19,6 +19,7 @@ const FILE: &str = "verification-cache.json";
 #[derive(Default, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct VerificationCache {
+    #[serde(rename = "schema", alias = "schema_version")]
     schema_version: u32,
     manifest_hash: String,
     entries: BTreeMap<String, Receipt>,
@@ -55,9 +56,9 @@ impl VerificationCache {
             Err(error) => return Err(error),
         };
         Ok(cached
-            .filter(|cache| cache.schema_version == 1 && cache.manifest_hash == manifest_hash)
+            .filter(|cache| cache.schema_version == 2 && cache.manifest_hash == manifest_hash)
             .unwrap_or_else(|| Self {
-                schema_version: 1,
+                schema_version: 2,
                 manifest_hash,
                 dirty: true,
                 ..Self::default()

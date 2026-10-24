@@ -184,6 +184,7 @@ pub fn run() {
             play_commands::begin_update,
             play_commands::begin_repair,
             play_commands::begin_uninstall,
+            play_commands::clean_native_cache,
             play_commands::begin_play,
             play_commands::confirm_play,
             play_commands::cancel_play,

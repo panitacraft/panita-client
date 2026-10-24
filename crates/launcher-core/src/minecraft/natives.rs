@@ -33,6 +33,9 @@ pub fn extract(
         let mut entry = archive.by_index(index).map_err(|_| invalid())?;
         let name = entry.name().trim_end_matches('/').to_owned();
         safe_path(&name)?;
+        if name == ".generation.json" {
+            return Err(invalid());
+        }
         if !seen.insert(name.to_ascii_lowercase()) {
             return Err(invalid());
         }

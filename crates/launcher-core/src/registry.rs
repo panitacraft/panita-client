@@ -15,6 +15,7 @@ use crate::storage::map_private_error;
 
 const RECORD: &str = "instance.json";
 const LEGACY_RECORD: &str = "installation.json";
+mod format;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -30,26 +31,24 @@ pub enum InstallationState {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "format::StoredRecord", into = "format::StoredRecord")]
 pub struct InstallationRecord {
     pub schema_version: u32,
     pub id: Uuid,
     /// Stable physical directory, independent of later catalog slug changes.
     /// In a legacy UUID folder this is also the durable migration destination.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub directory_name: Option<String>,
     pub last_catalog: CatalogInstance,
     pub resolved_source: CatalogSource,
     pub state: InstallationState,
     pub managed_files: Vec<String>,
-    #[serde(default)]
     pub settings: InstanceSettings,
 }
 
 impl InstallationRecord {
     pub(crate) fn validate(&self) -> Result<(), CoreError> {
         self.settings.validate()?;
-        if !matches!(self.schema_version, 1..=3)
+        if !matches!(self.schema_version, 1..=4)
             || (self.schema_version == 1 && self.directory_name.is_some())
             || (self.schema_version >= 2 && self.directory_name.is_none())
             || self
@@ -409,7 +408,7 @@ impl InstanceRegistry {
                 .map_err(map_private_error)?;
             let store = Self::store_at(&self.paths.root().join("instances").join(&name))?;
             let mut next = record.clone();
-            next.schema_version = 3;
+            next.schema_version = 4;
             next.directory_name = Some(name);
             next.validate()?;
             store.transaction(RECORD, |existing| {
@@ -508,7 +507,7 @@ impl InstanceRegistry {
             else {
                 return Ok(InstanceSettings::default());
             };
-            if record.schema_version == 3 {
+            if record.schema_version >= 3 {
                 return Ok(record.settings);
             }
             match Self::store_at(&directory)?.read("settings.json")? {

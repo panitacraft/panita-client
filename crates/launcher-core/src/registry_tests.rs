@@ -94,7 +94,7 @@ fn fresh_installation_uses_slug_and_persists_identity_across_catalog_renames() {
     let records = InstanceRegistry::new(paths.clone())
         .load()
         .unwrap_or_else(|_| panic!("restart"));
-    assert_eq!(records[0].schema_version, 3);
+    assert_eq!(records[0].schema_version, 4);
     assert_eq!(records[0].directory_name.as_deref(), Some("vanilla-actual"));
     assert_eq!(paths.instance(record.id).ok(), Some(expected));
     assert!(
@@ -104,6 +104,53 @@ fn fresh_installation_uses_slug_and_persists_identity_across_catalog_renames() {
             .join(record.id.to_string())
             .exists()
     );
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn compact_descriptor_migration_is_locked_and_preserves_identity_settings_and_player_files() {
+    let (paths, registry) = temporary();
+    let record = installed(Uuid::new_v4());
+    registry.save(&record).unwrap_or_else(|_| panic!("save"));
+    let root = paths.instance(record.id).unwrap_or_else(|_| panic!("root"));
+    let mut legacy = registry
+        .get(record.id)
+        .unwrap_or_default()
+        .unwrap_or_else(|| panic!("record"));
+    legacy.schema_version = 3;
+    legacy.managed_files = vec!["legacy-owned.txt".into()];
+    let private = private_fs::PrivateDir::open(&root).unwrap_or_else(|_| panic!("private root"));
+    private
+        .write_atomic_durable(
+            "instance.json",
+            &formatted_json(&legacy).unwrap_or_default(),
+        )
+        .unwrap_or_else(|_| panic!("legacy"));
+    let marker = root.join("minecraft/options.txt");
+    std::fs::write(&marker, b"preserve").unwrap_or_else(|_| panic!("player marker"));
+    let guard = crate::minecraft::download::try_lock(&root, ".installation.lock")
+        .unwrap_or_default()
+        .unwrap_or_else(|| panic!("lock"));
+    assert_eq!(registry.load().unwrap_or_default()[0].schema_version, 3);
+    drop(guard);
+    let migrated = registry.load().unwrap_or_default();
+    assert_eq!(migrated[0].schema_version, 4);
+    assert_eq!(migrated[0].settings, legacy.settings);
+    assert_eq!(migrated[0].managed_files, legacy.managed_files);
+    let value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("instance.json")).unwrap_or_default())
+            .unwrap_or_else(|_| panic!("json"));
+    assert_eq!(value["schema"], 4);
+    assert!(value["catalog"].get("id").is_none());
+    assert!(value.get("directory_name").is_none());
+    assert!(value.get("managed_files").is_none());
+    let mut duplicate = value.clone();
+    duplicate["catalog"]["id"] = record.id.to_string().into();
+    assert!(serde_json::from_value::<InstallationRecord>(duplicate).is_err());
+    let mut future = value;
+    future["schema"] = 999.into();
+    assert!(serde_json::from_value::<InstallationRecord>(future).is_err());
+    assert_eq!(std::fs::read(marker).unwrap_or_default(), b"preserve");
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
 }
 

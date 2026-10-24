@@ -70,7 +70,7 @@ export function usePlaySnapshot() {
   return useContext(PlayContext)?.snapshot ?? null;
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean }) {
+export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -78,6 +78,8 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   const [updateQuestion, setUpdateQuestion] = useState<(UpdateTarget & { backupWorlds: boolean }) | null>(null);
   const [uninstallQuestion, setUninstallQuestion] = useState(false);
   const [logError, setLogError] = useState<string | null>(null);
+  const [cleanupText, setCleanupText] = useState<string | null>(null);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
   const entry = play?.snapshot?.instances.find(entry => entry.instanceId === instanceId);
   const active = entry && playActive(entry.phase);
   const running = entry && (entry.phase === 'running' || entry.phase === 'stopping');
@@ -88,6 +90,24 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     setBusy(true);
     try { await play.act(command, { instanceId, ...args } as PlayArguments[C]); }
     finally { busyRef.current = false; setBusy(false); }
+  }
+
+  async function cleanNatives() {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setCleanupError(null);
+    setCleanupText('Comprobando los archivos nativos antiguos…');
+    try {
+      const report = await invoke<{ cleanedGenerations: number; retainedGenerations: number; untrackedGenerations: number }>('clean_native_cache', { instanceId });
+      setCleanupText(`Se eliminaron ${report.cleanedGenerations} generaciones antiguas. Se conservaron ${report.retainedGenerations} con archivos modificados o no verificables y ${report.untrackedGenerations} sin información de propiedad. Las generaciones activas se conservan.`);
+    } catch (cause) {
+      setCleanupText(null);
+      setCleanupError(messageForError(cause));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   }
 
   return <div className="play-controls">
@@ -151,6 +171,9 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     {!active && !installAllowed && <button type="button" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}>{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</button>}
     {!active && updateTarget && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUpdateQuestion({ ...updateTarget, backupWorlds: true })}>Actualizar…</button>}
     {!active && repairAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_repair', { requestId: crypto.randomUUID() })}>Reparar archivos</button>}
+    {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void cleanNatives()}>Limpiar nativos antiguos</button>}
+    {cleanupText && <p role="status">{cleanupText}</p>}
+    {cleanupError && <p role="alert">{cleanupError}</p>}
     {!active && uninstallAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUninstallQuestion(true)}>Desinstalar…</button>}
     {!active && uninstallQuestion && <fieldset className="catalog-notice">
       <legend>Desinstalar conservando mis datos</legend>

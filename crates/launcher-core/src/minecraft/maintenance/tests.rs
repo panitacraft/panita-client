@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn maintenance_hint_requires_an_active_owned_manifest_but_not_healthy_cache_files() {
+fn maintenance_hint_requires_an_owned_manifest_but_not_healthy_cache_files() {
     let (paths, accounts, id) = fixture();
     drop(accounts);
     let root = install::metadata_root(&paths, id).expect("root");
@@ -20,7 +20,7 @@ fn maintenance_hint_requires_an_active_owned_manifest_but_not_healthy_cache_file
     .expect("corrupt cache");
     assert!(has_installation_manifest(&paths, id).expect("repairable"));
     uninstall(&paths, id, &Cancellation::default()).expect("uninstall");
-    assert!(!has_installation_manifest(&paths, id).expect("tombstone"));
+    assert!(has_installation_manifest(&paths, id).expect("tombstone"));
     let mut foreign = installed;
     foreign.instance_id = Uuid::new_v4();
     write_json(&root, "installed.json", &foreign).expect("foreign manifest");
@@ -167,7 +167,7 @@ fn uninstall_recovery_rolls_forward_before_and_after_tombstone_publication() {
         native(&root, &mut installed, "owned.dll", b"verified");
         write_json(&root, "installed.json", &installed).expect("manifest");
         let journal = intent(id, &installed, Kind::Uninstall);
-        write_json(&root, "install-journal.json", &journal).expect("intent");
+        write_json(&root, "transaction.json", &journal).expect("intent");
         if published {
             assert_eq!(natives(&root, &installed, true).expect("remove"), 0);
             installed.schema_version = 3;
@@ -189,10 +189,9 @@ fn uninstall_recovery_rolls_forward_before_and_after_tombstone_publication() {
                 .exists()
         );
         assert!(
-            !read_json::<Journal>(&root, "install-journal.json")
+            read_json::<Journal>(&root, "transaction.json")
                 .expect("read")
-                .expect("journal")
-                .active
+                .is_none()
         );
         std::fs::remove_dir_all(paths.root()).expect("cleanup");
     }
@@ -211,7 +210,7 @@ fn repair_recovery_keeps_old_pointer_or_finishes_exact_prepared_generation() {
         prepared.operation = journal.operation;
         prepared.native_files.clear();
         journal.prepared = Some(prepared.clone());
-        write_json(&root, "install-journal.json", &journal).expect("intent");
+        write_json(&root, "transaction.json", &journal).expect("intent");
         if published {
             write_json(&root, "installed.json", &prepared).expect("pointer");
         }
@@ -271,11 +270,11 @@ fn maintenance_rejects_busy_cancelled_foreign_and_unsafe_requests_without_remova
     );
     drop(lease);
     let mut journal = intent(Uuid::new_v4(), &installed, Kind::Uninstall);
-    write_json(&root, "install-journal.json", &journal).expect("intent");
+    write_json(&root, "transaction.json", &journal).expect("intent");
     assert!(uninstall(&paths, id, &Cancellation::default()).is_err());
     journal.instance_id = id;
     journal.previous_operation = Some(Uuid::new_v4());
-    write_json(&root, "install-journal.json", &journal).expect("intent");
+    write_json(&root, "transaction.json", &journal).expect("intent");
     assert!(uninstall(&paths, id, &Cancellation::default()).is_err());
     assert!(
         root.join(format!("natives-{}/owned.dll", installed.operation))
@@ -293,7 +292,7 @@ fn broken_published_repair_can_be_recovered_by_explicit_uninstall() {
     let mut prepared = installed.clone();
     prepared.operation = journal.operation;
     journal.prepared = Some(prepared.clone());
-    write_json(&root, "install-journal.json", &journal).expect("intent");
+    write_json(&root, "transaction.json", &journal).expect("intent");
     write_json(&root, "installed.json", &prepared).expect("pointer");
     std::fs::write(
         paths.root().join(&prepared.plan.artifacts[0].destination),

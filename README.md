@@ -336,8 +336,8 @@ resolved directory. Do not rename folders manually. Unowned folders, duplicate
 UUID records, and corrupt ownership metadata are preserved and reported for
 recovery instead of being adopted or replaced.
 
-Each instance uses a flat launcher root with `instance.json` (schema 3),
-`installed.json` (schema 2), `install-journal.json`, and persistent coordination
+Each instance uses a flat launcher root with `instance.json` (schema 4),
+`installed.json` (disk schema 4), transient `transaction.json`, and persistent coordination
 locks. Instance setting overrides live in `instance.json`; all game/player files
 belong in `minecraft/`. Use `AppPaths::game_directory` for the game working
 directory, rather than the instance root. Native generations use
@@ -352,6 +352,34 @@ reported. Settings are imported before the new descriptor is committed. Migratio
 is blocked during game execution or an active installation. Do not run older
 launcher builds against migrated instances. Account storage and shared-cache
 identities remain separate from this migration.
+
+Instance descriptors now use `schema`, `id`, `directory`, `catalog`, `source`,
+`status` and `settings`. The catalog snapshot omits its duplicate instance UUID.
+Empty legacy ownership lists are omitted; nonempty lists remain as `legacy_files`.
+The local source pin remains separate from the catalog's requested source so an
+available update cannot silently change the installed version. Installation
+manifests retain their own `id` to reject files belonging to another instance,
+and use explicit `installed`/`uninstalled` status rather than encoding state in
+the disk schema number. Their managed native inventory is named `natives`.
+Existing descriptors/manifests remain readable and migrate under writer/operation
+locks with atomic writes. Never run older builds against migrated data.
+
+`transaction.json` exists while install/update/repair/uninstall recovery is needed.
+Completed transactions are marked inactive durably, then removed. Legacy
+`install-journal.json` remains recoverable; migration never discards a sole active
+intent, and conflicting or malformed intents are preserved and reported.
+
+Local-instance controls include “Limpiar nativos antiguos”, including after uninstall.
+Cleanup requires
+an idle instance lease and settled recovery. Protected `.generation.json` receipts
+record exact managed native-file ownership before installation manifests are
+superseded. Only unchanged, verified obsolete files and empty known directories
+are removed; active generations, modified/unknown files and untracked generations
+are retained and reported. No cleanup runs as part of Play. Files extracted by
+Minecraft itself that are absent from launcher ownership inventories, and older
+generations without receipts, remain untracked and are not deleted automatically.
+Uninstall continues to preserve worlds/settings, shared libraries/assets/Java,
+and metadata needed for safe reinstallation; it does not promise full disk cleanup.
 
 ## License
 

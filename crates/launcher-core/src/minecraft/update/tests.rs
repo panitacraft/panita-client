@@ -9,7 +9,7 @@ fn explicit_reinstallation_transition_recovers_from_uninstalled_tombstone() {
     super::super::maintenance::uninstall(&paths, id, &Cancellation::default())
         .unwrap_or_else(|_| panic!("uninstall"));
     let mut journal = staging(&paths, id, &previous);
-    write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("intent"));
+    write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("intent"));
     // A cancelled transition retains the tombstone and all original worlds.
     install::recover_locked(&paths, id, &root).unwrap_or_else(|_| panic!("abandon"));
     assert_eq!(
@@ -25,7 +25,7 @@ fn explicit_reinstallation_transition_recovers_from_uninstalled_tombstone() {
     if let Some(prepared) = &mut journal.prepared {
         prepared.operation = journal.operation;
     }
-    write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("intent"));
+    write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("intent"));
     let prepared = journal
         .prepared
         .as_ref()
@@ -82,7 +82,7 @@ fn updating_one_instance_retains_other_instance_files_settings_and_shared_cache_
         .unwrap_or_else(|_| panic!("other settings"));
     let before = std::fs::read(other_root.join("installed.json")).unwrap_or_default();
     let mut journal = staging(&paths, id, &previous);
-    write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("intent"));
+    write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("intent"));
     publish(&paths, id, &root, &mut journal).unwrap_or_else(|_| panic!("publish"));
     assert_eq!(
         install::verify_installed(&paths, id)
@@ -224,7 +224,7 @@ fn interruption_at_each_commit_boundary_recovers_without_world_or_settings_chang
         let guard = try_lock(&root, ".installation.lock")
             .unwrap_or_else(|_| panic!("lock"))
             .unwrap_or_else(|| panic!("lease"));
-        write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("intent"));
+        write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("intent"));
         assert!(
             publish_steps(&paths, id, &root, &mut journal, |stage| {
                 if stage == interrupted {
@@ -237,10 +237,11 @@ fn interruption_at_each_commit_boundary_recovers_without_world_or_settings_chang
         );
         recover_locked(&paths, id, &root).unwrap_or_else(|error| panic!("recovery: {error}"));
         recover_locked(&paths, id, &root).unwrap_or_else(|_| panic!("idempotent recovery"));
-        let saved = read_json::<Journal>(&root, "install-journal.json")
-            .unwrap_or_default()
-            .unwrap_or_else(|| panic!("journal"));
-        assert!(!saved.active && saved.prepared.is_none());
+        assert!(
+            read_json::<Journal>(&root, "transaction.json")
+                .unwrap_or_default()
+                .is_none()
+        );
         drop(guard);
         let installed = install::verify_installed(&paths, id)
             .unwrap_or_else(|error| panic!("verified recovery: {error}"));
@@ -283,7 +284,7 @@ fn cancellation_before_publication_retains_old_installation_and_completed_world_
         world_backup::create(&root, id, &journal.from_version, journal.operation, &cancel)
             .unwrap_or_else(|error| panic!("backup: {error}"));
     assert!(journal.backup.is_some());
-    write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("intent"));
+    write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("intent"));
     cancel.cancel();
     assert_eq!(
         cancel
@@ -312,19 +313,19 @@ fn failed_preparation_and_foreign_or_corrupt_journals_never_replace_the_previous
     let before = std::fs::read(root.join("installed.json")).unwrap_or_else(|_| panic!("manifest"));
     let mut journal = staging(&paths, id, &previous);
     journal.prepared = None;
-    write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("start"));
+    write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("start"));
     recover_locked(&paths, id, &root).unwrap_or_else(|_| panic!("abandon preparation"));
     journal.instance_id = Uuid::new_v4();
-    write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("foreign"));
-    let foreign = std::fs::read(root.join("install-journal.json")).unwrap_or_default();
+    write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("foreign"));
+    let foreign = std::fs::read(root.join("transaction.json")).unwrap_or_default();
     assert!(recover_locked(&paths, id, &root).is_err());
     assert_eq!(
-        std::fs::read(root.join("install-journal.json")).ok(),
+        std::fs::read(root.join("transaction.json")).ok(),
         Some(foreign)
     );
     private_fs::PrivateDir::open(&root)
         .unwrap_or_else(|_| panic!("root"))
-        .write_atomic_durable("install-journal.json", b"{broken")
+        .write_atomic_durable("transaction.json", b"{broken")
         .unwrap_or_else(|_| panic!("corrupt"));
     assert!(install::recover_locked(&paths, id, &root).is_err());
     assert_eq!(
@@ -342,7 +343,7 @@ fn corrupt_staged_generation_after_publication_blocks_recovery_instead_of_adopti
         .prepared
         .as_ref()
         .unwrap_or_else(|| panic!("prepared"));
-    write_json(&root, "install-journal.json", &journal).unwrap_or_else(|_| panic!("intent"));
+    write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("intent"));
     write_json(&root, "installed.json", prepared).unwrap_or_else(|_| panic!("pointer"));
     let client = prepared.plan.client_path().unwrap_or_default();
     let (dir, leaf) = super::super::download::ensure_parent(paths.root(), &client)
@@ -356,7 +357,7 @@ fn corrupt_staged_generation_after_publication_blocks_recovery_instead_of_adopti
         Some(ErrorCode::ArtifactMismatch)
     );
     assert!(
-        read_json::<Journal>(&root, "install-journal.json")
+        read_json::<Journal>(&root, "transaction.json")
             .ok()
             .flatten()
             .is_some_and(|journal| journal.active)

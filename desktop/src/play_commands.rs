@@ -805,6 +805,33 @@ pub(super) fn begin_uninstall(
     )
 }
 
+#[tauri::command]
+pub(super) async fn clean_native_cache(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    instance_id: Uuid,
+) -> Result<launcher_core::minecraft::native_cache::CleanupReport, ErrorCode> {
+    if window.label() != "main" {
+        return Err(ErrorCode::InvalidData);
+    }
+    let paths = AppPaths::new(
+        app.path()
+            .app_data_dir()
+            .map_err(|_| ErrorCode::StorageUnavailable)?,
+    )
+    .map_err(|error| error.code())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        launcher_core::minecraft::native_cache::cleanup(
+            &paths,
+            instance_id,
+            &Cancellation::default(),
+        )
+        .map_err(|error| error.code())
+    })
+    .await
+    .map_err(|_| ErrorCode::StorageUnavailable)?
+}
+
 fn begin_maintenance(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,

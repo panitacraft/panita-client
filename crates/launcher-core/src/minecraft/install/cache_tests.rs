@@ -9,6 +9,38 @@ struct Fixture {
     installed: InstalledLock,
 }
 
+#[test]
+fn compact_installed_manifest_migrates_legacy_and_separates_format_from_status() {
+    let fixture = Fixture::new();
+    let mut value = serde_json::to_value(&fixture.installed).unwrap_or_else(|_| panic!("manifest"));
+    assert_eq!(value["schema"], 4);
+    assert_eq!(value["status"], "installed");
+    let object = value.as_object_mut().unwrap_or_else(|| panic!("object"));
+    object.remove("schema");
+    object.remove("status");
+    object.insert("schema_version".into(), 2.into());
+    let id = object.remove("id").unwrap_or_default();
+    object.insert("instance_id".into(), id);
+    let natives = object.remove("natives").unwrap_or_default();
+    object.insert("native_files".into(), natives);
+    write_json(&fixture.root, "installed.json", &value)
+        .unwrap_or_else(|_| panic!("legacy manifest"));
+    let installed = verify_installed(&fixture.paths, fixture.id)
+        .unwrap_or_else(|error| panic!("audit: {error}"));
+    assert_eq!(installed.operation, fixture.installed.operation);
+    let mut migrated = read_json::<serde_json::Value>(&fixture.root, "installed.json")
+        .unwrap_or_default()
+        .unwrap_or_default();
+    assert_eq!(migrated["schema"], 4);
+    assert!(migrated.get("schema_version").is_none());
+    migrated["status"] = "uninstalled".into();
+    let tombstone: InstalledLock =
+        serde_json::from_value(migrated.clone()).unwrap_or_else(|_| panic!("tombstone"));
+    assert_eq!(tombstone.schema_version, 3);
+    migrated["schema"] = 999.into();
+    assert!(serde_json::from_value::<InstalledLock>(migrated).is_err());
+}
+
 impl Fixture {
     fn new() -> Self {
         let (paths, accounts, id) = crate::minecraft::play::tests::fixture();

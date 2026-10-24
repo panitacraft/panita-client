@@ -30,15 +30,19 @@ struct Journal {
     operation: Uuid,
     active: bool,
 }
+mod format;
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(try_from = "format::StoredInstalled", into = "format::StoredInstalled")]
 pub struct InstalledLock {
+    /// Legacy model states: 2 is installed, 3 is uninstalled. Disk schema 4 stores
+    /// this distinction as an explicit status, independent of its format version.
     pub schema_version: u32,
     pub instance_id: Uuid,
     pub operation: Uuid,
     pub plan: InstallPlan,
     pub native_files: Vec<NativeFile>,
     /// Missing in older manifests, which retain their original generation path.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_directory: Option<String>,
 }
 
@@ -65,6 +69,18 @@ pub(super) fn read_json<T: serde::de::DeserializeOwned>(
     root: &std::path::Path,
     name: &str,
 ) -> Result<Option<T>, CoreError> {
+    if name == "transaction.json" {
+        return super::transaction::read(root)?
+            .map(|value| serde_json::from_value(value).map_err(|_| invalid()))
+            .transpose();
+    }
+    read_json_raw(root, name)
+}
+
+pub(super) fn read_json_raw<T: serde::de::DeserializeOwned>(
+    root: &std::path::Path,
+    name: &str,
+) -> Result<Option<T>, CoreError> {
     let directory = private_fs::PrivateDir::open(root).map_err(map_private_error)?;
     let mut file = match directory.open_file(name) {
         Ok(file) => file,
@@ -84,6 +100,20 @@ pub(super) fn read_json<T: serde::de::DeserializeOwned>(
     Ok(Some(serde_json::from_slice(&bytes).map_err(|_| invalid())?))
 }
 pub(super) fn write_json(
+    root: &std::path::Path,
+    relative: &str,
+    value: &impl Serialize,
+) -> Result<(), CoreError> {
+    if relative == "transaction.json" {
+        return super::transaction::write(
+            root,
+            serde_json::to_value(value).map_err(|_| invalid())?,
+        );
+    }
+    write_json_raw(root, relative, value)
+}
+
+pub(super) fn write_json_raw(
     root: &std::path::Path,
     relative: &str,
     value: &impl Serialize,
@@ -116,14 +146,14 @@ pub(super) fn recover_locked(
     if super::update::recover_locked(paths, id, root)? {
         return Ok(());
     }
-    let Some(mut journal) = read_json::<Journal>(root, "install-journal.json")? else {
+    let Some(mut journal) = read_json::<Journal>(root, "transaction.json")? else {
         return Ok(());
     };
     if journal.schema_version != 1 || journal.operation.is_nil() {
         return Err(invalid());
     }
     if !journal.active {
-        return Ok(());
+        return super::transaction::remove(root);
     }
     let registry = InstanceRegistry::new(paths.clone());
     if let Some(mut record) = registry.get(id)? {
@@ -131,7 +161,8 @@ pub(super) fn recover_locked(
         registry.save_installation(&record)?;
     }
     journal.active = false;
-    write_json(root, "install-journal.json", &journal)
+    write_json(root, "transaction.json", &journal)?;
+    super::transaction::remove(root)
 }
 
 pub async fn recover(paths: &AppPaths, id: Uuid, cancel: &Cancellation) -> Result<(), CoreError> {
@@ -331,7 +362,7 @@ pub async fn install(
         operation,
         active: true,
     };
-    write_json(&root, "install-journal.json", &journal)?;
+    write_json(&root, "transaction.json", &journal)?;
     let mut record = InstallationRecord {
         schema_version: 1,
         id,
@@ -360,7 +391,8 @@ pub async fn install(
         record.state = InstallationState::Installed;
         registry.save_installation(&record)?;
         journal.active = false;
-        write_json(&root, "install-journal.json", &journal)?;
+        write_json(&root, "transaction.json", &journal)?;
+        super::transaction::remove(&root)?;
         Ok(installed)
     }
     .await;
@@ -374,7 +406,9 @@ pub async fn install(
         // NeedsRepair, preserving the original error and every previous artifact.
         if registry.save_installation(&record).is_ok() {
             journal.active = false;
-            let _ = write_json(&root, "install-journal.json", &journal);
+            if write_json(&root, "transaction.json", &journal).is_ok() {
+                let _ = super::transaction::remove(&root);
+            }
         }
     }
     result
@@ -454,14 +488,16 @@ pub(super) async fn prepare_recorded(
         )?);
     }
     cancel.check()?;
-    Ok(InstalledLock {
+    let installed = InstalledLock {
         schema_version: 2,
         instance_id: id,
         operation,
         plan,
         native_files,
         native_directory: Some(native_directory),
-    })
+    };
+    super::native_cache::record(&root, &installed)?;
+    Ok(installed)
 }
 
 /// Explicit full local audit. Never consults Play receipts and never repairs.
@@ -505,7 +541,7 @@ fn read_installed_under_lock(
     cancel: &Cancellation,
 ) -> Result<InstalledLock, CoreError> {
     cancel.check()?;
-    let journal = read_json::<serde_json::Value>(root, "install-journal.json")?;
+    let journal = read_json::<serde_json::Value>(root, "transaction.json")?;
     if journal.is_some_and(|journal| {
         if journal["schema_version"] == 3 {
             !super::maintenance::journal_inactive(journal, id)
@@ -519,7 +555,13 @@ fn read_installed_under_lock(
     }) {
         return Err(invalid());
     }
-    read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)
+    let value = read_json::<serde_json::Value>(root, "installed.json")?.ok_or_else(invalid)?;
+    let installed: InstalledLock = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
+    super::maintenance::validate_manifest(&installed, id)?;
+    if value.get("schema_version").is_some() {
+        write_json(root, "installed.json", &installed)?;
+    }
+    Ok(installed)
 }
 
 pub(super) fn verify_manifest(
@@ -736,7 +778,7 @@ mod tests {
             .unwrap_or_else(|_| panic!("world data"));
         write_json(
             &root,
-            "install-journal.json",
+            "transaction.json",
             &Journal {
                 schema_version: 1,
                 operation: Uuid::new_v4(),
@@ -755,7 +797,7 @@ mod tests {
             Some(ErrorCode::OperationBusy)
         );
         assert!(
-            read_json::<Journal>(&root, "install-journal.json")
+            read_json::<Journal>(&root, "transaction.json")
                 .unwrap_or_default()
                 .is_some_and(|journal| journal.active)
         );
@@ -797,13 +839,11 @@ mod tests {
         let root = metadata_root(&paths, id).unwrap_or_else(|_| panic!("root"));
         let directory = private_fs::PrivateDir::open(&root).unwrap_or_else(|_| panic!("directory"));
         directory
-            .write_atomic_durable("install-journal.json", b"{broken")
+            .write_atomic_durable("transaction.json", b"{broken")
             .unwrap_or_else(|_| panic!("corrupt"));
         assert!(recover(&paths, id, &Cancellation::default()).await.is_err());
         assert_eq!(
-            std::fs::read(root.join("install-journal.json"))
-                .ok()
-                .as_deref(),
+            std::fs::read(root.join("transaction.json")).ok().as_deref(),
             Some(b"{broken".as_slice())
         );
         write_json(&root, "lock.json", &serde_json::json!({"previous":"valid"}))

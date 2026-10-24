@@ -22,15 +22,15 @@ pub struct MaintenanceOutcome {
     pub retained_files: u32,
 }
 
-/// Presentation hint only: a recorded active plan may still need artifact repair.
-/// Missing/tombstoned plans must not expose operations that require that plan.
+/// Presentation hint only: a recognized owned plan may still need artifact repair.
+/// Tombstones allow native cleanup; repair/uninstall also check installation state.
 pub(crate) fn has_installation_manifest(paths: &AppPaths, id: Uuid) -> Result<bool, CoreError> {
     let root = paths.instance(id)?;
     let Some(installed) = read_json::<InstalledLock>(&root, "installed.json")? else {
         return Ok(false);
     };
     validate_manifest(&installed, id)?;
-    Ok(installed.schema_version == 2)
+    Ok(true)
 }
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -121,8 +121,7 @@ fn recover_for_maintenance(paths: &AppPaths, id: Uuid, root: &Path) -> Result<()
         Err(error) if error.code() == ErrorCode::ArtifactMismatch => (),
         Err(error) => return Err(error),
     }
-    let value =
-        read_json::<serde_json::Value>(root, "install-journal.json")?.ok_or_else(invalid)?;
+    let value = read_json::<serde_json::Value>(root, "transaction.json")?.ok_or_else(invalid)?;
     let installed = read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)?;
     validate_manifest(&installed, id)?;
     if value["schema_version"] == 2 {
@@ -166,7 +165,7 @@ fn save_record(
 }
 
 pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<bool, CoreError> {
-    let Some(value) = read_json::<serde_json::Value>(root, "install-journal.json")? else {
+    let Some(value) = read_json::<serde_json::Value>(root, "transaction.json")? else {
         return Ok(false);
     };
     if value["schema_version"] != 3 {
@@ -175,6 +174,7 @@ pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
     let mut journal: Journal = serde_json::from_value(value).map_err(|_| invalid())?;
     journal.validate(id)?;
     if !journal.active {
+        super::transaction::remove(root)?;
         return Ok(true);
     }
     if journal.kind == Kind::Uninstall {
@@ -220,12 +220,17 @@ pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
 fn complete(root: &Path, journal: &mut Journal) -> Result<(), CoreError> {
     journal.active = false;
     journal.prepared = None;
-    write_json(root, "install-journal.json", journal)
+    write_json(root, "transaction.json", journal)?;
+    super::transaction::remove(root)
 }
 
 /// Remove only unchanged, manifest-owned native files. Unknown entries and all
 /// directories remain. Ordinary edits, links and unverifiable files are retained.
-fn natives(root: &Path, installed: &InstalledLock, remove: bool) -> Result<u32, CoreError> {
+pub(super) fn natives(
+    root: &Path,
+    installed: &InstalledLock,
+    remove: bool,
+) -> Result<u32, CoreError> {
     if installed.native_files.is_empty() {
         return Ok(0);
     }
@@ -360,6 +365,7 @@ pub fn uninstall(
     recover_for_maintenance(paths, id, &root)?;
     let previous = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
     validate_manifest(&previous, id)?;
+    super::native_cache::record(&root, &previous)?;
     let mut journal = Journal {
         schema_version: 3,
         instance_id: id,
@@ -371,7 +377,7 @@ pub fn uninstall(
         retained_files: 0,
     };
     cancel.commit(|| {
-        write_json(&root, "install-journal.json", &journal)?;
+        write_json(&root, "transaction.json", &journal)?;
         finish_uninstall(paths, id, &root, &mut journal)
     })?;
     Ok(MaintenanceOutcome {
@@ -410,6 +416,7 @@ async fn repair_with_catalog(
     recover_for_maintenance(paths, id, &root)?;
     let previous = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
     validate_manifest(&previous, id)?;
+    super::native_cache::record(&root, &previous)?;
     let record = registry.get(id)?.ok_or_else(invalid)?;
     if previous.schema_version != 2
         || record.state == InstallationState::NotInstalled
@@ -431,7 +438,7 @@ async fn repair_with_catalog(
         prepared: None,
         retained_files,
     };
-    write_json(&root, "install-journal.json", &journal)?;
+    write_json(&root, "transaction.json", &journal)?;
     let result: Result<(), CoreError> = async {
         let installed = install::prepare_recorded(
             paths,
@@ -445,7 +452,7 @@ async fn repair_with_catalog(
         .await?;
         journal.prepared = Some(installed.clone());
         journal.validate(id)?;
-        write_json(&root, "install-journal.json", &journal)?;
+        write_json(&root, "transaction.json", &journal)?;
         cancel.commit(|| {
             write_json(&root, "installed.json", &installed)?;
             save_record(

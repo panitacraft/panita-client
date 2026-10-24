@@ -113,6 +113,7 @@ function App() {
                   updateTarget={updateTarget(instance, catalog.stale)}
                   repairAllowed={canRepair(instance, catalog.stale)}
                   uninstallAllowed={canUninstall(instance)}
+                  cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'}
                   allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
               </article>
             ))}

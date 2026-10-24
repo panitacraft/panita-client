@@ -96,7 +96,7 @@ pub(super) fn journal_inactive(value: serde_json::Value, id: Uuid) -> bool {
 /// Return false for an older install journal. Called under the operation lock.
 /// An old pointer abandons uncommitted staging; a new pointer completes metadata.
 pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<bool, CoreError> {
-    let Some(value) = read_json::<serde_json::Value>(root, "install-journal.json")? else {
+    let Some(value) = read_json::<serde_json::Value>(root, "transaction.json")? else {
         return Ok(false);
     };
     if value["schema_version"] != 2 {
@@ -105,6 +105,7 @@ pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
     let mut journal: Journal = serde_json::from_value(value).map_err(|_| invalid())?;
     journal.validate(id)?;
     if !journal.active {
+        super::transaction::remove(root)?;
         return Ok(true);
     }
     let installed = read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)?;
@@ -143,14 +144,15 @@ pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
     }
     journal.active = false;
     journal.prepared = None;
-    write_json(root, "install-journal.json", &journal)?;
+    write_json(root, "transaction.json", &journal)?;
+    super::transaction::remove(root)?;
     Ok(true)
 }
 
 /// A broken published update may be explicitly uninstalled, but only when its
 /// private intent and current pointer prove ownership of the same generation.
 pub(super) fn validate_for_uninstall(root: &Path, id: Uuid) -> Result<(), CoreError> {
-    let journal = read_json::<Journal>(root, "install-journal.json")?.ok_or_else(invalid)?;
+    let journal = read_json::<Journal>(root, "transaction.json")?.ok_or_else(invalid)?;
     journal.validate(id)?;
     let installed = read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)?;
     super::maintenance::validate_manifest(&installed, id)?;
@@ -221,7 +223,8 @@ fn publish_steps(
     checkpoint(CommitStage::RecordPublished)?;
     journal.active = false;
     journal.prepared = None;
-    write_json(root, "install-journal.json", journal)?;
+    write_json(root, "transaction.json", journal)?;
+    super::transaction::remove(root)?;
     checkpoint(CommitStage::JournalCompleted)
 }
 
@@ -314,6 +317,7 @@ async fn update_with_catalog(
         return Err(invalid());
     }
     let operation = Uuid::new_v4();
+    super::native_cache::record(&root, &previous)?;
     let mut journal = Journal {
         schema_version: 2,
         instance_id: id,
@@ -326,7 +330,7 @@ async fn update_with_catalog(
         backup: None,
         prepared: None,
     };
-    write_json(&root, "install-journal.json", &journal)?;
+    write_json(&root, "transaction.json", &journal)?;
     let result: Result<UpdateOutcome, CoreError> = async {
         let installed = install::prepare(
             paths,
@@ -344,7 +348,7 @@ async fn update_with_catalog(
         }
         journal.prepared = Some(installed.clone());
         journal.validate(id)?;
-        write_json(&root, "install-journal.json", &journal)?;
+        write_json(&root, "transaction.json", &journal)?;
         cancel.commit(|| publish(paths, id, &root, &mut journal))?;
         Ok(UpdateOutcome {
             installed,

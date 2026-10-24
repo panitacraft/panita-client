@@ -57,9 +57,14 @@ fn read(root: &Path, name: &str) -> Result<Option<Vec<u8>>, CoreError> {
 fn publish(root: &Path, name: &str, value: &impl Serialize) -> Result<(), CoreError> {
     let bytes = serde_json::to_vec_pretty(value).map_err(|_| invalid())?;
     if let Some(existing) = read(root, name)? {
-        if serde_json::from_slice::<serde_json::Value>(&existing).map_err(|_| invalid())?
-            != serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|_| invalid())?
-        {
+        let existing = if name == "installed.json" {
+            let installed: InstalledLock =
+                serde_json::from_slice(&existing).map_err(|_| invalid())?;
+            serde_json::to_value(installed).map_err(|_| invalid())?
+        } else {
+            serde_json::from_slice::<serde_json::Value>(&existing).map_err(|_| invalid())?
+        };
+        if existing != serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|_| invalid())? {
             return Err(invalid());
         }
         return Ok(());
@@ -199,7 +204,7 @@ fn prepare_intent(root: &Path, mut record: InstallationRecord) -> Result<Intent,
         record.settings = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
         record.settings.validate()?;
     }
-    record.schema_version = 3;
+    record.schema_version = 4;
     // Minecraft creates ordinary player files, not private-fs documents. Preserve
     // their ACLs; only launcher metadata requires private-file verification.
     let game_entries: Vec<_> = names_with_privacy(root, false)?
@@ -223,6 +228,9 @@ fn prepare_intent(root: &Path, mut record: InstallationRecord) -> Result<Intent,
             | "settings.json"
             | "lock.json"
             | "install-journal.json"
+            | "transaction.json"
+            | "verification-cache.json"
+            | "natives"
             | ".mutation.lock"
             | ".installation.lock" => {
                 // Windows byte-range locks also prohibit reads through another
@@ -270,14 +278,29 @@ fn prepare_intent(root: &Path, mut record: InstallationRecord) -> Result<Intent,
 
 pub(crate) fn prepare(
     root: &Path,
-    record: InstallationRecord,
+    mut record: InstallationRecord,
 ) -> Result<InstallationRecord, CoreError> {
     let legacy = root.join(".panita");
-    if record.schema_version == 3 && !legacy.try_exists().map_err(io)? {
+    if record.schema_version >= 3 && !legacy.try_exists().map_err(io)? {
         private_fs::PrivateDir::open(root.join("minecraft")).map_err(map_private_error)?;
+        if record.schema_version == 3 {
+            let _operation = crate::minecraft::download::try_lock(root, ".installation.lock")?
+                .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
+            if record.state == InstallationState::Running {
+                return Err(CoreError::new(ErrorCode::OperationBusy));
+            }
+            record.schema_version = 4;
+            let store = crate::storage::PrivateStore::open(&crate::paths::AppPaths::new(root)?)?;
+            store.with_lock(|transaction| {
+                transaction.write(
+                    "instance.json",
+                    &serde_json::to_vec_pretty(&record).map_err(|_| invalid())?,
+                )
+            })?;
+        }
         return Ok(record);
     }
-    if record.schema_version == 3 && names(&legacy)?.is_empty() {
+    if record.schema_version >= 3 && names(&legacy)?.is_empty() {
         std::fs::remove_dir(&legacy).map_err(io)?;
         sync(root)?;
         return Ok(record);
@@ -304,7 +327,7 @@ pub(crate) fn prepare(
     };
     if intent.schema_version != 1
         || intent.record.id != record.id
-        || intent.record.schema_version != 3
+        || !matches!(intent.record.schema_version, 3 | 4)
         || intent.record.directory_name != record.directory_name
         || intent.record.resolved_source != record.resolved_source
         || intent.game_entries.len() > 10_000
@@ -383,7 +406,7 @@ pub(crate) fn prepare(
             let current: InstallationRecord =
                 serde_json::from_slice(&bytes).map_err(|_| invalid())?;
             current.validate()?;
-            if current.schema_version != 3
+            if !matches!(current.schema_version, 3 | 4)
                 || current.id != record.id
                 || current.directory_name != record.directory_name
                 || current.resolved_source != record.resolved_source
