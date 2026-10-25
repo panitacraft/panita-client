@@ -422,8 +422,11 @@ impl AccountRepository {
                     });
                 }
                 pending.account_ids.clear();
-                // A retained marker is harmless; startup reconciliation is idempotent.
-                let _ = write_json(tx, REMOVAL_FILE, &pending);
+                // Publish an inactive marker before deletion, so an interrupted
+                // or non-durable unlink can only leave harmless completed work.
+                if write_json(tx, REMOVAL_FILE, &pending).is_ok() {
+                    let _ = retire_empty_marker(tx, REMOVAL_FILE);
+                }
                 Ok(RemovalOutcome::Removed)
             })
             .unwrap_or(RemovalOutcome::NotDurable)
@@ -542,8 +545,22 @@ fn load_pending(tx: &StoreTransaction<'_>) -> Result<PendingRemovals, CoreError>
                 },
             )?;
         }
+        // The legacy intent is now empty or durably represented in the new file.
+        // A failed unlink leaves an inactive marker for the next reconciliation.
+        let _ = retire_empty_marker(tx, LEGACY_REMOVAL_FILE);
+    }
+    if pending.account_ids.is_empty() {
+        let _ = retire_empty_marker(tx, REMOVAL_FILE);
     }
     Ok(pending)
+}
+
+fn retire_empty_marker(tx: &StoreTransaction<'_>, name: &'static str) -> Result<(), CoreError> {
+    let pending = read_pending(tx, name)?;
+    if !pending.account_ids.is_empty() {
+        return Err(CoreError::new(ErrorCode::AccountsFileInvalid));
+    }
+    tx.remove_verified_file(name)
 }
 
 fn read_pending(
@@ -581,6 +598,7 @@ fn load_reconciled(tx: &StoreTransaction<'_>) -> Result<AccountDocument, CoreErr
                 account_ids: Vec::new(),
             },
         )?;
+        let _ = retire_empty_marker(tx, REMOVAL_FILE);
     }
     Ok(document)
 }
@@ -905,6 +923,224 @@ mod tests {
     }
 
     #[test]
+    fn completed_removal_deletes_markers_and_preserves_other_accounts_after_restart() {
+        let (paths, repository) = repository();
+        let token =
+            Secret::new("synthetic-removal-token".into()).unwrap_or_else(|_| panic!("token"));
+        let removed = repository
+            .save_microsoft(Uuid::new_v4(), "PlayerOne", &token, None)
+            .unwrap_or_else(|_| panic!("Microsoft fixture"));
+        let retained = repository
+            .add_offline("PlayerTwo")
+            .unwrap_or_else(|_| panic!("offline fixture"));
+        assert!(matches!(
+            repository.remove(removed.account_id),
+            RemovalOutcome::Removed
+        ));
+        assert!(!paths.root().join(REMOVAL_FILE).exists());
+        assert!(!paths.root().join(LEGACY_REMOVAL_FILE).exists());
+        assert!(repository.refresh_token(removed.account_id).is_err());
+        drop(repository);
+        let restarted = AccountRepository::new(
+            PrivateStore::open(&paths).unwrap_or_else(|_| panic!("restart")),
+        );
+        assert_eq!(
+            restarted.snapshot().ok().map(|snapshot| snapshot.accounts),
+            Some(vec![retained])
+        );
+        assert!(!paths.root().join(REMOVAL_FILE).exists());
+        drop(restarted);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
+    fn empty_current_and_legacy_markers_are_retired_without_changing_accounts() {
+        let (paths, repository) = repository();
+        let retained = repository
+            .add_offline("Steve")
+            .unwrap_or_else(|_| panic!("fixture"));
+        repository
+            .store
+            .with_lock(|tx| {
+                write_json(
+                    tx,
+                    REMOVAL_FILE,
+                    &PendingRemovals {
+                        schema_version: 1,
+                        account_ids: vec![],
+                    },
+                )?;
+                tx.write(
+                    LEGACY_REMOVAL_FILE,
+                    br#"{"schema_version":1,"account_ids":[]}"#,
+                )
+            })
+            .unwrap_or_else(|_| panic!("markers"));
+        assert_eq!(
+            repository.snapshot().ok().map(|snapshot| snapshot.accounts),
+            Some(vec![retained])
+        );
+        assert!(!paths.root().join(REMOVAL_FILE).exists());
+        assert!(!paths.root().join(LEGACY_REMOVAL_FILE).exists());
+        assert!(repository.snapshot().is_ok());
+        assert!(!paths.root().join(REMOVAL_FILE).exists());
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
+    fn active_removal_survives_failed_reconciliation_and_is_retired_after_recovery() {
+        let (paths, repository) = repository();
+        let account = repository
+            .add_offline("Steve")
+            .unwrap_or_else(|_| panic!("fixture"));
+        let original = repository
+            .store
+            .read(ACCOUNT_FILE)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        repository
+            .store
+            .with_lock(|tx| {
+                write_json(
+                    tx,
+                    REMOVAL_FILE,
+                    &PendingRemovals {
+                        schema_version: 1,
+                        account_ids: vec![account.account_id],
+                    },
+                )?;
+                tx.write(ACCOUNT_FILE, b"corrupt synthetic account fixture")
+            })
+            .unwrap_or_else(|_| panic!("pending fixture"));
+        assert!(repository.snapshot().is_err());
+        assert!(
+            repository
+                .store
+                .with_lock(|tx| retire_empty_marker(tx, REMOVAL_FILE))
+                .is_err()
+        );
+        assert_eq!(
+            repository
+                .store
+                .with_lock(load_pending)
+                .ok()
+                .map(|pending| pending.account_ids),
+            Some(vec![account.account_id])
+        );
+        repository
+            .store
+            .with_lock(|tx| tx.write(ACCOUNT_FILE, &original))
+            .unwrap_or_else(|_| panic!("restore fixture"));
+        assert!(
+            repository
+                .snapshot()
+                .is_ok_and(|snapshot| snapshot.accounts.is_empty())
+        );
+        assert!(!paths.root().join(REMOVAL_FILE).exists());
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn locked_empty_marker_is_retried_without_blocking_accounts() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let (paths, repository) = repository();
+        let account = repository
+            .add_offline("Steve")
+            .unwrap_or_else(|_| panic!("fixture"));
+        repository
+            .store
+            .with_lock(|tx| {
+                write_json(
+                    tx,
+                    REMOVAL_FILE,
+                    &PendingRemovals {
+                        schema_version: 1,
+                        account_ids: vec![],
+                    },
+                )
+            })
+            .unwrap_or_else(|_| panic!("marker"));
+        // Permit reads/writes but deny deletion until this external handle closes.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1 | 0x2)
+            .open(paths.root().join(REMOVAL_FILE))
+            .unwrap_or_else(|_| panic!("hold"));
+        assert!(
+            repository
+                .store
+                .with_lock(|tx| retire_empty_marker(tx, REMOVAL_FILE))
+                .is_err()
+        );
+        assert_eq!(
+            repository.snapshot().ok().map(|snapshot| snapshot.accounts),
+            Some(vec![account])
+        );
+        assert!(paths.root().join(REMOVAL_FILE).exists());
+        drop(held);
+        assert!(repository.snapshot().is_ok());
+        assert!(!paths.root().join(REMOVAL_FILE).exists());
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
+    fn unknown_or_linked_markers_are_never_deleted_as_completed_work() {
+        let (paths, repository) = repository();
+        assert!(repository.add_offline("Steve").is_ok());
+        for bytes in [
+            b"corrupt".as_slice(),
+            br#"{"schema":99,"account_ids":[]}"#,
+            br#"{"schema":1,"account_ids":[],"unknown":true}"#,
+        ] {
+            repository
+                .store
+                .with_lock(|tx| tx.write(REMOVAL_FILE, bytes))
+                .unwrap_or_else(|_| panic!("invalid fixture"));
+            assert!(repository.snapshot().is_err());
+            assert!(
+                repository
+                    .store
+                    .with_lock(|tx| retire_empty_marker(tx, REMOVAL_FILE))
+                    .is_err()
+            );
+            assert_eq!(
+                repository.store.read(REMOVAL_FILE).ok().flatten(),
+                Some(bytes.to_vec())
+            );
+        }
+        repository
+            .store
+            .with_lock(|tx| {
+                write_json(
+                    tx,
+                    REMOVAL_FILE,
+                    &PendingRemovals {
+                        schema_version: 1,
+                        account_ids: vec![],
+                    },
+                )
+            })
+            .unwrap_or_else(|_| panic!("linked fixture"));
+        let linked = paths.root().join("unrelated.json");
+        assert!(std::fs::hard_link(paths.root().join(REMOVAL_FILE), &linked).is_ok());
+        assert!(repository.snapshot().is_err());
+        assert!(
+            repository
+                .store
+                .with_lock(|tx| retire_empty_marker(tx, REMOVAL_FILE))
+                .is_err()
+        );
+        assert!(linked.exists() && paths.root().join(REMOVAL_FILE).exists());
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
     fn pending_removal_blocks_restore_and_late_rotation() {
         let (paths, repository) = repository();
         let token = Secret::new("synthetic-token".to_owned()).unwrap_or_else(|_| panic!("fixture"));
@@ -989,6 +1225,8 @@ mod tests {
                             .is_empty()
                     );
                     assert!(read_pending(tx, REMOVAL_FILE)?.account_ids.is_empty());
+                    assert!(tx.read(REMOVAL_FILE)?.is_none());
+                    assert!(tx.read(LEGACY_REMOVAL_FILE)?.is_none());
                     Ok(())
                 })
                 .is_ok()

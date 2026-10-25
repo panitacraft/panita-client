@@ -113,6 +113,13 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 - Distinguish service/network failures from revoked credentials. Show actionable Spanish errors without silently deleting accounts or converting Microsoft accounts to offline accounts.
 - Explicit offline accounts may launch fully installed vanilla without connectivity. Microsoft accounts require successful current Play validation.
 - Signing out removes both profile and refresh token, clears in-memory sessions, and invalidates pending work. Report incomplete cleanup honestly and prevent stale operations from restoring credentials.
+- Keep `account-removals.json` only while account-removal recovery is needed. After
+  the account-file update succeeds durably, publish an empty marker before deleting
+  it under the same writer lock. Retire validated empty current/legacy markers on
+  reconciliation; preserve active, corrupt, unknown or unsafe markers. If deleting
+  an inactive marker fails, retain it for a later reconciliation without treating
+  completed credential removal as failed. This owner-approved cleanup applies from
+  2026-10-24 and does not weaken failed-sign-out recovery.
 
 ### 4.3 Security and data protection
 
@@ -132,7 +139,7 @@ Use the current user's application-data directory, with platform-specific paths 
 ```text
 PanitaClient/
 ├─ accounts.json          # sensitive: metadata and Microsoft refresh tokens
-├─ account-removals.json  # nonsecret pending account-removal recovery
+├─ account-removals.json  # temporary nonsecret pending account-removal recovery
 ├─ settings.json          # indented disk schema 3; compact, explicit keys
 ├─ insts-cache.json
 ├─ libraries/             # shared, verified caches
@@ -217,7 +224,7 @@ panita-client/
 This annex is an integral part of AGENTS.md. It preserves the accepted decision, rationale, recovery cases, and validation requirements from the local source document `docs/account-storage-decision.md` as of 2026-10-08. The complete policy is included below; reading a separate file is not required. Update this annex alongside any owner-approved policy changes.
 Status: Accepted
 Date: 2026-10-05
-Updated: 2026-10-16 (stable slug-derived instance folders with UUID identity; authentication and storage decisions retained)
+Updated: 2026-10-24 (temporary completed account-removal markers; authentication and token-storage decisions retained)
 
 ### Decision
 
@@ -268,6 +275,11 @@ Complete Microsoft → Xbox Live → XSTS → Minecraft Services → Java profil
 - Serialize account mutations. A failure before replacement leaves the previous valid file intact. Do not create token-bearing backup copies.
 - If persistence fails after successful login, a memory-only authenticated session may continue, with an accurate indication that it was not saved. Never silently loosen permissions or claim a write succeeded.
 - For failed sign-out persistence, block in-memory reuse and report cleanup incomplete. Use a durable nonsecret pending-removal marker where writable, reconcile it before restoring sessions, and retry account-file removal. If neither file nor marker can be written, explicitly report that persisted credentials may remain after restart; do not promise successful durable sign-out.
+- After the account-file removal is durable, publish a validated empty recovery
+  marker and remove it. An interrupted/failed deletion can leave only completed
+  work, which reconciliation may remove again. Legacy marker migration must
+  durably transfer every pending ID before clearing/deleting the old marker.
+  Never delete active or unrecognized markers merely to simplify the directory.
 
 ### Failure and recovery cases
 

@@ -46,6 +46,14 @@ legacy header under the protected writer lock without exposing credentials.
 Global and instance overrides use equivalent setting names. Downloaded third-party
 documents and frontend IPC retain their separate contracts.
 
+`account-removals.json` is temporary recovery metadata. Account removal first
+persists pending IDs, updates the protected account file, publishes an empty
+completion marker and deletes that marker under the writer lock. Startup/account
+reconciliation also removes validated empty current/legacy markers. Failed account
+writes preserve pending work; a locked completed marker is retained and retried
+later without blocking otherwise valid account access. Corrupt, future and linked
+markers are preserved and reported instead of being deleted.
+
 The Spanish client-event viewer reads the latest 256 structured events from the
 current launcher process on demand. Startup, storage/catalog errors and Play/install/
 update/repair/uninstall transitions use fixed event categories and error codes.

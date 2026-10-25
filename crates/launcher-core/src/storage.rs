@@ -37,6 +37,49 @@ impl StoreTransaction<'_> {
             .write_atomic_durable(name, bytes)
             .map_err(map_private_error)
     }
+
+    /// Caller holds the writer lock and validates that this document is retired.
+    /// Resolve from the retained private root, rejecting redirects and hard links.
+    pub(crate) fn remove_verified_file(&self, name: &'static str) -> Result<(), CoreError> {
+        if name.is_empty() || name.contains(['/', '\\']) {
+            return Err(CoreError::new(ErrorCode::InvalidData));
+        }
+        let verified = match self.store.root.open_file(name) {
+            Ok(file) => file,
+            Err(PrivateFsError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(());
+            }
+            Err(error) => return Err(map_private_error(error)),
+        };
+        #[cfg(windows)]
+        let root = {
+            use std::os::windows::io::AsHandle;
+            File::from(
+                self.store
+                    .root
+                    .as_handle()
+                    .try_clone_to_owned()
+                    .map_err(map_io_error)?,
+            )
+        };
+        #[cfg(unix)]
+        let root = {
+            use std::os::fd::AsFd;
+            File::from(
+                self.store
+                    .root
+                    .as_fd()
+                    .try_clone_to_owned()
+                    .map_err(map_io_error)?,
+            )
+        };
+        let directory = cap_std::fs::Dir::from_std_file(root);
+        directory.remove_file(name).map_err(map_io_error)?;
+        drop(verified);
+        #[cfg(unix)]
+        directory.into_std_file().sync_all().map_err(map_io_error)?;
+        Ok(())
+    }
 }
 
 impl PrivateStore {
