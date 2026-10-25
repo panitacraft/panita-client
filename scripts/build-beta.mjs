@@ -36,7 +36,7 @@ console.log(`Unsigned beta: ${name}\nSource: ${revision}\nOutput: ${destination}
 if (args.includes('--check')) process.exit(0);
 
 // No signing or publication is performed. Tauri retains the existing application identity.
-run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', '--no-sign', '--config', join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundle]);
+run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', '--no-sign', '--config', join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundle, '--', '--locked']);
 const bundleDirectory = join(root, 'target/phase-7-build/release/bundle', bundle);
 const expected = bundle === 'nsis'
   ? `Panita Client_${config.version}_x64-setup.exe`
