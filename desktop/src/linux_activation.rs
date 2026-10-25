@@ -145,7 +145,7 @@ mod tests {
             .and_then(|builder| builder.build())
             .unwrap_or_else(|_| panic!("isolated relay owner"));
         let args = vec![
-            "/usr/bin/panita-desktop".to_owned(),
+            "/usr/bin/panita-client".to_owned(),
             "panitacraft://oauth/callback?code=SYNTHETIC&state=SYNTHETIC".to_owned(),
         ];
         assert!(forward(&identifier, &args, "fixture-activation"));
