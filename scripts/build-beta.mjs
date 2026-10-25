@@ -37,6 +37,10 @@ if (args.includes('--check')) process.exit(0);
 
 // No signing or publication is performed. Tauri retains the existing application identity.
 run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', '--no-sign', '--config', join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundle, '--', '--locked']);
+if (run('git', ['rev-parse', 'HEAD'], true) !== revision
+    || run('git', ['status', '--porcelain', '--untracked-files=normal'], true).length > 0) {
+  throw new Error('Source changed during compilation. Commit changes and rebuild before preparing a candidate.');
+}
 const bundleDirectory = join(root, 'target/phase-7-build/release/bundle', bundle);
 const expected = bundle === 'nsis'
   ? `Panita Client_${config.version}_x64-setup.exe`
