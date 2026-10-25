@@ -11,6 +11,7 @@ pub mod download;
 mod executable;
 pub mod install;
 pub mod launch;
+mod log_context;
 pub mod maintenance;
 pub mod native_cache;
 pub mod natives;

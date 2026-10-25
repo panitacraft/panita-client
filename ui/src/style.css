@@ -70,5 +70,14 @@ dialog::backdrop { background: #000a; }
 .game-log-section { padding: 24px; }
 .game-log-lines { height: 60vh; overflow: auto; background: #10231e; border: 1px solid #4c7564; padding: 12px; }
 .game-log-lines pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+.game-log-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; }
+.game-log-tools label { display: flex; align-items: center; gap: 6px; }
+.game-log-lines.log-nowrap pre { white-space: pre; overflow-wrap: normal; }
+.game-log-lines.log-colored .log-error, .game-log-lines.log-colored .log-fatal { color: #ffb5ad; }
+.game-log-lines.log-colored .log-warn { color: #f2cf74; }
+.game-log-lines.log-colored .log-info { color: #c2e9ce; }
+.game-log-lines.log-colored .log-debug, .game-log-lines.log-colored .log-trace { color: #b4c9e9; }
+.game-log-lines .log-match { outline: 2px solid #f2cf74; outline-offset: 1px; background: #314236; }
+.log-metadata { font-weight: 600; }
 .game-log-lines:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
 .crash-summary { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

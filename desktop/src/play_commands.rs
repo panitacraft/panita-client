@@ -247,9 +247,11 @@ impl PlayController {
             .ok_or(ErrorCode::OperationCancelled)?;
         let page = game.events_page(offset, OUTPUT_PAGE_SIZE);
         let next = page.offset + page.records.len();
-        let lines: Vec<_> = page.records.into_iter().filter_map(|event| match event.kind {
-            ProcessEventKind::Output { stream, text } => Some(json!({"stream": if stream == OutputStream::Stdout { "stdout" } else { "stderr" }, "text": if text == "[sensitive output omitted]" { "[salida sensible omitida]" } else { &text }})),
-            ProcessEventKind::OutputDiscarded { .. } => Some(json!({"stream": "notice", "text": "Se omitió una línea demasiado larga o una salida que no pudo leerse."})),
+        let lines: Vec<_> = page.records.into_iter().enumerate().filter_map(|(index, event)| match event.kind {
+            ProcessEventKind::Output { stream, text } => Some(json!({"sequence":page.offset + index,
+                "context": event.log_context.as_deref(), "cdata":event.cdata,
+                "stream": if stream == OutputStream::Stdout { "stdout" } else { "stderr" }, "text": if text == "[sensitive output omitted]" { "[salida sensible omitida]" } else { &text }})),
+            ProcessEventKind::OutputDiscarded { .. } => Some(json!({"sequence":page.offset + index,"stream": "notice", "text": "Se omitió una línea demasiado larga o una salida que no pudo leerse."})),
             _ => None,
         }).collect();
         Ok(
@@ -624,7 +626,21 @@ async fn start_and_monitor(
                 controller.update(instance, request, |entry| entry.console_error = Some(error));
                 controller.publish(&app);
             }
-            match game.wait().await {
+            let mut changes = game.output_changes();
+            let result = loop {
+                tokio::select! {
+                    exit = game.wait() => break exit,
+                    changed = changes.changed() => {
+                        if changed.is_err() { break game.wait().await; }
+                        // Coalesce bursts without polling while the game is idle.
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                        let total = *changes.borrow_and_update();
+                        notify_game_log(&app, instance, request, total, true, None);
+                    }
+                }
+            };
+            let final_exit = result.as_ref().ok().copied();
+            match result {
                 Ok(exit) => {
                     if controller.complete_game(instance, request, exit) {
                         // A crash must remain visible even when the main window was hidden.
@@ -635,6 +651,9 @@ async fn start_and_monitor(
                     entry.error = Some(error.code());
                 }),
             }
+            // Publish after controller state changes so the final page sees exit state.
+            let total = *changes.borrow();
+            notify_game_log(&app, instance, request, total, false, final_exit);
         }
         Err(error) => controller.fail(instance, request, error.code()),
     }
@@ -649,6 +668,74 @@ pub(super) fn play_snapshot(state: tauri::State<'_, DesktopState>) -> Result<Val
 
 fn log_label(instance: Uuid, request: Uuid) -> String {
     format!("game-log-{instance}-{request}")
+}
+
+fn notify_game_log(
+    app: &tauri::AppHandle,
+    instance: Uuid,
+    request: Uuid,
+    total: usize,
+    running: bool,
+    exit: Option<launcher_core::minecraft::process::GameExit>,
+) {
+    let label = log_label(instance, request);
+    if app.get_webview_window(&label).is_some() {
+        let _ = app.emit_to(
+            label.as_str(),
+            "game-log-changed",
+            json!({"instanceId":instance,"requestId":request,"total":total,
+                "running":running,"exitCode":exit.and_then(|exit|exit.code)}),
+        );
+    }
+}
+
+#[tauri::command]
+pub(super) async fn find_game_log(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+    query: String,
+    start: usize,
+    backwards: bool,
+) -> Result<Value, ErrorCode> {
+    if window.label() != "main" && window.label() != log_label(instance_id, request_id) {
+        return Err(ErrorCode::InvalidData);
+    }
+    let game = {
+        let state = state
+            .plays
+            .state
+            .lock()
+            .map_err(|_| ErrorCode::StorageUnavailable)?;
+        state
+            .entries
+            .get(&instance_id)
+            .filter(|entry| entry.request == request_id)
+            .and_then(|entry| entry.last_game.clone())
+            .ok_or(ErrorCode::OperationCancelled)?
+    };
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let result = game
+            .find_output(&query, start, backwards)
+            .map_err(|error| error.code())?;
+        Ok::<_, ErrorCode>(json!({"found":result.found,"next":result.next,"total":result.total}))
+    })
+    .await
+    .map_err(|_| ErrorCode::StorageUnavailable)??;
+    let current = state
+        .plays
+        .state
+        .lock()
+        .map_err(|_| ErrorCode::StorageUnavailable)?;
+    if current
+        .entries
+        .get(&instance_id)
+        .is_none_or(|entry| entry.request != request_id)
+    {
+        return Err(ErrorCode::OperationCancelled);
+    }
+    Ok(result)
 }
 
 #[tauri::command]

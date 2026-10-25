@@ -1,32 +1,13 @@
 import type { PlaySnapshot } from './play-state';
 
 export type GameLogSnapshot = {
-  lines: { stream: 'stdout' | 'stderr' | 'notice'; text: string }[];
+  lines: { stream: 'stdout' | 'stderr' | 'notice'; text: string; sequence?: number; context?: string | null; cdata?: boolean }[];
   running: boolean; exitCode: number | null;
   offset: number; nextOffset: number; total: number; pageSize: number;
 };
 
 export function previousLogPage(snapshot: GameLogSnapshot): number {
   return Math.max(0, snapshot.offset - snapshot.pageSize);
-}
-
-/** Render Mojang's console XML as plain text, without evaluating markup. */
-export function readableGameLines(lines: GameLogSnapshot['lines']): GameLogSnapshot['lines'] {
-  let prefix = '';
-  return lines.flatMap(line => {
-    if (line.stream !== 'stdout') return [line];
-    if (/^\s*<log4j:Event\b/.test(line.text)) {
-      const level = /\blevel="([^"]*)"/.exec(line.text)?.[1];
-      const thread = /\bthread="([^"]*)"/.exec(line.text)?.[1];
-      prefix = [level, thread].filter(Boolean).join('/');
-      return [];
-    }
-    if (/^\s*<\/log4j:Event>\s*$/.test(line.text)) { prefix = ''; return []; }
-    const text = line.text.replace(/^\s*<log4j:(?:Message|Throwable)>(?:<!\[CDATA\[)?/, '')
-      .replace(/(?:\]\]>)?<\/log4j:(?:Message|Throwable)>\s*$/, '');
-    if (!text.trim()) return [];
-    return [{ ...line, text: prefix ? `[${prefix}] ${text}` : text }];
-  });
 }
 
 export function logWindowIdentity(label: string): { instanceId: string; requestId: string } | null {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { logWindowIdentity, previousLogPage, readableGameLines, unacknowledgedCrashes } from '../src/game-output-state.ts';
+import { logWindowIdentity, previousLogPage, unacknowledgedCrashes } from '../src/game-output-state.ts';
+import { readableGameLines } from '../src/game-log-format.ts';
 
 const instanceId = '65ee13c6-bc34-4914-aa09-41205f3691a0';
 const requestId = '7238fb86-89bf-44a1-bd6c-96362be534bb';

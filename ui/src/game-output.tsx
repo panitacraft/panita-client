@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { usePlaySnapshot } from './play';
 import { messageForError } from './errors';
-import { previousLogPage, readableGameLines, unacknowledgedCrashes, type GameLogSnapshot } from './game-output-state';
+import { previousLogPage, unacknowledgedCrashes, type GameLogSnapshot } from './game-output-state';
+import { formattedGameLines, logPrefix, readableGameLines } from './game-log-format';
+import { startGameLogFeed, type GameLogNotice } from './game-log-feed';
 
 export function CrashNotifications({ names }: { names: Record<string, string> }) {
   const snapshot = usePlaySnapshot();
@@ -56,44 +59,113 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
   const [error, setError] = useState<string | null>(null);
   const [follow, setFollow] = useState(true);
   const [offset, setOffset] = useState<number | null>(null);
+  const [viewStart, setViewStart] = useState(0);
+  const [wrap, setWrap] = useState(true);
+  const [colors, setColors] = useState(true);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchNotice, setSearchNotice] = useState<string | null>(null);
+  const [match, setMatch] = useState<number | null>(null);
+  const [retry, setRetry] = useState(0);
+  const searchGeneration = useRef(0);
+  const list = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
+  useEffect(() => () => { searchGeneration.current++; }, [instanceId, requestId]);
+  useEffect(() => startGameLogFeed({
+    offset, follow,
+    load: cursor => invoke<GameLogSnapshot>('game_log_snapshot', { instanceId, requestId, offset: cursor }),
+    subscribe: changed => listen<GameLogNotice>('game-log-changed', event => {
+      const notice = event.payload;
+      if (notice.instanceId === instanceId && notice.requestId === requestId) changed(notice);
+    }),
+    receive: next => { setSnapshot(next); setError(null); },
+    fail: cause => setError(messageForError(cause)),
+  }), [instanceId, requestId, offset, follow, retry]);
+  const lines = useMemo(() => formattedGameLines((snapshot?.lines ?? []).filter(line => (line.sequence ?? 0) >= viewStart)), [snapshot?.lines, viewStart]);
+  const selected = match === null ? undefined : lines.find(line => (line.sequence ?? -1) >= match)?.sequence;
   useEffect(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    async function refresh() {
-      try {
-        const next = await invoke<GameLogSnapshot>('game_log_snapshot', { instanceId, requestId, offset });
-        if (active) { setSnapshot(next); setError(null); }
-        if (active && next.running) timer = setTimeout(() => void refresh(), 1000);
-      } catch (cause) { if (active) setError(messageForError(cause)); }
-    }
-    void refresh();
-    return () => { active = false; clearTimeout(timer); };
-  }, [instanceId, requestId, offset]);
-  useEffect(() => { if (follow) end.current?.scrollIntoView({ block: 'end' }); }, [snapshot, follow]);
+    if (follow) end.current?.scrollIntoView({ block: 'end' });
+    else if (selected !== undefined) list.current?.querySelector('[data-sequence="' + selected + '"]')?.scrollIntoView({ block: 'center' });
+  }, [snapshot, follow, selected]);
+
+  function navigate(cursor: number | null) {
+    setFollow(cursor === null); setOffset(cursor);
+    list.current?.scrollTo({ top: 0 });
+  }
+  function clearView() {
+    searchGeneration.current++; setSearching(false); setMatch(null); setSearchNotice(null);
+    const start = snapshot?.total ?? 0;
+    setViewStart(start); setSnapshot(null); setOffset(start); setFollow(true); setRetry(value => value + 1);
+  }
+  async function find(backwards: boolean) {
+    if (!query.trim() || searching) return;
+    const generation = ++searchGeneration.current;
+    setSearching(true); setSearchNotice(null);
+    let start = match === null ? (backwards ? snapshot?.total ?? 0 : 0) : backwards ? match : match + 1;
+    try {
+      while (generation === searchGeneration.current) {
+        const result = await invoke<{ found: number | null; next: number; total: number }>('find_game_log', {
+          instanceId, requestId, query, start, backwards,
+        });
+        if (generation !== searchGeneration.current) return;
+        if (result.found !== null) {
+          setMatch(result.found); setViewStart(0); navigate(result.found); return;
+        }
+        if ((backwards && result.next === 0) || (!backwards && result.next >= result.total)) {
+          setSearchNotice('No hay más coincidencias en esa dirección.'); return;
+        }
+        if (result.next === start) throw new Error('Console search did not advance');
+        start = result.next;
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    } catch (cause) { if (generation === searchGeneration.current) setSearchNotice(messageForError(cause)); }
+    finally { if (generation === searchGeneration.current) setSearching(false); }
+  }
   return <main><section className="game-log-section">
     <h1>Registro de Minecraft</h1>
-    <p>Historial de esta ejecución sin límite de entradas, conservado solo en memoria. Se muestra por páginas sin descartar entradas anteriores por cantidad. Se ocultan datos sensibles y se omiten líneas demasiado largas. Este visor no guarda ni exporta el registro.</p>
-    <p>Las sesiones largas consumen más memoria. El historial deja de estar disponible al cerrar el cliente o reemplazar esta ejecución por otra.</p>
+    <p>Historial sin límite de entradas, solo en memoria. Las entradas nuevas llegan por eventos; cada lectura y página son limitadas para mantener la ventana utilizable.</p>
+    <p>Se ocultan datos sensibles y se omiten líneas demasiado largas. No se guarda ni exporta este registro. Las sesiones largas consumen más memoria; el historial termina al cerrar el cliente o reemplazar esta ejecución.</p>
     <p>Instancia: {instanceId}</p>
-    <label><input type="checkbox" checked={follow} onChange={event => {
-      setFollow(event.target.checked);
-      setOffset(event.target.checked ? null : snapshot?.offset ?? 0);
-    }} /> Seguir las entradas nuevas</label>
-    {error && <p role="alert">{error} Cierra esta ventana y abre el registro desde la ejecución actual.</p>}
+    <div className="game-log-tools">
+      <label><input type="checkbox" checked={follow} onChange={event => {
+        setFollow(event.target.checked); setOffset(event.target.checked ? null : snapshot?.offset ?? viewStart);
+      }} /> Seguir entradas nuevas</label>
+      <label><input type="checkbox" checked={wrap} onChange={event => setWrap(event.target.checked)} /> Ajustar líneas</label>
+      <label><input type="checkbox" checked={colors} onChange={event => setColors(event.target.checked)} /> Colorear niveles</label>
+      <button type="button" disabled={!snapshot} onClick={clearView}>Limpiar vista</button>
+      <button type="button" disabled={viewStart === 0} onClick={() => { setViewStart(0); navigate(null); }}>Restaurar historial</button>
+    </div>
+    <p>Limpiar la vista conserva el historial en memoria y permite restaurarlo.</p>
+    <div className="game-log-tools" role="search" aria-label="Buscar en el historial de Minecraft">
+      <label>Buscar en todo el historial <input value={query} maxLength={256} onChange={event => {
+        searchGeneration.current++; setSearching(false); setQuery(event.target.value); setMatch(null); setSearchNotice(null);
+      }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void find(event.shiftKey); } }} /></label>
+      <button type="button" disabled={!query.trim() || searching} onClick={() => void find(true)}>Coincidencia anterior</button>
+      <button type="button" disabled={!query.trim() || searching} onClick={() => void find(false)}>Coincidencia siguiente</button>
+      {searching && <button type="button" onClick={() => { searchGeneration.current++; setSearching(false); }}>Cancelar búsqueda</button>}
+    </div>
+    {searching && <p role="status">Buscando en el historial conservado…</p>}
+    {searchNotice && <p role="status">{searchNotice}</p>}
+    {error && <p role="alert">{error} <button type="button" onClick={() => setRetry(value => value + 1)}>Reintentar lectura</button></p>}
     {!snapshot && !error && <p role="status">Cargando registro…</p>}
     {snapshot && <>
-      <p role="status">{snapshot.running ? 'Minecraft está en ejecución.' : `Minecraft se cerró.${snapshot.exitCode !== null ? ` Código de salida: ${snapshot.exitCode}.` : ''}`}</p>
+      <p role="status">{snapshot.running ? 'Minecraft está en ejecución.' : 'Minecraft se cerró.' + (snapshot.exitCode !== null ? ' Código de salida: ' + snapshot.exitCode + '.' : '')}</p>
       <nav aria-label="Páginas del registro de Minecraft">
-        <button type="button" disabled={snapshot.offset === 0} onClick={() => { setFollow(false); setOffset(0); }}>Inicio</button>
-        <button type="button" disabled={snapshot.offset === 0} onClick={() => { setFollow(false); setOffset(previousLogPage(snapshot)); }}>Anterior</button>
-        <button type="button" disabled={snapshot.nextOffset >= snapshot.total} onClick={() => { setFollow(false); setOffset(snapshot.nextOffset); }}>Siguiente</button>
-        <button type="button" onClick={() => { setFollow(true); setOffset(null); }}>Últimas entradas</button>
+        <button type="button" disabled={snapshot.offset <= viewStart} onClick={() => { setMatch(null); navigate(viewStart); }}>Inicio</button>
+        <button type="button" disabled={snapshot.offset <= viewStart} onClick={() => { setMatch(null); navigate(Math.max(viewStart, previousLogPage(snapshot))); }}>Anterior</button>
+        <button type="button" disabled={snapshot.nextOffset >= snapshot.total} onClick={() => { setMatch(null); navigate(snapshot.nextOffset); }}>Siguiente</button>
+        <button type="button" onClick={() => { setMatch(null); navigate(null); }}>Últimas entradas</button>
       </nav>
-      <p>Eventos {snapshot.total === 0 ? 0 : snapshot.offset + 1}–{snapshot.nextOffset} de {snapshot.total}. El tamaño de página no limita el historial conservado.</p>
-      <div className="game-log-lines" tabIndex={0} aria-label="Entradas del registro de Minecraft">
-        {snapshot.lines.length === 0 && <p>Todavía no hay entradas disponibles.</p>}
-        {readableGameLines(snapshot.lines).map((line, index) => <pre key={index}>[{line.stream}] {line.text}</pre>)}
+      <p>{snapshot.nextOffset > snapshot.offset ? 'Eventos ' + (snapshot.offset + 1) + '–' + snapshot.nextOffset + ' de ' + snapshot.total : 'Sin entradas en esta página. Total registrado: ' + snapshot.total}. El tamaño de página no limita el historial.</p>
+      <div ref={list} className={'game-log-lines ' + (wrap ? 'log-wrap ' : 'log-nowrap ') + (colors ? 'log-colored' : '')} tabIndex={0} aria-label="Entradas del registro de Minecraft">
+        {lines.length === 0 && <p>Todavía no hay mensajes visibles en esta página.</p>}
+        {lines.map((line, index) => {
+          const level = line.metadata?.level?.toLowerCase() ?? (line.stream === 'stderr' ? 'error' : 'normal');
+          const tone = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'].includes(level) ? level : 'normal';
+          return <pre key={line.sequence ?? index} data-sequence={line.sequence} className={'log-' + tone + (line.sequence === selected ? ' log-match' : '')}>
+            <span className="log-metadata">{logPrefix(line.metadata) || '[' + line.stream + ']'} </span>{line.text}
+          </pre>;
+        })}
         <div ref={end} />
       </div>
     </>}

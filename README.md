@@ -439,6 +439,19 @@ after exit until the launcher closes or a new execution replaces it. It does not
 log files, export output or include account data or launch commands. Structured
 launcher diagnostics remain separate.
 
+The log viewer uses scoped change notifications, coalesced over approximately
+100 ms, rather than a one-second polling loop. Sequential cursor reads catch up
+through bursts without jumping over retained pages. Log4j output shows its time,
+level, thread and logger, including when a page starts inside an event. The viewer
+offers literal case-insensitive search across retained redacted output, line wrap,
+level colors, follow/pause, and local clear/restore controls. Search scans at most
+500 events per request and never reads files. Clear hides earlier output locally;
+it does not erase retained history. This adopts Prism's behavior as a reference
+using an original implementation, while retaining Panita's unlimited memory-only
+policy. Output still depends on the game's stdout/stderr flushing; lines above
+8 KiB are omitted with a notice, and child-exit draining remains bounded to two
+seconds. This does not guarantee capture of every internal Minecraft event.
+
 New installations, updates and repairs record `natives/<operation>/` as their
 native-generation location. Existing manifests continue to resolve their original
 `natives-<operation>/` paths without moving or deleting files during launch. These

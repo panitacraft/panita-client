@@ -66,6 +66,8 @@ pub struct ProcessEvent {
     pub operation: OperationId,
     pub instance: Uuid,
     pub kind: ProcessEventKind,
+    pub log_context: Option<Arc<str>>,
+    pub cdata: bool,
 }
 
 /// A bounded read of an unlimited in-memory execution history.
@@ -75,15 +77,26 @@ pub struct ProcessEventPage {
     pub records: Vec<ProcessEvent>,
 }
 
+pub struct ProcessEventSearch {
+    pub found: Option<usize>,
+    pub next: usize,
+    pub total: usize,
+}
+
 struct Events {
     process: ProcessSessionId,
     operation: OperationId,
     instance: Uuid,
     records: Mutex<VecDeque<ProcessEvent>>,
+    changed: watch::Sender<usize>,
 }
 
 impl Events {
     fn push(&self, kind: ProcessEventKind) {
+        self.push_context(kind, None, false);
+    }
+
+    fn push_context(&self, kind: ProcessEventKind, log_context: Option<Arc<str>>, cdata: bool) {
         let mut records = self
             .records
             .lock()
@@ -93,7 +106,10 @@ impl Events {
             operation: self.operation,
             instance: self.instance,
             kind,
+            log_context,
+            cdata,
         });
+        self.changed.send_replace(records.len());
     }
 
     fn page(&self, offset: Option<usize>, limit: usize) -> ProcessEventPage {
@@ -114,6 +130,45 @@ impl Events {
                 .cloned()
                 .collect(),
         }
+    }
+
+    fn find(
+        &self,
+        query: &str,
+        start: usize,
+        backwards: bool,
+    ) -> Result<ProcessEventSearch, CoreError> {
+        if query.trim().is_empty() || query.len() > 1024 || query.chars().any(char::is_control) {
+            return Err(CoreError::new(ErrorCode::InvalidData));
+        }
+        let query = query.to_lowercase();
+        let records = self
+            .records
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let total = records.len();
+        let start = start.min(total);
+        let (from, to) = if backwards {
+            (start.saturating_sub(OUTPUT_PAGE_SIZE), start)
+        } else {
+            (start, start.saturating_add(OUTPUT_PAGE_SIZE).min(total))
+        };
+        let matches = |index: &usize| {
+            matches!(&records[*index].kind,
+            ProcessEventKind::Output { text, .. } if text.to_lowercase().contains(&query))
+        };
+        let found = if backwards {
+            (from..to).rev().find(matches)
+        } else {
+            (from..to).find(matches)
+        };
+        Ok(ProcessEventSearch {
+            found,
+            total,
+            next: found.map_or(if backwards { from } else { to }, |index| {
+                if backwards { index } else { index + 1 }
+            }),
+        })
     }
 }
 
@@ -207,6 +262,7 @@ impl LaunchLease {
             operation,
             instance: self.instance,
             records: Mutex::new(VecDeque::new()),
+            changed: watch::channel(0).0,
         });
         events.push(ProcessEventKind::Started);
         let redactions = Arc::new(command);
@@ -262,6 +318,19 @@ pub struct RunningGame {
 }
 
 impl RunningGame {
+    /// Notifications carry only a cursor. Readers recover every retained event by page.
+    pub fn output_changes(&self) -> watch::Receiver<usize> {
+        self.events.changed.subscribe()
+    }
+
+    pub fn find_output(
+        &self,
+        query: &str,
+        start: usize,
+        backwards: bool,
+    ) -> Result<ProcessEventSearch, CoreError> {
+        self.events.find(query, start, backwards)
+    }
     pub fn events_page(&self, offset: Option<usize>, limit: usize) -> ProcessEventPage {
         self.events.page(offset, limit)
     }
@@ -401,6 +470,7 @@ async fn drain(mut task: tokio::task::JoinHandle<()>, stream: OutputStream, even
 struct LineBuffer {
     bytes: Vec<u8>,
     discarded: bool,
+    context: super::log_context::LogContext,
 }
 impl Drop for LineBuffer {
     fn drop(&mut self) {
@@ -411,6 +481,7 @@ impl Drop for LineBuffer {
 impl LineBuffer {
     fn finish(&mut self, stream: OutputStream, events: &Events, command: &LaunchCommand) {
         if self.discarded {
+            self.context = super::log_context::LogContext::default();
             events.push(ProcessEventKind::OutputDiscarded { stream });
         } else if !self.bytes.is_empty() {
             let mut text = String::from_utf8_lossy(&self.bytes).into_owned();
@@ -437,11 +508,12 @@ impl LineBuffer {
                 text.zeroize();
                 text = "[sensitive output omitted]".into();
             }
-            let text = text
+            let text: String = text
                 .chars()
                 .filter(|ch| !ch.is_control() || *ch == '\t')
                 .collect();
-            events.push(ProcessEventKind::Output { stream, text });
+            let (context, cdata) = self.context.consume(&text);
+            events.push_context(ProcessEventKind::Output { stream, text }, context, cdata);
         }
         self.bytes.zeroize();
         self.bytes.clear();
@@ -461,6 +533,7 @@ async fn read_output<R: AsyncRead + Unpin>(
     let mut line = LineBuffer {
         bytes: Vec::new(),
         discarded: false,
+        context: super::log_context::LogContext::default(),
     };
     let mut chunk = [0u8; 4096];
     loop {

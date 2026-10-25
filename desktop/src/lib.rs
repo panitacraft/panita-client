@@ -178,6 +178,7 @@ pub fn run() {
             account_commands::validate_account,
             play_commands::play_snapshot,
             play_commands::game_log_snapshot,
+            play_commands::find_game_log,
             play_commands::open_game_log,
             play_commands::open_crash_reports,
             play_commands::begin_install,

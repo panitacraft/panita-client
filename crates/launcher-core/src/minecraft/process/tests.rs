@@ -224,7 +224,9 @@ async fn output_history_is_unlimited_paged_and_unterminated_secrets_are_redacted
         operation: OperationId::new(),
         instance: id,
         records: Mutex::new(VecDeque::new()),
+        changed: watch::channel(0).0,
     });
+    let mut changes = events.changed.subscribe();
     let input = format!("{}final {TOKEN}", "line\n".repeat(10_000));
     read_output(
         Some(input.as_bytes()),
@@ -263,6 +265,74 @@ async fn output_history_is_unlimited_paged_and_unterminated_secrets_are_redacted
     let empty = events.page(Some(usize::MAX), 0);
     assert_eq!(empty.offset, 10_001);
     assert!(empty.records.is_empty());
+    assert!(changes.has_changed().unwrap_or(false));
+    assert_eq!(*changes.borrow_and_update(), 10_001);
+    assert!(!changes.has_changed().unwrap_or(true));
+    let first = events
+        .find("FINAL", 0, false)
+        .unwrap_or_else(|_| panic!("search"));
+    assert_eq!(first.found, None);
+    assert_eq!(first.next, OUTPUT_PAGE_SIZE);
+    let last = events
+        .find("FINAL", 10_000, false)
+        .unwrap_or_else(|_| panic!("search"));
+    assert_eq!(last.found, Some(10_000));
+    let reverse = events
+        .find("final", usize::MAX, true)
+        .unwrap_or_else(|_| panic!("search"));
+    assert_eq!(reverse.found, Some(10_000));
+    assert_eq!(reverse.next, 10_000);
+    let previous = events
+        .find("line", reverse.next, true)
+        .unwrap_or_else(|_| panic!("search"));
+    assert_eq!(previous.found, Some(9999));
+    assert_eq!(
+        events
+            .find(TOKEN, 10_000, false)
+            .ok()
+            .and_then(|result| result.found),
+        None
+    );
+    for query in ["", " \t", "line\n", &"x".repeat(1025)] {
+        assert!(events.find(query, 0, false).is_err());
+    }
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
+async fn log_context_is_redacted_before_retention_and_survives_page_boundaries() {
+    let (paths, id) = fixture();
+    let command = Arc::new(command(&paths, id, "unused"));
+    let events = Arc::new(Events {
+        process: ProcessSessionId::new(),
+        operation: OperationId::new(),
+        instance: id,
+        records: Mutex::new(VecDeque::new()),
+        changed: watch::channel(0).0,
+    });
+    let input = format!(
+        "<log4j:Event logger=\"{TOKEN}\" level=\"INFO\">\n<log4j:Message><![CDATA[start\n{}end]]></log4j:Message></log4j:Event>\nplain",
+        "payload\n".repeat(600)
+    );
+    read_output(
+        Some(input.as_bytes()),
+        OutputStream::Stdout,
+        events.clone(),
+        command,
+    )
+    .await;
+    let page = events.page(Some(500), OUTPUT_PAGE_SIZE);
+    assert!(page.records[0].cdata);
+    assert!(
+        page.records[0]
+            .log_context
+            .as_deref()
+            .is_some_and(|header| header.contains("[redacted]"))
+    );
+    assert!(!format!("{:?}", page.records).contains(TOKEN));
+    let last = page.records.last().unwrap_or_else(|| panic!("last"));
+    assert_eq!(last.log_context, None);
+    assert!(!last.cdata);
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
 }
 
