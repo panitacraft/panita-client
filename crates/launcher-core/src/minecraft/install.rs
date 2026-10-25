@@ -496,7 +496,6 @@ pub(super) async fn prepare_recorded(
         native_files,
         native_directory: Some(native_directory),
     };
-    super::native_cache::record(&root, &installed)?;
     Ok(installed)
 }
 

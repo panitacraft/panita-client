@@ -20,6 +20,7 @@ pub enum ErrorCode {
     AccountRestricted,
     MinecraftNotOwned,
     OperationBusy,
+    NativeCleanupIncomplete,
     CallbackRegistrationFailed,
     BrowserUnavailable,
     InstanceDisabled,

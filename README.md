@@ -398,30 +398,22 @@ Completed transactions are marked inactive durably, then removed. Legacy
 intent, and conflicting or malformed intents are preserved and reported.
 
 Local-instance controls include “Limpiar nativos antiguos”, including after uninstall.
-Cleanup requires
-an idle instance lease and settled recovery. Protected `.generation.json` receipts
-record exact managed native-file ownership before installation manifests are
-superseded. Only unchanged, verified obsolete files and empty known directories
-are removed; active generations, modified/unknown files and untracked generations
-are retained and reported. No cleanup runs as part of Play. Before process creation,
-Panita captures a bounded filename baseline for the known native generation. After
-successful process creation it publishes a protected schema-2 receipt containing
-that baseline and the exact installed library references. After confirmed child
-exit, before releasing the instance lease, it records new native file identities
-and modification metadata. Each run refreshes the baseline; unfinished observations,
-files added while idle and replaced files do not gain ownership. On manual cleanup, new
-single-link native files may join the inventory only if their names and bytes match
-fully verified library JAR entries. Supported numbered JNA DLLs and their new empty
-companion markers are handled explicitly. Verification is deferred to cleanup and
-archive identities are reused within that operation. Baseline files and old folders
-without provenance stay untracked, even if their DLLs match a trusted archive.
-Per-folder retention details distinguish missing/invalid ownership, unavailable
-library evidence, changed or unsafe files, unknown content and access failures.
-Failed tracking does not stop an owned game; a fixed console notice explains that
-unverified files will be retained. Failed process creation rolls back a newly
-prepared empty generation. No permissions are relaxed or automatic cleanup added.
-Uninstall continues to preserve worlds/settings, shared libraries/assets/Java,
-and metadata needed for safe reinstallation; it does not promise full disk cleanup.
+Native directories are disposable: cleanup removes obsolete native folders in full,
+including edited/runtime-created files and old .generation.json receipts. No ownership
+inventory or JAR/DLL hashing is required. The active installed generation is retained
+during manual cleanup and successful instance updates. Updates clean only after the
+new pointer is published; recovery repeats cleanup for published updates.
+Uninstall first publishes its inactive installation marker, then removes every
+native generation, including the former active one and the empty natives container.
+A blocked uninstall keeps its recovery transaction for retry; a blocked update
+cleanup reports a warning while retaining the valid updated installation.
+Deletion requires the instance operation lease, validated identity/recovery and
+bounded no-follow filesystem traversal. Redirected entries are retained and OS
+locks/access failures are reported. Only natives/ and canonical legacy natives-UUID
+entries inside that instance are disposable. Worlds, options, screenshots, backups,
+other instances, shared libraries/assets/Java and reinstallation metadata remain.
+No native cleanup or runtime-ownership tracking runs on Play or game exit.
+
 
 ## License
 

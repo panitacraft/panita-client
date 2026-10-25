@@ -15,6 +15,7 @@ export type PlayEntry = {
   receivedFiles: number;
   reusedFiles: number;
   retainedFiles: number;
+  nativeCleanup?: import('./native-cleanup-state').NativeCleanupReport | null;
 };
 export type PlaySnapshot = {
   revision: number;

@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 pub struct MaintenanceOutcome {
     pub retained_files: u32,
+    pub native_cleanup: Option<super::native_cache::CleanupReport>,
 }
 
 /// Presentation hint only: a recognized owned plan may still need artifact repair.
@@ -178,7 +179,10 @@ pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
         return Ok(true);
     }
     if journal.kind == Kind::Uninstall {
-        finish_uninstall(paths, id, root, &mut journal)?;
+        let cleanup = finish_uninstall(paths, id, root, &mut journal)?;
+        if cleanup.retained_generations > 0 {
+            return Err(CoreError::new(ErrorCode::NativeCleanupIncomplete));
+        }
         return Ok(true);
     }
     let installed = read_json::<InstalledLock>(root, "installed.json")?.ok_or_else(invalid)?;
@@ -326,7 +330,7 @@ fn finish_uninstall(
     id: Uuid,
     root: &Path,
     journal: &mut Journal,
-) -> Result<(), CoreError> {
+) -> Result<super::native_cache::CleanupReport, CoreError> {
     let installed = read_json::<InstalledLock>(root, "installed.json")?;
     match (&installed, journal.previous_operation) {
         (Some(installed), Some(previous)) => {
@@ -334,7 +338,7 @@ fn finish_uninstall(
             if installed.operation != previous {
                 return Err(invalid());
             }
-            journal.retained_files = natives(root, installed, true)?;
+            journal.retained_files = 0;
             let mut tombstone = installed.clone();
             tombstone.schema_version = 3;
             write_json(root, "installed.json", &tombstone)?;
@@ -350,7 +354,31 @@ fn finish_uninstall(
             .as_ref()
             .map(|installed| installed.plan.version.id.as_str()),
     )?;
-    complete(root, journal)
+    let cleanup = super::native_cache::remove_all(root)?;
+    if cleanup.retained_generations == 0 {
+        complete(root, journal)?;
+    }
+    Ok(cleanup)
+}
+
+/// Retry a committed uninstall without losing its cleanup result in generic recovery.
+pub(super) fn retry_uninstall_cleanup(
+    paths: &AppPaths,
+    id: Uuid,
+    root: &Path,
+) -> Result<Option<super::native_cache::CleanupReport>, CoreError> {
+    let Some(value) = read_json::<serde_json::Value>(root, "transaction.json")? else {
+        return Ok(None);
+    };
+    if value["schema_version"] != 3 {
+        return Ok(None);
+    }
+    let mut journal: Journal = serde_json::from_value(value).map_err(|_| invalid())?;
+    journal.validate(id)?;
+    if journal.active && journal.kind == Kind::Uninstall {
+        return finish_uninstall(paths, id, root, &mut journal).map(Some);
+    }
+    Ok(None)
 }
 
 pub fn uninstall(
@@ -362,10 +390,15 @@ pub fn uninstall(
     let root = install::metadata_root(paths, id)?;
     let _lease = try_lock(&root, ".installation.lock")?
         .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
+    if let Some(native_cleanup) = retry_uninstall_cleanup(paths, id, &root)? {
+        return Ok(MaintenanceOutcome {
+            retained_files: 0,
+            native_cleanup: Some(native_cleanup),
+        });
+    }
     recover_for_maintenance(paths, id, &root)?;
     let previous = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
     validate_manifest(&previous, id)?;
-    super::native_cache::record(&root, &previous)?;
     let mut journal = Journal {
         schema_version: 3,
         instance_id: id,
@@ -376,12 +409,13 @@ pub fn uninstall(
         prepared: None,
         retained_files: 0,
     };
-    cancel.commit(|| {
+    let native_cleanup = cancel.commit(|| {
         write_json(&root, "transaction.json", &journal)?;
         finish_uninstall(paths, id, &root, &mut journal)
     })?;
     Ok(MaintenanceOutcome {
         retained_files: journal.retained_files,
+        native_cleanup: Some(native_cleanup),
     })
 }
 
@@ -416,7 +450,6 @@ async fn repair_with_catalog(
     recover_for_maintenance(paths, id, &root)?;
     let previous = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
     validate_manifest(&previous, id)?;
-    super::native_cache::record(&root, &previous)?;
     let record = registry.get(id)?.ok_or_else(invalid)?;
     if previous.schema_version != 2
         || record.state == InstallationState::NotInstalled
@@ -474,7 +507,10 @@ async fn repair_with_catalog(
             return Err(error);
         }
     }
-    Ok(MaintenanceOutcome { retained_files })
+    Ok(MaintenanceOutcome {
+        retained_files,
+        native_cleanup: None,
+    })
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ import { messageForError } from './errors';
 import { acceptPlaySnapshot, playActive, type PlayPhase, type PlaySnapshot } from './play-state';
 import type { UpdateTarget } from './library-state';
 import { invokePlay, type PlayArguments, type PlayCommand } from './play-api';
-import { nativeRetentionReason, type NativeCleanupReport } from './native-cleanup-state';
+import { nativeCleanupSummary, nativeRetentionReason, type NativeCleanupReport } from './native-cleanup-state';
 
 type PlayContextValue = {
   snapshot: PlaySnapshot | null;
@@ -100,10 +100,10 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     setBusy(true);
     setCleanupError(null);
     setCleanupDetails([]);
-    setCleanupText('Comprobando los archivos nativos antiguos…');
+    setCleanupText('Eliminando las carpetas nativas antiguas…');
     try {
       const report = await invoke<NativeCleanupReport>('clean_native_cache', { instanceId });
-      setCleanupText(`Se eliminaron ${report.cleanedGenerations} generaciones antiguas. Se conservaron ${report.retainedGenerations + report.untrackedGenerations} antiguas por seguridad. La generación activa se conserva.`);
+      setCleanupText(nativeCleanupSummary(report));
       setCleanupDetails(report.details);
     } catch (cause) {
       setCleanupText(null);
@@ -136,6 +136,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       : entry.operation === 'uninstall' && entry.phase === 'installing' ? 'Desinstalando y conservando tus datos…'
       : entry.operation === 'uninstall' && entry.phase === 'failed' ? 'No pudimos completar la desinstalación. Conservamos los archivos restantes para recuperar la operación.'
       : entry.operation === 'uninstall' && entry.phase === 'cancelled' ? 'Desinstalación cancelada.'
+      : entry.operation === 'uninstall' && entry.phase === 'uninstalled' && (entry.nativeCleanup?.retainedGenerations ?? 0) > 0 ? 'La instancia está desinstalada. La limpieza de nativos sigue pendiente.'
       : phaseText[entry.phase]}</p>}
     {entry && entry.operation !== 'play' && entry.operation !== 'uninstall' && active && <div>
       <progress aria-label={entry.operation === 'update' ? 'Actualización de Minecraft y Java' : entry.operation === 'repair' ? 'Reparación de Minecraft y Java' : 'Instalación de Minecraft y Java'} />
@@ -144,6 +145,13 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       {entry.operation === 'update' && entry.backupRequested && <p>La copia de mundos debe completarse antes de cambiar la versión.</p>}
     </div>}
     {entry && (entry.operation === 'repair' || entry.operation === 'uninstall') && !active && entry.retainedFiles > 0 && <p role="status">Conservamos {entry.retainedFiles} archivos nativos modificados o que no pudimos comprobar.</p>}
+    {entry?.nativeCleanup && !active && <div role="status">
+      <p>{nativeCleanupSummary(entry.nativeCleanup)}</p>
+      {entry.nativeCleanup.retainedGenerations > 0 && <p>Cierra los programas que usen esas carpetas y vuelve a intentar «Limpiar nativos antiguos».</p>}
+      {entry.nativeCleanup.details.length > 0 && <details><summary>Detalle de la limpieza automática</summary>
+        <ul>{entry.nativeCleanup.details.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
+      </details>}
+    </div>}
     {entry?.operation === 'update' && entry.phase === 'installed' && <p>{entry.backupOperation
       ? `Copia de mundos guardada en la carpeta de esta instancia: world-backups/${entry.backupOperation}/worlds.zip.`
       : entry.backupRequested ? 'No había mundos locales para copiar.' : 'Actualizaste sin crear una copia de mundos.'}</p>}
@@ -184,7 +192,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     {!active && uninstallAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUninstallQuestion(true)}>Desinstalar…</button>}
     {!active && uninstallQuestion && <fieldset className="catalog-notice">
       <legend>Desinstalar conservando mis datos</legend>
-      <p>Quitaremos esta instalación de las disponibles para jugar y eliminaremos solo sus archivos nativos verificados. Conservaremos tus mundos, ajustes, capturas, copias de mundos y archivos personales. Los archivos compartidos de Minecraft y Java también se conservan.</p>
+      <p>Quitaremos esta instalación de las disponibles para jugar y eliminaremos todas sus carpetas nativas, incluidos archivos antiguos, modificados o añadidos allí. Conservaremos tus mundos, ajustes, capturas y copias de mundos en la carpeta de Minecraft. Los archivos compartidos de Minecraft y Java también se conservan.</p>
       <p>Puedes reinstalar esta instancia cuando esté habilitada en el catálogo. Esta acción no elimina todos sus archivos ni libera el espacio de las cachés compartidas.</p>
       <div className="account-buttons">
         <button type="button" disabled={busy} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID() }); }}>Confirmar desinstalación</button>

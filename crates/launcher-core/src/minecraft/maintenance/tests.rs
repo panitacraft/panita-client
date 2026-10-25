@@ -69,7 +69,7 @@ fn intent(id: Uuid, previous: &InstalledLock, kind: Kind) -> Journal {
 }
 
 #[test]
-fn uninstall_retains_hardlinked_files_and_independent_instance_data() {
+fn uninstall_unlinks_native_aliases_and_preserves_independent_instance_data() {
     let (paths, id, root, mut installed) = setup();
     native(&root, &mut installed, "linked.dll", b"linked");
     write_json(&root, "installed.json", &installed).expect("manifest");
@@ -91,8 +91,8 @@ fn uninstall_retains_hardlinked_files_and_independent_instance_data() {
     write_json(&other_root, "installed.json", &other_manifest).expect("other manifest");
     let before = std::fs::read(other_root.join("installed.json")).expect("before");
     let outcome = uninstall(&paths, id, &Cancellation::default()).expect("uninstall");
-    assert_eq!(outcome.retained_files, 1);
-    assert_eq!(std::fs::read(&source).expect("native retained"), b"linked");
+    assert_eq!(outcome.retained_files, 0);
+    assert!(!source.exists());
     assert_eq!(
         std::fs::read(game.join("player-owned.bin")).expect("player file"),
         b"linked"
@@ -106,7 +106,7 @@ fn uninstall_retains_hardlinked_files_and_independent_instance_data() {
 }
 
 #[test]
-fn uninstall_preserves_player_data_modified_files_identity_and_shared_caches() {
+fn uninstall_removes_all_natives_and_preserves_player_data_identity_and_shared_caches() {
     let (paths, id, root, mut installed) = setup();
     native(&root, &mut installed, "owned.dll", b"verified");
     native(&root, &mut installed, "edited.dll", b"original");
@@ -123,16 +123,8 @@ fn uninstall_preserves_player_data_modified_files_identity_and_shared_caches() {
     let cache = paths.root().join(&installed.plan.artifacts[0].destination);
     let cached = std::fs::read(&cache).expect("cache");
     let outcome = uninstall(&paths, id, &Cancellation::default()).expect("uninstall");
-    assert_eq!(outcome.retained_files, 1);
-    assert!(!generation.join("owned.dll").exists());
-    assert_eq!(
-        std::fs::read(generation.join("edited.dll")).expect("edited"),
-        b"modified"
-    );
-    assert_eq!(
-        std::fs::read(generation.join("unknown.dll")).expect("unknown"),
-        b"unknown"
-    );
+    assert_eq!(outcome.retained_files, 0);
+    assert!(!generation.exists());
     assert_eq!(
         std::fs::read(game.join("saves/world/level.dat")).expect("world"),
         b"world"

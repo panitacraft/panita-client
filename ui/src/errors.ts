@@ -4,6 +4,7 @@ export type LauncherErrorCode =
   | 'permission_denied'
   | 'storage_unavailable'
   | 'storage_commit_uncertain'
+  | 'native_cleanup_incomplete'
   | 'network_unavailable' | 'authentication_required' | 'account_not_found'
   | 'account_mismatch' | 'invalid_username' | 'authentication_denied'
   | 'authentication_timeout' | 'service_unavailable' | 'account_restricted'
@@ -16,6 +17,7 @@ export type LauncherErrorCode =
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
+  native_cleanup_incomplete: 'La instancia está desinstalada, pero faltan archivos nativos por eliminar. Cierra Minecraft y cualquier programa que use esa carpeta, revisa los permisos y vuelve a intentar la limpieza.',
   world_backup_unsafe: 'No pudimos crear una copia segura de tus mundos. Revisa si hay archivos enlazados o cambios en la carpeta de mundos y vuelve a intentarlo.',
   update_selection_changed: 'La versión instalada o la versión del catálogo cambió. Actualiza el catálogo y revisa la actualización antes de confirmarla de nuevo.',
   catalog_confirmation_required: 'No pudimos comprobar el estado actual de esta instancia. Confirma la advertencia para jugar con la instalación local.',

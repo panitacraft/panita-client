@@ -54,7 +54,6 @@ pub enum ProcessEventKind {
     OutputDiscarded {
         stream: OutputStream,
     },
-    NativeTrackingUnavailable,
     GracefulStopRequested,
     ForceStopRequested,
     Exited(GameExit),
@@ -242,11 +241,6 @@ impl LaunchLease {
         {
             return Err(CoreError::new(ErrorCode::InvalidData));
         }
-        let (tracking, mut tracking_unavailable) =
-            match super::native_cache::capture(&self.paths, self.instance) {
-                Ok(capture) => (capture, false),
-                Err(_) => (None, true),
-            };
         let mut builder = tokio::process::Command::new(&command.executable);
         builder
             .args(&command.args)
@@ -260,22 +254,9 @@ impl LaunchLease {
             .kill_on_drop(false);
         #[cfg(windows)]
         builder.creation_flags(0x08000000);
-        let mut child = match builder.spawn() {
-            Ok(child) => child,
-            Err(_) => {
-                if let Some(tracking) = tracking {
-                    tracking.abort();
-                }
-                return Err(CoreError::new(ErrorCode::ProcessStartFailed));
-            }
-        };
-        let observation = match tracking.map(|tracking| tracking.publish()).transpose() {
-            Ok(observation) => observation,
-            Err(_) => {
-                tracking_unavailable = true;
-                None
-            }
-        };
+        let mut child = builder
+            .spawn()
+            .map_err(|_| CoreError::new(ErrorCode::ProcessStartFailed))?;
         let events = Arc::new(Events {
             process,
             operation,
@@ -284,9 +265,6 @@ impl LaunchLease {
             changed: watch::channel(0).0,
         });
         events.push(ProcessEventKind::Started);
-        if tracking_unavailable {
-            events.push(ProcessEventKind::NativeTrackingUnavailable);
-        }
         let redactions = Arc::new(command);
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -311,7 +289,6 @@ impl LaunchLease {
             complete,
             events.clone(),
             (output, errors),
-            observation,
         ));
         Ok(RunningGame {
             controls,
@@ -416,7 +393,6 @@ async fn supervise(
     complete: watch::Sender<Option<GameExit>>,
     events: Arc<Events>,
     pipes: (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>),
-    observation: Option<super::native_cache::Observation>,
 ) {
     let mut controls_open = true;
     let status = loop {
@@ -447,14 +423,6 @@ async fn supervise(
         drain(pipes.0, OutputStream::Stdout, &events),
         drain(pipes.1, OutputStream::Stderr, &events)
     );
-    if let Some(observation) = observation
-        && !matches!(
-            tokio::task::spawn_blocking(move || observation.finish()).await,
-            Ok(Ok(()))
-        )
-    {
-        events.push(ProcessEventKind::NativeTrackingUnavailable);
-    }
     events.push(ProcessEventKind::Exited(status));
     drop(lease);
     let _ = complete.send(Some(status));

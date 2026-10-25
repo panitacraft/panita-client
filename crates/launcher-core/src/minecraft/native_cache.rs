@@ -1,7 +1,7 @@
-//! Ownership-based native cleanup, independent of reusable shared caches and player data.
+//! Disposable native directories, confined to one idle instance.
 use super::{
     download::{Cancellation, io, try_lock},
-    install::{self, InstalledLock, read_json, write_json},
+    install::{self, InstalledLock, read_json},
     invalid,
 };
 use crate::{
@@ -9,30 +9,18 @@ use crate::{
     paths::AppPaths,
     storage::map_private_error,
 };
-use cap_fs_ext::DirExt;
-use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, path::Path};
+use cap_fs_ext::{DirExt, MetadataExt};
+use serde::Serialize;
+use std::{
+    ffi::{OsStr, OsString},
+    path::Path,
+};
 use uuid::Uuid;
 
-const RECEIPT: &str = ".generation.json";
-mod runtime;
-pub(super) use runtime::{Observation, capture};
 #[cfg(test)]
 mod tests;
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Generation {
-    schema: u32,
-    id: Uuid,
-    operation: Uuid,
-    directory: String,
-    files: Vec<super::natives::NativeFile>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    runtime: Option<runtime::Tracking>,
-}
-
-#[derive(Default, Serialize)]
+#[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanupReport {
     pub cleaned_generations: u32,
@@ -41,90 +29,20 @@ pub struct CleanupReport {
     pub details: Vec<CleanupDetail>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CleanupDetail {
     pub directory: String,
     pub reason: &'static str,
 }
 
-/// Record exact launcher-managed files, never infer ownership from directory names.
-/// No directory is created for a generation without extracted files.
-pub(super) fn record(root: &Path, installed: &InstalledLock) -> Result<(), CoreError> {
-    if installed.native_files.is_empty() {
-        return Ok(());
-    }
-    super::maintenance::validate_manifest(installed, installed.instance_id)?;
-    if installed
-        .native_files
-        .iter()
-        .any(|file| file.path == RECEIPT)
-    {
-        return Err(invalid());
-    }
-    let directory = installed.native_directory()?;
-    let path = root.join(&directory);
-    // A missing old generation has no files to reclaim and must not be recreated.
-    if !path.try_exists().map_err(io)? {
-        return Ok(());
-    }
-    let expected = Generation {
-        schema: 1,
-        id: installed.instance_id,
-        operation: installed.operation,
-        directory,
-        files: installed.native_files.clone(),
-        runtime: None,
-    };
-    match read_json::<Generation>(&path, RECEIPT)? {
-        Some(mut existing) => {
-            if !matches!(existing.schema, 1 | 2)
-                || (existing.schema == 1 && existing.runtime.is_some())
-            {
-                return Err(invalid());
-            }
-            if existing.runtime.is_some() {
-                if let Some(tracking) = &existing.runtime {
-                    runtime::validate(tracking)?;
-                }
-                if existing.id != expected.id
-                    || existing.operation != expected.operation
-                    || existing.directory != expected.directory
-                {
-                    return Err(invalid());
-                }
-                let mut generation = installed.clone();
-                generation.native_files = existing.files.clone();
-                super::maintenance::validate_manifest(&generation, installed.instance_id)?;
-                if !expected.files.iter().all(|owned| {
-                    existing.files.iter().any(|file| {
-                        file.path == owned.path
-                            && file.sha1 == owned.sha1
-                            && file.size == owned.size
-                    })
-                }) {
-                    return Err(invalid());
-                }
-                return Ok(());
-            }
-            existing.runtime = None;
-            existing.schema = 1;
-            if serde_json::to_value(&existing).map_err(|_| invalid())?
-                != serde_json::to_value(&expected).map_err(|_| invalid())?
-            {
-                return Err(invalid());
-            }
-            Ok(())
-        }
-        None => write_json(
-            root,
-            &format!("{}/{RECEIPT}", expected.directory),
-            &expected,
-        ),
+impl CleanupReport {
+    fn retain(&mut self, directory: String, reason: &'static str) {
+        self.retained_generations += 1;
+        self.details.push(CleanupDetail { directory, reason });
     }
 }
 
-/// Explicit idle-only cleanup. Recovery must settle pending transactions first.
 pub fn cleanup(
     paths: &AppPaths,
     id: Uuid,
@@ -134,262 +52,200 @@ pub fn cleanup(
     let root = install::metadata_root(paths, id)?;
     let _lease = try_lock(&root, ".installation.lock")?
         .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
+    if let Some(report) = super::maintenance::retry_uninstall_cleanup(paths, id, &root)? {
+        return Ok(report);
+    }
     install::recover_locked(paths, id, &root)?;
     let installed = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
     super::maintenance::validate_manifest(&installed, id)?;
-    record(&root, &installed)?;
-    cleanup_locked(paths, &root, &installed, cancel)
+    cleanup_locked(&root, &installed, cancel)
+}
+
+/// Caller owns the instance operation lease and its authoritative installed pointer.
+pub(super) fn cleanup_locked(
+    root: &Path,
+    installed: &InstalledLock,
+    cancel: &Cancellation,
+) -> Result<CleanupReport, CoreError> {
+    let active = if installed.schema_version == 2 {
+        Some(installed.native_directory()?)
+    } else {
+        None
+    };
+    purge(root, active.as_deref(), cancel)
+}
+
+/// A committed update remains usable if the OS prevents native cleanup.
+pub(super) fn after_update(root: &Path, installed: &InstalledLock) -> CleanupReport {
+    cleanup_locked(root, installed, &Cancellation::default()).unwrap_or_else(|_| {
+        let mut report = CleanupReport::default();
+        report.retain("natives".into(), "accessFailure");
+        report
+    })
+}
+
+pub(super) fn remove_all(root: &Path) -> Result<CleanupReport, CoreError> {
+    purge(root, None, &Cancellation::default())
 }
 
 fn uuid_name(name: &str) -> bool {
     Uuid::parse_str(name).is_ok_and(|id| !id.is_nil() && id.to_string() == name)
 }
 
-fn children(directory: &cap_std::fs::Dir) -> Result<Vec<String>, CoreError> {
+fn names(directory: &cap_std::fs::Dir) -> Result<Vec<OsString>, CoreError> {
     let mut names = Vec::new();
     for entry in directory.entries().map_err(io)? {
-        let entry = entry.map_err(io)?;
-        if let Some(name) = entry.file_name().to_str() {
-            names.push(name.to_owned());
-        }
-        if names.len() > 10_000 {
+        names.push(entry.map_err(io)?.file_name());
+        if names.len() > 100_000 {
             return Err(invalid());
         }
     }
     Ok(names)
 }
 
-pub(super) fn cleanup_locked(
-    paths: &AppPaths,
+fn safe_directory(parent: &cap_std::fs::Dir, name: &OsStr) -> Result<cap_std::fs::Dir, CoreError> {
+    let metadata = parent.symlink_metadata(name).map_err(io)?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(invalid());
+    }
+    parent.open_dir_nofollow(name).map_err(io)
+}
+
+/// No-follow, bounded handle-relative traversal. An outside hard-link alias keeps
+/// its contents when its disposable native-directory name is unlinked.
+fn remove_tree(
+    parent: &cap_std::fs::Dir,
+    name: &OsStr,
+    cancel: &Cancellation,
+    depth: usize,
+    remaining: &mut usize,
+) -> Result<(), CoreError> {
+    cancel.check()?;
+    if depth > 64 {
+        return Err(invalid());
+    }
+    let metadata = parent.symlink_metadata(name).map_err(io)?;
+    if metadata.file_type().is_symlink() {
+        return Err(invalid());
+    }
+    if metadata.is_file() {
+        return parent.remove_file(name).map_err(io);
+    }
+    let directory = safe_directory(parent, name)?;
+    let identity = directory.dir_metadata().map_err(io)?;
+    for child in names(&directory)? {
+        cancel.check()?;
+        *remaining = remaining.checked_sub(1).ok_or_else(invalid)?;
+        let metadata = directory.symlink_metadata(&child).map_err(io)?;
+        if metadata.file_type().is_symlink() {
+            return Err(invalid());
+        }
+        if metadata.is_dir() {
+            remove_tree(&directory, &child, cancel, depth + 1, remaining)?;
+        } else if metadata.is_file() {
+            directory.remove_file(&child).map_err(io)?;
+        } else {
+            return Err(invalid());
+        }
+    }
+    let current = parent.symlink_metadata(name).map_err(io)?;
+    if current.file_type().is_symlink()
+        || current.dev() != identity.dev()
+        || current.ino() != identity.ino()
+    {
+        return Err(invalid());
+    }
+    drop(directory);
+    parent.remove_dir(name).map_err(io)
+}
+
+fn purge(
     root: &Path,
-    installed: &InstalledLock,
+    active: Option<&str>,
     cancel: &Cancellation,
 ) -> Result<CleanupReport, CoreError> {
+    cancel.check()?;
     let private = private_fs::PrivateDir::open(root).map_err(map_private_error)?;
     let capability = super::world_backup::capability(&private)?;
     let mut candidates = Vec::new();
-    for name in children(&capability)? {
-        if name.strip_prefix("natives-").is_some_and(uuid_name) {
-            candidates.push(name);
+    for name in names(&capability)? {
+        if name
+            .to_str()
+            .is_some_and(|name| name.strip_prefix("natives-").is_some_and(uuid_name))
+        {
+            candidates.push((false, name));
         }
     }
-    match capability.open_dir_nofollow("natives") {
-        Ok(container) => {
-            for name in children(&container)? {
-                if uuid_name(&name) {
-                    candidates.push(format!("natives/{name}"));
-                }
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-        Err(error) => return Err(io(error)),
-    }
-    let active = if installed.schema_version == 2 {
-        Some(installed.native_directory()?)
-    } else {
-        None
-    };
     let mut report = CleanupReport::default();
-    let mut archives = runtime::ArchiveCache::new();
-    for directory in candidates {
+    let container = match capability.symlink_metadata("natives") {
+        Ok(_) => match safe_directory(&capability, OsStr::new("natives")) {
+            Ok(directory) => Some(directory),
+            Err(error) => {
+                report.retain(
+                    "natives".into(),
+                    if error.code() == ErrorCode::InvalidData {
+                        "unsafePath"
+                    } else {
+                        "accessFailure"
+                    },
+                );
+                None
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => {
+            report.retain("natives".into(), "accessFailure");
+            None
+        }
+    };
+    if let Some(container) = &container {
+        for name in names(container)? {
+            candidates.push((true, name));
+        }
+    }
+    for (nested, name) in candidates {
         cancel.check()?;
-        if active.as_deref() == Some(&directory) {
+        let directory = if nested {
+            format!("natives/{}", name.to_string_lossy())
+        } else {
+            name.to_string_lossy().into_owned()
+        };
+        if active == Some(directory.as_str()) {
             report.details.push(CleanupDetail {
                 directory,
                 reason: "active",
             });
             continue;
         }
-        let path = root.join(&directory);
-        let parts: Vec<_> = directory.split('/').collect();
-        if open_chain(&capability, &parts)
-            .and_then(|folder| children(&folder))
-            .is_ok_and(|names| !names.iter().any(|name| name == RECEIPT))
-        {
-            report.untracked_generations += 1;
-            report.details.push(CleanupDetail {
-                directory,
-                reason: "missingOwnership",
-            });
-            continue;
-        }
-        let mut receipt = match read_json::<Generation>(&path, RECEIPT) {
-            Ok(Some(receipt)) => receipt,
-            Ok(None) => {
-                report.untracked_generations += 1;
-                report.details.push(CleanupDetail {
-                    directory,
-                    reason: "missingOwnership",
-                });
-                continue;
-            }
-            Err(error) => {
-                report.retained_generations += 1;
-                report.details.push(CleanupDetail {
-                    directory,
-                    reason: if error.code() == ErrorCode::InvalidData {
-                        "invalidOwnership"
-                    } else {
-                        "accessFailure"
-                    },
-                });
-                continue;
-            }
-        };
-        let mut generation = installed.clone();
-        generation.operation = receipt.operation;
-        generation.native_directory = if directory.starts_with("natives/") {
-            Some(directory.clone())
+        let parent = if nested {
+            container.as_ref().ok_or_else(invalid)?
         } else {
-            None
+            &capability
         };
-        generation.native_files = receipt.files.clone();
-        if !matches!(receipt.schema, 1 | 2)
-            || (receipt.schema == 1 && receipt.runtime.is_some())
-            || receipt
-                .runtime
-                .as_ref()
-                .is_some_and(|tracking| runtime::validate(tracking).is_err())
-            || receipt.id != installed.instance_id
-            || receipt.directory != directory
-            || generation
-                .native_files
-                .iter()
-                .any(|file| file.path == RECEIPT)
-            || generation.native_directory().ok().as_deref() != Some(directory.as_str())
-            || super::maintenance::validate_manifest(&generation, installed.instance_id).is_err()
-        {
-            report.retained_generations += 1;
-            report.details.push(CleanupDetail {
-                directory,
-                reason: "invalidOwnership",
-            });
-            continue;
-        }
-        if let Err(error) = runtime::extend(paths, root, &mut receipt, cancel, &mut archives) {
-            cancel.check()?;
-            report.retained_generations += 1;
-            report.details.push(CleanupDetail {
-                directory,
-                reason: if error.code() == ErrorCode::InvalidData {
-                    "unverifiedLibraries"
-                } else {
-                    "accessFailure"
-                },
-            });
-            continue;
-        }
-        generation.native_files = receipt.files;
-        cancel.check()?;
-        if super::maintenance::validate_manifest(&generation, installed.instance_id).is_err() {
-            report.retained_generations += 1;
-            report.details.push(CleanupDetail {
-                directory,
-                reason: "invalidOwnership",
-            });
-            continue;
-        }
-        match clean_generation(root, &capability, &directory, &generation) {
-            Ok(true) => report.cleaned_generations += 1,
-            result => {
-                report.retained_generations += 1;
-                report.details.push(CleanupDetail {
+        match remove_tree(parent, &name, cancel, 0, &mut 100_000) {
+            Ok(()) => report.cleaned_generations += 1,
+            Err(error) => {
+                cancel.check()?;
+                report.retain(
                     directory,
-                    reason: if result.is_err() {
-                        "accessFailure"
+                    if error.code() == ErrorCode::InvalidData {
+                        "unsafePath"
                     } else {
-                        retention_reason(&capability, &generation)
+                        "accessFailure"
                     },
-                });
+                );
             }
+        }
+    }
+    if let Some(container) = container {
+        let empty = names(&container)?.is_empty();
+        drop(container);
+        if empty
+            && let Err(error) = capability.remove_dir("natives")
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            report.retain("natives".into(), "accessFailure");
         }
     }
     Ok(report)
-}
-
-fn retention_reason(capability: &cap_std::fs::Dir, installed: &InstalledLock) -> &'static str {
-    use cap_fs_ext::{FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
-    let Ok(directory) = installed.native_directory() else {
-        return "invalidOwnership";
-    };
-    let Ok(folder) = open_chain(capability, &directory.split('/').collect::<Vec<_>>()) else {
-        return "accessFailure";
-    };
-    for file in &installed.native_files {
-        let parts = file.path.split('/').collect::<Vec<_>>();
-        let parent = match open_chain(&folder, &parts[..parts.len() - 1]) {
-            Ok(parent) => parent,
-            Err(error) if error.code() == ErrorCode::StorageUnavailable => continue,
-            Err(_) => return "accessFailure",
-        };
-        let mut options = cap_std::fs::OpenOptions::new();
-        options.read(true).follow(FollowSymlinks::No);
-        match parent.open_with(parts[parts.len() - 1], &options) {
-            Ok(file) => {
-                return if file
-                    .metadata()
-                    .is_ok_and(|metadata| metadata.is_file() && metadata.nlink() == 1)
-                {
-                    "changedFiles"
-                } else {
-                    "unsafeFiles"
-                };
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-            Err(_) => return "accessFailure",
-        }
-    }
-    "unknownFiles"
-}
-
-fn open_chain(root: &cap_std::fs::Dir, parts: &[&str]) -> Result<cap_std::fs::Dir, CoreError> {
-    let mut directory = root.try_clone().map_err(io)?;
-    for part in parts {
-        directory = directory.open_dir_nofollow(part).map_err(io)?;
-    }
-    Ok(directory)
-}
-
-fn clean_generation(
-    root: &Path,
-    capability: &cap_std::fs::Dir,
-    relative: &str,
-    installed: &InstalledLock,
-) -> Result<bool, CoreError> {
-    // Reuse the uninstall hash/identity checks: edited, linked and unknown files stay.
-    let retained = super::maintenance::natives(root, installed, true)?;
-    let parts: Vec<_> = relative.split('/').collect();
-    let parent = open_chain(capability, &parts[..parts.len() - 1])?;
-    let leaf = parts.last().ok_or_else(invalid)?;
-    let generation = parent.open_dir_nofollow(leaf).map_err(io)?;
-    let mut directories = BTreeSet::new();
-    for file in &installed.native_files {
-        let mut parts: Vec<_> = file.path.split('/').collect();
-        parts.pop();
-        while !parts.is_empty() {
-            directories.insert(parts.join("/"));
-            parts.pop();
-        }
-    }
-    let mut directories: Vec<_> = directories.into_iter().collect();
-    directories.sort_by_key(|path| std::cmp::Reverse(path.split('/').count()));
-    for path in directories {
-        let parts: Vec<_> = path.split('/').collect();
-        if let Ok(parent) = open_chain(&generation, &parts[..parts.len() - 1]) {
-            let leaf = parts.last().ok_or_else(invalid)?;
-            if parent.open_dir_nofollow(leaf).is_ok() {
-                let _ = parent.remove_dir(leaf);
-            }
-        }
-    }
-    if retained != 0 || children(&generation)?.iter().any(|name| name != RECEIPT) {
-        return Ok(false);
-    }
-    let private = private_fs::PrivateDir::open(root.join(relative)).map_err(map_private_error)?;
-    private.open_file(RECEIPT).map_err(map_private_error)?;
-    generation.remove_file(RECEIPT).map_err(io)?;
-    drop(private);
-    drop(generation);
-    parent.remove_dir(leaf).map_err(io)?;
-    Ok(true)
 }

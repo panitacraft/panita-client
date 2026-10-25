@@ -119,6 +119,7 @@ struct Entry {
     received_files: u64,
     reused_files: u64,
     retained_files: u32,
+    native_cleanup: Option<launcher_core::minecraft::native_cache::CleanupReport>,
     last_progress: std::time::Instant,
     last_logged: Option<(WorkflowPhase, Option<ErrorCode>)>,
 }
@@ -252,7 +253,6 @@ impl PlayController {
                 "context": event.log_context.as_deref(), "cdata":event.cdata,
                 "stream": if stream == OutputStream::Stdout { "stdout" } else { "stderr" }, "text": if text == "[sensitive output omitted]" { "[salida sensible omitida]" } else { &text }})),
             ProcessEventKind::OutputDiscarded { .. } => Some(json!({"sequence":page.offset + index,"stream": "notice", "text": "Se omitió una línea demasiado larga o una salida que no pudo leerse."})),
-            ProcessEventKind::NativeTrackingUnavailable => Some(json!({"sequence":page.offset + index,"stream":"notice","text":"No pudimos registrar la propiedad de los archivos nativos de esta ejecución. La limpieza conservará los archivos que no pueda verificar."})),
             _ => None,
         }).collect();
         Ok(
@@ -335,6 +335,7 @@ impl PlayController {
                 received_files: 0,
                 reused_files: 0,
                 retained_files: 0,
+                native_cleanup: None,
                 last_progress: std::time::Instant::now(),
                 last_logged: None,
             },
@@ -423,6 +424,7 @@ impl PlayController {
                     "backupRequested": entry.backup_requested, "backupOperation": entry.backup_operation,
                     "receivedFiles": entry.received_files, "reusedFiles": entry.reused_files,
                     "retainedFiles": entry.retained_files,
+                    "nativeCleanup": entry.native_cleanup,
                 })
             })
             .collect();
@@ -988,7 +990,7 @@ fn begin_maintenance(
                 .await
                 .map_err(|_| ErrorCode::StorageCommitUncertain)?
                 .map_err(|error| error.code())?;
-                return Ok((None, outcome.retained_files));
+                return Ok((None, outcome.retained_files, outcome.native_cleanup));
             }
             let platform = platform.as_ref().ok_or(ErrorCode::RuntimeUnsupported)?;
             let progress_controller = controller.clone();
@@ -1008,7 +1010,7 @@ fn begin_maintenance(
                 )
                 .await
                 .map_err(|error| error.code())?;
-                Ok((None, outcome.retained_files))
+                Ok((None, outcome.retained_files, outcome.native_cleanup))
             } else if let Some(update) = update {
                 let outcome = launcher_core::minecraft::update::update(
                     &paths,
@@ -1020,7 +1022,11 @@ fn begin_maintenance(
                 )
                 .await
                 .map_err(|error| error.code())?;
-                Ok((outcome.backup.map(|backup| backup.operation), 0))
+                Ok((
+                    outcome.backup.map(|backup| backup.operation),
+                    0,
+                    Some(outcome.native_cleanup),
+                ))
             } else {
                 launcher_core::minecraft::install::install(
                     &paths,
@@ -1031,22 +1037,25 @@ fn begin_maintenance(
                 )
                 .await
                 .map_err(|error| error.code())?;
-                Ok((None, 0))
+                Ok((None, 0, None))
             }
         }
         .await;
         match result {
             // The published manifest is authoritative if cancellation races
             // successful completion. Never report committed data as cancelled.
-            Ok((backup, retained)) => controller.update(instance_id, request_id, |entry| {
-                entry.phase = if kind == OperationKind::Uninstall {
-                    Phase::Uninstalled
-                } else {
-                    Phase::Installed
-                };
-                entry.backup_operation = backup;
-                entry.retained_files = retained;
-            }),
+            Ok((backup, retained, native_cleanup)) => {
+                controller.update(instance_id, request_id, |entry| {
+                    entry.phase = if kind == OperationKind::Uninstall {
+                        Phase::Uninstalled
+                    } else {
+                        Phase::Installed
+                    };
+                    entry.backup_operation = backup;
+                    entry.retained_files = retained;
+                    entry.native_cleanup = native_cleanup;
+                })
+            }
             Err(error) => controller.fail(instance_id, request_id, error),
         }
         controller.publish(&app);

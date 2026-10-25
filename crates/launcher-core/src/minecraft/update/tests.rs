@@ -224,6 +224,21 @@ fn interruption_at_each_commit_boundary_recovers_without_world_or_settings_chang
         let guard = try_lock(&root, ".installation.lock")
             .unwrap_or_else(|_| panic!("lock"))
             .unwrap_or_else(|| panic!("lease"));
+        let old_natives = root.join(previous.native_directory().unwrap_or_default());
+        let new_natives = root.join(
+            journal
+                .prepared
+                .as_ref()
+                .unwrap_or_else(|| panic!("prepared"))
+                .native_directory()
+                .unwrap_or_default(),
+        );
+        std::fs::create_dir_all(&old_natives).unwrap_or_else(|_| panic!("old natives"));
+        std::fs::create_dir_all(&new_natives).unwrap_or_else(|_| panic!("new natives"));
+        std::fs::write(old_natives.join("old.dll"), b"untracked old native")
+            .unwrap_or_else(|_| panic!("old native"));
+        std::fs::write(new_natives.join("new.dll"), b"new native")
+            .unwrap_or_else(|_| panic!("new native"));
         write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("intent"));
         assert!(
             publish_steps(&paths, id, &root, &mut journal, |stage| {
@@ -246,12 +261,15 @@ fn interruption_at_each_commit_boundary_recovers_without_world_or_settings_chang
         let installed = install::verify_installed(&paths, id)
             .unwrap_or_else(|error| panic!("verified recovery: {error}"));
         if interrupted == CommitStage::BeforePointer {
+            assert!(old_natives.join("old.dll").exists());
             assert_eq!(installed.operation, previous.operation);
             assert_eq!(
                 std::fs::read(root.join("installed.json")).ok(),
                 Some(old_bytes)
             );
         } else {
+            assert!(!old_natives.exists());
+            assert!(new_natives.join("new.dll").exists());
             assert_eq!(installed.plan.version.id, TARGET);
             assert_eq!(
                 InstanceRegistry::new(paths.clone())
@@ -407,4 +425,70 @@ async fn updates_require_a_current_enabled_catalog_pin_and_do_not_fall_back_offl
         assert!(!root.join("world-backups").exists());
         preserved(&paths, id, &root);
     }
+}
+
+#[test]
+fn successful_update_cleans_untracked_natives_and_preserves_the_new_generation() {
+    let (paths, id, root, previous) = fixture();
+    let old = root.join(previous.native_directory().unwrap_or_default());
+    std::fs::create_dir_all(&old).unwrap_or_else(|_| panic!("old natives"));
+    std::fs::write(old.join("edited.dll"), b"edited").unwrap_or_else(|_| panic!("old DLL"));
+    let mut journal = staging(&paths, id, &previous);
+    let new = root.join(
+        journal
+            .prepared
+            .as_ref()
+            .unwrap_or_else(|| panic!("prepared"))
+            .native_directory()
+            .unwrap_or_default(),
+    );
+    std::fs::create_dir_all(&new).unwrap_or_else(|_| panic!("new natives"));
+    std::fs::write(new.join("current.dll"), b"current").unwrap_or_else(|_| panic!("new DLL"));
+    write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("intent"));
+    let report = publish(&paths, id, &root, &mut journal).unwrap_or_else(|_| panic!("publish"));
+    assert_eq!(report.cleaned_generations, 1);
+    assert_eq!(report.retained_generations, 0);
+    assert!(!old.exists());
+    assert!(new.join("current.dll").exists());
+    assert!(!root.join("transaction.json").exists());
+    preserved(&paths, id, &root);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[cfg(windows)]
+#[test]
+fn blocked_native_cleanup_reports_warning_without_rolling_back_a_published_update() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (paths, id, root, previous) = fixture();
+    let old = root.join(previous.native_directory().unwrap_or_default());
+    std::fs::create_dir_all(&old).unwrap_or_else(|_| panic!("old natives"));
+    std::fs::write(old.join("locked.dll"), b"locked").unwrap_or_else(|_| panic!("old DLL"));
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(old.join("locked.dll"))
+        .unwrap_or_else(|_| panic!("locked"));
+    let mut journal = staging(&paths, id, &previous);
+    write_json(&root, "transaction.json", &journal).unwrap_or_else(|_| panic!("intent"));
+    let report = publish(&paths, id, &root, &mut journal).unwrap_or_else(|_| panic!("publish"));
+    assert_eq!(report.retained_generations, 1);
+    assert_eq!(report.details[0].reason, "accessFailure");
+    assert!(!root.join("transaction.json").exists());
+    assert_eq!(
+        install::verify_installed(&paths, id)
+            .unwrap_or_else(|_| panic!("updated installation"))
+            .plan
+            .version
+            .id,
+        TARGET
+    );
+    drop(held);
+    assert_eq!(
+        super::super::native_cache::cleanup(&paths, id, &Cancellation::default())
+            .unwrap_or_else(|_| panic!("retry"))
+            .cleaned_generations,
+        1
+    );
+    preserved(&paths, id, &root);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
 }

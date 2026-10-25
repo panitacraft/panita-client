@@ -28,6 +28,7 @@ pub struct UpdateRequest {
 pub struct UpdateOutcome {
     pub installed: InstalledLock,
     pub backup: Option<BackupReceipt>,
+    pub native_cleanup: super::native_cache::CleanupReport,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -139,6 +140,7 @@ pub(super) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
         }
         install::verify_manifest(paths, id, root, &installed, &Cancellation::default())?;
         publish_record(paths, id, &journal.from_version, &journal.to_version)?;
+        let _ = super::native_cache::after_update(root, &installed);
     } else {
         return Err(invalid());
     }
@@ -196,7 +198,7 @@ fn publish(
     id: Uuid,
     root: &Path,
     journal: &mut Journal,
-) -> Result<(), CoreError> {
+) -> Result<super::native_cache::CleanupReport, CoreError> {
     publish_steps(paths, id, root, journal, |_| Ok(()))
 }
 
@@ -214,18 +216,20 @@ fn publish_steps(
     root: &Path,
     journal: &mut Journal,
     mut checkpoint: impl FnMut(CommitStage) -> Result<(), CoreError>,
-) -> Result<(), CoreError> {
+) -> Result<super::native_cache::CleanupReport, CoreError> {
     checkpoint(CommitStage::BeforePointer)?;
     let prepared = journal.prepared.as_ref().ok_or_else(invalid)?;
     write_json(root, "installed.json", prepared)?;
     checkpoint(CommitStage::PointerPublished)?;
     publish_record(paths, id, &journal.from_version, &journal.to_version)?;
     checkpoint(CommitStage::RecordPublished)?;
+    let native_cleanup = super::native_cache::after_update(root, prepared);
     journal.active = false;
     journal.prepared = None;
     write_json(root, "transaction.json", journal)?;
     super::transaction::remove(root)?;
-    checkpoint(CommitStage::JournalCompleted)
+    checkpoint(CommitStage::JournalCompleted)?;
+    Ok(native_cleanup)
 }
 
 pub async fn update(
@@ -317,7 +321,6 @@ async fn update_with_catalog(
         return Err(invalid());
     }
     let operation = Uuid::new_v4();
-    super::native_cache::record(&root, &previous)?;
     let mut journal = Journal {
         schema_version: 2,
         instance_id: id,
@@ -349,10 +352,11 @@ async fn update_with_catalog(
         journal.prepared = Some(installed.clone());
         journal.validate(id)?;
         write_json(&root, "transaction.json", &journal)?;
-        cancel.commit(|| publish(paths, id, &root, &mut journal))?;
+        let native_cleanup = cancel.commit(|| publish(paths, id, &root, &mut journal))?;
         Ok(UpdateOutcome {
             installed,
             backup: journal.backup.clone(),
+            native_cleanup,
         })
     }
     .await;
@@ -367,9 +371,11 @@ async fn update_with_catalog(
             let installed =
                 read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
             if installed.operation == operation {
+                let native_cleanup = super::native_cache::after_update(&root, &installed);
                 Ok(UpdateOutcome {
                     installed,
                     backup: journal.backup,
+                    native_cleanup,
                 })
             } else {
                 Err(error)
