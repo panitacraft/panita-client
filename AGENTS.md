@@ -432,8 +432,12 @@ are evidence, not product guarantees.
   `linkat(AT_EMPTY_PATH)` blocker while retaining private creation, identity,
   atomicity, and durability checks. See `vendor/private-fs/PANITA-PATCH.md`.
 - The Linux build baseline is Ubuntu 24.04. Runtime executables require owner-only
-  0700 permissions; private metadata remains 0600. Existing BOX development
-  packages prevent clean-install qualification.
+  0700 permissions; private metadata remains 0600. Recheck BOX's current package
+  inventory before describing its baseline. On 2026-10-25, read-only inspection
+  verifies Ubuntu 26.04.1 x86_64, an existing panita-client 0.1.0 installation and
+  GTK/WebKit runtimes; the previously recorded development tools/packages are
+  absent. This inventory does not establish a fresh clean-install baseline or
+  qualify the Phase 7 candidate. No package removal or VM reset is authorized.
 - Phase 6 was accepted on 2026-10-25. Its closure is recorded at
   https://github.com/panitacraft/panita-client/issues/8. Installer polish,
   clean-machine and advertised-platform qualification, release preparation, and
