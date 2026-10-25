@@ -5,6 +5,7 @@ import { messageForError } from './errors';
 import { acceptPlaySnapshot, playActive, type PlayPhase, type PlaySnapshot } from './play-state';
 import type { UpdateTarget } from './library-state';
 import { invokePlay, type PlayArguments, type PlayCommand } from './play-api';
+import { nativeRetentionReason, type NativeCleanupReport } from './native-cleanup-state';
 
 type PlayContextValue = {
   snapshot: PlaySnapshot | null;
@@ -80,6 +81,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   const [logError, setLogError] = useState<string | null>(null);
   const [cleanupText, setCleanupText] = useState<string | null>(null);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const [cleanupDetails, setCleanupDetails] = useState<NativeCleanupReport['details']>([]);
   const entry = play?.snapshot?.instances.find(entry => entry.instanceId === instanceId);
   const active = entry && playActive(entry.phase);
   const running = entry && (entry.phase === 'running' || entry.phase === 'stopping');
@@ -97,10 +99,12 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     busyRef.current = true;
     setBusy(true);
     setCleanupError(null);
+    setCleanupDetails([]);
     setCleanupText('Comprobando los archivos nativos antiguos…');
     try {
-      const report = await invoke<{ cleanedGenerations: number; retainedGenerations: number; untrackedGenerations: number }>('clean_native_cache', { instanceId });
-      setCleanupText(`Se eliminaron ${report.cleanedGenerations} generaciones antiguas. Se conservaron ${report.retainedGenerations} con archivos modificados o no verificables y ${report.untrackedGenerations} sin información de propiedad. Las generaciones activas se conservan.`);
+      const report = await invoke<NativeCleanupReport>('clean_native_cache', { instanceId });
+      setCleanupText(`Se eliminaron ${report.cleanedGenerations} generaciones antiguas. Se conservaron ${report.retainedGenerations + report.untrackedGenerations} antiguas por seguridad. La generación activa se conserva.`);
+      setCleanupDetails(report.details);
     } catch (cause) {
       setCleanupText(null);
       setCleanupError(messageForError(cause));
@@ -173,6 +177,9 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     {!active && repairAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_repair', { requestId: crypto.randomUUID() })}>Reparar archivos</button>}
     {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void cleanNatives()}>Limpiar nativos antiguos</button>}
     {cleanupText && <p role="status">{cleanupText}</p>}
+    {cleanupDetails.length > 0 && <details><summary>Por qué se conservaron estas carpetas</summary>
+      <ul>{cleanupDetails.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
+    </details>}
     {cleanupError && <p role="alert">{cleanupError}</p>}
     {!active && uninstallAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUninstallQuestion(true)}>Desinstalar…</button>}
     {!active && uninstallQuestion && <fieldset className="catalog-notice">

@@ -15,6 +15,8 @@ use std::{collections::BTreeSet, path::Path};
 use uuid::Uuid;
 
 const RECEIPT: &str = ".generation.json";
+mod runtime;
+pub(super) use runtime::{Observation, capture};
 #[cfg(test)]
 mod tests;
 
@@ -26,6 +28,8 @@ struct Generation {
     operation: Uuid,
     directory: String,
     files: Vec<super::natives::NativeFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    runtime: Option<runtime::Tracking>,
 }
 
 #[derive(Default, Serialize)]
@@ -34,6 +38,14 @@ pub struct CleanupReport {
     pub cleaned_generations: u32,
     pub retained_generations: u32,
     pub untracked_generations: u32,
+    pub details: Vec<CleanupDetail>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CleanupDetail {
+    pub directory: String,
+    pub reason: &'static str,
 }
 
 /// Record exact launcher-managed files, never infer ownership from directory names.
@@ -62,15 +74,48 @@ pub(super) fn record(root: &Path, installed: &InstalledLock) -> Result<(), CoreE
         operation: installed.operation,
         directory,
         files: installed.native_files.clone(),
+        runtime: None,
     };
     match read_json::<Generation>(&path, RECEIPT)? {
-        Some(existing)
+        Some(mut existing) => {
+            if !matches!(existing.schema, 1 | 2)
+                || (existing.schema == 1 && existing.runtime.is_some())
+            {
+                return Err(invalid());
+            }
+            if existing.runtime.is_some() {
+                if let Some(tracking) = &existing.runtime {
+                    runtime::validate(tracking)?;
+                }
+                if existing.id != expected.id
+                    || existing.operation != expected.operation
+                    || existing.directory != expected.directory
+                {
+                    return Err(invalid());
+                }
+                let mut generation = installed.clone();
+                generation.native_files = existing.files.clone();
+                super::maintenance::validate_manifest(&generation, installed.instance_id)?;
+                if !expected.files.iter().all(|owned| {
+                    existing.files.iter().any(|file| {
+                        file.path == owned.path
+                            && file.sha1 == owned.sha1
+                            && file.size == owned.size
+                    })
+                }) {
+                    return Err(invalid());
+                }
+                return Ok(());
+            }
+            existing.runtime = None;
+            existing.schema = 1;
             if serde_json::to_value(&existing).map_err(|_| invalid())?
-                != serde_json::to_value(&expected).map_err(|_| invalid())? =>
-        {
-            Err(invalid())
+                != serde_json::to_value(&expected).map_err(|_| invalid())?
+            {
+                return Err(invalid());
+            }
+            Ok(())
         }
-        Some(_) => Ok(()),
         None => write_json(
             root,
             &format!("{}/{RECEIPT}", expected.directory),
@@ -93,7 +138,7 @@ pub fn cleanup(
     let installed = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
     super::maintenance::validate_manifest(&installed, id)?;
     record(&root, &installed)?;
-    cleanup_locked(&root, &installed, cancel)
+    cleanup_locked(paths, &root, &installed, cancel)
 }
 
 fn uuid_name(name: &str) -> bool {
@@ -115,6 +160,7 @@ fn children(directory: &cap_std::fs::Dir) -> Result<Vec<String>, CoreError> {
 }
 
 pub(super) fn cleanup_locked(
+    paths: &AppPaths,
     root: &Path,
     installed: &InstalledLock,
     cancel: &Cancellation,
@@ -144,20 +190,49 @@ pub(super) fn cleanup_locked(
         None
     };
     let mut report = CleanupReport::default();
+    let mut archives = runtime::ArchiveCache::new();
     for directory in candidates {
         cancel.check()?;
         if active.as_deref() == Some(&directory) {
+            report.details.push(CleanupDetail {
+                directory,
+                reason: "active",
+            });
             continue;
         }
         let path = root.join(&directory);
-        let receipt = match read_json::<Generation>(&path, RECEIPT) {
+        let parts: Vec<_> = directory.split('/').collect();
+        if open_chain(&capability, &parts)
+            .and_then(|folder| children(&folder))
+            .is_ok_and(|names| !names.iter().any(|name| name == RECEIPT))
+        {
+            report.untracked_generations += 1;
+            report.details.push(CleanupDetail {
+                directory,
+                reason: "missingOwnership",
+            });
+            continue;
+        }
+        let mut receipt = match read_json::<Generation>(&path, RECEIPT) {
             Ok(Some(receipt)) => receipt,
             Ok(None) => {
                 report.untracked_generations += 1;
+                report.details.push(CleanupDetail {
+                    directory,
+                    reason: "missingOwnership",
+                });
                 continue;
             }
-            Err(_) => {
+            Err(error) => {
                 report.retained_generations += 1;
+                report.details.push(CleanupDetail {
+                    directory,
+                    reason: if error.code() == ErrorCode::InvalidData {
+                        "invalidOwnership"
+                    } else {
+                        "accessFailure"
+                    },
+                });
                 continue;
             }
         };
@@ -168,26 +243,103 @@ pub(super) fn cleanup_locked(
         } else {
             None
         };
-        generation.native_files = receipt.files;
-        if receipt.schema != 1
+        generation.native_files = receipt.files.clone();
+        if !matches!(receipt.schema, 1 | 2)
+            || (receipt.schema == 1 && receipt.runtime.is_some())
+            || receipt
+                .runtime
+                .as_ref()
+                .is_some_and(|tracking| runtime::validate(tracking).is_err())
             || receipt.id != installed.instance_id
             || receipt.directory != directory
             || generation
                 .native_files
                 .iter()
                 .any(|file| file.path == RECEIPT)
-            || generation.native_directory()? != directory
+            || generation.native_directory().ok().as_deref() != Some(directory.as_str())
             || super::maintenance::validate_manifest(&generation, installed.instance_id).is_err()
         {
             report.retained_generations += 1;
+            report.details.push(CleanupDetail {
+                directory,
+                reason: "invalidOwnership",
+            });
+            continue;
+        }
+        if let Err(error) = runtime::extend(paths, root, &mut receipt, cancel, &mut archives) {
+            cancel.check()?;
+            report.retained_generations += 1;
+            report.details.push(CleanupDetail {
+                directory,
+                reason: if error.code() == ErrorCode::InvalidData {
+                    "unverifiedLibraries"
+                } else {
+                    "accessFailure"
+                },
+            });
+            continue;
+        }
+        generation.native_files = receipt.files;
+        cancel.check()?;
+        if super::maintenance::validate_manifest(&generation, installed.instance_id).is_err() {
+            report.retained_generations += 1;
+            report.details.push(CleanupDetail {
+                directory,
+                reason: "invalidOwnership",
+            });
             continue;
         }
         match clean_generation(root, &capability, &directory, &generation) {
             Ok(true) => report.cleaned_generations += 1,
-            _ => report.retained_generations += 1,
+            result => {
+                report.retained_generations += 1;
+                report.details.push(CleanupDetail {
+                    directory,
+                    reason: if result.is_err() {
+                        "accessFailure"
+                    } else {
+                        retention_reason(&capability, &generation)
+                    },
+                });
+            }
         }
     }
     Ok(report)
+}
+
+fn retention_reason(capability: &cap_std::fs::Dir, installed: &InstalledLock) -> &'static str {
+    use cap_fs_ext::{FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
+    let Ok(directory) = installed.native_directory() else {
+        return "invalidOwnership";
+    };
+    let Ok(folder) = open_chain(capability, &directory.split('/').collect::<Vec<_>>()) else {
+        return "accessFailure";
+    };
+    for file in &installed.native_files {
+        let parts = file.path.split('/').collect::<Vec<_>>();
+        let parent = match open_chain(&folder, &parts[..parts.len() - 1]) {
+            Ok(parent) => parent,
+            Err(error) if error.code() == ErrorCode::StorageUnavailable => continue,
+            Err(_) => return "accessFailure",
+        };
+        let mut options = cap_std::fs::OpenOptions::new();
+        options.read(true).follow(FollowSymlinks::No);
+        match parent.open_with(parts[parts.len() - 1], &options) {
+            Ok(file) => {
+                return if file
+                    .metadata()
+                    .is_ok_and(|metadata| metadata.is_file() && metadata.nlink() == 1)
+                {
+                    "changedFiles"
+                } else {
+                    "unsafeFiles"
+                };
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(_) => return "accessFailure",
+        }
+    }
+    "unknownFiles"
 }
 
 fn open_chain(root: &cap_std::fs::Dir, parts: &[&str]) -> Result<cap_std::fs::Dir, CoreError> {

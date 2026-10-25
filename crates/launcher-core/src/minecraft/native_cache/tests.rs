@@ -216,3 +216,499 @@ fn unsafe_receipts_and_unresolved_transactions_cannot_authorize_cleanup() {
     drop(private);
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
 }
+
+fn runtime_fixture() -> (AppPaths, std::path::PathBuf, InstalledLock) {
+    use std::io::{Cursor, Write};
+    let (paths, root, mut installed) = fixture();
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for (name, bytes) in [
+        ("windows/x64/lwjgl.dll", b"native".as_slice()),
+        (
+            "com/sun/jna/win32-x86-64/jnidispatch.dll",
+            b"jna".as_slice(),
+        ),
+    ] {
+        writer
+            .start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap_or_else(|_| panic!("entry"));
+        writer.write_all(bytes).unwrap_or_else(|_| panic!("bytes"));
+    }
+    let bytes = writer
+        .finish()
+        .unwrap_or_else(|_| panic!("zip"))
+        .into_inner();
+    let artifact = super::super::Artifact {
+        url: "https://libraries.minecraft.net/runtime-fixture.jar".into(),
+        path: Some("test/native.jar".into()),
+        sha1: format!("{:x}", Sha1::digest(&bytes)),
+        size: bytes.len() as u64,
+    };
+    let destination =
+        super::super::plan::library_cache_path(&artifact).unwrap_or_else(|_| panic!("cache"));
+    let (parent, leaf) = super::super::download::ensure_parent(paths.root(), &destination)
+        .unwrap_or_else(|_| panic!("parent"));
+    parent
+        .write_atomic_durable(&leaf, &bytes)
+        .unwrap_or_else(|_| panic!("cache"));
+    installed.plan.version.classpath.push(artifact.clone());
+    installed
+        .plan
+        .artifacts
+        .push(super::super::plan::PlannedArtifact {
+            artifact,
+            destination,
+            executable: false,
+        });
+    write_json(&root, "installed.json", &installed).unwrap_or_else(|_| panic!("manifest"));
+    (paths, root, installed)
+}
+
+fn retire(root: &Path, old: &InstalledLock) -> InstalledLock {
+    let mut next = old.clone();
+    next.operation = Uuid::new_v4();
+    next.native_directory = Some(format!("natives/{}", next.operation));
+    next.native_files.clear();
+    write_json(root, "installed.json", &next).unwrap_or_else(|_| panic!("retire"));
+    next
+}
+
+#[test]
+fn tracked_runtime_files_and_jna_markers_are_reclaimed_but_preexisting_files_stay() {
+    let (paths, root, installed) = runtime_fixture();
+    let relative = installed.native_directory().unwrap_or_default();
+    let (private, _) =
+        super::super::download::ensure_parent(&root, &format!("{relative}/placeholder"))
+            .unwrap_or_else(|_| panic!("generation"));
+    private
+        .write_atomic_durable("lwjgl.dll", b"native")
+        .unwrap_or_else(|_| panic!("baseline"));
+    let observation = capture(&paths, installed.instance_id)
+        .unwrap_or_else(|_| panic!("capture"))
+        .unwrap_or_else(|| panic!("tracking"))
+        .publish()
+        .unwrap_or_else(|_| panic!("publish"));
+    private
+        .write_atomic_durable("jna123.dll", b"jna")
+        .unwrap_or_else(|_| panic!("jna"));
+    private
+        .write_atomic_durable("jna123.dll.x", b"")
+        .unwrap_or_else(|_| panic!("marker"));
+    private
+        .write_atomic_durable("jna999.dll.x", b"")
+        .unwrap_or_else(|_| panic!("unknown marker"));
+    observation
+        .finish()
+        .unwrap_or_else(|_| panic!("completed execution"));
+    let (late, _) =
+        super::super::download::ensure_parent(&root, &format!("{relative}/late/lwjgl.dll"))
+            .unwrap_or_else(|_| panic!("idle file"));
+    late.write_atomic_durable("lwjgl.dll", b"native")
+        .unwrap_or_else(|_| panic!("idle native"));
+    drop(late);
+    // Subsequent runs retain prior observations but cannot claim files added while idle.
+    capture(&paths, installed.instance_id)
+        .unwrap_or_else(|_| panic!("again"))
+        .unwrap_or_else(|| panic!("tracking"))
+        .publish()
+        .unwrap_or_else(|_| panic!("publish again"))
+        .finish()
+        .unwrap_or_else(|_| panic!("finish again"));
+    retire(&root, &installed);
+    // Closing the game releases creation handles before idle-only cleanup.
+    drop(private);
+    let report = cleanup(&paths, installed.instance_id, &Cancellation::default())
+        .unwrap_or_else(|error| panic!("cleanup {error}"));
+    assert_eq!(report.retained_generations, 1);
+    assert_eq!(report.details[0].reason, "unknownFiles");
+    assert!(root.join(&relative).join("lwjgl.dll").exists());
+    assert!(root.join(&relative).join("late/lwjgl.dll").exists());
+    assert!(!root.join(&relative).join("jna123.dll").exists());
+    assert!(!root.join(&relative).join("jna123.dll.x").exists());
+    assert!(root.join(&relative).join("jna999.dll.x").exists());
+    let again = cleanup(&paths, installed.instance_id, &Cancellation::default())
+        .unwrap_or_else(|_| panic!("repeat"));
+    assert_eq!(again.retained_generations, 1);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn runtime_cleanup_removes_whole_obsolete_generations_and_preserves_active_ones() {
+    let (paths, root, installed) = runtime_fixture();
+    let observation = capture(&paths, installed.instance_id)
+        .unwrap_or_else(|_| panic!("capture"))
+        .unwrap_or_else(|| panic!("tracking"))
+        .publish()
+        .unwrap_or_else(|_| panic!("publish"));
+    let relative = installed.native_directory().unwrap_or_default();
+    let private =
+        private_fs::PrivateDir::open(root.join(&relative)).unwrap_or_else(|_| panic!("generation"));
+    private
+        .write_atomic_durable("lwjgl.dll", b"native")
+        .unwrap_or_else(|_| panic!("runtime"));
+    assert_eq!(
+        cleanup(&paths, installed.instance_id, &Cancellation::default())
+            .unwrap_or_else(|_| panic!("active"))
+            .cleaned_generations,
+        0
+    );
+    observation
+        .finish()
+        .unwrap_or_else(|_| panic!("completed execution"));
+    retire(&root, &installed);
+    drop(private);
+    let report = cleanup(&paths, installed.instance_id, &Cancellation::default())
+        .unwrap_or_else(|error| panic!("cleanup {error}"));
+    assert_eq!(report.cleaned_generations, 1);
+    assert!(!root.join(relative).exists());
+    assert_eq!(
+        cleanup(&paths, installed.instance_id, &Cancellation::default())
+            .unwrap_or_else(|_| panic!("again"))
+            .cleaned_generations,
+        0
+    );
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn corrupt_libraries_and_modified_runtime_files_cannot_be_adopted() {
+    let (paths, root, installed) = runtime_fixture();
+    let observation = capture(&paths, installed.instance_id)
+        .unwrap_or_else(|_| panic!("capture"))
+        .unwrap_or_else(|| panic!("tracking"))
+        .publish()
+        .unwrap_or_else(|_| panic!("publish"));
+    let relative = installed.native_directory().unwrap_or_default();
+    let private =
+        private_fs::PrivateDir::open(root.join(&relative)).unwrap_or_else(|_| panic!("generation"));
+    private
+        .write_atomic_durable("lwjgl.dll", b"modified")
+        .unwrap_or_else(|_| panic!("runtime"));
+    observation
+        .finish()
+        .unwrap_or_else(|_| panic!("completed execution"));
+    retire(&root, &installed);
+    let report = cleanup(&paths, installed.instance_id, &Cancellation::default())
+        .unwrap_or_else(|_| panic!("modified"));
+    assert_eq!(report.retained_generations, 1);
+    assert_eq!(
+        std::fs::read(root.join(&relative).join("lwjgl.dll")).unwrap_or_default(),
+        b"modified"
+    );
+    let library = &installed
+        .plan
+        .artifacts
+        .last()
+        .unwrap_or_else(|| panic!("library"))
+        .destination;
+    let (parent, leaf) = super::super::download::existing_parent(paths.root(), library)
+        .unwrap_or_else(|_| panic!("parent"))
+        .unwrap_or_else(|| panic!("cache"));
+    parent
+        .write_atomic_durable(leaf, b"corrupt")
+        .unwrap_or_else(|_| panic!("corrupt"));
+    let report = cleanup(&paths, installed.instance_id, &Cancellation::default())
+        .unwrap_or_else(|_| panic!("corrupt cleanup"));
+    assert_eq!(report.details[0].reason, "unverifiedLibraries");
+    assert!(root.join(&relative).join("lwjgl.dll").exists());
+    drop(private);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn failed_spawn_inventory_does_not_leave_an_empty_generation() {
+    let (paths, root, installed) = runtime_fixture();
+    capture(&paths, installed.instance_id)
+        .unwrap_or_else(|_| panic!("capture"))
+        .unwrap_or_else(|| panic!("tracking"))
+        .abort();
+    assert!(
+        !root
+            .join(installed.native_directory().unwrap_or_default())
+            .exists()
+    );
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn unfinished_runs_idle_files_and_replaced_files_are_not_adopted() {
+    for scenario in ["unfinished", "idle", "replaced"] {
+        let (paths, root, installed) = runtime_fixture();
+        let observation = capture(&paths, installed.instance_id)
+            .unwrap_or_else(|_| panic!("capture"))
+            .unwrap_or_else(|| panic!("tracking"))
+            .publish()
+            .unwrap_or_else(|_| panic!("publish"));
+        let relative = installed.native_directory().unwrap_or_default();
+        let private = private_fs::PrivateDir::open(root.join(&relative))
+            .unwrap_or_else(|_| panic!("generation"));
+        if scenario == "idle" {
+            observation.finish().unwrap_or_else(|_| panic!("finish"));
+            private
+                .write_atomic_durable("lwjgl.dll", b"native")
+                .unwrap_or_else(|_| panic!("idle"));
+        } else {
+            private
+                .write_atomic_durable("lwjgl.dll", b"native")
+                .unwrap_or_else(|_| panic!("runtime"));
+            if scenario == "replaced" {
+                observation.finish().unwrap_or_else(|_| panic!("finish"));
+                private
+                    .write_atomic_durable("lwjgl.dll", b"native")
+                    .unwrap_or_else(|_| panic!("replace"));
+            }
+        }
+        drop(private);
+        retire(&root, &installed);
+        let report = cleanup(&paths, installed.instance_id, &Cancellation::default())
+            .unwrap_or_else(|_| panic!("cleanup"));
+        assert_eq!(report.cleaned_generations, 0, "{scenario}");
+        assert_eq!(
+            std::fs::read(root.join(relative).join("lwjgl.dll")).unwrap_or_default(),
+            b"native",
+            "{scenario}"
+        );
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+}
+
+#[test]
+fn runtime_child_fixture() {
+    if !std::env::args().any(|arg| arg == "--exact") {
+        return;
+    }
+    let game = std::env::current_dir().unwrap_or_else(|_| panic!("game"));
+    let root = game.parent().unwrap_or_else(|| panic!("instance"));
+    let installed: InstalledLock = read_json(root, "installed.json")
+        .unwrap_or_default()
+        .unwrap_or_else(|| panic!("manifest"));
+    std::fs::write(
+        root.join(installed.native_directory().unwrap_or_default())
+            .join("lwjgl.dll"),
+        b"native",
+    )
+    .unwrap_or_else(|_| panic!("runtime extraction"));
+    std::process::exit(3);
+}
+
+#[tokio::test]
+async fn owned_child_exit_publishes_runtime_identity_before_releasing_lease() {
+    let (paths, root, installed) = runtime_fixture();
+    let command = super::super::launch::LaunchCommand {
+        executable: std::env::current_exe().unwrap_or_else(|_| panic!("test executable")),
+        directory: paths
+            .game_directory(installed.instance_id)
+            .unwrap_or_else(|_| panic!("game")),
+        args: vec![
+            "--exact".into(),
+            "minecraft::native_cache::tests::runtime_child_fixture".into(),
+            "--nocapture".into(),
+        ],
+        redactions: vec![],
+    };
+    let game = super::super::process::LaunchLease::acquire(&paths, installed.instance_id)
+        .unwrap_or_else(|_| panic!("lease"))
+        .spawn(
+            command,
+            crate::operation::ProcessSessionId::new(),
+            crate::operation::OperationId::new(),
+        )
+        .unwrap_or_else(|_| panic!("spawn"));
+    let exit = tokio::time::timeout(std::time::Duration::from_secs(15), game.wait())
+        .await
+        .unwrap_or_else(|_| panic!("timeout"))
+        .unwrap_or_else(|_| panic!("wait"));
+    assert_eq!(exit.code, Some(3));
+    assert!(!game.events().iter().any(|event| matches!(
+        event.kind,
+        super::super::process::ProcessEventKind::NativeTrackingUnavailable
+    )));
+    retire(&root, &installed);
+    assert_eq!(
+        cleanup(&paths, installed.instance_id, &Cancellation::default())
+            .unwrap_or_else(|_| panic!("cleanup"))
+            .cleaned_generations,
+        1
+    );
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn matching_untracked_files_and_runtime_hard_links_remain_unowned() {
+    let (paths, root, installed) = runtime_fixture();
+    let observation = capture(&paths, installed.instance_id)
+        .unwrap_or_else(|_| panic!("capture"))
+        .unwrap_or_else(|| panic!("tracking"))
+        .publish()
+        .unwrap_or_else(|_| panic!("publish"));
+    let relative = installed.native_directory().unwrap_or_default();
+    let private =
+        private_fs::PrivateDir::open(root.join(&relative)).unwrap_or_else(|_| panic!("generation"));
+    private
+        .write_atomic_durable("lwjgl.dll", b"native")
+        .unwrap_or_else(|_| panic!("runtime"));
+    let alias = root.join("keep-alias.dll");
+    std::fs::hard_link(root.join(&relative).join("lwjgl.dll"), &alias)
+        .unwrap_or_else(|_| panic!("link"));
+    let unknown = format!("natives/{}", Uuid::new_v4());
+    let (untracked, _) =
+        super::super::download::ensure_parent(&root, &format!("{unknown}/lwjgl.dll"))
+            .unwrap_or_else(|_| panic!("untracked"));
+    untracked
+        .write_atomic_durable("lwjgl.dll", b"native")
+        .unwrap_or_else(|_| panic!("matching DLL"));
+    drop(untracked);
+    drop(private);
+    observation
+        .finish()
+        .unwrap_or_else(|_| panic!("completed execution"));
+    retire(&root, &installed);
+    let report = cleanup(&paths, installed.instance_id, &Cancellation::default())
+        .unwrap_or_else(|_| panic!("cleanup"));
+    assert_eq!(report.untracked_generations, 1);
+    assert_eq!(report.retained_generations, 1);
+    assert!(
+        report
+            .details
+            .iter()
+            .any(|detail| detail.directory == unknown && detail.reason == "missingOwnership")
+    );
+    assert_eq!(std::fs::read(alias).unwrap_or_default(), b"native");
+    assert!(root.join(&unknown).join("lwjgl.dll").exists());
+    assert!(!root.join(&unknown).join(RECEIPT).exists());
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn runtime_inventory_survives_interrupted_removal() {
+    let (paths, root, mut installed) = runtime_fixture();
+    let relative = installed.native_directory().unwrap_or_default();
+    let (base, _) = super::super::download::ensure_parent(&root, &format!("{relative}/base.dll"))
+        .unwrap_or_else(|_| panic!("base directory"));
+    base.write_atomic_durable("base.dll", b"native")
+        .unwrap_or_else(|_| panic!("base"));
+    drop(base);
+    installed
+        .native_files
+        .push(super::super::natives::NativeFile {
+            path: "base.dll".into(),
+            sha1: format!("{:x}", Sha1::digest(b"native")),
+            size: 6,
+        });
+    write_json(&root, "installed.json", &installed).unwrap_or_else(|_| panic!("base manifest"));
+    record(&root, &installed).unwrap_or_else(|_| panic!("base ownership"));
+    let observation = capture(&paths, installed.instance_id)
+        .unwrap_or_else(|_| panic!("capture"))
+        .unwrap_or_else(|| panic!("tracking"))
+        .publish()
+        .unwrap_or_else(|_| panic!("publish"));
+    let relative = installed.native_directory().unwrap_or_default();
+    let private =
+        private_fs::PrivateDir::open(root.join(&relative)).unwrap_or_else(|_| panic!("generation"));
+    private
+        .write_atomic_durable("lwjgl.dll", b"native")
+        .unwrap_or_else(|_| panic!("runtime"));
+    drop(private);
+    observation
+        .finish()
+        .unwrap_or_else(|_| panic!("completed execution"));
+    let mut receipt: Generation = read_json(&root.join(&relative), RECEIPT)
+        .unwrap_or_default()
+        .unwrap_or_else(|| panic!("receipt"));
+    runtime::extend(
+        &paths,
+        &root,
+        &mut receipt,
+        &Cancellation::default(),
+        &mut runtime::ArchiveCache::new(),
+    )
+    .unwrap_or_else(|_| panic!("inventory"));
+    record(&root, &installed).unwrap_or_else(|_| panic!("preserve extended runtime inventory"));
+    let mut recorded = installed.clone();
+    recorded.native_files = receipt.files;
+    super::super::maintenance::natives(&root, &recorded, true)
+        .unwrap_or_else(|_| panic!("interrupted removal"));
+    assert!(root.join(&relative).join(RECEIPT).exists());
+    retire(&root, &installed);
+    assert_eq!(
+        cleanup(&paths, installed.instance_id, &Cancellation::default())
+            .unwrap_or_else(|_| panic!("resume"))
+            .cleaned_generations,
+        1
+    );
+    assert!(!root.join(relative).exists());
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn future_runtime_receipts_are_preserved_without_rewriting() {
+    let (paths, root, installed) = runtime_fixture();
+    capture(&paths, installed.instance_id)
+        .unwrap_or_else(|_| panic!("capture"))
+        .unwrap_or_else(|| panic!("tracking"))
+        .publish()
+        .unwrap_or_else(|_| panic!("publish"));
+    let relative = installed.native_directory().unwrap_or_default();
+    let mut receipt: Generation = read_json(&root.join(&relative), RECEIPT)
+        .unwrap_or_default()
+        .unwrap_or_else(|| panic!("receipt"));
+    receipt.schema = 999;
+    write_json(&root, &format!("{relative}/{RECEIPT}"), &receipt)
+        .unwrap_or_else(|_| panic!("future"));
+    let before = std::fs::read(root.join(&relative).join(RECEIPT)).unwrap_or_default();
+    assert!(capture(&paths, installed.instance_id).is_err());
+    retire(&root, &installed);
+    let report = cleanup(&paths, installed.instance_id, &Cancellation::default())
+        .unwrap_or_else(|_| panic!("cleanup"));
+    assert_eq!(report.details[0].reason, "invalidOwnership");
+    assert_eq!(
+        std::fs::read(root.join(&relative).join(RECEIPT)).unwrap_or_default(),
+        before
+    );
+    let mut invalid = serde_json::to_value(&receipt).unwrap_or_else(|_| panic!("value"));
+    invalid["schema"] = serde_json::json!(2);
+    invalid["runtime"]["baseline"] = serde_json::json!(["../player-data"]);
+    write_json(&root, &format!("{relative}/{RECEIPT}"), &invalid)
+        .unwrap_or_else(|_| panic!("invalid baseline"));
+    let before = std::fs::read(root.join(&relative).join(RECEIPT)).unwrap_or_default();
+    let report = cleanup(&paths, installed.instance_id, &Cancellation::default())
+        .unwrap_or_else(|_| panic!("invalid cleanup"));
+    assert_eq!(report.details[0].reason, "invalidOwnership");
+    assert_eq!(
+        std::fs::read(root.join(&relative).join(RECEIPT)).unwrap_or_default(),
+        before
+    );
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[cfg(windows)]
+#[test]
+fn open_creation_handles_report_access_failure_and_cleanup_can_be_retried() {
+    let (paths, root, installed) = runtime_fixture();
+    let relative = installed.native_directory().unwrap_or_default();
+    let (held, _) =
+        super::super::download::ensure_parent(&root, &format!("{relative}/placeholder"))
+            .unwrap_or_else(|_| panic!("generation"));
+    let observation = capture(&paths, installed.instance_id)
+        .unwrap_or_else(|_| panic!("capture"))
+        .unwrap_or_else(|| panic!("tracking"))
+        .publish()
+        .unwrap_or_else(|_| panic!("publish"));
+    held.write_atomic_durable("lwjgl.dll", b"native")
+        .unwrap_or_else(|_| panic!("runtime"));
+    observation
+        .finish()
+        .unwrap_or_else(|_| panic!("completed execution"));
+    retire(&root, &installed);
+    let report = cleanup(&paths, installed.instance_id, &Cancellation::default())
+        .unwrap_or_else(|_| panic!("retained"));
+    assert_eq!(report.details[0].reason, "accessFailure");
+    assert!(root.join(&relative).join("lwjgl.dll").exists());
+    drop(held);
+    assert_eq!(
+        cleanup(&paths, installed.instance_id, &Cancellation::default())
+            .unwrap_or_else(|_| panic!("retry"))
+            .cleaned_generations,
+        1
+    );
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}

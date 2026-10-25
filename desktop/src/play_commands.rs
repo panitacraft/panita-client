@@ -252,6 +252,7 @@ impl PlayController {
                 "context": event.log_context.as_deref(), "cdata":event.cdata,
                 "stream": if stream == OutputStream::Stdout { "stdout" } else { "stderr" }, "text": if text == "[sensitive output omitted]" { "[salida sensible omitida]" } else { &text }})),
             ProcessEventKind::OutputDiscarded { .. } => Some(json!({"sequence":page.offset + index,"stream": "notice", "text": "Se omitió una línea demasiado larga o una salida que no pudo leerse."})),
+            ProcessEventKind::NativeTrackingUnavailable => Some(json!({"sequence":page.offset + index,"stream":"notice","text":"No pudimos registrar la propiedad de los archivos nativos de esta ejecución. La limpieza conservará los archivos que no pueda verificar."})),
             _ => None,
         }).collect();
         Ok(
