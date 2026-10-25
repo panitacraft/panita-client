@@ -340,3 +340,89 @@ Prism source is background for JSON persistence, not code to copy or a guarantee
 - https://github.com/PrismLauncher/PrismLauncher/blob/develop/launcher/minecraft/auth/AccountList.cpp
 
 OAuth reference: https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow
+
+## Annex B. Maintenance and Desktop Decisions Preserved from the README
+
+These existing decisions and implementation boundaries were consolidated from the
+README on 2026-10-25. They supplement the rules above; they do not authorize Phase 7
+implementation or a release. Historical test counts and individual measurements
+are evidence, not product guarantees.
+
+### Updates, repair, and world backups
+
+- Require explicit confirmation showing the installed and requested Minecraft
+  versions before a version transition. Keep the previous installation authoritative
+  until verified publication, and recover interrupted publication before Play.
+  Updates and repair require a current enabled catalog response; neither uses the
+  offline Play fallback. Local uninstall does not require catalog connectivity.
+- Repair uses the recorded exact installation plan and Minecraft version, verifies
+  Minecraft/Java caches, probes Java, and prepares a fresh native generation when
+  required. Failed preparation preserves the previous installation descriptor.
+  Repair retains previous native generations until explicit cleanup. Apply §4.1's
+  disposable-native policy; old ownership receipts do not gate native deletion.
+- Default the version-transition confirmation to backing up worlds. Completed
+  backups contain only `minecraft/saves/`, stored inside the instance as
+  `world-backups/{operation}/worlds.zip`. Publish schema-versioned `backup.json`
+  only after ZIP read-back verification, identifying the instance and installed
+  version at backup time. Reject linked/redirected entries, unsafe names, and
+  detected source changes. Preserve incomplete directories without a completed receipt.
+- Backups exclude account data. Updating never restores or deletes worlds. Explain
+  that opening a world in another Minecraft version can change it and reverting
+  game files cannot undo those changes. Reinstalling against a changed catalog pin
+  uses the same explicit version-transition/backup workflow. Full player-data
+  removal and shared-cache cleanup remain outside these maintenance controls.
+- Repair/Uninstall controls require an active recorded installation plan; damaged
+  cache files remain repairable. Incomplete installations retain install/retry
+  controls. Frontend manifest hints never replace backend operation/identity checks.
+- Do not run native cleanup or runtime-ownership tracking on Play or game exit.
+
+### Settings and application paths
+
+- Use `%APPDATA%\PanitaClient` on Windows and
+  `${XDG_DATA_HOME:-~/.local/share}/PanitaClient` on Linux for private app data.
+- Read global settings schemas 1/2 without rewriting them until a successful save.
+  Selection/window writers preserve the latest launch settings under the shared
+  writer lock. Save window state on close/hide, but do not restore hidden or
+  minimized state on the next launch. Older builds cannot read disk schema 3.
+- Keep RAM sliders, numeric controls, and editable JVM memory synchronized. Accept
+  one `-Xmx` value in MiB (`M`) or GiB (`G`) as authoritative RAM and exclude it
+  from additional JVM options to prevent duplicate heap arguments. Preserve global
+  versus per-instance inheritance. Custom Java paths remain unsupported by launch
+  preflight; the settings UI may clear an existing override.
+- `console_on_start` defaults to false globally; instances inherit it unless
+  explicitly overridden. Capture the effective preference for each Play attempt
+  and open the execution viewer after process creation. Report viewer-opening
+  failures separately without stopping the owned game.
+
+### Diagnostics and execution viewer boundaries
+
+- Keep the latest 256 structured launcher events in memory for the current process,
+  separate from unlimited Minecraft execution history. Use fixed event categories
+  and error codes; download ticks must not flood the viewer. Diagnostics remain
+  available when account initialization fails and provide no export or account,
+  callback, launch-argument, or raw game-log access.
+- Optional support identifiers are random process/session and operation UUIDs.
+  They correlate one process or action; they are neither content hashes nor online
+  report lookup codes. Clear structured events on process exit.
+- Bound execution-viewer IPC/rendered pages and search scans to 500 process events
+  per request. Coalesce scoped change notifications over approximately 100 ms and
+  catch up sequentially. Search is literal and case-insensitive across retained
+  redacted output; it never reads files. Local clear only hides earlier output.
+- Omit lines over 8 KiB with a notice; bound child-exit draining to two seconds.
+  Capture depends on stdout/stderr flushing and does not guarantee every internal
+  Minecraft event. Bound the Windows shell wait when opening crash reports.
+
+### Build and qualification boundaries
+
+- Retain the local `private-fs` patch and its Linux regression checks. Its
+  proc-descriptor publication fallback resolves the earlier unprivileged
+  `linkat(AT_EMPTY_PATH)` blocker while retaining private creation, identity,
+  atomicity, and durability checks. See `vendor/private-fs/PANITA-PATCH.md`.
+- The Linux build baseline is Ubuntu 24.04. Runtime executables require owner-only
+  0700 permissions; private metadata remains 0600. Existing BOX development
+  packages prevent clean-install qualification.
+- Phase 6 was accepted on 2026-10-25. Its closure is recorded at
+  https://github.com/panitacraft/panita-client/issues/8. Installer polish,
+  clean-machine and advertised-platform qualification, release preparation, and
+  distribution remain Phase 7 work. Do not treat earlier BOX results as fresh
+  Linux native acceptance of the latest Phase 6 changes.
