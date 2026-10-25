@@ -53,8 +53,12 @@ Download ticks do not add duplicate events. Optional support details contain onl
 process/session and operation UUIDs. This command remains available when account
 initialization fails. It does not read account storage, callbacks, launch arguments
 or raw Minecraft log/console files, and provides no export. These in-memory events
-are cleared on process exit; this is not a persistent crash-log viewer. Native
-keyboard/layout and full desktop E2E qualification remain incomplete.
+are cleared on process exit; this is not a persistent crash-log viewer.
+Support identifiers are random UUIDs: the session groups one launcher process,
+while an operation groups one action. Share the event/error context with its UUIDs
+for correlation; they are neither content hashes nor online report lookup codes.
+
+Native keyboard/layout and full desktop E2E qualification remain incomplete.
 
 Native validation on 2026-10-22 used an isolated Windows x64 debug build and a
 synthetic offline account. It verified account/preferences restart, maximized-window
@@ -419,8 +423,11 @@ console excerpt. The launcher restores its hidden main window for this notificat
 requested stops do not produce crash dialogs. The report-folder action opens only
 the current instance's existing `minecraft/crash-reports/` directory and explains
 when no report folder exists. A separate per-execution Minecraft log window shows
-a bounded, redacted stdout/stderr snapshot, follows new output while running and
-remains readable after exit until the launcher closes. It does not read historical
+an unlimited-entry, redacted stdout/stderr history in memory, follows new output
+while running and pages through earlier entries without dropping them by count.
+Each IPC/rendered page is bounded to 500 process events; this is a page size,
+not a history limit. Long sessions consume more memory. History remains readable
+after exit until the launcher closes or a new execution replaces it. It does not read historical
 log files, export output or include account data or launch commands. Structured
 launcher diagnostics remain separate.
 
@@ -475,4 +482,4 @@ Minecraft”, off by default. Each instance inherits this setting unless it has 
 explicit on/off override. The effective preference is captured for each Play
 attempt, and the existing execution log window opens automatically after process
 creation. A viewer-opening failure is reported separately and never stops the
-owned game. The console's existing bounded redaction and lifecycle rules apply.
+owned game. Per-line size, redaction and lifecycle protections still apply.

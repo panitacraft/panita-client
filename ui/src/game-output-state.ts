@@ -1,11 +1,19 @@
 import type { PlaySnapshot } from './play-state';
 
-export type GameLogSnapshot = { lines: { stream: 'stdout' | 'stderr' | 'notice'; text: string }[]; running: boolean; exitCode: number | null };
+export type GameLogSnapshot = {
+  lines: { stream: 'stdout' | 'stderr' | 'notice'; text: string }[];
+  running: boolean; exitCode: number | null;
+  offset: number; nextOffset: number; total: number; pageSize: number;
+};
+
+export function previousLogPage(snapshot: GameLogSnapshot): number {
+  return Math.max(0, snapshot.offset - snapshot.pageSize);
+}
 
 /** Render Mojang's console XML as plain text, without evaluating markup. */
 export function readableGameLines(lines: GameLogSnapshot['lines']): GameLogSnapshot['lines'] {
   let prefix = '';
-  return lines.slice(-256).flatMap(line => {
+  return lines.flatMap(line => {
     if (line.stream !== 'stdout') return [line];
     if (/^\s*<log4j:Event\b/.test(line.text)) {
       const level = /\blevel="([^"]*)"/.exec(line.text)?.[1];

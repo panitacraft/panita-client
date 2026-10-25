@@ -216,7 +216,7 @@ async fn spawn_failure_releases_lease_and_returns_only_fixed_error() {
 }
 
 #[tokio::test]
-async fn output_flood_is_bounded_and_unterminated_secret_is_redacted() {
+async fn output_history_is_unlimited_paged_and_unterminated_secrets_are_redacted() {
     let (paths, id) = fixture();
     let command = Arc::new(command(&paths, id, "unused"));
     let events = Arc::new(Events {
@@ -225,7 +225,7 @@ async fn output_flood_is_bounded_and_unterminated_secret_is_redacted() {
         instance: id,
         records: Mutex::new(VecDeque::new()),
     });
-    let input = format!("{}final {TOKEN}", "line\n".repeat(400));
+    let input = format!("{}final {TOKEN}", "line\n".repeat(10_000));
     read_output(
         Some(input.as_bytes()),
         OutputStream::Stdout,
@@ -237,11 +237,32 @@ async fn output_flood_is_bounded_and_unterminated_secret_is_redacted() {
         .records
         .lock()
         .unwrap_or_else(|poison| poison.into_inner());
-    assert_eq!(records.len(), MAX_EVENTS);
+    assert_eq!(records.len(), 10_001);
+    assert!(matches!(&records[0].kind, ProcessEventKind::Output { text, .. } if text == "line"));
     assert!(
         matches!(&records.back().unwrap_or_else(|| panic!("last event")).kind, ProcessEventKind::Output { text, .. } if text == "final [redacted]")
     );
     assert!(!format!("{records:?}").contains(TOKEN));
+    drop(records);
+    let mut offset = 0;
+    while offset < 10_001 {
+        let page = events.page(Some(offset), usize::MAX);
+        assert_eq!(page.offset, offset);
+        assert_eq!(page.total, 10_001);
+        assert!(page.records.len() <= OUTPUT_PAGE_SIZE);
+        assert!(!page.records.is_empty());
+        offset += page.records.len();
+    }
+    assert_eq!(offset, 10_001);
+    let tail = events.page(None, OUTPUT_PAGE_SIZE);
+    assert_eq!(tail.offset, 10_001 - OUTPUT_PAGE_SIZE);
+    assert!(
+        matches!(&tail.records.last().unwrap_or_else(|| panic!("last")).kind,
+        ProcessEventKind::Output { text, .. } if text == "final [redacted]")
+    );
+    let empty = events.page(Some(usize::MAX), 0);
+    assert_eq!(empty.offset, 10_001);
+    assert!(empty.records.is_empty());
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
 }
 

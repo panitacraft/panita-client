@@ -222,7 +222,16 @@ impl PlayController {
     }
 
     fn game_output(&self, instance: Uuid, request: Uuid) -> Result<Value, ErrorCode> {
-        use launcher_core::minecraft::process::{OutputStream, ProcessEventKind};
+        self.game_output_page(instance, request, None)
+    }
+
+    fn game_output_page(
+        &self,
+        instance: Uuid,
+        request: Uuid,
+        offset: Option<usize>,
+    ) -> Result<Value, ErrorCode> {
+        use launcher_core::minecraft::process::{OUTPUT_PAGE_SIZE, OutputStream, ProcessEventKind};
         let state = self
             .state
             .lock()
@@ -236,13 +245,16 @@ impl PlayController {
             .last_game
             .as_ref()
             .ok_or(ErrorCode::OperationCancelled)?;
-        let lines: Vec<_> = game.events().into_iter().filter_map(|event| match event.kind {
+        let page = game.events_page(offset, OUTPUT_PAGE_SIZE);
+        let next = page.offset + page.records.len();
+        let lines: Vec<_> = page.records.into_iter().filter_map(|event| match event.kind {
             ProcessEventKind::Output { stream, text } => Some(json!({"stream": if stream == OutputStream::Stdout { "stdout" } else { "stderr" }, "text": if text == "[sensitive output omitted]" { "[salida sensible omitida]" } else { &text }})),
             ProcessEventKind::OutputDiscarded { .. } => Some(json!({"stream": "notice", "text": "Se omitió una línea demasiado larga o una salida que no pudo leerse."})),
             _ => None,
         }).collect();
         Ok(
-            json!({"lines":lines, "running":entry.game.is_some(), "exitCode":entry.exit.and_then(|exit|exit.code)}),
+            json!({"lines":lines, "running":entry.game.is_some(), "exitCode":entry.exit.and_then(|exit|exit.code),
+                "offset":page.offset,"nextOffset":next,"total":page.total,"pageSize":OUTPUT_PAGE_SIZE}),
         )
     }
 
@@ -645,11 +657,14 @@ pub(super) fn game_log_snapshot(
     state: tauri::State<'_, DesktopState>,
     instance_id: Uuid,
     request_id: Uuid,
+    offset: Option<usize>,
 ) -> Result<Value, ErrorCode> {
     if window.label() != "main" && window.label() != log_label(instance_id, request_id) {
         return Err(ErrorCode::InvalidData);
     }
-    state.plays.game_output(instance_id, request_id)
+    state
+        .plays
+        .game_output_page(instance_id, request_id, offset)
 }
 
 #[tauri::command]

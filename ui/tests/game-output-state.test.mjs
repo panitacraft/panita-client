@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { logWindowIdentity, readableGameLines, unacknowledgedCrashes } from '../src/game-output-state.ts';
+import { logWindowIdentity, previousLogPage, readableGameLines, unacknowledgedCrashes } from '../src/game-output-state.ts';
 
 const instanceId = '65ee13c6-bc34-4914-aa09-41205f3691a0';
 const requestId = '7238fb86-89bf-44a1-bd6c-96362be534bb';
@@ -17,7 +17,17 @@ test('Minecraft console XML is readable plain text while stderr and ordinary out
     { stream: 'stdout', text: '[INFO/Render thread] Game ready <script>text only</script>' },
     lines[3], lines[4],
   ]);
-  assert.equal(readableGameLines(Array(300).fill(lines[4])).length, 256);
+  const history = [lines[3], ...Array(10_000).fill(lines[4]), { stream: 'stderr', text: 'last' }];
+  const readable = readableGameLines(history);
+  assert.equal(readable.length, 10_002);
+  assert.deepEqual(readable[0], lines[3]);
+  assert.deepEqual(readable.at(-1), history.at(-1));
+});
+
+test('console history pages navigate to the beginning without imposing a retention cap', () => {
+  assert.equal(previousLogPage({ offset: 1234, pageSize: 500 }), 734);
+  assert.equal(previousLogPage({ offset: 234, pageSize: 500 }), 0);
+  assert.equal(previousLogPage({ offset: 0, pageSize: 500 }), 0);
 });
 
 test('log windows bind their identity to one instance and execution', () => {

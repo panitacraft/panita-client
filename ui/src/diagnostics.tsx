@@ -32,6 +32,7 @@ function DiagnosticViewer() {
           <dl><dt>Sesión del cliente</dt><dd>{record.processSessionId}</dd>
             {record.operationId && <><dt>Operación</dt><dd>{record.operationId}</dd></>}
           </dl>
+          <p>La sesión agrupa los eventos de una ejecución del cliente; la operación relaciona los eventos de una misma acción. Al reportar un problema, comparte el evento, su error y estos identificadores. No son códigos de acceso ni permiten consultar un informe en línea.</p>
         </details>
       </li>)}
     </ol>}

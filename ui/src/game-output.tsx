@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { usePlaySnapshot } from './play';
 import { messageForError } from './errors';
-import { readableGameLines, unacknowledgedCrashes, type GameLogSnapshot } from './game-output-state';
+import { previousLogPage, readableGameLines, unacknowledgedCrashes, type GameLogSnapshot } from './game-output-state';
 
 export function CrashNotifications({ names }: { names: Record<string, string> }) {
   const snapshot = usePlaySnapshot();
@@ -55,30 +55,42 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
   const [snapshot, setSnapshot] = useState<GameLogSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [follow, setFollow] = useState(true);
+  const [offset, setOffset] = useState<number | null>(null);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function refresh() {
       try {
-        const next = await invoke<GameLogSnapshot>('game_log_snapshot', { instanceId, requestId });
+        const next = await invoke<GameLogSnapshot>('game_log_snapshot', { instanceId, requestId, offset });
         if (active) { setSnapshot(next); setError(null); }
         if (active && next.running) timer = setTimeout(() => void refresh(), 1000);
       } catch (cause) { if (active) setError(messageForError(cause)); }
     }
     void refresh();
     return () => { active = false; clearTimeout(timer); };
-  }, [instanceId, requestId]);
+  }, [instanceId, requestId, offset]);
   useEffect(() => { if (follow) end.current?.scrollIntoView({ block: 'end' }); }, [snapshot, follow]);
   return <main><section className="game-log-section">
     <h1>Registro de Minecraft</h1>
-    <p>Últimas 256 entradas de esta ejecución. Se ocultan datos sensibles y se omiten líneas demasiado largas. Este visor no guarda ni exporta el registro.</p>
+    <p>Historial de esta ejecución sin límite de entradas, conservado solo en memoria. Se muestra por páginas sin descartar entradas anteriores por cantidad. Se ocultan datos sensibles y se omiten líneas demasiado largas. Este visor no guarda ni exporta el registro.</p>
+    <p>Las sesiones largas consumen más memoria. El historial deja de estar disponible al cerrar el cliente o reemplazar esta ejecución por otra.</p>
     <p>Instancia: {instanceId}</p>
-    <label><input type="checkbox" checked={follow} onChange={event => setFollow(event.target.checked)} /> Seguir las entradas nuevas</label>
+    <label><input type="checkbox" checked={follow} onChange={event => {
+      setFollow(event.target.checked);
+      setOffset(event.target.checked ? null : snapshot?.offset ?? 0);
+    }} /> Seguir las entradas nuevas</label>
     {error && <p role="alert">{error} Cierra esta ventana y abre el registro desde la ejecución actual.</p>}
     {!snapshot && !error && <p role="status">Cargando registro…</p>}
     {snapshot && <>
       <p role="status">{snapshot.running ? 'Minecraft está en ejecución.' : `Minecraft se cerró.${snapshot.exitCode !== null ? ` Código de salida: ${snapshot.exitCode}.` : ''}`}</p>
+      <nav aria-label="Páginas del registro de Minecraft">
+        <button type="button" disabled={snapshot.offset === 0} onClick={() => { setFollow(false); setOffset(0); }}>Inicio</button>
+        <button type="button" disabled={snapshot.offset === 0} onClick={() => { setFollow(false); setOffset(previousLogPage(snapshot)); }}>Anterior</button>
+        <button type="button" disabled={snapshot.nextOffset >= snapshot.total} onClick={() => { setFollow(false); setOffset(snapshot.nextOffset); }}>Siguiente</button>
+        <button type="button" onClick={() => { setFollow(true); setOffset(null); }}>Últimas entradas</button>
+      </nav>
+      <p>Eventos {snapshot.total === 0 ? 0 : snapshot.offset + 1}–{snapshot.nextOffset} de {snapshot.total}. El tamaño de página no limita el historial conservado.</p>
       <div className="game-log-lines" tabIndex={0} aria-label="Entradas del registro de Minecraft">
         {snapshot.lines.length === 0 && <p>Todavía no hay entradas disponibles.</p>}
         {readableGameLines(snapshot.lines).map((line, index) => <pre key={index}>[{line.stream}] {line.text}</pre>)}

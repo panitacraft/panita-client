@@ -19,8 +19,8 @@ use crate::operation::{OperationId, ProcessSessionId};
 use crate::paths::AppPaths;
 use crate::registry::InstanceRegistry;
 
-const MAX_EVENTS: usize = 256;
 const MAX_LINE: usize = 8192;
+pub const OUTPUT_PAGE_SIZE: usize = 500;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputStream {
@@ -68,6 +68,13 @@ pub struct ProcessEvent {
     pub kind: ProcessEventKind,
 }
 
+/// A bounded read of an unlimited in-memory execution history.
+pub struct ProcessEventPage {
+    pub offset: usize,
+    pub total: usize,
+    pub records: Vec<ProcessEvent>,
+}
+
 struct Events {
     process: ProcessSessionId,
     operation: OperationId,
@@ -81,15 +88,32 @@ impl Events {
             .records
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        if records.len() == MAX_EVENTS {
-            records.pop_front();
-        }
         records.push_back(ProcessEvent {
             process: self.process,
             operation: self.operation,
             instance: self.instance,
             kind,
         });
+    }
+
+    fn page(&self, offset: Option<usize>, limit: usize) -> ProcessEventPage {
+        let records = self
+            .records
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let total = records.len();
+        let limit = limit.clamp(1, OUTPUT_PAGE_SIZE);
+        let offset = offset
+            .unwrap_or_else(|| total.saturating_sub(limit))
+            .min(total);
+        ProcessEventPage {
+            offset,
+            total,
+            records: records
+                .range(offset..offset.saturating_add(limit).min(total))
+                .cloned()
+                .collect(),
+        }
     }
 }
 
@@ -238,6 +262,10 @@ pub struct RunningGame {
 }
 
 impl RunningGame {
+    pub fn events_page(&self, offset: Option<usize>, limit: usize) -> ProcessEventPage {
+        self.events.page(offset, limit)
+    }
+
     pub fn events(&self) -> Vec<ProcessEvent> {
         self.events
             .records
