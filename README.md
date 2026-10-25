@@ -4,23 +4,31 @@ Panita Client is an unofficial Minecraft launcher for friends. The MVP will
 install and launch two independent vanilla instances from the Panita API
 catalog, using Microsoft or explicitly selected offline accounts.
 
-This repository is in development. The desktop interface manages accounts,
-the catalog, vanilla installation progress/cancellation, and Play. The core
-development harness described below remains available for isolated checks.
-Phase 5 game launch and process lifecycle are accepted as of
-2026-10-19. Desktop Play connects installed vanilla instances to verified launch
-preflight, cancellation, per-attempt outage confirmation and game lifecycle
-status. Installation and maintenance workflows remain Phase 6; clean-machine
-and distribution qualification remain Phase 7. Phase 6 started on 2026-10-19
-with typed account commands and tested account UI state transitions. Account
-feedback rejects stale results, retries failed initialization, and retains
-incomplete sign-out cleanup warnings across account changes. The desktop connects
-the core installer, same-version retries, progress, cancellation, and catalog
-refresh. Automated lifecycle/state checks pass; native installation and maintenance
-UI acceptance and full end-to-end validation remain pending. Phase 6 also provides
-global/per-instance RAM, Minecraft window size
-and JVM settings, remembered instance selection, and launcher size/maximized-state
-persistence. These desktop additions still require native Windows/Linux acceptance.
+This repository is in development. Phase 6 desktop integration and safe instance
+maintenance were formally accepted by the owner on 2026-10-25 after the supplied
+tests, including automatic update cleanup and full native removal on uninstall,
+passed with the expected behavior. [Phase 6 tracking and closure](https://github.com/panitacraft/panita-client/issues/8)
+records the accepted scope and evidence. Phase 5 game launch/process lifecycle
+acceptance remains valid.
+
+The Spanish desktop integrates accounts, catalog/local state, install/cancel/retry,
+Play verification and supervision, global/per-instance settings, explicit updates
+with world backups, exact-plan repair, and uninstall preserving player data.
+Minecraft console history is unlimited in memory, with scoped live updates,
+formatting, search and bounded pages; structured client diagnostics remain separate.
+Native directories are disposable: manual cleanup preserves the active generation,
+successful instance updates clean obsolete generations automatically, and uninstall
+removes all natives while retaining worlds, settings, backups and shared caches.
+
+Final Windows checks pass 210 Rust tests (one intentional live-catalog skip),
+48 UI tests, formatting, Clippy, the production UI and isolated desktop build.
+The owner reports successful manual acceptance. Separate native Windows observations
+include game launch, repair and the final removal of the previously retained native
+folder. Automated fault/recovery tests are separate from real-service/manual results.
+Phase 7 retains installer polish, clean-machine and advertised-platform qualification,
+release preparation and distribution. BOX's existing development packages remain a
+clean-install limitation; this closure does not claim fresh Linux native acceptance
+for the latest Phase 6 changes or authorize a release or Phase 7 implementation.
 
 Global `settings.json` schemas 1 and 2 are read without rewriting them; the next
 successful settings/preference save writes indented disk schema 3 with a trailing
@@ -66,7 +74,7 @@ Support identifiers are random UUIDs: the session groups one launcher process,
 while an operation groups one action. Share the event/error context with its UUIDs
 for correlation; they are neither content hashes nor online report lookup codes.
 
-Native keyboard/layout and full desktop E2E qualification remain incomplete.
+The owner accepted the supplied Windows desktop, keyboard/layout and E2E tests. Clean installed-product and platform qualification remain Phase 7 work.
 
 Native validation on 2026-10-22 used an isolated Windows x64 debug build and a
 synthetic offline account. It verified account/preferences restart, maximized-window
@@ -90,8 +98,8 @@ The corrected Windows candidate also restored a deliberately damaged recorded
 Minecraft client cache through native Repair. The pinned plan, game options and a
 synthetic saves marker retained their hashes while a new generation was published.
 Native instance RAM override saving kept its 4096 MiB value separate from the
-6144 MiB global default. Broader maintenance, interruption and platform acceptance
-remain pending.
+6144 MiB global default. The owner subsequently accepted the supplied Phase 6 maintenance/recovery tests;
+clean-machine and platform qualification remain Phase 7 work.
 
 The repaired installation again reached the real main menu. Normal game exit kept
 an open launcher alive, and its diagnostic viewer showed the ordered repair/launch/
@@ -112,14 +120,16 @@ or unverifiable old native files are reported. Repair requires a current enabled
 catalog response. Failed preparation keeps the previous installation descriptor.
 
 Uninstall is available locally and preserves worlds, settings, screenshots,
-backups, unknown/modified files, and shared Minecraft/Java caches. It removes only
-unchanged manifest-owned native files and marks the installation unavailable for
-Play. A schema-3 `installed.json` tombstone retains the exact plan and stable UUID/
-directory association for reinstallation. Maintenance journal schema 3 coordinates
-repair publication and recoverable uninstall under the instance operation lock.
-Older builds cannot operate on these descriptors. Reinstalling a changed catalog
-pin uses the explicit version-transition/backup workflow. Full player-data removal
-and shared-cache cleanup are outside these controls.
+backups and shared Minecraft/Java caches. It marks the installation unavailable for
+Play before removing every native generation, including modified or untracked native
+contents. Disk schema 4 installed.json records explicit uninstalled status and keeps
+the exact plan plus stable UUID/directory association for reinstallation. A pending
+transaction remains until blocked native deletions can be retried successfully.
+Reinstalling a changed catalog pin uses the explicit version-transition/backup
+workflow. Full player-data removal and shared-cache cleanup remain outside these
+controls. Successful instance updates automatically clean obsolete natives after
+publishing the new installation; a blocked cleanup is reported without rolling back
+a valid update. Repair keeps its previous generations until explicit cleanup.
 
 The confirmation defaults to backing up worlds. Completed backups contain only
 `minecraft/saves/`, stored as `world-backups/{operation}/worlds.zip` inside the
@@ -129,8 +139,8 @@ copy was made. Linked/redirected entries, unsafe names and detected source chang
 block backup creation. Partial directories are preserved without a completed
 receipt. Backups exclude launcher account data; update never restores or deletes
 worlds. Opening a world in a new Minecraft version may change it; reverting game
-files cannot undo those world changes. Live update and native confirmation/restart
-acceptance remain pending.
+files cannot undo those world changes. The owner reports the supplied update,
+backup, confirmation and restart tests passed for Phase 6 acceptance.
 
 An isolated Windows build reached the Minecraft 26.3 and 1.21.1 main menus
 through desktop Play with a synthetic offline account. Cancellation, launcher
@@ -177,7 +187,8 @@ storage-test failure.
 The Phase 4 core resolves official version, asset and Java metadata; verifies
 downloaded hashes and sizes; reuses shared caches; and commits per-instance
 installation journals and locks. Cancellation and interruption preserve user
-files. Installation controls are not yet connected to the desktop interface.
+files. At the Phase 4 checkpoint installation controls were not yet connected to
+the desktop; Phase 6 completes that integration.
 Game execution was subsequently verified in Phase 5; final installed-platform
 qualification remains separate.
 
