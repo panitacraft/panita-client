@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="es">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panita Client — Vista previa del instalador</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px 16px; background: #0b1713; color: #efece5; font: 15px/1.5 "Segoe UI", sans-serif; }
+  .preview { margin: 0 auto 20px; max-width: 440px; }
+  .preview p { margin: 0 0 12px; color: #c4d0c8; font-size: 13px; }
+  .modes { display: flex; gap: 8px; flex-wrap: wrap; }
+  button { font: inherit; cursor: pointer; border: 0; border-radius: 8px; }
+  button:focus-visible, summary:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
+  .modes button { color: #c4d0c8; background: #1b392e; padding: 8px 12px; font-size: 13px; }
+  .modes button[aria-pressed="true"] { color: #10231e; background: #f2cf74; }
+  .window { position: relative; width: 100%; max-width: 440px; margin: auto; background: #10231e; border: 1px solid #355346; border-radius: 14px; box-shadow: 0 22px 70px #0006; overflow: hidden; }
+  .chrome { display: flex; align-items: center; justify-content: space-between; height: 45px; padding: 0 16px 0 25px; }
+  .chrome span { font-size: 12px; color: #bdc9bd; }
+  .chrome button { color: #c4d0c8; background: transparent; min-width: 36px; min-height: 36px; font-size: 22px; }
+  main { min-height: 495px; padding: 20px 30px 28px; display: flex; flex-direction: column; }
+  .brand { display: flex; align-items: center; gap: 13px; margin-bottom: 32px; }
+  .brand img { width: 53px; height: 53px; }
+  .brand strong { font-size: 20px; font-weight: 650; letter-spacing: -.5px; }
+  .eyebrow { margin: 0 0 9px; color: #f2cf74; font-size: 11px; font-weight: 650; letter-spacing: 1.5px; text-transform: uppercase; }
+  h1 { margin: 0 0 13px; font-size: 29px; line-height: 1.2; font-weight: 650; letter-spacing: -.8px; }
+  .description { margin: 0; color: #c4d0c8; font-size: 14px; }
+  .status { margin-top: 25px; padding: 17px; background: #1b392e; border-radius: 8px; }
+  .status p { margin: 0; font-size: 13px; }
+  .status .secondary { margin-top: 5px; color: #c4d0c8; font-size: 12px; overflow-wrap: anywhere; }
+  progress { display: block; width: 100%; margin: 12px 0 8px; accent-color: #f2cf74; height: 7px; }
+  details { margin-top: 13px; font-size: 12px; color: #c4d0c8; }
+  summary { cursor: pointer; }
+  #output { padding-top: 9px; line-height: 1.7; white-space: pre-line; }
+  .actions { display: flex; gap: 10px; margin-top: auto; padding-top: 34px; }
+  .actions button { min-height: 47px; padding: 11px 15px; font-size: 14px; font-weight: 650; }
+  .primary { flex: 1; background: #f2cf74; color: #18261c; }
+  .primary.danger { background: #c54c43; color: #fff; }
+  .secondary-button { background: #294739; color: #efece5; }
+  button:disabled { cursor: default; opacity: .65; }
+  footer { padding: 13px 24px; color: #bdc9bd; background: #142b22; text-align: center; font-size: 11px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 380px) { main { padding: 15px 21px 23px; } h1 { font-size: 26px; } }
+</style>
+<div class="preview">
+  <p>Vista previa del diseño · Las acciones son simuladas y no modifican tu equipo.</p>
+  <nav class="modes" aria-label="Vistas del instalador">
+    <button type="button" data-mode="install" aria-pressed="true">Instalar</button>
+    <button type="button" data-mode="update" aria-pressed="false">Actualizar</button>
+    <button type="button" data-mode="uninstall" aria-pressed="false">Desinstalar</button>
+  </nav>
+</div>
+<section class="window" aria-label="Panita Client">
+  <header class="chrome"><span>Panita Client</span><button type="button" id="close" aria-label="Cerrar vista previa">×</button></header>
+  <main>
+    <div class="brand"><img src="/logo.svg" alt=""><strong>Panita Client</strong></div>
+    <p class="eyebrow">Beta · 0.1.1-beta.1</p>
+    <h1 id="title">Todo listo para empezar</h1>
+    <p class="description" id="description">Instala Panita Client y encuentra tu próxima aventura.</p>
+    <div class="status">
+      <p id="status" role="status" aria-live="polite">Se instalará para tu usuario.</p>
+      <p class="secondary" id="detail">No necesitas instalar Java por separado.</p>
+      <progress id="progress" max="100" value="0" aria-label="Progreso de instalación" hidden></progress>
+      <details id="details" hidden><summary>Ver detalles</summary><div id="output"></div></details>
+    </div>
+    <div class="actions"><button class="secondary-button" id="cancel" type="button">Cancelar</button><button class="primary" id="primary" type="button">Instalar</button></div>
+  </main>
+  <footer>Panitacraft · Un launcher para jugar juntos</footer>
+</section>
+<script>
+  const views = {
+    install: ['Todo listo para empezar', 'Instala Panita Client y encuentra tu próxima aventura.', 'Se instalará para tu usuario.', 'No necesitas instalar Java por separado.', 'Instalar', 'Instalando Panita Client', 'Panita Client está listo', 'Ya puedes abrir el launcher y elegir una instancia.'],
+    update: ['Tu próxima aventura continúa', 'Actualiza Panita Client a la nueva versión beta.', 'Tus datos se conservarán.', 'La actualización mantiene tus cuentas, instancias y mundos.', 'Actualizar', 'Actualizando Panita Client', 'Panita Client está actualizado', 'Tus cuentas, instancias y mundos siguen disponibles.'],
+    uninstall: ['¿Desinstalar Panita Client?', 'Se eliminará el launcher de este equipo.', 'Tus datos se conservarán.', 'Las cuentas guardadas, ajustes, instancias y mundos permanecerán en este equipo.', 'Desinstalar', 'Desinstalando Panita Client', 'Panita Client se desinstaló', 'Tus datos siguen en este equipo. Puedes reinstalar el launcher cuando quieras.'],
+  };
+  const byId = id => document.getElementById(id);
+  let mode = 'install';
+  let timer;
+  let state = 'ready';
+  function render(nextMode) {
+    clearInterval(timer);
+    mode = nextMode;
+    state = 'ready';
+    const view = views[mode];
+    ['title', 'description', 'status', 'detail', 'primary'].forEach((id, index) => byId(id).textContent = view[index]);
+    byId('primary').classList.toggle('danger', mode === 'uninstall');
+    byId('primary').disabled = false;
+    byId('cancel').hidden = false;
+    byId('progress').hidden = true;
+    byId('progress').value = 0;
+    byId('details').hidden = true;
+    byId('output').textContent = '';
+    document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === mode)));
+  }
+  document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => render(button.dataset.mode)));
+  function reset() { render(mode); }
+  byId('cancel').addEventListener('click', reset);
+  byId('close').addEventListener('click', reset);
+  byId('primary').addEventListener('click', () => {
+    if (state === 'done') { reset(); return; }
+    state = 'running';
+    byId('title').textContent = views[mode][5];
+    byId('status').textContent = 'Preparando…';
+    byId('detail').textContent = 'Espera un momento.';
+    byId('progress').hidden = false;
+    byId('details').hidden = false;
+    byId('primary').disabled = true;
+    const steps = mode === 'uninstall'
+      ? ['Cerrando el launcher…', 'Eliminando archivos del launcher…', 'Retirando accesos directos…', 'Datos personales conservados.']
+      : ['Preparando la instalación…', 'Comprobando Microsoft Edge WebView2…', 'Instalando archivos del launcher…', 'Preparando accesos directos…'];
+    let step = 0;
+    timer = setInterval(() => {
+      byId('progress').value = (step + 1) * 25;
+      byId('status').textContent = steps[step];
+      byId('output').textContent += `${steps[step]}\n`;
+      step += 1;
+      if (step === steps.length) {
+        clearInterval(timer);
+        state = 'done';
+        byId('title').textContent = views[mode][6];
+        byId('description').textContent = views[mode][7];
+        byId('status').textContent = 'Proceso completado.';
+        byId('detail').textContent = 'Vista previa: no se realizaron cambios.';
+        byId('primary').textContent = 'Volver al inicio';
+        byId('primary').disabled = false;
+        byId('primary').classList.remove('danger');
+        byId('cancel').hidden = true;
+      }
+    }, 700);
+  });
+</script>
+</html>

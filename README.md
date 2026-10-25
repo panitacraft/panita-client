@@ -67,6 +67,16 @@ pnpm install --frozen-lockfile
 pnpm tauri dev
 ```
 
+Prepare a local unsigned beta candidate from a clean committed tree with
+`pnpm build:beta`. Add `--check` to inspect the version, source revision and output
+location without building. Candidates, SHA-256 checksums and provenance are written
+under `target/beta/`; the command does not publish them. Installed-product testing
+is still required before distribution. Windows candidates embed the WebView2
+bootstrapper; installing WebView2 still requires internet access when it is absent.
+
+Preview the proposed installer design with `node scripts/preview-installer.mjs`
+and open the printed local address. Its actions are simulated.
+
 See [AGENTS.md](AGENTS.md) for project rules and accepted decisions, and the
 [checks workflow](.github/workflows/checks.yml) for build and test commands.
 
