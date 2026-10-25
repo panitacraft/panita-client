@@ -17,6 +17,10 @@ pub(super) struct Current {
     catalog: serde_json::Value,
     source: CatalogSource,
     status: InstallationState,
+    #[serde(
+        serialize_with = "crate::settings::serialize_overrides",
+        deserialize_with = "crate::settings::deserialize_overrides"
+    )]
     settings: InstanceSettings,
     // Preserve nonempty legacy inventories until their ownership can be retired.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

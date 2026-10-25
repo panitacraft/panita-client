@@ -117,9 +117,7 @@ pub(crate) fn valid_directory_name(name: &str) -> bool {
 }
 
 fn formatted_json(value: &impl Serialize) -> Result<Vec<u8>, CoreError> {
-    let mut bytes = serde_json::to_vec_pretty(value).map_err(|_| invalid())?;
-    bytes.push(b'\n');
-    Ok(bytes)
+    crate::storage_json::pretty(value).map_err(|_| invalid())
 }
 
 fn io(error: std::io::Error) -> CoreError {

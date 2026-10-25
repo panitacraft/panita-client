@@ -153,6 +153,28 @@ PanitaClient/
 
 Do not introduce a separate plaintext keychain-fallback `secrets.json`; the chosen persistence mechanism is `accounts.json`.
 
+### JSON naming and formatting
+
+- Use consistent, conventional English `snake_case` keys in client-owned disk JSON.
+  Put `schema` first, then `type` for a discriminator and `id` when applicable.
+  Use two-space indentation and a trailing newline. Keep dynamic transaction
+  headers in this order as well; JSON readers must not depend on property order.
+- Prefer concise domain terms, preserving explicit units and distinctions such as
+  `ram_mib`, `account_id` versus `profile_id`, and `java_path`. Use the same names
+  for equivalent global and instance settings. Avoid inconsistent synonyms such as
+  `schema_version`/`schema` and `kind`/`type` in new disk writes.
+- Read supported legacy spellings through validated migrations or aliases, reject
+  conflicting spellings, and preserve corrupt/future data. Keep atomic writes,
+  privacy, identity checks and recovery guarantees. Never inspect real account
+  files or copy credentials into diagnostics to validate formatting.
+- Keep disk naming separate from IPC, public API payloads and authoritative
+  third-party JSON. Do not rename downloaded Minecraft/Java/catalog fields or
+  invalidate their integrity proofs merely for presentation consistency.
+
+This rule was requested by the owner on 2026-10-24. Accounts and catalog caches now
+write `schema`; operation transactions write `type`, with `kind` retained only as
+a supported legacy spelling. Existing numeric format versions remain validated.
+
 ## 5. Architecture
 
 Global settings use indented disk schema 3 with `schema`, `ram_mib`, `jvm_args`,

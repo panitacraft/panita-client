@@ -39,6 +39,13 @@ are updated through verified handles without changing permissions. Explorer stil
 shows them when “Hidden items” is enabled. Unix dot-prefixed coordination entries
 already follow the platform's hidden-file convention.
 
+Client-owned disk JSON uses `snake_case`, a leading `schema`, `type` for
+discriminators, two-space indentation and a trailing newline. Supported legacy
+keys remain readable; conflicting headers fail safely. Accounts migrate their
+legacy header under the protected writer lock without exposing credentials.
+Global and instance overrides use equivalent setting names. Downloaded third-party
+documents and frontend IPC retain their separate contracts.
+
 The Spanish client-event viewer reads the latest 256 structured events from the
 current launcher process on demand. Startup, storage/catalog errors and Play/install/
 update/repair/uninstall transitions use fixed event categories and error codes.

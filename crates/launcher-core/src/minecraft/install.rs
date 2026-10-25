@@ -118,7 +118,7 @@ pub(super) fn write_json_raw(
     relative: &str,
     value: &impl Serialize,
 ) -> Result<(), CoreError> {
-    let bytes = serde_json::to_vec(value).map_err(|_| invalid())?;
+    let bytes = crate::storage_json::pretty(value).map_err(|_| invalid())?;
     if bytes.len() > 32 * 1024 * 1024 {
         return Err(invalid());
     }

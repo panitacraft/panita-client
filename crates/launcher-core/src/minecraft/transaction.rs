@@ -17,6 +17,11 @@ const LEGACY: &str = "install-journal.json";
 
 fn canonical(mut value: Value) -> Result<Value, CoreError> {
     let object = value.as_object_mut().ok_or_else(invalid)?;
+    if let Some(kind) = object.remove("type")
+        && object.insert("kind".into(), kind).is_some()
+    {
+        return Err(invalid());
+    }
     if let Some(schema) = object.remove("schema") {
         if object.insert("schema_version".into(), schema).is_some() {
             return Err(invalid());
@@ -54,6 +59,11 @@ fn stored(mut value: Value) -> Result<Value, CoreError> {
         _ => return Err(invalid()),
     }
     object.insert("schema".into(), schema);
+    if let Some(kind) = object.remove("kind")
+        && object.insert("type".into(), kind).is_some()
+    {
+        return Err(invalid());
+    }
     if let Some(id) = object.remove("instance_id") {
         object.insert("id".into(), id);
     }
@@ -83,11 +93,11 @@ pub(super) fn write(root: &Path, value: Value) -> Result<(), CoreError> {
                 return Err(invalid());
             }
         } else {
-            write_json_raw(root, FILE, &stored(legacy)?)?;
+            write_json_raw(root, FILE, &crate::storage_json::Ordered(&stored(legacy)?))?;
         }
         remove_one(root, LEGACY)?;
     }
-    write_json_raw(root, FILE, &stored(value)?)
+    write_json_raw(root, FILE, &crate::storage_json::Ordered(&stored(value)?))
 }
 
 fn remove_one(root: &Path, name: &str) -> Result<(), CoreError> {
@@ -127,6 +137,41 @@ mod tests {
     use super::*;
     use crate::minecraft::{download::Cancellation, install};
     use uuid::Uuid;
+
+    #[test]
+    fn transaction_headers_are_consistent_and_both_legacy_names_remain_readable() {
+        for (schema, kind) in [
+            (1, "install"),
+            (2, "update"),
+            (3, "repair"),
+            (3, "uninstall"),
+        ] {
+            let mut original = serde_json::json!({"schema_version":schema,"instance_id":Uuid::new_v4(),
+                "operation":Uuid::new_v4(),"active":true});
+            if schema == 3 {
+                original["kind"] = kind.into();
+            }
+            let stored = stored(original.clone()).unwrap_or_else(|_| panic!("store"));
+            assert_eq!(stored["type"], kind);
+            assert!(stored.get("kind").is_none());
+            let bytes = crate::storage_json::pretty(&crate::storage_json::Ordered(&stored))
+                .unwrap_or_default();
+            assert!(
+                String::from_utf8_lossy(&bytes)
+                    .starts_with(&format!("{{\n  \"schema\": {schema},\n  \"type\""))
+            );
+            assert_eq!(canonical(stored.clone()).ok(), Some(original.clone()));
+            let mut legacy = stored.clone();
+            legacy
+                .as_object_mut()
+                .unwrap_or_else(|| panic!("object"))
+                .remove("type");
+            legacy["kind"] = kind.into();
+            assert_eq!(canonical(legacy.clone()).ok(), Some(original));
+            legacy["type"] = kind.into();
+            assert!(canonical(legacy).is_err());
+        }
+    }
 
     #[tokio::test]
     async fn legacy_active_intent_recovers_and_completed_transaction_disappears() {

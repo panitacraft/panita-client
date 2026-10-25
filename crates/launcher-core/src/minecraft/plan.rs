@@ -32,6 +32,7 @@ pub struct DocumentIdentity {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InstallPlan {
+    #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: u32,
     pub version: ResolvedVersion,
     pub platform: String,

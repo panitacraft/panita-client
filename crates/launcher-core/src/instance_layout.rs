@@ -22,6 +22,7 @@ struct MoveEntry {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Intent {
+    #[serde(rename = "schema", alias = "schema_version")]
     schema_version: u32,
     record: InstallationRecord,
     game_entries: Vec<String>,
@@ -55,7 +56,7 @@ fn read(root: &Path, name: &str) -> Result<Option<Vec<u8>>, CoreError> {
 }
 
 fn publish(root: &Path, name: &str, value: &impl Serialize) -> Result<(), CoreError> {
-    let bytes = serde_json::to_vec_pretty(value).map_err(|_| invalid())?;
+    let bytes = crate::storage_json::pretty(value).map_err(|_| invalid())?;
     if let Some(existing) = read(root, name)? {
         let existing = if name == "installed.json" {
             let installed: InstalledLock =
@@ -431,7 +432,10 @@ pub(crate) fn prepare(
     intent.record = descriptor.clone();
     private_fs::PrivateDir::open(&legacy)
         .map_err(map_private_error)?
-        .write_atomic_durable(INTENT, &serde_json::to_vec(&intent).map_err(|_| invalid())?)
+        .write_atomic_durable(
+            INTENT,
+            &crate::storage_json::pretty(&intent).map_err(|_| invalid())?,
+        )
         .map_err(map_private_error)?;
     private_fs::PrivateDir::open(root)
         .map_err(map_private_error)?

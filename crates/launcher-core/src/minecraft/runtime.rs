@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashSet};
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RuntimeIdentity {
+    #[serde(rename = "schema", alias = "schema_version")]
     schema_version: u32,
     manifest: Artifact,
 }
@@ -116,7 +117,7 @@ pub fn allocate_cache(
             directory
                 .write_atomic_durable(
                     ".runtime-identity.json",
-                    &serde_json::to_vec(&RuntimeIdentity {
+                    &crate::storage_json::pretty(&RuntimeIdentity {
                         schema_version: 1,
                         manifest: source.clone(),
                     })

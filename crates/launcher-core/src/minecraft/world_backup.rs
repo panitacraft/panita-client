@@ -20,6 +20,7 @@ use uuid::Uuid;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackupReceipt {
+    #[serde(rename = "schema", alias = "schema_version")]
     pub schema_version: u32,
     pub instance_id: Uuid,
     pub installed_version: String,
@@ -322,7 +323,7 @@ pub(super) fn create(
     destination
         .write_atomic_durable(
             "backup.json",
-            &serde_json::to_vec(&receipt).map_err(|_| invalid())?,
+            &crate::storage_json::pretty(&receipt).map_err(|_| invalid())?,
         )
         .map_err(map_private_error)?;
     Ok(Some(receipt))

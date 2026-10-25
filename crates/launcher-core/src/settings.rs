@@ -150,10 +150,7 @@ impl GlobalSettings {
                 window: self.launcher.window.clone(),
             },
         };
-        let mut bytes = serde_json::to_vec_pretty(&document)
-            .map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
-        bytes.push(b'\n');
-        Ok(bytes)
+        crate::storage_json::pretty(&document).map_err(|_| CoreError::new(ErrorCode::InvalidData))
     }
 
     pub(crate) fn validate(&self) -> Result<(), CoreError> {
@@ -279,6 +276,52 @@ pub struct InstanceSettings {
     pub window_size: Option<WindowSize>,
     #[serde(default)]
     pub show_console_on_start: Option<bool>,
+}
+
+/// Disk-only spelling for overrides; IPC and the global settings model stay stable.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct StoredOverrides {
+    #[serde(alias = "schema_version")]
+    schema: u32,
+    ram_mib: Option<u32>,
+    #[serde(alias = "extra_jvm_args")]
+    jvm_args: Option<Vec<String>>,
+    #[serde(alias = "java_path_override")]
+    java_path: Option<String>,
+    #[serde(alias = "window_size")]
+    game_window: Option<WindowSize>,
+    #[serde(default, alias = "show_console_on_start")]
+    console_on_start: Option<bool>,
+}
+
+pub(crate) fn serialize_overrides<S: serde::Serializer>(
+    value: &InstanceSettings,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    StoredOverrides {
+        schema: value.schema_version,
+        ram_mib: value.ram_mib,
+        jvm_args: value.extra_jvm_args.clone(),
+        java_path: value.java_path_override.clone(),
+        game_window: value.window_size.clone(),
+        console_on_start: value.show_console_on_start,
+    }
+    .serialize(serializer)
+}
+
+pub(crate) fn deserialize_overrides<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<InstanceSettings, D::Error> {
+    let stored = StoredOverrides::deserialize(deserializer)?;
+    Ok(InstanceSettings {
+        schema_version: stored.schema,
+        ram_mib: stored.ram_mib,
+        extra_jvm_args: stored.jvm_args,
+        java_path_override: stored.java_path,
+        window_size: stored.game_window,
+        show_console_on_start: stored.console_on_start,
+    })
 }
 
 impl Default for InstanceSettings {

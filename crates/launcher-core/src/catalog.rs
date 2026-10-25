@@ -303,6 +303,7 @@ pub fn parse_list(bytes: &[u8]) -> Result<Vec<CatalogInstance>, CoreError> {
 
 #[derive(Serialize, Deserialize)]
 struct CachedCatalog {
+    #[serde(rename = "schema", alias = "schema_version")]
     schema_version: u32,
     #[serde(rename = "source_fingerprint", alias = "representation")]
     representation: String,
@@ -445,8 +446,7 @@ impl CatalogClient {
             Ok(mut cache) => {
                 cache.schema_version = 3;
                 let instances = parse_list(cache.body.as_bytes())?;
-                let mut bytes = serde_json::to_vec_pretty(&cache).map_err(|_| invalid())?;
-                bytes.push(b'\n');
+                let bytes = crate::storage_json::pretty(&cache).map_err(|_| invalid())?;
                 let cache_warning = store
                     .transaction(CACHE_FILE, |_| Ok((bytes, ())))
                     .err()

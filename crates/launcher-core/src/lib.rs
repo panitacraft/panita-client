@@ -14,6 +14,7 @@ pub mod registry;
 pub mod sessions;
 pub mod settings;
 pub mod storage;
+mod storage_json;
 
 pub const APPLICATION_NAME: &str = "Panita Client";
 

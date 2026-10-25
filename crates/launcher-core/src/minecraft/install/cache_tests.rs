@@ -163,7 +163,7 @@ fn invalid_receipts_and_new_installation_generations_require_fresh_checks() {
     let mut unsupported: serde_json::Value = read_json(&fixture.root, "verification-cache.json")
         .unwrap_or_else(|_| panic!("receipt"))
         .unwrap_or_else(|| panic!("missing receipt"));
-    unsupported["schema_version"] = 999.into();
+    unsupported["schema"] = 999.into();
     write_json(&fixture.root, "verification-cache.json", &unsupported)
         .unwrap_or_else(|_| panic!("unsupported cache"));
     assert!(fixture.audit().hashed >= 3);

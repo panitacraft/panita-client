@@ -170,6 +170,10 @@ async fn catalog_etag_revalidation_and_outage_preserve_disabled_cache() {
     legacy["schema_version"] = json!(1);
     legacy
         .as_object_mut()
+        .unwrap_or_else(|| panic!("cache object"))
+        .remove("schema");
+    legacy
+        .as_object_mut()
         .unwrap_or_else(|| panic!("object"))
         .remove("source_fingerprint");
     legacy["representation"] = json!(client.representation());
@@ -200,7 +204,8 @@ async fn catalog_etag_revalidation_and_outage_preserve_disabled_cache() {
             .unwrap_or_default(),
     )
     .unwrap_or_else(|_| panic!("upgraded cache"));
-    assert_eq!(upgraded["schema_version"], json!(3));
+    assert_eq!(upgraded["schema"], json!(3));
+    assert!(upgraded.get("schema_version").is_none());
     assert_eq!(
         upgraded["source_fingerprint"],
         json!(source_fingerprint(&client.representation()))

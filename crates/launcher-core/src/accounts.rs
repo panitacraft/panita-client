@@ -88,6 +88,7 @@ struct AccountDocument {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AccountFile {
+    #[serde(rename = "schema", alias = "schema_version")]
     schema_version: u32,
     accounts: Vec<AccountEntry>,
 }
@@ -164,6 +165,7 @@ impl Default for AccountDocument {
 #[derive(Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct PendingRemovals {
+    #[serde(rename = "schema", alias = "schema_version")]
     schema_version: u32,
     account_ids: Vec<Uuid>,
 }
@@ -450,14 +452,21 @@ fn load_document(tx: &StoreTransaction<'_>) -> Result<AccountDocument, CoreError
     };
     #[derive(Deserialize)]
     struct Version {
-        schema_version: u32,
+        schema: Option<u32>,
+        schema_version: Option<u32>,
     }
-    let version = serde_json::from_slice::<Version>(&bytes).map(|v| v.schema_version);
-    let migrate = matches!(version, Ok(1));
     let invalid = || CoreError::new(ErrorCode::AccountsFileInvalid);
+    let version = serde_json::from_slice::<Version>(&bytes)
+        .map_err(|_| invalid())
+        .and_then(|header| match (header.schema, header.schema_version) {
+            (Some(version), None) => Ok((version, false)),
+            (None, Some(version)) => Ok((version, true)),
+            _ => Err(invalid()),
+        });
+    let migrate = matches!(version, Ok((1, _)) | Ok((2, true)));
     let parsed = match version {
-        Ok(1) => serde_json::from_slice::<AccountDocument>(&bytes).map_err(|_| invalid()),
-        Ok(2) => serde_json::from_slice::<AccountFile>(&bytes)
+        Ok((1, _)) => serde_json::from_slice::<AccountDocument>(&bytes).map_err(|_| invalid()),
+        Ok((2, _)) => serde_json::from_slice::<AccountFile>(&bytes)
             .map_err(|_| invalid())
             .and_then(|file| file.into_document().map_err(|_| invalid())),
         _ => Err(invalid()),
@@ -618,8 +627,7 @@ fn write_json(
     value: &impl Serialize,
 ) -> Result<(), CoreError> {
     let mut bytes =
-        serde_json::to_vec_pretty(value).map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
-    bytes.push(b'\n');
+        crate::storage_json::pretty(value).map_err(|_| CoreError::new(ErrorCode::InvalidData))?;
     let result = tx.write(name, &bytes);
     bytes.zeroize();
     result
@@ -649,6 +657,54 @@ mod tests {
             "5627dd98-e6be-3c21-b8a8-e92344183641"
         );
         assert_ne!(offline_profile_id("Steve"), offline_profile_id("steve"));
+    }
+
+    #[test]
+    fn legacy_v2_header_migrates_without_losing_accounts_and_mixed_headers_are_preserved() {
+        let (paths, repository) = repository();
+        let account = repository
+            .add_offline("Steve")
+            .unwrap_or_else(|_| panic!("fixture"));
+        let bytes = repository
+            .store
+            .read(ACCOUNT_FILE)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let mut legacy: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_default();
+        legacy
+            .as_object_mut()
+            .unwrap_or_else(|| panic!("object"))
+            .remove("schema");
+        legacy["schema_version"] = 2.into();
+        let bytes = serde_json::to_vec(&legacy).unwrap_or_default();
+        repository
+            .store
+            .transaction(ACCOUNT_FILE, |_| Ok((bytes, ())))
+            .unwrap_or_else(|_| panic!("legacy fixture"));
+        let snapshot = repository.snapshot().unwrap_or_else(|_| panic!("migrate"));
+        assert_eq!(snapshot.accounts, vec![account]);
+        let migrated = repository
+            .store
+            .read(ACCOUNT_FILE)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        assert!(migrated.starts_with(b"{\n  \"schema\": 2,"));
+        let mut mixed: serde_json::Value = serde_json::from_slice(&migrated).unwrap_or_default();
+        mixed["schema_version"] = 2.into();
+        let mixed = serde_json::to_vec(&mixed).unwrap_or_default();
+        repository
+            .store
+            .transaction(ACCOUNT_FILE, |_| Ok((mixed.clone(), ())))
+            .unwrap_or_else(|_| panic!("mixed fixture"));
+        assert!(repository.snapshot().is_err());
+        assert_eq!(
+            repository.store.read(ACCOUNT_FILE).ok().flatten(),
+            Some(mixed)
+        );
+        drop(repository);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }
 
     #[test]
@@ -691,7 +747,9 @@ mod tests {
             .unwrap_or_else(|| panic!("missing fixture file"));
         let file: serde_json::Value =
             serde_json::from_slice(&bytes).unwrap_or_else(|_| panic!("fixture operation failed"));
-        assert_eq!(file["schema_version"], 2);
+        assert_eq!(file["schema"], 2);
+        assert!(file.get("schema_version").is_none());
+        assert!(bytes.starts_with(b"{\n  \"schema\": 2,"));
         assert!(file.get("selected_account_id").is_none());
         assert_eq!(file["accounts"][0]["type"], "MSA");
         assert_eq!(file["accounts"][0]["selected"], true);
@@ -736,7 +794,7 @@ mod tests {
             match invalid {
                 0 => file["accounts"][0]["selected"] = true.into(),
                 1 => file["accounts"][0]["access_token"] = "forbidden".into(),
-                _ => file["schema_version"] = 3.into(),
+                _ => file["schema"] = 3.into(),
             }
             let bytes =
                 serde_json::to_vec(&file).unwrap_or_else(|_| panic!("fixture operation failed"));
