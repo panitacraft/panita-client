@@ -414,6 +414,19 @@ are evidence, not product guarantees.
 
 ### Build and qualification boundaries
 
+- The owner authorized starting Phase 7 with an unsigned beta on 2026-10-25.
+  Code signing is deferred; disclose unsigned Windows publisher/SmartScreen
+  limitations. Prepare a compact Panita-branded graphical installer and matching
+  uninstall confirmation, using the supplied screenshots as visual references.
+  Keep Spanish player-facing text, per-user installation, WebView2 handling,
+  protocol ownership checks and preservation of existing player/account data.
+  Manual installer updates remain the distribution model; this does not authorize
+  self-update, pushes, release publication, deployment or a master merge.
+- The owner identifies BOX as the Ubuntu 26.04 installed-product test target.
+  Verify its actual OS before recording results. The Ubuntu 24.04 build baseline
+  remains separate. BOX is not a clean runtime baseline while development packages
+  remain installed; no reset or package removal is authorized.
+
 - Retain the local `private-fs` patch and its Linux regression checks. Its
   proc-descriptor publication fallback resolves the earlier unprivileged
   `linkat(AT_EMPTY_PATH)` blocker while retaining private creation, identity,
