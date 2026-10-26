@@ -7,6 +7,8 @@ mod linux_activation;
 mod play_commands;
 mod protocol;
 mod settings_commands;
+#[cfg(windows)]
+mod windows_identity;
 
 struct DesktopState {
     process: launcher_core::operation::ProcessSessionId,
@@ -111,6 +113,11 @@ async fn catalog_snapshot(
 
 pub fn run() {
     let context = tauri::generate_context!();
+    #[cfg(windows)]
+    if !windows_identity::configure(&context.config().identifier) {
+        // Cosmetic shell integration must not prevent account or game recovery.
+        eprintln!("Windows application identity setup failed");
+    }
     #[cfg(target_os = "linux")]
     if linux_activation::forward_from_environment(&context.config().identifier) {
         return;
