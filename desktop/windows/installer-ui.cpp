@@ -244,15 +244,16 @@ void prepare_log(Controls& controls) {
   sync_log();
 }
 
-bool checkbox(HWND window) {
+bool choice_control(HWND window) {
   wchar_t type[32]{};
   GetClassNameW(window, type, 32);
   if (lstrcmpiW(type, L"Button") != 0) return false;
   const LONG_PTR kind = GetWindowLongPtrW(window, GWL_STYLE) & BS_TYPEMASK;
-  return kind == BS_CHECKBOX || kind == BS_AUTOCHECKBOX;
+  return kind == BS_CHECKBOX || kind == BS_AUTOCHECKBOX ||
+      kind == BS_RADIOBUTTON || kind == BS_AUTORADIOBUTTON;
 }
 
-void draw_checkbox(HWND window, HDC dc) {
+void draw_choice(HWND window, HDC dc) {
   RECT bounds{};
   GetClientRect(window, &bounds);
   const UINT dpi = GetDpiForWindow(root);
@@ -261,14 +262,33 @@ void draw_checkbox(HWND window, HDC dc) {
   DeleteObject(base);
   const int size = MulDiv(18, dpi, 96);
   const bool checked = SendMessageW(window, BM_GETCHECK, 0, 0) == BST_CHECKED;
+  const bool enabled = IsWindowEnabled(window) != FALSE;
+  const LONG_PTR kind = GetWindowLongPtrW(window, GWL_STYLE) & BS_TYPEMASK;
+  const bool radio = kind == BS_RADIOBUTTON || kind == BS_AUTORADIOBUTTON;
+  const COLORREF accent = enabled ? gold : RGB(135, 154, 143);
   RECT box{0, (bounds.bottom - size) / 2, size, (bounds.bottom + size) / 2};
-  HBRUSH fill = CreateSolidBrush(checked ? gold : card);
-  FillRect(dc, &box, fill);
+  HBRUSH fill = CreateSolidBrush(checked && !radio ? accent : card);
+  HPEN outline = CreatePen(PS_SOLID, (std::max)(1, scale(1)), accent);
+  HGDIOBJ old_brush = SelectObject(dc, fill);
+  HGDIOBJ old_outline = SelectObject(dc, outline);
+  if (radio) {
+    Ellipse(dc, box.left, box.top, box.right, box.bottom);
+    if (checked) {
+      HBRUSH dot = CreateSolidBrush(accent);
+      SelectObject(dc, dot);
+      const int inset = scale(5);
+      Ellipse(dc, box.left + inset, box.top + inset, box.right - inset, box.bottom - inset);
+      SelectObject(dc, fill);
+      DeleteObject(dot);
+    }
+  } else {
+    Rectangle(dc, box.left, box.top, box.right, box.bottom);
+  }
+  SelectObject(dc, old_brush);
+  SelectObject(dc, old_outline);
   DeleteObject(fill);
-  HBRUSH border = CreateSolidBrush(gold);
-  FrameRect(dc, &box, border);
-  DeleteObject(border);
-  if (checked) {
+  DeleteObject(outline);
+  if (checked && !radio) {
     HPEN pen = CreatePen(PS_SOLID, MulDiv(2, dpi, 96), background);
     HGDIOBJ old_pen = SelectObject(dc, pen);
     MoveToEx(dc, size / 4, box.top + size / 2, nullptr);
@@ -442,18 +462,18 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
     draw_logo(window, reinterpret_cast<HDC>(wp));
     return 0;
   }
-  // Keep the native auto-checkbox style/state and accessibility provider. Paint
-  // it without the white themed square, including wrapped text and keyboard focus.
-  if (checkbox(window)) {
+  // Keep native checkbox/radio state, grouping, keyboard and accessibility.
+  // Only replace painting, including wrapped text and keyboard focus.
+  if (choice_control(window)) {
     if (message == WM_PAINT) {
       PAINTSTRUCT paint{};
       HDC dc = BeginPaint(window, &paint);
-      draw_checkbox(window, dc);
+      draw_choice(window, dc);
       EndPaint(window, &paint);
       return 0;
     }
     if (message == WM_PRINTCLIENT) {
-      draw_checkbox(window, reinterpret_cast<HDC>(wp));
+      draw_choice(window, reinterpret_cast<HDC>(wp));
       return 0;
     }
     if (message == WM_ERASEBKGND) return TRUE;
@@ -540,7 +560,7 @@ BOOL CALLBACK style_child(HWND window, LPARAM) {
   if (font.lfHeight >= -MulDiv(14, GetDpiForWindow(root), 96)) {
     RECT bounds{};
     GetWindowRect(window, &bounds);
-    const bool compact_button = lstrcmpiW(type, L"Button") == 0 && !checkbox(window) &&
+    const bool compact_button = lstrcmpiW(type, L"Button") == 0 && !choice_control(window) &&
         bounds.bottom - bounds.top <= MulDiv(32, GetDpiForWindow(root), 96);
     SendMessageW(window, WM_SETFONT,
         reinterpret_cast<WPARAM>(compact_button ? caption_font : body_font), TRUE);
