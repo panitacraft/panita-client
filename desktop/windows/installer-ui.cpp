@@ -7,6 +7,9 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <commctrl.h>
+#include <algorithm>
+#include <array>
+#include <string>
 
 namespace {
 constexpr COLORREF background = RGB(16, 35, 30);
@@ -15,6 +18,149 @@ constexpr COLORREF gold = RGB(242, 207, 116);
 HWND root;
 HFONT body_font;
 HFONT caption_font;
+HBRUSH log_brush;
+HWND detail_source;
+HWND wrapped_log;
+bool log_sync_queued;
+constexpr UINT sync_log_message = WM_APP + 42;
+
+int scale(int value) { return MulDiv(value, static_cast<int>(GetDpiForWindow(root)), 96); }
+int role(HWND window) {
+  return static_cast<int>(reinterpret_cast<INT_PTR>(GetPropW(window, L"PanitaRole")));
+}
+void draw_logo(HWND window, HDC dc) {
+  RECT bounds{};
+  GetClientRect(window, &bounds);
+  HBRUSH brush = CreateSolidBrush(background);
+  FillRect(dc, &bounds, brush);
+  DeleteObject(brush);
+  const auto icon = reinterpret_cast<HICON>(SendMessageW(window, STM_GETICON, 0, 0));
+  DrawIconEx(dc, 0, 0, icon, bounds.right, bounds.bottom, 0, nullptr, DI_NORMAL);
+}
+bool visible(HWND window) {
+  return window && (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE);
+}
+void place(HWND window, int x, int y, int width, int height) {
+  if (window) SetWindowPos(window, nullptr, scale(x), scale(y), scale(width),
+      scale(height), SWP_NOZORDER | SWP_NOACTIVATE);
+}
+std::wstring window_text(HWND window) {
+  const int length = (std::min)(GetWindowTextLengthW(window), 1048576);
+  std::wstring text(static_cast<size_t>(length) + 1, L'\0');
+  GetWindowTextW(window, text.data(), length + 1);
+  text.resize(static_cast<size_t>(length));
+  return text;
+}
+int text_height(HWND window, int width) {
+  auto text = window_text(window);
+  HDC dc = GetDC(window);
+  HGDIOBJ old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
+  RECT bounds{0, 0, scale(width), 0};
+  DrawTextW(dc, text.c_str(), -1, &bounds, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+  SelectObject(dc, old);
+  ReleaseDC(window, dc);
+  const int dpi = static_cast<int>(GetDpiForWindow(root));
+  return (std::max)(18, (static_cast<int>(bounds.bottom) * 96 + dpi - 1) / dpi);
+}
+BOOL CALLBACK collect_roles(HWND window, LPARAM data) {
+  auto& controls = *reinterpret_cast<std::array<HWND, 20>*>(data);
+  const int id = role(window);
+  if (id > 0 && id < static_cast<int>(controls.size())) controls[static_cast<size_t>(id)] = window;
+  return TRUE;
+}
+void resize_shell(HWND page, int content_height) {
+  const int height = (std::max)(360, content_height + 116);
+  SetWindowPos(root, nullptr, 0, 0, scale(450), scale(height),
+      SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+  place(page, 24, 24, 402, height - 116);
+  place(GetDlgItem(root, IDOK), 24, height - 68, 402, 44);
+}
+void compact_page(const std::array<HWND, 20>& controls) {
+  if (!controls[6] || !controls[7]) return;
+  HWND page = GetParent(controls[6]);
+  place(controls[1], 0, 0, 32, 32);
+  place(controls[2], 48, 0, 222, 32);
+  place(controls[3], 280, 2, 64, 28);
+  place(controls[4], 350, 2, 52, 28);
+  place(controls[5], 0, 44, 402, 20);
+  int cursor = 80;
+  auto row = [&](int id, int gap, int minimum, int width = 402) {
+    HWND control = controls[static_cast<size_t>(id)];
+    if (!visible(control)) return;
+    const int height = (std::max)(minimum, text_height(control, width));
+    place(control, 0, cursor, 402, height);
+    cursor += height + gap;
+  };
+  row(6, 10, 32);
+  row(7, 16, 18);
+  if (controls[8] && controls[9]) {
+    const int height = text_height(controls[9], 370);
+    place(controls[8], 0, cursor, 402, height + 24);
+    place(controls[9], 16, cursor + 12, 370, height);
+    cursor += height + 40;
+  }
+  row(10, 12, 18);
+  row(11, 16, 40);
+  row(12, 0, 28, 374);
+  row(13, 12, 36, 374);
+  row(14, 0, 18);
+  row(15, 12, 36, 374);
+  row(16, 0, 32);
+  row(18, 12, 44, 374);
+  row(19, 0, 44, 374);
+  resize_shell(page, cursor);
+}
+
+// Mirror NSIS's own detail entries into a readonly, word-wrapped control. The
+// original list remains the writer target; no log files or user data are read.
+void sync_log() {
+  log_sync_queued = false;
+  if (!IsWindow(detail_source) || !IsWindow(wrapped_log)) return;
+  std::wstring text;
+  std::array<wchar_t, 32768> entry{};
+  const int count = ListView_GetItemCount(detail_source);
+  bool trimmed = false;
+  for (int index = 0; index < count; ++index) {
+    ListView_GetItemText(detail_source, index, 0, entry.data(), static_cast<int>(entry.size()));
+    text.append(entry.data()).append(L"\r\n");
+    while (text.size() > 1048000) {
+      const size_t end = text.find(L"\r\n");
+      if (end == std::wstring::npos) break;
+      text.erase(0, end + 2);
+      trimmed = true;
+    }
+  }
+  if (trimmed) text.insert(0, L"Se muestran los mensajes m\u00e1s recientes.\r\n");
+  if (text == window_text(wrapped_log)) return;
+  const auto first = SendMessageW(wrapped_log, EM_GETFIRSTVISIBLELINE, 0, 0);
+  const auto lines = SendMessageW(wrapped_log, EM_GETLINECOUNT, 0, 0);
+  RECT bounds{};
+  GetClientRect(wrapped_log, &bounds);
+  const bool at_bottom = first + bounds.bottom / (std::max)(1, scale(18)) >= lines - 1;
+  SetWindowTextW(wrapped_log, text.c_str());
+  SendMessageW(wrapped_log, EM_LINESCROLL, 0,
+      at_bottom ? SendMessageW(wrapped_log, EM_GETLINECOUNT, 0, 0) : first);
+}
+void prepare_log(const std::array<HWND, 20>& controls) {
+  if (!controls[17] || controls[6] || !IsWindow(detail_source)) return;
+  HWND page = GetParent(detail_source);
+  if (!IsWindow(wrapped_log)) {
+    wrapped_log = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP |
+        ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL,
+        0, 0, 0, 0, page, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (!wrapped_log) return; // Retain the original details if creation fails.
+    SetPropW(wrapped_log, L"PanitaWrappedLog", reinterpret_cast<HANDLE>(1));
+    SendMessageW(wrapped_log, WM_SETFONT, reinterpret_cast<WPARAM>(body_font), TRUE);
+    SendMessageW(wrapped_log, EM_SETLIMITTEXT, 1048576, 0);
+    SendMessageW(wrapped_log, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+        MAKELPARAM(scale(8), scale(8)));
+  }
+  ShowWindow(detail_source, SW_HIDE);
+  const bool warning = visible(controls[17]);
+  place(wrapped_log, 0, warning ? 214 : 122, 402, warning ? 150 : 240);
+  resize_shell(page, 364);
+  sync_log();
+}
 
 bool checkbox(HWND window) {
   wchar_t type[32]{};
@@ -72,7 +218,7 @@ bool header_point(LPARAM position) {
   POINT point{GET_X_LPARAM(position), GET_Y_LPARAM(position)};
   ScreenToClient(root, &point);
   const UINT dpi = GetDpiForWindow(root);
-  return point.y >= 0 && point.y < MulDiv(90, dpi, 96);
+  return point.y >= 0 && point.y < MulDiv(70, dpi, 96);
 }
 
 void draw_button(const DRAWITEMSTRUCT& item) {
@@ -113,6 +259,27 @@ void draw_button(const DRAWITEMSTRUCT& item) {
 
 LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
                               UINT_PTR id, DWORD_PTR) {
+  if (window == root && message == sync_log_message) {
+    sync_log();
+    return 0;
+  }
+  if (message == WM_CTLCOLORSTATIC && GetPropW(reinterpret_cast<HWND>(lp), L"PanitaWrappedLog")) {
+    HDC dc = reinterpret_cast<HDC>(wp);
+    SetTextColor(dc, RGB(239, 236, 229));
+    SetBkColor(dc, card);
+    return reinterpret_cast<LRESULT>(log_brush);
+  }
+  if (role(window) == 1 && message == WM_PAINT) {
+    PAINTSTRUCT paint{};
+    HDC dc = BeginPaint(window, &paint);
+    draw_logo(window, dc);
+    EndPaint(window, &paint);
+    return 0;
+  }
+  if (role(window) == 1 && message == WM_PRINTCLIENT) {
+    draw_logo(window, reinterpret_cast<HDC>(wp));
+    return 0;
+  }
   // Keep the native auto-checkbox style/state and accessibility provider. Paint
   // it without the white themed square, including wrapped text and keyboard focus.
   if (checkbox(window)) {
@@ -155,19 +322,32 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
   }
   if (message == WM_NCDESTROY) {
     RemoveWindowSubclass(window, presentation, id);
+    if (window == detail_source) { detail_source = nullptr; wrapped_log = nullptr; log_sync_queued = false; }
     if (window == root) {
       DeleteObject(body_font);
       DeleteObject(caption_font);
       body_font = caption_font = nullptr;
+      DeleteObject(log_brush);
+      log_brush = nullptr;
     }
   }
-  return DefSubclassProc(window, message, wp, lp);
+  const LRESULT result = DefSubclassProc(window, message, wp, lp);
+  if (window == detail_source && !log_sync_queued &&
+      (message == LVM_INSERTITEMW || message == LVM_INSERTITEMA ||
+       message == LVM_SETITEMTEXTW || message == LVM_SETITEMTEXTA ||
+       message == LVM_SETITEMW || message == LVM_SETITEMA ||
+       message == LVM_DELETEITEM || message == LVM_DELETEALLITEMS)) {
+    log_sync_queued = true;
+    PostMessageW(root, sync_log_message, 0, 0);
+  }
+  return result;
 }
 
 BOOL CALLBACK style_child(HWND window, LPARAM) {
   SetWindowSubclass(window, presentation, 1, 0);
   wchar_t type[32]{};
   GetClassNameW(window, type, 32);
+  if (lstrcmpiW(type, WC_LISTVIEWW) == 0 && GetDlgCtrlID(window) == 1016) detail_source = window;
   LOGFONTW font{};
   const auto current_font = reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0));
   GetObjectW(current_font, sizeof(font), &font);
@@ -194,6 +374,7 @@ BOOL CALLBACK style_child(HWND window, LPARAM) {
 }
 
 extern "C" __declspec(dllexport) void __cdecl Apply(HWND parent, int, wchar_t*, void*, void*) {
+  if (!IsWindow(parent)) return;
   root = parent;
   if (!body_font) {
     const UINT dpi = GetDpiForWindow(root);
@@ -204,7 +385,12 @@ extern "C" __declspec(dllexport) void __cdecl Apply(HWND parent, int, wchar_t*, 
         FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
   }
+  if (!log_brush) log_brush = CreateSolidBrush(card);
   SetWindowSubclass(root, presentation, 1, 0);
   EnumChildWindows(root, style_child, 0);
+  std::array<HWND, 20> controls{};
+  EnumChildWindows(root, collect_roles, reinterpret_cast<LPARAM>(&controls));
+  compact_page(controls);
+  prepare_log(controls);
   RedrawWindow(root, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
 }

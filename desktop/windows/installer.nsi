@@ -282,13 +282,16 @@ Function PageReinstall
 
     ${NSD_CreateLabel} 0 0 100% 24u $R1
     Pop $R1
+    !insertmacro PANITA_ROLE $R1 6
 
     ${NSD_CreateRadioButton} 30u 50u -30u 8u $R2
     Pop $R2
+    !insertmacro PANITA_ROLE $R2 18
     ${NSD_OnClick} $R2 PageReinstallUpdateSelection
 
     ${NSD_CreateRadioButton} 30u 70u -30u 8u $R3
     Pop $R3
+    !insertmacro PANITA_ROLE $R3 19
     ; Disable this radio button if downgrading and downgrades are disabled
     !if "${ALLOWDOWNGRADES}" == "false"
       ${IfThen} $R0 = -1 ${|} EnableWindow $R3 0 ${|}
@@ -317,6 +320,7 @@ Function PageReinstall
     !insertmacro PANITA_BRAND ""
     ${NSD_CreateLabel} 0 0 0 0 "Elige cómo continuar con la instalación existente."
     Pop $PanitaDescription
+    !insertmacro PANITA_ROLE $PanitaDescription 7
     !insertmacro PANITA_RECT $PanitaDescription 0 72 402 72
     SetCtlColors $PanitaDescription C4D0C8 10231E
     SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Continuar"
