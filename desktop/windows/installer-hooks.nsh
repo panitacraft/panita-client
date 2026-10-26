@@ -9,7 +9,11 @@
   ${If} $R7 != ""
   ${AndIf} $R7 != "$\"$INSTDIR\${MAINBINARYNAME}.exe$\" $\"%1$\""
   ${AndIf} $R8 != "com.panitacraft.client"
-    MessageBox MB_OK|MB_ICONSTOP "Otra aplicación utiliza el enlace panitacraft. Libera ese enlace antes de instalar Panita Client." /SD IDOK
+    !ifdef PANITA_CUSTOM_UI
+      !insertmacro PANITA_REPORT "Otra aplicación utiliza el enlace panitacraft. Libera ese enlace antes de instalar Panita Client."
+    !else
+      MessageBox MB_OK|MB_ICONSTOP "Otra aplicación utiliza el enlace panitacraft. Libera ese enlace antes de instalar Panita Client." /SD IDOK
+    !endif
     Abort
   ${EndIf}
 !macroend

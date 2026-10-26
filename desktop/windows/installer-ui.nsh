@@ -19,6 +19,42 @@ Var PanitaIdleResult
 Var PanitaPriorDirectory
 Var PanitaRemoveDataCheckbox
 Var PanitaRemoveDataWanted
+Var PanitaHeading
+Var PanitaDescription
+Var PanitaCardBackground
+Var PanitaCardText
+Var PanitaDataSummary
+Var PanitaEraseStage
+Var PanitaEraseAcknowledgement
+Var PanitaEraseBack
+Var PanitaProgressActive
+Var PanitaProgressNotice
+
+; Stay within the branded page. Silent runs only log and retain their error code.
+!macro PANITA_REPORT MESSAGE
+  DetailPrint "${MESSAGE}"
+  Push $0
+  ${If} $PanitaProgressActive == 1
+    System::Call 'user32::IsWindow(p $PanitaProgressNotice) i .r0'
+    ${If} $0 != 0
+      SendMessage $PanitaProgressNotice ${WM_SETTEXT} 0 "STR:${MESSAGE}"
+      ShowWindow $PanitaProgressNotice ${SW_SHOW}
+      GetDlgItem $0 $PanitaDialog 1006
+      ShowWindow $0 ${SW_HIDE}
+      GetDlgItem $0 $PanitaDialog 1004
+      ShowWindow $0 ${SW_HIDE}
+      GetDlgItem $0 $PanitaDialog 1016
+      !insertmacro PANITA_RECT $0 0 214 402 304
+    ${EndIf}
+  ${Else}
+    System::Call 'user32::IsWindow(p $PanitaDescription) i .r0'
+    ${If} $0 != 0
+      SendMessage $PanitaDescription ${WM_SETTEXT} 0 "STR:${MESSAGE}"
+      SetCtlColors $PanitaDescription F2CF74 10231E
+    ${EndIf}
+  ${EndIf}
+  Pop $0
+!macroend
 
 ; Never force-close a launcher that may own live games. Probe the exact file.
 !macro PANITA_REQUIRE_IDLE EXECUTABLE
@@ -53,9 +89,9 @@ Var PanitaRemoveDataWanted
   ; Restore the stack before rejecting a page transition, so retries are safe.
   ${If} $PanitaIdleResult != ""
     ${If} $PanitaIdleResult == "busy"
-      MessageBox MB_OK|MB_ICONSTOP "Cierra todas las instancias y Panita Client antes de continuar." /SD IDOK
+      !insertmacro PANITA_REPORT "Cierra todas las instancias y Panita Client antes de continuar. Después, vuelve a intentarlo."
     ${Else}
-      MessageBox MB_OK|MB_ICONSTOP "No se pudo comprobar si Panita Client está en uso. Cierra el launcher e inténtalo de nuevo." /SD IDOK
+      !insertmacro PANITA_REPORT "No se pudo comprobar si Panita Client está en uso. Cierra el launcher e inténtalo de nuevo."
     ${EndIf}
     SetErrorLevel 2
     Abort
@@ -68,7 +104,7 @@ Var PanitaRemoveDataWanted
   ${If} $OldMainBinaryName != ""
   ${AndIf} $OldMainBinaryName != "panita-desktop.exe"
   ${AndIf} $OldMainBinaryName != "panita-client.exe"
-    MessageBox MB_OK|MB_ICONSTOP "La instalación anterior no se reconoce. Conserva sus archivos y revisa la instalación antes de continuar." /SD IDOK
+    !insertmacro PANITA_REPORT "La instalación anterior no se reconoce. Conserva sus archivos y revisa la instalación antes de continuar."
     SetErrorLevel 2
     Abort
   ${EndIf}
@@ -107,6 +143,7 @@ Var PanitaRemoveDataWanted
 !macroend
 
 !macro PANITA_PAGE_LAYOUT HANDLE
+  StrCpy $PanitaProgressActive 0
   SendMessage ${HANDLE} ${WM_SETFONT} $PanitaBodyFont 1
   SendMessage $mui.Button.Next ${WM_SETFONT} $PanitaBodyFont 1
   SetCtlColors ${HANDLE} EFECE5 10231E
@@ -154,22 +191,27 @@ Var PanitaRemoveDataWanted
 !macro PANITA_HEADING TITLE DESCRIPTION
   ${NSD_CreateLabel} 0 0 0 0 "${TITLE}"
   Pop $0
+  StrCpy $PanitaHeading $0
   !insertmacro PANITA_RECT $0 0 110 402 72
   SendMessage $0 ${WM_SETFONT} $PanitaTitleFont 1
   SetCtlColors $0 EFECE5 10231E
   ${NSD_CreateLabel} 0 0 0 0 "${DESCRIPTION}"
   Pop $0
-  !insertmacro PANITA_RECT $0 0 194 402 56
+  StrCpy $PanitaDescription $0
+  !insertmacro PANITA_RECT $0 0 190 402 68
   SetCtlColors $0 C4D0C8 10231E
 !macroend
 
 !macro PANITA_CARD TEXT Y HEIGHT
   ${NSD_CreateLabel} 0 0 0 0 " "
   Pop $0
+  StrCpy $PanitaCardBackground $0
   !insertmacro PANITA_RECT $0 0 ${Y} 402 ${HEIGHT}
   SetCtlColors $0 C4D0C8 1B392E
   ${NSD_CreateLabel} 0 0 0 0 "${TEXT}"
   Pop $0
+  StrCpy $PanitaCardText $0
+  ${NSD_AddStyle} $PanitaCardText ${SS_NOPREFIX}
   !insertmacro PANITA_RECT $0 16 ${Y} 370 ${HEIGHT}
   ; SS_CENTERIMAGE vertically centers a single line; multiline copy uses a
   ; separately inset rectangle so it remains readable at every DPI.
@@ -230,6 +272,7 @@ Var PanitaRemoveDataWanted
   FunctionEnd
 
   Function PanitaChooseDirectory
+    Pop $0 ; nsDialogs click-control handle.
     nsDialogs::SelectFolderDialog "Carpeta de instalación" "$INSTDIR"
     Pop $0
     ${If} $0 != error
@@ -271,6 +314,7 @@ Var PanitaRemoveDataWanted
     !insertmacro PANITA_BRAND "un."
     !insertmacro PANITA_HEADING "¿Desinstalar Panita Client?" "Se eliminará el launcher de este equipo."
     StrCpy $PanitaRemoveDataWanted 0
+    StrCpy $PanitaEraseStage 0
     !insertmacro PANITA_CARD "Se conservarán todos tus datos, a menos que marques la opción de abajo." 270 82
     ${NSD_CreateCheckbox} 0 0 0 0 "Eliminar también todos mis datos (irreversible)"
     Pop $PanitaRemoveDataCheckbox
@@ -279,9 +323,20 @@ Var PanitaRemoveDataWanted
     SetCtlColors $PanitaRemoveDataCheckbox EFECE5 10231E
     ${NSD_Uncheck} $PanitaRemoveDataCheckbox
     ${NSD_CreateLabel} 0 0 0 0 "%APPDATA%\PanitaClient: cuentas y sesiones guardadas, ajustes, todas las instancias con mundos, capturas y copias de seguridad, descargas de Minecraft y Java, cachés y registros locales."
-    Pop $0
-    !insertmacro PANITA_RECT $0 0 432 402 104
-    SetCtlColors $0 C4D0C8 10231E
+    Pop $PanitaDataSummary
+    !insertmacro PANITA_RECT $PanitaDataSummary 0 432 402 104
+    SetCtlColors $PanitaDataSummary C4D0C8 10231E
+    ${NSD_CreateCheckbox} 0 0 0 0 "Entiendo que se eliminarán todos estos datos de forma permanente."
+    Pop $PanitaEraseAcknowledgement
+    !insertmacro PANITA_RECT $PanitaEraseAcknowledgement 0 450 402 52
+    SetCtlColors $PanitaEraseAcknowledgement EFECE5 10231E
+    ${NSD_OnClick} $PanitaEraseAcknowledgement un.PanitaAcknowledgeErasure
+    ShowWindow $PanitaEraseAcknowledgement ${SW_HIDE}
+    ${NSD_CreateButton} 0 0 0 0 "Volver sin eliminar datos"
+    Pop $PanitaEraseBack
+    !insertmacro PANITA_RECT $PanitaEraseBack 0 512 402 28
+    ${NSD_OnClick} $PanitaEraseBack un.PanitaCancelErasure
+    ShowWindow $PanitaEraseBack ${SW_HIDE}
     SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Desinstalar"
     PanitaUi::Apply /NOUNLOAD
     nsDialogs::Show
@@ -291,11 +346,61 @@ Var PanitaRemoveDataWanted
     !insertmacro PANITA_REQUIRE_IDLE "$INSTDIR\${MAINBINARYNAME}.exe"
     ${NSD_GetState} $PanitaRemoveDataCheckbox $PanitaRemoveDataWanted
     ${If} $PanitaRemoveDataWanted == ${BST_CHECKED}
-      MessageBox MB_YESNO|MB_ICONEXCLAMATION|MB_DEFBUTTON2 "Se eliminará permanentemente toda la carpeta:$\r$\n$APPDATA\PanitaClient$\r$\n$\r$\nIncluye cuentas y sesiones guardadas, ajustes, todas las instancias, mundos, capturas, configuraciones y copias de seguridad, descargas de Minecraft y Java, cachés y registros locales.$\r$\n$\r$\nNo se puede deshacer. ¿Eliminar todos estos datos y desinstalar?" /SD IDNO IDYES confirmed
-      StrCpy $PanitaRemoveDataWanted 0
-      Abort
-      confirmed:
+      ${If} $PanitaEraseStage == 0
+        StrCpy $PanitaEraseStage 1
+        ${NSD_SetText} $PanitaHeading "¿Eliminar todos tus datos?"
+        ${NSD_SetText} $PanitaDescription "Esta acción es permanente y no se puede deshacer. Revisa la carpeta y su contenido antes de confirmar."
+        SetCtlColors $PanitaDescription F2CF74 10231E
+        ${NSD_SetText} $PanitaCardText "$APPDATA\PanitaClient$\r$\n$\r$\nSe eliminará toda esta carpeta: cuentas y sesiones, ajustes, todas las instancias con mundos, capturas, configuraciones y copias de seguridad, descargas de Minecraft y Java, cachés, registros y cualquier otro archivo que contenga."
+        !insertmacro PANITA_RECT $PanitaCardBackground 0 270 402 168
+        !insertmacro PANITA_RECT $PanitaCardText 16 282 370 144
+        ShowWindow $PanitaRemoveDataCheckbox ${SW_HIDE}
+        ShowWindow $PanitaDataSummary ${SW_HIDE}
+        ${NSD_Uncheck} $PanitaEraseAcknowledgement
+        ShowWindow $PanitaEraseAcknowledgement ${SW_SHOW}
+        ShowWindow $PanitaEraseBack ${SW_SHOW}
+        SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Eliminar datos y desinstalar"
+        EnableWindow $mui.Button.Next 0
+        ${NSD_SetFocus} $PanitaEraseBack
+        Abort
+      ${EndIf}
+      ; Check again at the boundary; Enter or a stale command cannot bypass it.
+      ${NSD_GetState} $PanitaEraseAcknowledgement $0
+      ${If} $0 != ${BST_CHECKED}
+        Abort
+      ${EndIf}
     ${EndIf}
+  FunctionEnd
+
+  Function un.PanitaAcknowledgeErasure
+    Pop $0 ; nsDialogs click-control handle.
+    ${NSD_GetState} $PanitaEraseAcknowledgement $0
+    ${If} $0 == ${BST_CHECKED}
+      EnableWindow $mui.Button.Next 1
+    ${Else}
+      EnableWindow $mui.Button.Next 0
+    ${EndIf}
+  FunctionEnd
+
+  Function un.PanitaCancelErasure
+    Pop $0 ; nsDialogs click-control handle.
+    StrCpy $PanitaEraseStage 0
+    StrCpy $PanitaRemoveDataWanted 0
+    ${NSD_Uncheck} $PanitaRemoveDataCheckbox
+    ${NSD_Uncheck} $PanitaEraseAcknowledgement
+    ${NSD_SetText} $PanitaHeading "¿Desinstalar Panita Client?"
+    ${NSD_SetText} $PanitaDescription "Se eliminará el launcher de este equipo."
+    SetCtlColors $PanitaDescription C4D0C8 10231E
+    ${NSD_SetText} $PanitaCardText "Se conservarán todos tus datos, a menos que marques la opción de abajo."
+    !insertmacro PANITA_RECT $PanitaCardBackground 0 270 402 82
+    !insertmacro PANITA_RECT $PanitaCardText 16 284 370 54
+    ShowWindow $PanitaRemoveDataCheckbox ${SW_SHOW}
+    ShowWindow $PanitaDataSummary ${SW_SHOW}
+    ShowWindow $PanitaEraseAcknowledgement ${SW_HIDE}
+    ShowWindow $PanitaEraseBack ${SW_HIDE}
+    EnableWindow $mui.Button.Next 1
+    SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Desinstalar"
+    ${NSD_SetFocus} $PanitaRemoveDataCheckbox
   FunctionEnd
 
   Function PanitaProgress
@@ -340,10 +445,12 @@ Var PanitaRemoveDataWanted
   FunctionEnd
 
   Function ${PREFIX}PanitaMinimize
+    Pop $0 ; nsDialogs click-control handle.
     ShowWindow $HWNDPARENT ${SW_MINIMIZE}
   FunctionEnd
 
   Function ${PREFIX}PanitaClose
+    Pop $0 ; nsDialogs click-control handle.
     SendMessage $HWNDPARENT ${WM_COMMAND} 2 0
   FunctionEnd
 
@@ -352,6 +459,12 @@ Var PanitaRemoveDataWanted
 !macro PANITA_PROGRESS_LAYOUT TITLE
   FindWindow $PanitaDialog "#32770" "" $HWNDPARENT
   !insertmacro PANITA_PAGE_LAYOUT $PanitaDialog
+  StrCpy $PanitaProgressActive 1
+  System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w " ", i 0x40000000, i 0, i 0, i 0, i 0, p $PanitaDialog, p 0, p 0, p 0) p .r0'
+  StrCpy $PanitaProgressNotice $0
+  SendMessage $PanitaProgressNotice ${WM_SETFONT} $PanitaBodyFont 1
+  SetCtlColors $PanitaProgressNotice F2CF74 10231E
+  !insertmacro PANITA_RECT $PanitaProgressNotice 0 70 402 128
   ; Brand the native progress page while retaining its actual status/log controls.
   System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "${TITLE}", i 0x50000000, i 0, i 0, i 0, i 0, p $PanitaDialog, p 0, p 0, p 0) p .r0'
   SendMessage $0 ${WM_SETFONT} $PanitaBrandFont 1

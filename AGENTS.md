@@ -426,6 +426,11 @@ are evidence, not product guarantees.
 
 ### Build and qualification boundaries
 
+- On 2026-10-26 the owner requests Panita-controlled installer/update/uninstaller
+  warnings inside the branded window, including busy-instance errors and the
+  separate full-data erasure confirmation. Keep Spanish text, explicit consent,
+  safe defaults and idle checks. OS-owned security/runtime dialogs are separate.
+
 - On 2026-10-26 the owner requests keeping the beta checklist only in ignored
   `docs/`, and confirms frameless styling applies to the installer/uninstaller
   only. Keep the main launcher window decorations. A busy-launcher uninstall

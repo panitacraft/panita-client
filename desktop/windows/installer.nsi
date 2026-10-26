@@ -1,7 +1,7 @@
 ; Adapted from Tauri CLI 2.12.2, MIT licensed; see TAURI-LICENSE-MIT.
 ; Original SHA-256: 166f9677d42e81c7f712a1bf80d9d8c089c21d2967d8398474768b5eac14b494
 ; https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.12.2/crates/tauri-bundler/src/bundle/windows/nsis/installer.nsi
-; Panita changes presentation and always preserves private application data.
+; Panita changes presentation; private data is preserved unless separately erased.
 Unicode true
 ManifestDPIAware true
 ; Add in `dpiAwareness` `PerMonitorV2` to manifest for Windows 10 1607+ (note this should not affect lower versions since they should be able to ignore this and pick up `dpiAware` `true` set by `ManifestDPIAware true`)
@@ -315,11 +315,17 @@ Function PageReinstall
     !insertmacro PANITA_RECT $R2 0 246 402 44
     !insertmacro PANITA_RECT $R3 0 310 402 44
     !insertmacro PANITA_BRAND ""
+    ${NSD_CreateLabel} 0 0 0 0 "Elige cómo continuar con la instalación existente."
+    Pop $PanitaDescription
+    !insertmacro PANITA_RECT $PanitaDescription 0 72 402 72
+    SetCtlColors $PanitaDescription C4D0C8 10231E
     SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Continuar"
+    PanitaUi::Apply /NOUNLOAD
     nsDialogs::Show
   ${EndIf}
 FunctionEnd
 Function PageReinstallUpdateSelection
+  Pop $0 ; nsDialogs click-control handle.
   ${NSD_GetState} $R2 $R1
   ${If} $R1 == ${BST_CHECKED}
     StrCpy $ReinstallPageCheck 1
@@ -399,7 +405,7 @@ Function PageLeaveReinstall
       ${EndIf}
 
       ; Other errors? show generic error message and return to select un/reinstall page
-      MessageBox MB_ICONEXCLAMATION "$(unableToUninstall)"
+      !insertmacro PANITA_REPORT "No se pudo desinstalar la versión anterior. Cierra Panita Client y sus instancias antes de volver a intentarlo."
       Abort
     ${EndIf}
   reinst_done:
@@ -513,7 +519,7 @@ Function .onInit
           FileWrite $0 "$(silentDowngrades)"
         ${EndIf}
       ${Else}
-        MessageBox MB_ICONSTOP "$(silentDowngrades)"
+        !insertmacro PANITA_REPORT "$(silentDowngrades)"
       ${EndIf}
       Abort
     ${EndIf}
@@ -586,7 +592,6 @@ Section WebView2
     !if "${MINIMUMWEBVIEW2VERSION}" != ""
       ${VersionCompare} "${MINIMUMWEBVIEW2VERSION}" "$4" $R0
       ${If} $R0 = 1
-        update_webview:
           DetailPrint "$(installingWebview2)"
           ${If} ${RunningX64}
             ReadRegStr $R1 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate" "path"
@@ -603,9 +608,9 @@ Section WebView2
             ${If} $1 = 0
               DetailPrint "$(webview2InstallSuccess)"
             ${Else}
-              MessageBox MB_ICONEXCLAMATION|MB_ABORTRETRYIGNORE "$(webview2InstallError)" IDIGNORE ignore IDRETRY update_webview
-              Quit
-              ignore:
+              !insertmacro PANITA_REPORT "No se pudo actualizar Microsoft Edge WebView2. Revisa la conexión e inténtalo de nuevo ejecutando el instalador."
+              SetErrorLevel 3
+              Abort
             ${EndIf}
           ${EndIf}
       ${EndIf}
@@ -765,7 +770,7 @@ Section Uninstall
     ExecWait '$\"$INSTDIR\${MAINBINARYNAME}.exe$\" --remove-launcher-data' $0
     ${If} ${Errors}
     ${OrIf} $0 != 0
-      MessageBox MB_OK|MB_ICONSTOP "No se pudieron eliminar todos los datos. No se desinstaló el launcher. Los datos podrían haberse eliminado parcialmente. Cierra todas las instancias, revisa permisos o archivos bloqueados y vuelve a ejecutar el desinstalador para reintentar la eliminación." /SD IDOK
+      !insertmacro PANITA_REPORT "No se pudieron eliminar todos los datos. El launcher sigue instalado. La eliminación podría ser parcial. Cierra todas las instancias, revisa permisos o archivos bloqueados y vuelve a ejecutar el desinstalador para reintentar."
       SetErrorLevel 3
       Abort
     ${EndIf}
