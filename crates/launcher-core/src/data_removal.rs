@@ -161,6 +161,10 @@ fn remove_profile(root: &Path) -> Result<(), CoreError> {
         Err(error) => return Err(crate::storage::map_private_error(error)),
     };
     let lock = lock_handle(&private_lock)?;
+    #[cfg(windows)]
+    private_lock
+        .set_hidden()
+        .map_err(crate::storage::map_private_error)?;
     fs2::FileExt::try_lock_exclusive(&lock)
         .map_err(|_| CoreError::new(ErrorCode::OperationBusy))?;
     if pending(root)? {
@@ -178,6 +182,11 @@ fn remove_profile(root: &Path) -> Result<(), CoreError> {
     walk(&directory, 0, &mut 1_000_000, false)?;
     private
         .write_atomic_durable(MARKER, INTENT)
+        .map_err(crate::storage::map_private_error)?;
+    #[cfg(windows)]
+    private
+        .open_file(MARKER)
+        .and_then(|file| file.set_hidden())
         .map_err(crate::storage::map_private_error)?;
     walk(&directory, 0, &mut 1_000_000, true)?;
     drop(lock);
@@ -204,14 +213,15 @@ mod tests {
         fn new() -> Self {
             let path =
                 std::env::temp_dir().join(format!("panita-erasure-test-{}", uuid::Uuid::new_v4()));
-            private_fs::PrivateDir::ensure(&path).expect("private synthetic fixture");
+            private_fs::PrivateDir::ensure(&path)
+                .unwrap_or_else(|_| panic!("private synthetic fixture"));
             Self(path)
         }
         fn write(&self, name: &str, bytes: &[u8]) {
             private_fs::PrivateDir::open(&self.0)
-                .unwrap()
+                .unwrap_or_else(|_| panic!("synthetic fixture operation"))
                 .write_atomic_durable(name, bytes)
-                .unwrap();
+                .unwrap_or_else(|_| panic!("synthetic fixture operation"));
         }
     }
     impl Drop for Fixture {
@@ -228,18 +238,19 @@ mod tests {
             b"synthetic invalid account data, never parsed",
         );
         sibling.write("keep", b"outside");
-        std::fs::create_dir_all(fixture.0.join("instances/demo/minecraft/saves/world")).unwrap();
+        std::fs::create_dir_all(fixture.0.join("instances/demo/minecraft/saves/world"))
+            .unwrap_or_else(|_| panic!("synthetic fixture operation"));
         std::fs::write(
             fixture
                 .0
                 .join("instances/demo/minecraft/saves/world/level.dat"),
             b"synthetic world",
         )
-        .unwrap();
-        remove_profile(&fixture.0).unwrap();
+        .unwrap_or_else(|_| panic!("synthetic fixture operation"));
+        remove_profile(&fixture.0).unwrap_or_else(|_| panic!("synthetic fixture operation"));
         assert!(!fixture.0.exists());
         assert!(sibling.0.join("keep").exists());
-        remove_profile(&fixture.0).unwrap();
+        remove_profile(&fixture.0).unwrap_or_else(|_| panic!("synthetic fixture operation"));
     }
     #[test]
     fn refuses_busy_writer_before_removing_anything() {
@@ -247,14 +258,16 @@ mod tests {
         fixture.write(".mutation.lock", b"");
         fixture.write("keep", b"present");
         let private_lock = private_fs::PrivateDir::open(&fixture.0)
-            .unwrap()
+            .unwrap_or_else(|_| panic!("synthetic fixture operation"))
             .open_file(".mutation.lock")
-            .unwrap();
-        let lock = lock_handle(&private_lock).unwrap();
-        fs2::FileExt::try_lock_exclusive(&lock).unwrap();
+            .unwrap_or_else(|_| panic!("synthetic fixture operation"));
+        let lock =
+            lock_handle(&private_lock).unwrap_or_else(|_| panic!("synthetic fixture operation"));
+        lock.lock()
+            .unwrap_or_else(|_| panic!("synthetic fixture operation"));
         assert_eq!(
-            remove_profile(&fixture.0).unwrap_err().code(),
-            ErrorCode::OperationBusy
+            remove_profile(&fixture.0).err().map(|error| error.code()),
+            Some(ErrorCode::OperationBusy)
         );
         assert!(fixture.0.join("keep").exists());
     }
@@ -263,11 +276,11 @@ mod tests {
         let fixture = Fixture::new();
         fixture.write(MARKER, b"future schema");
         fixture.write("keep", b"present");
-        assert!(pending(&fixture.0).unwrap());
+        assert!(pending(&fixture.0).unwrap_or_else(|_| panic!("synthetic fixture operation")));
         assert!(remove_profile(&fixture.0).is_err());
         assert!(fixture.0.join("keep").exists());
         fixture.write(MARKER, INTENT);
-        remove_profile(&fixture.0).unwrap();
+        remove_profile(&fixture.0).unwrap_or_else(|_| panic!("synthetic fixture operation"));
         assert!(!fixture.0.exists());
     }
     #[cfg(windows)]
@@ -280,12 +293,27 @@ mod tests {
             .read(true)
             .share_mode(3)
             .open(fixture.0.join("locked"))
-            .unwrap();
+            .unwrap_or_else(|_| panic!("synthetic fixture operation"));
         assert!(remove_profile(&fixture.0).is_err());
-        assert!(pending(&fixture.0).unwrap());
+        assert!(pending(&fixture.0).unwrap_or_else(|_| panic!("synthetic fixture operation")));
         assert!(fixture.0.join("locked").exists());
+        use std::os::windows::fs::MetadataExt;
+        assert_ne!(
+            std::fs::metadata(fixture.0.join(MARKER))
+                .unwrap_or_else(|_| panic!("synthetic fixture operation"))
+                .file_attributes()
+                & 2,
+            0
+        );
+        assert_ne!(
+            std::fs::metadata(fixture.0.join(".mutation.lock"))
+                .unwrap_or_else(|_| panic!("synthetic fixture operation"))
+                .file_attributes()
+                & 2,
+            0
+        );
         drop(locked);
-        remove_profile(&fixture.0).unwrap();
+        remove_profile(&fixture.0).unwrap_or_else(|_| panic!("synthetic fixture operation"));
         assert!(!fixture.0.exists());
     }
     #[test]
@@ -300,13 +328,14 @@ mod tests {
                 .arg(fixture.0.join("redirect"))
                 .arg(&outside.0)
                 .output()
-                .unwrap();
+                .unwrap_or_else(|_| panic!("synthetic fixture operation"));
             assert!(status.status.success());
         }
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&outside.0, fixture.0.join("redirect")).unwrap();
+        std::os::unix::fs::symlink(&outside.0, fixture.0.join("redirect"))
+            .unwrap_or_else(|_| panic!("synthetic fixture operation"));
         assert!(remove_profile(&fixture.0).is_err());
         assert!(outside.0.join("keep").exists());
-        assert!(!pending(&fixture.0).unwrap());
+        assert!(!pending(&fixture.0).unwrap_or_else(|_| panic!("synthetic fixture operation")));
     }
 }
