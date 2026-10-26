@@ -77,8 +77,6 @@ bootstrapper; installing WebView2 still requires internet access when it is abse
 Preview the proposed installer design with `node scripts/preview-installer.mjs`
 and open the printed local address. Its actions are simulated.
 
-Use [the beta test checklist](BETA-TESTING.md) to record installed-product results.
-
 See [AGENTS.md](AGENTS.md) for project rules and accepted decisions, and the
 [checks workflow](.github/workflows/checks.yml) for build and test commands.
 
