@@ -9,6 +9,8 @@ mod protocol;
 mod settings_commands;
 #[cfg(windows)]
 mod windows_identity;
+#[cfg(windows)]
+mod windows_maintenance;
 
 struct DesktopState {
     process: launcher_core::operation::ProcessSessionId,
@@ -114,6 +116,27 @@ async fn catalog_snapshot(
 pub fn run() {
     let context = tauri::generate_context!();
     #[cfg(windows)]
+    if windows_maintenance::requested(std::env::args_os().skip(1)) {
+        std::process::exit(windows_maintenance::remove(&context.config().identifier));
+    }
+    #[cfg(windows)]
+    let startup_gate = match windows_maintenance::StartupGate::enter() {
+        Ok(gate) => gate,
+        Err(()) => {
+            windows_maintenance::show_error(
+                "Hay otra operación de inicio o eliminación de datos en curso. Espera a que termine y vuelve a abrir Panita Client.",
+            );
+            return;
+        }
+    };
+    #[cfg(windows)]
+    if !windows_maintenance::startup_allowed() {
+        windows_maintenance::show_error(
+            "La eliminación de datos quedó incompleta o no se puede comprobar. Cierra Panita Client y vuelve a ejecutar el desinstalador para completarla. Los datos restantes no se abrirán.",
+        );
+        return;
+    }
+    #[cfg(windows)]
     if !windows_identity::configure(&context.config().identifier) {
         // Cosmetic shell integration must not prevent account or game recovery.
         eprintln!("Windows application identity setup failed");
@@ -199,6 +222,8 @@ pub fn run() {
             play_commands::stop_game
         ])
         .build(context);
+    #[cfg(windows)]
+    drop(startup_gate);
     match result {
         Ok(app) => app.run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = event

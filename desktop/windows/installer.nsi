@@ -755,6 +755,22 @@ Section Uninstall
 
   !insertmacro PANITA_REQUIRE_IDLE "$INSTDIR\${MAINBINARYNAME}.exe"
 
+  ; Interactive, explicitly confirmed full-profile erasure only. Updates,
+  ; passive and silent uninstall always preserve player/account data.
+  ${If} $PanitaRemoveDataWanted == ${BST_CHECKED}
+  ${AndIf} $UpdateMode <> 1
+  ${AndIf} $PassiveMode <> 1
+  ${AndIfNot} ${Silent}
+    ClearErrors
+    ExecWait '$\"$INSTDIR\${MAINBINARYNAME}.exe$\" --remove-launcher-data' $0
+    ${If} ${Errors}
+    ${OrIf} $0 != 0
+      MessageBox MB_OK|MB_ICONSTOP "No se pudieron eliminar todos los datos. No se desinstaló el launcher. Los datos podrían haberse eliminado parcialmente. Cierra todas las instancias, revisa permisos o archivos bloqueados y vuelve a ejecutar el desinstalador para reintentar la eliminación." /SD IDOK
+      SetErrorLevel 3
+      Abort
+    ${EndIf}
+  ${EndIf}
+
   ; Delete the app directory and its content from disk
   ; Copy main executable
   Delete "$INSTDIR\${MAINBINARYNAME}.exe"

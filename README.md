@@ -72,7 +72,9 @@ Prepare a local unsigned beta candidate from a clean committed tree with
 location without building. Candidates, SHA-256 checksums and provenance are written
 under `target/beta/`; the command does not publish them. Installed-product testing
 is still required before distribution. Windows candidates embed the WebView2
-bootstrapper; installing WebView2 still requires internet access when it is absent.
+  bootstrapper; installing WebView2 still requires internet access when it is absent.
+  Windows packaging also requires the MSVC x86 tools to compile the native NSIS
+  presentation plugin; the launcher itself remains x64.
 
 Preview the proposed installer design with `node scripts/preview-installer.mjs`
 and open the printed local address. Its actions are simulated.

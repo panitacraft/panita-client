@@ -2167,6 +2167,7 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
+ "winsafe",
  "zeroize",
  "zip",
 ]
@@ -2698,6 +2699,7 @@ dependencies = [
  "gtk",
  "launcher-core",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",

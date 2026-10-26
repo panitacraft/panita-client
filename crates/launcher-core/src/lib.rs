@@ -3,6 +3,8 @@
 pub mod accounts;
 pub mod authentication;
 pub mod catalog;
+#[cfg(any(windows, test))]
+pub mod data_removal;
 pub mod error;
 mod instance_layout;
 pub mod logging;

@@ -20,6 +20,7 @@ tokio = { version = "1", features = ["time"] }
 windows-registry = "=0.100.0"
 windows-version = "=0.1.7"
 winsafe = { version = "=0.0.29", default-features = false, features = ["shell"] }
+sha2 = "=0.10.9"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "=0.18.2"

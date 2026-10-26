@@ -131,6 +131,18 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 - Preserve existing valid data on failed writes. Do not silently replace unreadable or corrupt account data with an empty store.
 - Validate network inputs, download hashes, destinations, redirects, and archive paths. Prevent traversal and writes outside intended directories. Apply least-privilege Tauri capabilities and IPC boundaries.
 - Updates, repairs, and uninstall operations must protect worlds and user-edited files. Make destructive removal explicit; do not overwrite user data merely because it differs from a pack default.
+- On 2026-10-26 the owner authorizes an optional Windows launcher-uninstall
+  action that erases the entire current-user `%APPDATA%\PanitaClient` folder.
+  Keep it unchecked by default and require a separate explicit confirmation.
+  Name the exact folder and list saved accounts/sessions, settings, all instances
+  including worlds, screenshots, configuration and backups, Minecraft/Java
+  downloads, caches and local logs. This is irreversible. Ordinary uninstall,
+  silent/passive uninstall and installer updates preserve all profile data.
+  Exclude live launchers and concurrent startup, reject redirected paths, never
+  follow links outside that root, and report partial failures honestly. Do not
+  open a partially erased profile or retry erasure automatically at startup.
+  This explicitly supersedes data-preservation requirements only for this
+  separately confirmed full-profile erasure; all other operations retain them.
 
 ### 4.4 Data on disk
 
