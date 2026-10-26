@@ -23,6 +23,11 @@ data; no delete-data checkbox or recursive app-data removal is included.
 When updating the pinned Tauri CLI, compare this template against that version
 and repeat installer upgrade/uninstall/ownership tests. Test native dialog layout
 at the target Windows DPI settings; browser-preview checks are insufficient.
-The title bar and standard button controls remain Windows-native. The NSIS
+The installer/uninstaller outer window is frameless. Interactive pages provide
+their own Spanish minimize/close controls and a draggable brand header; button
+widgets remain Windows-native. The main launcher retains its window decorations.
+Busy uninstall is checked by the confirmation page's leave callback, so dismissing
+the warning keeps that page available for retry. The section guard still checks
+again before deletion to catch a launcher started after preflight. The NSIS
 uninstaller's outer wrapper may report zero after its child rejects an operation;
 validate the UI and filesystem/registration outcomes rather than that code alone.

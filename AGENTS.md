@@ -414,6 +414,12 @@ are evidence, not product guarantees.
 
 ### Build and qualification boundaries
 
+- On 2026-10-26 the owner requests keeping the beta checklist only in ignored
+  `docs/`, and confirms frameless styling applies to the installer/uninstaller
+  only. Keep the main launcher window decorations. A busy-launcher uninstall
+  warning must leave its confirmation screen available for retry, with a final
+  idle check before deletion. Do not force-close the supervising launcher.
+
 - The packaged executable is `panita-client` (`panita-client.exe` on Windows),
   requested by the owner on 2026-10-25. Preserve the application identifier and
   private data paths during this rename. The internal Rust desktop crate and

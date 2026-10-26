@@ -306,9 +306,16 @@ Function PageReinstall
 
     ${NSD_SetFocus} $R2
     !insertmacro PANITA_PAGE_LAYOUT $R4
+    System::Call 'uxtheme::SetWindowTheme(p R2, w "", w "")'
+    System::Call 'uxtheme::SetWindowTheme(p R3, w "", w "")'
     SetCtlColors $R1 EFECE5 10231E
     SetCtlColors $R2 EFECE5 10231E
     SetCtlColors $R3 EFECE5 10231E
+    !insertmacro PANITA_RECT $R1 0 152 402 72
+    !insertmacro PANITA_RECT $R2 0 246 402 44
+    !insertmacro PANITA_RECT $R3 0 310 402 44
+    !insertmacro PANITA_BRAND ""
+    SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Continuar"
     nsDialogs::Show
   ${EndIf}
 FunctionEnd
@@ -423,7 +430,7 @@ FunctionEnd
 
 ; Uninstaller Pages
 ; 1. Explicit uninstall confirmation preserves all private application data.
-UninstPage custom un.PanitaConfirm
+UninstPage custom un.PanitaConfirm un.PanitaConfirmLeave
 
 ; 2. Uninstalling Page
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.PanitaProgress
