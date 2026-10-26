@@ -414,6 +414,14 @@ are evidence, not product guarantees.
 
 ### Build and qualification boundaries
 
+- The packaged executable is `panita-client` (`panita-client.exe` on Windows),
+  requested by the owner on 2026-10-25. Preserve the application identifier and
+  private data paths during this rename. The internal Rust desktop crate and
+  stable GTK window class remain `panita-desktop`; legacy executable names remain
+  valid only for migration. Installer maintenance must reject a running launcher
+  rather than force-close the process supervising games. Verify old-executable,
+  shortcut and callback migration without deleting unknown files or player data.
+
 - The owner authorized starting Phase 7 with an unsigned beta on 2026-10-25.
   Code signing is deferred; disclose unsigned Windows publisher/SmartScreen
   limitations. Prepare a compact Panita-branded graphical installer and matching
