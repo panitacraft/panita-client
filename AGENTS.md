@@ -426,6 +426,13 @@ are evidence, not product guarantees.
 
 ### Build and qualification boundaries
 
+- On 2026-10-26 the owner requests a consistent installer/uninstaller height and
+  header across phases, minimize/close icons, dragging from non-interactive
+  window areas, Windows error sounds and an explicit finish-without-launching
+  option. Failed progress must remain closable/minimizable; native navigation
+  must not reappear over content. Preserve native worker-completion checks and
+  never force-close an active file mutation to implement these controls.
+
 - On 2026-10-26 the owner requests Panita-controlled installer/update/uninstaller
   warnings inside the branded window, including busy-instance errors and the
   separate full-data erasure confirmation. Keep Spanish text, explicit consent,

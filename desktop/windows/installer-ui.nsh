@@ -6,6 +6,8 @@
 !define MUI_INSTFILESPAGE_COLORS "EFECE5 1B392E"
 !define MUI_CUSTOMFUNCTION_GUIINIT PanitaGuiInit
 !define MUI_CUSTOMFUNCTION_UNGUIINIT un.PanitaGuiInit
+!define MUI_CUSTOMFUNCTION_ABORT PanitaUserAbort
+!define MUI_CUSTOMFUNCTION_UNABORT un.PanitaUserAbort
 Var PanitaDpi
 Var PanitaDialog
 Var PanitaIcon
@@ -29,6 +31,7 @@ Var PanitaEraseAcknowledgement
 Var PanitaEraseBack
 Var PanitaProgressActive
 Var PanitaProgressNotice
+Var PanitaLaunchAfterSetup
 
 ; Presentation roles let the plugin measure actual fonts/text instead of keeping
 ; large fixed-height gaps. Values are transient window properties, not disk data.
@@ -39,8 +42,13 @@ Var PanitaProgressNotice
 ; Stay within the branded page. Silent runs only log and retain their error code.
 !macro PANITA_REPORT MESSAGE
   DetailPrint "${MESSAGE}"
+  ${IfNot} ${Silent}
+  ${AndIf} $PassiveMode != 1
+    System::Call 'user32::MessageBeep(i 0x10)'
+  ${EndIf}
   Push $0
   ${If} $PanitaProgressActive == 1
+    System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaPhase", p 2)'
     System::Call 'user32::IsWindow(p $PanitaProgressNotice) i .r0'
     ${If} $0 != 0
       SendMessage $PanitaProgressNotice ${WM_SETTEXT} 0 "STR:${MESSAGE}"
@@ -151,6 +159,7 @@ Var PanitaProgressNotice
 
 !macro PANITA_PAGE_LAYOUT HANDLE
   StrCpy $PanitaProgressActive 0
+  System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaPhase", p 0)'
   SendMessage ${HANDLE} ${WM_SETFONT} $PanitaBodyFont 1
   SendMessage $mui.Button.Next ${WM_SETFONT} $PanitaBodyFont 1
   SetCtlColors ${HANDLE} EFECE5 10231E
@@ -166,10 +175,10 @@ Var PanitaProgressNotice
   GetDlgItem $0 $HWNDPARENT 1036
   ShowWindow $0 ${SW_HIDE}
   Pop $0
-  !insertmacro PANITA_RECT ${HANDLE} 24 24 402 540
+  !insertmacro PANITA_RECT ${HANDLE} 24 24 402 484
   ShowWindow $mui.Button.Back ${SW_HIDE}
   ShowWindow $mui.Button.Cancel ${SW_HIDE}
-  !insertmacro PANITA_RECT $mui.Button.Next 24 582 402 44
+  !insertmacro PANITA_RECT $mui.Button.Next 24 532 402 44
 !macroend
 
 !macro PANITA_BRAND PREFIX
@@ -189,12 +198,10 @@ Var PanitaProgressNotice
   Pop $0
   !insertmacro PANITA_ROLE $0 3
   !insertmacro PANITA_RECT $0 280 0 64 28
-  ${NSD_OnClick} $0 ${PREFIX}PanitaMinimize
   ${NSD_CreateButton} 0 0 0 0 "Cerrar"
   Pop $0
   !insertmacro PANITA_ROLE $0 4
   !insertmacro PANITA_RECT $0 350 0 52 28
-  ${NSD_OnClick} $0 ${PREFIX}PanitaClose
   ${NSD_CreateLabel} 0 0 0 0 "Beta · ${VERSION}"
   Pop $0
   !insertmacro PANITA_ROLE $0 5
@@ -311,10 +318,16 @@ Var PanitaProgressNotice
       Abort
     ${EndIf}
     !insertmacro PANITA_PAGE_LAYOUT $PanitaDialog
+    System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaPhase", p 4)'
     !insertmacro PANITA_BRAND ""
-    !insertmacro PANITA_HEADING "Panita Client está listo" "Ya puedes abrir el launcher y elegir una instancia."
+    !insertmacro PANITA_HEADING "Panita Client está listo" "Finaliza la instalación. Si quieres, abre el launcher con la opción de abajo."
     !insertmacro PANITA_CARD "Tus aventuras se mantienen separadas. Las actualizaciones de instancias son siempre opcionales." 270 104
-    SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Abrir"
+    ${NSD_CreateCheckbox} 0 0 0 0 "Abrir Panita Client al finalizar"
+    Pop $PanitaLaunchAfterSetup
+    !insertmacro PANITA_ROLE $PanitaLaunchAfterSetup 20
+    SetCtlColors $PanitaLaunchAfterSetup EFECE5 10231E
+    ${NSD_Uncheck} $PanitaLaunchAfterSetup
+    SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Finalizar"
     SendMessage $mui.Button.Cancel ${WM_SETTEXT} 0 "STR:Cerrar"
     EnableWindow $mui.Button.Cancel 1
     PanitaUi::Apply /NOUNLOAD
@@ -322,7 +335,10 @@ Var PanitaProgressNotice
   FunctionEnd
 
   Function PanitaFinishLeave
-    Call RunMainBinary
+    ${NSD_GetState} $PanitaLaunchAfterSetup $0
+    ${If} $0 == ${BST_CHECKED}
+      Call RunMainBinary
+    ${EndIf}
   FunctionEnd
 
   Function un.PanitaConfirm
@@ -438,6 +454,26 @@ Var PanitaProgressNotice
   Function un.PanitaProgress
     !insertmacro PANITA_PROGRESS_LAYOUT "Desinstalando Panita Client"
   FunctionEnd
+
+  !insertmacro PANITA_PROGRESS_DONE ""
+  !insertmacro PANITA_PROGRESS_DONE "un."
+!macroend
+
+!macro PANITA_PROGRESS_DONE PREFIX
+  Function ${PREFIX}PanitaProgressDone
+    IfAbort failed completed
+    failed:
+      System::Call 'user32::GetPropW(p $HWNDPARENT, w "PanitaPhase") p .r0'
+      ${If} $0 != 2
+        !insertmacro PANITA_REPORT "No se pudo completar la operación. Revisa los detalles y cierra esta ventana para volver a intentarlo."
+      ${EndIf}
+      System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaPhase", p 2)'
+      Goto done
+    completed:
+      System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaPhase", p 3)'
+    done:
+      PanitaUi::Apply /NOUNLOAD
+  FunctionEnd
 !macroend
 
 !macro PANITA_GUI_INIT PREFIX
@@ -453,7 +489,7 @@ Var PanitaProgressNotice
     System::Call 'user32::SetWindowLongW(p $HWNDPARENT, i -16, i r0)'
     IntOp $0 450 * $PanitaDpi
     IntOp $0 $0 / 96
-    IntOp $1 650 * $PanitaDpi
+    IntOp $1 600 * $PanitaDpi
     IntOp $1 $1 / 96
     System::Call 'user32::SetWindowPos(p $HWNDPARENT, p 0, i 0, i 0, i r0, i r1, i 38)'
     SetCtlColors $HWNDPARENT EFECE5 10231E
@@ -462,6 +498,12 @@ Var PanitaProgressNotice
     CreateFont $PanitaBodyFont "Segoe UI" 11 400
     System::Call 'shell32::ExtractIconExW(w "$EXEPATH", i 0, *p .r0, p 0, i 1)'
     StrCpy $PanitaIcon $0
+    System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaIcon", p $PanitaIcon)'
+    System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "Beta · ${VERSION}", i 0x40000000, i 0, i 0, i 0, i 0, p $HWNDPARENT, p 0, p 0, p 0) p .r0'
+    System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaVersionLabel", p r0)'
+    !if "${PREFIX}" == "un."
+      System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaUninstall", p 1)'
+    !endif
     ; Replace the wizard header and separators with the page's own branding.
     ShowWindow $mui.Header.Text ${SW_HIDE}
     ShowWindow $mui.Header.SubText ${SW_HIDE}
@@ -472,14 +514,15 @@ Var PanitaProgressNotice
     ShowWindow $mui.Line.FullWindow ${SW_HIDE}
   FunctionEnd
 
-  Function ${PREFIX}PanitaMinimize
-    Pop $0 ; nsDialogs click-control handle.
-    ShowWindow $HWNDPARENT ${SW_MINIMIZE}
-  FunctionEnd
-
-  Function ${PREFIX}PanitaClose
-    Pop $0 ; nsDialogs click-control handle.
-    SendMessage $HWNDPARENT ${WM_COMMAND} 2 0
+  Function ${PREFIX}PanitaUserAbort
+    System::Call 'user32::GetPropW(p $HWNDPARENT, w "PanitaPhase") p .r0'
+    ${If} $0 == 1
+      Abort ; Never interrupt file mutation through the custom close control.
+    ${ElseIf} $0 == 3
+    ${OrIf} $0 == 4
+      SetErrorLevel 0
+      Quit ; Completed setup may close without starting the launcher.
+    ${EndIf}
   FunctionEnd
 
 !macroend
@@ -488,6 +531,7 @@ Var PanitaProgressNotice
   FindWindow $PanitaDialog "#32770" "" $HWNDPARENT
   !insertmacro PANITA_PAGE_LAYOUT $PanitaDialog
   StrCpy $PanitaProgressActive 1
+  System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaPhase", p 1)'
   System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w " ", i 0x40000000, i 0, i 0, i 0, i 0, p $PanitaDialog, p 0, p 0, p 0) p .r0'
   StrCpy $PanitaProgressNotice $0
   !insertmacro PANITA_ROLE $PanitaProgressNotice 17
@@ -496,6 +540,7 @@ Var PanitaProgressNotice
   !insertmacro PANITA_RECT $PanitaProgressNotice 0 70 402 128
   ; Brand the native progress page while retaining its actual status/log controls.
   System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "${TITLE}", i 0x50000000, i 0, i 0, i 0, i 0, p $PanitaDialog, p 0, p 0, p 0) p .r0'
+  System::Call 'user32::SetPropW(p r0, w "PanitaStageTitle", p 1)'
   SendMessage $0 ${WM_SETFONT} $PanitaBrandFont 1
   SetCtlColors $0 EFECE5 10231E
   !insertmacro PANITA_RECT $0 0 4 402 32

@@ -280,9 +280,10 @@ Function PageReinstall
     Pop $R4
     ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
 
-    ${NSD_CreateLabel} 0 0 100% 24u $R1
+    ${NSD_CreateLabel} 0 0 100% 24u "Opciones de instalación"
     Pop $R1
     !insertmacro PANITA_ROLE $R1 6
+    SendMessage $R1 ${WM_SETFONT} $PanitaTitleFont 1
 
     ${NSD_CreateRadioButton} 30u 50u -30u 8u $R2
     Pop $R2
@@ -318,7 +319,13 @@ Function PageReinstall
     !insertmacro PANITA_RECT $R2 0 246 402 44
     !insertmacro PANITA_RECT $R3 0 310 402 44
     !insertmacro PANITA_BRAND ""
-    ${NSD_CreateLabel} 0 0 0 0 "Elige cómo continuar con la instalación existente."
+    ${If} $R0 == 0
+      ${NSD_CreateLabel} 0 0 0 0 "Esta versión ya está instalada. Puedes reinstalar el launcher o desinstalarlo."
+    ${ElseIf} $R0 == 1
+      ${NSD_CreateLabel} 0 0 0 0 "Hay una versión anterior instalada. Elige cómo actualizar el launcher. Tus cuentas, ajustes, instancias y mundos se conservarán."
+    ${Else}
+      ${NSD_CreateLabel} 0 0 0 0 "Hay una versión más reciente instalada. Revisa las opciones disponibles antes de continuar."
+    ${EndIf}
     Pop $PanitaDescription
     !insertmacro PANITA_ROLE $PanitaDescription 7
     !insertmacro PANITA_RECT $PanitaDescription 0 72 402 72
@@ -429,6 +436,7 @@ Var AppStartMenuFolder
 
 ; 7. Installation page
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW PanitaProgress
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE PanitaProgressDone
 !insertmacro MUI_PAGE_INSTFILES
 
 ; 8. Branded completion page
@@ -444,6 +452,7 @@ UninstPage custom un.PanitaConfirm un.PanitaConfirmLeave
 
 ; 2. Uninstalling Page
 !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.PanitaProgress
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.PanitaProgressDone
 !insertmacro MUI_UNPAGE_INSTFILES
 
 ;Languages
