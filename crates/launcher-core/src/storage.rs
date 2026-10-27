@@ -38,6 +38,17 @@ impl StoreTransaction<'_> {
             .map_err(map_private_error)
     }
 
+    /// Cosmetic only: hide a data file in Explorer without changing its permissions.
+    /// An atomic replacement publishes a new file, so callers repeat this after writing.
+    #[cfg(windows)]
+    pub(crate) fn hide(&self, name: &'static str) -> Result<(), CoreError> {
+        self.store
+            .root
+            .open_file(name)
+            .and_then(|file| file.set_hidden())
+            .map_err(map_private_error)
+    }
+
     /// Caller holds the writer lock and validates that this document is retired.
     /// Resolve from the retained private root, rejecting redirects and hard links.
     pub(crate) fn remove_verified_file(&self, name: &'static str) -> Result<(), CoreError> {

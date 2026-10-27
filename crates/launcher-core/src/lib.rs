@@ -12,6 +12,7 @@ pub mod minecraft;
 pub mod modpack;
 pub mod oauth;
 pub mod operation;
+pub mod panita_session;
 pub mod paths;
 pub mod registry;
 pub mod sessions;
