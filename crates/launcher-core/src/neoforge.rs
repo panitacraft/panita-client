@@ -12,6 +12,8 @@ use sha1::{Digest, Sha1};
 use crate::error::{CoreError, ErrorCode};
 use crate::minecraft::{safe_path, valid_hash};
 
+pub mod plan;
+
 pub const MAVEN_ROOT: &str = "https://maven.neoforged.net/releases/";
 pub const MAX_INSTALLER_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_METADATA_BYTES: usize = 8 * 1024 * 1024;
