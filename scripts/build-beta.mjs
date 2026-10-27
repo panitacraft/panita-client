@@ -13,14 +13,17 @@ const [os, bundles] = platform;
 const config = JSON.parse(await readFile(join(root, 'desktop/tauri.beta.conf.json'), 'utf8'));
 const baseConfig = JSON.parse(await readFile(join(root, 'desktop/tauri.conf.json'), 'utf8'));
 const args = process.argv.slice(2);
+const loaderValidation = args.includes('--loader-validation');
+if (loaderValidation) args.splice(args.indexOf('--loader-validation'), 1);
 const releaseIndex = args.indexOf('--release-tag');
 const release = releaseIndex !== -1;
 const releaseTag = release ? args[releaseIndex + 1] : undefined;
+if (loaderValidation && release) throw new Error('Loader validation builds cannot be release candidates.');
 if (release) {
   config.version = releaseVersion(releaseTag);
   args.splice(releaseIndex, 2);
 } else if (!/^\d+\.\d+\.\d+-beta\.\d+$/.test(config.version)) throw new Error('Expected an explicit beta version.');
-if (args.some(arg => arg !== '--check')) throw new Error('Supported options: --check, --release-tag <vVERSION>');
+if (args.some(arg => arg !== '--check')) throw new Error('Supported options: --check, --release-tag <vVERSION>, --loader-validation');
 
 function run(command, commandArgs, capture = false) {
   const result = spawnSync(command, commandArgs, {
@@ -41,12 +44,12 @@ if (dirty) throw new Error('Commit task changes before producing an installer ca
 if (release && run('git', ['rev-parse', `refs/tags/${releaseTag}^{commit}`], true) !== revision) {
   throw new Error('Release tag must identify the current source commit.');
 }
-const destination = join(root, release ? 'target/releases' : 'target/beta', config.version, os);
-console.log(`Unsigned ${release ? 'release' : 'beta'}: ${config.version} (${bundles.map(([bundle]) => bundle).join(', ')})\nSource: ${revision}\nOutput: ${destination}`);
+const destination = join(root, loaderValidation ? 'target/loader-validation' : release ? 'target/releases' : 'target/beta', config.version, os);
+console.log(`Unsigned ${loaderValidation ? 'internal loader validation' : release ? 'release' : 'beta'}: ${config.version} (${bundles.map(([bundle]) => bundle).join(', ')})\nSource: ${revision}\nOutput: ${destination}`);
 if (args.includes('--check')) process.exit(0);
 
 // No signing or publication is performed. Tauri retains the existing application identity.
-run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', '--no-sign', '--config', release ? JSON.stringify(config) : join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundles.map(([bundle]) => bundle).join(','), '--', '--locked']);
+run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', '--no-sign', '--config', release ? JSON.stringify(config) : join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundles.map(([bundle]) => bundle).join(','), ...(loaderValidation ? ['--features', 'loader-validation'] : []), '--', '--locked']);
 if (run('git', ['rev-parse', 'HEAD'], true) !== revision
     || run('git', ['status', '--porcelain', '--untracked-files=normal'], true).length > 0) {
   throw new Error('Source changed during compilation. Commit changes and rebuild before preparing a candidate.');
@@ -54,7 +57,7 @@ if (run('git', ['rev-parse', 'HEAD'], true) !== revision
 const checksums = [];
 await mkdir(destination, { recursive: true });
 for (const [bundle, extension] of bundles) {
-  const name = `panita-client_${config.version}_${os}_x64_unsigned${extension}`;
+  const name = `panita-client_${config.version}_${os}_x64_unsigned${loaderValidation ? '_loader-validation' : ''}${extension}`;
   const bundleDirectory = join(root, 'target/phase-7-build/release/bundle', bundle);
   const expected = bundle === 'nsis'
     ? `Panita Client_${config.version}_x64-setup.exe`
@@ -73,7 +76,8 @@ for (const [bundle, extension] of bundles) {
   const manifest = bundle === 'appimage' ? 'candidate-appimage.json' : 'candidate.json';
   await writeFile(join(destination, manifest), `${JSON.stringify({
     schema: 1,
-    type: release ? 'unsigned_release_candidate' : 'unsigned_beta_candidate',
+    type: loaderValidation ? 'unsigned_loader_validation_candidate' : release ? 'unsigned_release_candidate' : 'unsigned_beta_candidate',
+    ...(loaderValidation ? { features: ['loader-validation'], distribution: 'internal_validation_only' } : {}),
     version: config.version,
     source_revision: revision,
     platform: `${os}_x64`,
