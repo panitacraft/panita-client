@@ -1,0 +1,16 @@
+pkgname=panita-client
+pkgver=${PANITA_ARCH_VERSION:?}
+pkgrel=1
+pkgdesc='Unofficial Minecraft launcher for the Panitacraft community'
+arch=('x86_64')
+url='https://github.com/panitacraft/panita-client'
+license=('GPL-3.0-or-later')
+depends=('cairo' 'gdk-pixbuf2' 'glib2' 'gtk3' 'pango' 'webkit2gtk-4.1'
+         'openssl' 'gcc-libs' 'glibc' 'xdg-utils' 'hicolor-icon-theme' 'desktop-file-utils')
+options=('!strip' '!debug' '!emptydirs')
+source=('payload.tar')
+sha256sums=("${PANITA_PAYLOAD_SHA256:?}")
+
+package() {
+  cp -a "$srcdir/usr" "$pkgdir/"
+}
