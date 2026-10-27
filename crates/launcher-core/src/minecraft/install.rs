@@ -32,6 +32,8 @@ struct Journal {
     active: bool,
 }
 mod format;
+mod timing;
+use timing::{Stage, Timer};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "format::StoredInstalled", into = "format::StoredInstalled")]
@@ -263,6 +265,7 @@ async fn download_all(
     progress: Progress,
 ) -> Result<(), CoreError> {
     let required = {
+        let _timer = Timer::new(Stage::Capacity);
         let paths = paths.clone();
         let files = plan.artifacts.clone();
         let cancel = cancel.clone();
@@ -273,6 +276,7 @@ async fn download_all(
         .await
     };
     required?;
+    let _timer = Timer::new(Stage::Cache);
     // The cache already serializes each parent directory across processes.
     // Batch those files to amortize private opens, leases and temporary scans.
     let mut batches = std::collections::BTreeMap::<String, Vec<PlannedArtifact>>::new();
@@ -379,10 +383,14 @@ pub async fn install(
     progress: Progress,
     auth: Option<PanitaCredentials>,
 ) -> Result<InstalledLock, CoreError> {
+    let _timer = Timer::new(Stage::Total);
     let catalog_client = CatalogClient::new()?.with_auth(auth);
-    let catalog = tokio::select! {
-        _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
-        result = catalog_client.detail(id) => result?,
+    let catalog = {
+        let _timer = Timer::new(Stage::Catalog);
+        tokio::select! {
+            _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
+            result = catalog_client.detail(id) => result?,
+        }
     };
     let registry = InstanceRegistry::new(paths.clone());
     // Retain explicit availability learned here, including a disabled result.
@@ -489,8 +497,14 @@ pub(super) async fn prepare(
     progress: Progress,
 ) -> Result<InstalledLock, CoreError> {
     let downloader = Downloader::new()?;
-    let mut plan = super::plan::resolve(&downloader, version, platform, cancel).await?;
-    plan.allocate_runtime(paths)?;
+    let mut plan = {
+        let _timer = Timer::new(Stage::Metadata);
+        super::plan::resolve(&downloader, version, platform, cancel).await?
+    };
+    {
+        let _timer = Timer::new(Stage::RuntimeReservation);
+        plan.allocate_runtime(paths)?;
+    }
     prepare_recorded(paths, id, operation, platform, plan, cancel, progress).await
 }
 
@@ -523,9 +537,16 @@ pub(super) async fn prepare_recorded(
     }
     let downloader = Downloader::new()?;
     download_all(paths, &downloader, &plan, cancel, progress).await?;
-    plan.verify_dependencies(paths)?;
-    verify_java(paths, &plan, platform, cancel).await?;
+    {
+        let _timer = Timer::new(Stage::Dependencies);
+        plan.verify_dependencies(paths)?;
+    }
+    {
+        let _timer = Timer::new(Stage::Java);
+        verify_java(paths, &plan, platform, cancel).await?;
+    }
     if let Some(loader) = &plan.loader {
+        let _timer = Timer::new(Stage::Loader);
         match loader.verify(paths, cancel) {
             Ok(()) => {}
             Err(error) if error.code() == ErrorCode::ArtifactMismatch => {
@@ -534,6 +555,7 @@ pub(super) async fn prepare_recorded(
             Err(error) => return Err(error),
         }
     }
+    let native_timer = Timer::new(Stage::Natives);
     let native_directory = format!("natives/{operation}");
     let native_root = root.join(&native_directory);
     if !plan.version.natives.is_empty() {
@@ -559,6 +581,7 @@ pub(super) async fn prepare_recorded(
             cancel,
         )?);
     }
+    drop(native_timer);
     cancel.check()?;
     let installed = InstalledLock {
         schema_version: 2,
