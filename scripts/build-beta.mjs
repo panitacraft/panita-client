@@ -10,6 +10,7 @@ const platform = { win32: ['windows', 'nsis', '.exe'], linux: ['linux', 'deb', '
 if (!platform || process.arch !== 'x64') throw new Error('Beta packaging currently requires Windows x64 or Linux x64.');
 const [os, bundle, extension] = platform;
 const config = JSON.parse(await readFile(join(root, 'desktop/tauri.beta.conf.json'), 'utf8'));
+const baseConfig = JSON.parse(await readFile(join(root, 'desktop/tauri.conf.json'), 'utf8'));
 if (!/^\d+\.\d+\.\d+-beta\.\d+$/.test(config.version)) throw new Error('Expected an explicit beta version.');
 const args = process.argv.slice(2);
 if (args.some(arg => arg !== '--check')) throw new Error('Supported option: --check');
@@ -44,7 +45,7 @@ if (run('git', ['rev-parse', 'HEAD'], true) !== revision
 const bundleDirectory = join(root, 'target/phase-7-build/release/bundle', bundle);
 const expected = bundle === 'nsis'
   ? `Panita Client_${config.version}_x64-setup.exe`
-  : `panita-client_${config.version}_amd64.deb`;
+  : `${config.productName ?? baseConfig.productName}_${config.version}_amd64.deb`;
 const files = await readdir(bundleDirectory);
 // Match the exact version to avoid copying an older candidate left by an interrupted build.
 const candidates = files.filter(file => file === expected);

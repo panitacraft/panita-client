@@ -76,6 +76,13 @@ is still required before distribution. Windows candidates embed the WebView2
   Windows packaging also requires the MSVC x86 tools to compile the native NSIS
   presentation plugin; the launcher itself remains x64.
 
+From Windows with Docker Desktop running Linux containers, use
+`pwsh -File scripts/build-linux-beta.ps1` to prepare the Linux `.deb` in a separate
+Ubuntu 24.04 build environment. The command builds committed `develop`, verifies
+the package contents and runtime linkage, and copies the candidate into
+`target/beta/`. It does not install anything on the testing VM. Compilation and
+package inspection do not establish installed-product qualification.
+
 Preview the proposed installer design with `node scripts/preview-installer.mjs`
 and open the printed local address. Its actions are simulated.
 
