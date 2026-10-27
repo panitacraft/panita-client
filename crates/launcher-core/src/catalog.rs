@@ -2,12 +2,13 @@
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use reqwest::{Client, StatusCode, header};
+use reqwest::{Client, RequestBuilder, StatusCode, header};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{CoreError, ErrorCode};
+use crate::panita_api::PanitaCredentials;
 use crate::storage::PrivateStore;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
@@ -451,6 +452,9 @@ pub struct CatalogSnapshot {
 pub struct CatalogClient {
     client: Client,
     base: String,
+    /// Launcher key and member session. Restricted instances are only returned
+    /// to a request that carries both.
+    auth: Option<PanitaCredentials>,
 }
 
 #[cfg(test)]
@@ -473,11 +477,33 @@ impl CatalogClient {
         Ok(Self {
             client,
             base: BASE.to_owned(),
+            auth: None,
         })
     }
 
+    pub fn with_auth(mut self, auth: PanitaCredentials) -> Self {
+        self.auth = Some(auth);
+        self
+    }
+
+    fn authorize(&self, request: RequestBuilder) -> RequestBuilder {
+        match &self.auth {
+            Some(auth) => auth.apply(request),
+            None => request,
+        }
+    }
+
+    /// A cached list belongs to the identity it was fetched for: a member's list
+    /// can include restricted entries and is never served to anyone else.
     fn representation(&self) -> String {
-        format!("{}/v1/instances|accept:application/json", self.base)
+        let identity = self.auth.as_ref().and_then(PanitaCredentials::identity);
+        match identity {
+            Some(id) => format!(
+                "{}/v1/instances|accept:application/json|identity:{id}",
+                self.base
+            ),
+            None => format!("{}/v1/instances|accept:application/json", self.base),
+        }
     }
 
     pub async fn refresh(&self, store: &PrivateStore) -> Result<CatalogSnapshot, CoreError> {
@@ -487,10 +513,11 @@ impl CatalogClient {
             .transpose();
         let cache_invalid = cached.is_err();
         let cached = cached.ok().flatten();
-        let mut request = self
-            .client
-            .get(format!("{}/v1/instances", self.base))
-            .header(header::ACCEPT, "application/json");
+        let mut request = self.authorize(
+            self.client
+                .get(format!("{}/v1/instances", self.base))
+                .header(header::ACCEPT, "application/json"),
+        );
         if let Some(etag) = cached.as_ref().and_then(|cache| cache.etag.as_ref()) {
             request = request.header(header::IF_NONE_MATCH, etag);
         }
@@ -501,6 +528,9 @@ impl CatalogClient {
                 .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
             if response.status() == StatusCode::NOT_MODIFIED {
                 return cached.ok_or_else(invalid);
+            }
+            if is_unauthorized(response.status()) {
+                return Err(unauthorized(response).await);
             }
             check_status(response.status())?;
             let etag = response
@@ -570,15 +600,20 @@ impl CatalogClient {
     /// Request revalidation is not a guarantee of origin freshness through a CDN.
     pub async fn detail(&self, id: Uuid) -> Result<CatalogInstance, CoreError> {
         let response = self
-            .client
-            .get(format!("{}/v1/instances/{id}", self.base))
-            .header(header::ACCEPT, "application/json")
-            .header(header::CACHE_CONTROL, "no-cache")
+            .authorize(
+                self.client
+                    .get(format!("{}/v1/instances/{id}", self.base))
+                    .header(header::ACCEPT, "application/json")
+                    .header(header::CACHE_CONTROL, "no-cache"),
+            )
             .send()
             .await
             .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
         if response.status() == StatusCode::NOT_FOUND {
             return Err(CoreError::new(ErrorCode::InstanceMissing));
+        }
+        if is_unauthorized(response.status()) {
+            return Err(unauthorized(response).await);
         }
         check_status(response.status())?;
         let detail: Detail =
@@ -589,6 +624,26 @@ impl CatalogClient {
         }
         Ok(record)
     }
+}
+
+fn is_unauthorized(status: StatusCode) -> bool {
+    status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN
+}
+
+/// Only `invalid_token` means the session is closed. `invalid_key` (or a 403) is
+/// this launcher's key being refused, and anything else, including a proxy page,
+/// is invalid data. None of them is an outage, so none falls back to the cache.
+async fn unauthorized(response: reqwest::Response) -> CoreError {
+    let status = response.status();
+    let reason = match body(response).await {
+        Ok(bytes) => crate::panita_api::error_reason(&bytes),
+        Err(_) => None,
+    };
+    CoreError::new(match (status.as_u16(), reason.as_deref()) {
+        (401, Some("invalid_token")) => ErrorCode::SessionRejected,
+        (401 | 403, Some("invalid_key")) | (403, _) => ErrorCode::ApiKeyRejected,
+        _ => ErrorCode::InvalidData,
+    })
 }
 
 fn check_status(status: StatusCode) -> Result<(), CoreError> {

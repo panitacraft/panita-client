@@ -36,6 +36,8 @@ fn launcher_key() -> String {
 pub struct PanitaCredentials {
     key: String,
     token: Option<Arc<Secret>>,
+    /// The Panita account id of the session, used to bind cached catalogs.
+    identity: Option<u64>,
 }
 
 impl PanitaCredentials {
@@ -51,12 +53,18 @@ impl PanitaCredentials {
         Ok(Self {
             key: key.to_owned(),
             token: None,
+            identity: None,
         })
     }
 
     pub fn with_session(mut self, session: &PanitaSession) -> Self {
         self.token = Some(Arc::clone(session.token()));
+        self.identity = Some(session.user.id);
         self
+    }
+
+    pub(crate) fn identity(&self) -> Option<u64> {
+        self.identity
     }
 
     pub fn has_session(&self) -> bool {
@@ -180,6 +188,14 @@ pub enum PollOutcome {
 pub struct PanitaApiClient {
     client: Client,
     base: String,
+}
+
+#[cfg(test)]
+impl PanitaApiClient {
+    /// Lets other clients' tests reuse this module's loopback fixture.
+    pub(crate) fn test_transport(self) -> (Client, String) {
+        (self.client, self.base)
+    }
 }
 
 impl PanitaApiClient {
@@ -364,22 +380,7 @@ impl Reply {
     /// key was refused while every session is still valid. Anything unrecognized,
     /// including a proxy page, is invalid data and never a rejection.
     fn failure(&self, operation: Operation) -> PanitaApiError {
-        #[derive(Deserialize)]
-        struct Failure {
-            error: Inner,
-        }
-        #[derive(Deserialize)]
-        struct Inner {
-            details: Option<Details>,
-        }
-        #[derive(Deserialize)]
-        struct Details {
-            reason: Option<String>,
-        }
-        let reason = serde_json::from_slice::<Failure>(&self.body)
-            .ok()
-            .and_then(|failure| failure.error.details)
-            .and_then(|details| details.reason);
+        let reason = error_reason(&self.body);
         let reason = reason.as_deref();
         let code = match (self.status.as_u16(), operation, reason) {
             (401 | 403, _, Some("invalid_key")) | (403, _, _) => ErrorCode::ApiKeyRejected,
@@ -407,6 +408,27 @@ impl Reply {
         };
         code.into()
     }
+}
+
+/// `error.details.reason` of the API's error envelope. A proxy page or any other
+/// body has none, and an unknown reason is never treated as a rejection.
+pub(crate) fn error_reason(body: &[u8]) -> Option<String> {
+    #[derive(Deserialize)]
+    struct Failure {
+        error: Inner,
+    }
+    #[derive(Deserialize)]
+    struct Inner {
+        details: Option<Details>,
+    }
+    #[derive(Deserialize)]
+    struct Details {
+        reason: Option<String>,
+    }
+    serde_json::from_slice::<Failure>(body)
+        .ok()
+        .and_then(|failure| failure.error.details)
+        .and_then(|details| details.reason)
 }
 
 #[derive(Deserialize)]
