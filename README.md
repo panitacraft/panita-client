@@ -28,8 +28,9 @@ The launcher handles the downloads and Java setup for you, with a friendly and i
 
 ## Before you play
 
-Panita Client is an **unsigned beta**. Packaged application tests are
-owner-reported as passed on Windows 11 x64 and Ubuntu 26.04.1 x64. The owner
+Panita Client is an **unsigned prerelease**. The agreed MVP phases are complete,
+and the owner confirms release validation on 2026-10-27. Packaged application
+tests are owner-reported as passed on Windows 11 x64 and Ubuntu 26.04.1 x64. The owner
 also confirms teammate testing passed on clean Windows 11 and Ubuntu VMs.
 Other Windows/Linux versions are unqualified; macOS, ARM, Flatpak and modpacks
 are future scope.

@@ -356,9 +356,9 @@ OAuth reference: https://learn.microsoft.com/en-us/entra/identity-platform/v2-oa
 ## Annex B. Maintenance and Desktop Decisions Preserved from the README
 
 These existing decisions and implementation boundaries were consolidated from the
-README on 2026-10-25. They supplement the rules above; they do not authorize Phase 7
-implementation or a release. Historical test counts and individual measurements
-are evidence, not product guarantees.
+README on 2026-10-25. They supplement the rules above; their historical approval
+boundaries do not revoke later explicit owner decisions. Historical test counts
+and individual measurements are evidence, not product guarantees.
 
 ### Updates, repair, and world backups
 
@@ -476,8 +476,13 @@ are evidence, not product guarantees.
   GTK/WebKit runtimes; the previously recorded development tools/packages are
   absent. This inventory does not establish a fresh clean-install baseline or
   qualify the Phase 7 candidate. No package removal or VM reset is authorized.
-- Phase 6 was accepted on 2026-10-25. Its closure is recorded at
-  https://github.com/panitacraft/panita-client/issues/8. Installer polish,
-  clean-machine and advertised-platform qualification, release preparation, and
-  distribution remain Phase 7 work. Do not treat earlier BOX results as fresh
-  Linux native acceptance of the latest Phase 6 changes.
+- Phases 0–7 are accepted and complete; Phase 6 closed on 2026-10-25 and
+  Phase 7 on 2026-10-26. The owner accepts Windows/Linux functional results and
+  teammate-reported clean Windows 11/Ubuntu VM tests. On 2026-10-27 the owner
+  confirms release validation. Preserve these as owner-reported results;
+  historical BOX observations and beta candidate hashes retain their own scope.
+  The current release tag is `v0.1.1-alpha` at this documentation checkpoint.
+  CachyOS installation/game launch remain unverified in the available records;
+  signing and self-update remain deferred. Later explicit release decisions
+  supersede earlier preparation-only boundaries for their authorized scope.
+  Future pushes, tags, merges and publication still require authorization.
