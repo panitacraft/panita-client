@@ -96,7 +96,7 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 - Record resolved versions and managed-file ownership per installation. Share only reusable, verified caches; coordinate writes and cleanup across operations and processes.
 - Use Prism's cached-check strategy as the Play-time reference, approved by the owner on 2026-10-23. Keep full content verification for installation, repair, recovery and explicit audits. Play may reuse protected, manifest-bound verification receipts when expected hashes, sizes and file metadata remain unchanged; unknown or changed files require full hashes. Apply changed-file revalidation to assets as well, rather than Prism's size-only asset reuse. Keep permission, redirected-path, installation-completeness, catalog and authentication checks on every Play. Missing files or detected mismatches still block Play and require explicit Repair. Receipts are disposable and contain no credentials; absent, malformed or outdated receipts require fresh verification. Accept that metadata-preserving corruption can escape the cached check; this is not an anti-malware boundary.
 - Store vanilla clients at `versions/{version}/{version}-{client-hash}.jar`. Store Java at `runtime/java-{major}-{platform}/`, using suffixes such as `-build-2` only when different exact builds need separate directories. Persist and verify the authoritative runtime manifest and artifact hashes; readable names are not proof of identity. Reserve runtime builds under an interprocess writer lock before downloads, reuse matching reservations after interruption, and never adopt unowned directories or overwrite a different build. Existing installation manifests keep resolving their recorded legacy cache paths; do not remove referenced caches during layout changes.
-- Consume the public, read-only Panita API. The launcher does not access Supabase directly or need its database credentials.
+- Consume the Panita API. The public catalog is read-only; Panita activation (§4.5) adds authenticated calls to the API's auth routes, including POST and DELETE. The launcher does not access Supabase directly or need its database credentials.
 - Use exact pinned versions. Vanilla uses the catalog Minecraft version; future Modrinth instances use the pinned pack as their authoritative source.
 - Fetch the catalog at startup. Show disabled entries dimmed, with a lock icon and Spanish status text. Check the specific instance through the API on every Play request; an explicit disabled result blocks installation/launch. Disabled or removed entries must not delete local installations or worlds. Installed vanilla updates are explicit, not automatic.
 - If the catalog API is unreachable, show the last valid cached catalog and an on-load Spanish toast explaining that installed instances remain available. Before each fallback launch, require a warning confirmation because current instance status could not be checked. Permit only complete local vanilla installations; do not bypass a known disabled state, install missing files, or treat an explicit disabled/missing response as a network outage. Microsoft authentication requirements remain independent.
@@ -124,10 +124,11 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 ### 4.3 Security and data protection
 
 - Do not bundle application secrets, client secrets, database/admin keys, or updater signing private keys. Public OAuth client IDs are not secrets; signing private keys belong in CI secrets.
+- The Panita launcher key (`X-Api-Key`) is a declared public client identifier, approved by the owner on 2026-10-27. A distributed binary can always be searched for it, so nothing may depend on hiding it: accounts are protected by the member's session token and the confirmation from Discord. Inject it at build time from a repository variable, never as a secret, and never treat it as one. The keys of the bot and the mod are real secrets and never ship in the launcher.
 - Treat `accounts.json` as sensitive: anyone able to read it can extract refresh tokens. Never claim it is encrypted or protected against malware running as the same user.
 - Use private application-data paths and platform-appropriate permissions: restricted Windows ACLs and owner-only Unix permissions. Run as a normal user; do not elevate to access accounts.
 - Use schema versions, migrations, and atomic writes. Protect atomic-write temporaries from creation; they may contain refresh tokens and require the same restrictions and cleanup as the account file.
-- Never put credentials or complete account files in logs, frontend payloads, diagnostics, source control, or launcher-generated backups/exports. Redact sensitive headers, arguments, callbacks, and errors.
+- Never put credentials or complete account files in logs, frontend payloads, diagnostics, source control, or launcher-generated backups/exports. Redact sensitive headers, arguments, callbacks, and errors, including `Authorization`, `X-Api-Key` and the Panita session token.
 - Preserve existing valid data on failed writes. Do not silently replace unreadable or corrupt account data with an empty store.
 - Validate network inputs, download hashes, destinations, redirects, and archive paths. Prevent traversal and writes outside intended directories. Apply least-privilege Tauri capabilities and IPC boundaries.
 - Updates, repairs, and uninstall operations must protect worlds and user-edited files. Make destructive removal explicit; do not overwrite user data merely because it differs from a pack default.
@@ -152,6 +153,7 @@ Use the current user's application-data directory, with platform-specific paths 
 PanitaClient/
 ├─ accounts.json          # sensitive: metadata and Microsoft refresh tokens
 ├─ account-removals.json  # temporary nonsecret pending account-removal recovery
+├─ panita-session.json    # sensitive: Panitacraft session token and a nonsecret member snapshot; hidden on Windows
 ├─ settings.json          # indented disk schema 3; compact, explicit keys
 ├─ insts-cache.json
 ├─ libraries/             # shared, verified caches
@@ -170,7 +172,7 @@ PanitaClient/
 └─ logs/                  # redacted launcher logs
 ```
 
-Do not introduce a separate plaintext keychain-fallback `secrets.json`; the chosen persistence mechanism is `accounts.json`.
+Do not introduce a separate plaintext keychain-fallback `secrets.json`; the chosen persistence mechanisms are `accounts.json` and `panita-session.json`.
 
 ### JSON naming and formatting
 
@@ -193,6 +195,59 @@ Do not introduce a separate plaintext keychain-fallback `secrets.json`; the chos
 This rule was requested by the owner on 2026-10-24. Accounts and catalog caches now
 write `schema`; operation transactions write `type`, with `kind` retained only as
 a supported legacy spelling. Existing numeric format versions remain validated.
+
+### 4.5 Panita activation (2026-10-27)
+
+The owner approved Panita activation on 2026-10-27. Its API contract is
+`launcher-activation-plan.md` in the Panita API repository. It is separate from the
+§7 modpack plan, whose exclusion of Panita login and restricted instances scopes
+that plan only.
+
+- Activation is a community gate, independent of Minecraft authentication. It is
+  not DRM: a modified launcher can skip it, and the real locks are restricted
+  instances (the API) and the server whitelist. Public instances stay playable by
+  any activated launcher. Do not promise users more.
+- The member types their ign or Discord name; the launcher asks the API for a login
+  request, shows the serial (`XXXX-YYYY-ZZZZ`) with the Discord instructions, and
+  polls every 2 to 3 seconds until the member confirms it in Discord, the serial
+  expires (3 minutes) or the login is cancelled. The launcher never talks to
+  Discord and uses neither an embedded webview nor a deep link for this flow. Send
+  the computer name and operating system as informational device text, reduced to
+  a safe alphabet and not editable; never an IP address or a location.
+- States are no session, creating, pending, active and active offline. Show
+  activation first and then, if no Minecraft account is saved, onboarding to add a
+  Microsoft or offline account. A saved Minecraft account never skips activation.
+  Minecraft status and the nickname are only hints, never requirements.
+- Store `panita-session.json` through the same private store, atomic writes,
+  interprocess writer lock and schema validation as `accounts.json`, apart from
+  Minecraft accounts and their removal recovery. It holds the session token in
+  plaintext with restricted permissions and a nonsecret snapshot of the member (the
+  date of birth is never kept). Hide it on Windows after every write as a cosmetic
+  aid only. Never claim it is encrypted or protected against malware running as
+  the same user; the safety net is revocation with `/sessions` in the Discord bot.
+  Preserve a damaged or future file untouched, report it and block activation
+  instead of replacing it. If the write fails after confirmation, keep a
+  memory-only session, say so and offer a retry.
+- A 401 ends an activation only with `details.reason: invalid_token`. `invalid_key`
+  (for example after a key rotation), a 403, a proxy page, a timeout, a 5xx or no
+  network never delete the session. Signing out closes the session on the API as a
+  courtesy and always removes the local copy and the cached catalog; offline it
+  says the session stays open on the server until closed with `/sessions`.
+- An unverified session launches complete installed instances, restricted ones
+  included, with no time limit, keeping the catalog-outage warning confirmation of
+  §4.1. Installing, updating and repairing need a recently verified session. A
+  revocation takes effect when the launcher is next online. Check the session at
+  startup, before Play when it is unverified, on explicit retry and when the window
+  regains focus; do not run an unattended retry loop.
+- Send the key and the session to the catalog: restricted instances are returned
+  only to a request carrying both. Bind the cached catalog to the member's identity
+  and remove it on sign-out or rejection. A 404 for a restricted instance means it
+  is not visible to the member, never a network failure.
+- Ending or rejecting a session cancels launches that have not started and never
+  touches a running game, the hide-on-close supervision or an operation already in
+  flight.
+- Record activation failures in diagnostics as a fixed event with only the error
+  code, never the member name, serial, token or service response.
 
 ## 5. Architecture
 
@@ -243,7 +298,7 @@ Updated: 2026-10-24 (temporary completed account-removal markers; authentication
 
 Panita Client persists account metadata and Microsoft refresh tokens in a local, schema-versioned `accounts.json` with restricted filesystem permissions. Refresh tokens are plaintext in this file. This explicitly supersedes the OS credential-store proposal and the subsequent reopened discussion.
 
-Microsoft, Xbox Live, XSTS, and Minecraft access tokens and their expiration metadata remain only in backend memory. Offline accounts have no tokens. Panita never requests or stores Microsoft passwords or MFA codes and never sends credentials to the catalog API or Supabase.
+Microsoft, Xbox Live, XSTS, and Minecraft access tokens and their expiration metadata remain only in backend memory. Offline accounts have no tokens. Panita never requests or stores Microsoft passwords or MFA codes and never sends Microsoft credentials or tokens to the Panita API or Supabase. The Panita session token of §4.5 is a separate credential issued by the Panita API and sent only to it.
 
 The selected design prioritizes automatic session persistence across Windows, Linux, and eventually macOS without requiring a keyring service, a master password, or a remote key service. No custom encryption or API-delivered encryption key is planned. Windows is the first implementation target; each additional platform requires permission and lifecycle validation before support is announced.
 
