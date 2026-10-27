@@ -275,3 +275,7 @@ pub fn launch(paths: &AppPaths, cancel: &Cancellation) -> Result<RunningGame, Co
 
 #[cfg(test)]
 mod tests;
+
+/// Optional packaged diagnostic entry point; never registered as desktop IPC.
+pub mod cli;
+mod prepare;

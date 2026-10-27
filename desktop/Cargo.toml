@@ -34,3 +34,4 @@ workspace = true
 
 [features]
 test-endpoints = ["launcher-core/test-endpoints"]
+loader-validation = ["launcher-core/loader-validation"]
