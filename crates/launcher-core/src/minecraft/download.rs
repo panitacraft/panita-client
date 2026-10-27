@@ -18,6 +18,39 @@ use crate::{
     storage::map_private_error,
 };
 
+pub(crate) const MAX_DOWNLOADS: usize = 8;
+
+/// Keep bounded filesystem work off the async transport workers. Callers must
+/// drain their workers on cancellation instead of abandoning blocking jobs.
+pub(crate) async fn on_disk<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, CoreError> + Send + 'static,
+) -> Result<T, CoreError> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| CoreError::new(ErrorCode::StorageUnavailable))?
+}
+
+/// Metadata is only a capacity estimate; reuse always requires a full hash.
+pub(crate) fn planned_size(
+    directory: &PrivateDir,
+    name: &str,
+    executable: bool,
+) -> Result<Option<u64>, CoreError> {
+    #[cfg(target_os = "linux")]
+    if executable {
+        return super::executable::size(directory, name);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = executable;
+    match directory.open_file(name) {
+        Ok(file) => Ok(Some(native_file(&file)?.metadata().map_err(io)?.len())),
+        Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(None)
+        }
+        Err(error) => Err(map_private_error(error)),
+    }
+}
+
 pub(crate) fn io(error: std::io::Error) -> CoreError {
     CoreError::new(match error.kind() {
         std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
@@ -373,6 +406,33 @@ struct CacheRequest<'a> {
     executable: bool,
 }
 
+struct CacheDirectory {
+    directory: PrivateDir,
+    // Retain the writer lease inside blocking jobs as well as async transport.
+    _guard: ArtifactLock,
+}
+
+impl CacheRequest<'_> {
+    fn validate(&self) -> Result<(), CoreError> {
+        self.artifact.validate()?;
+        safe_path(self.relative)?;
+        if (self.executable && !self.relative.starts_with("runtime/"))
+            || !["libraries/", "assets/", "versions/", "runtime/"]
+                .iter()
+                .any(|prefix| self.relative.starts_with(prefix))
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
+    fn parent(&self) -> &str {
+        self.relative
+            .rsplit_once('/')
+            .map_or("", |(parent, _)| parent)
+    }
+}
+
 impl Downloader {
     pub fn new() -> Result<Self, CoreError> {
         let client = reqwest::Client::builder()
@@ -501,44 +561,123 @@ impl Downloader {
         cancel: &Cancellation,
         progress: &(dyn Fn(DownloadProgress) + Sync),
     ) -> Result<PathBuf, CoreError> {
+        request.validate()?;
+        let directory = Self::cache_directory(paths, &request, cancel).await?;
+        self.cache_in_directory(paths, request, directory, cancel, progress)
+            .await
+    }
+
+    /// One batch owns one parent-directory lease. Other processes use the same
+    /// lock, and no task acquires a second directory lease while holding it.
+    pub(crate) async fn cache_batch(
+        &self,
+        paths: &AppPaths,
+        files: &[super::plan::PlannedArtifact],
+        cancel: &Cancellation,
+        progress: &(dyn Fn(DownloadProgress) + Sync),
+    ) -> Result<(), CoreError> {
+        let first = files.first().ok_or_else(invalid)?;
+        let first = CacheRequest {
+            relative: &first.destination,
+            artifact: &first.artifact,
+            executable: first.executable,
+        };
+        for file in files {
+            let request = CacheRequest {
+                relative: &file.destination,
+                artifact: &file.artifact,
+                executable: file.executable,
+            };
+            request.validate()?;
+            if request.parent() != first.parent() {
+                return Err(invalid());
+            }
+        }
+        let directory = Self::cache_directory(paths, &first, cancel).await?;
+        for file in files {
+            self.cache_in_directory(
+                paths,
+                CacheRequest {
+                    relative: &file.destination,
+                    artifact: &file.artifact,
+                    executable: file.executable,
+                },
+                directory.clone(),
+                cancel,
+                progress,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn cache_directory(
+        paths: &AppPaths,
+        request: &CacheRequest<'_>,
+        cancel: &Cancellation,
+    ) -> Result<Arc<CacheDirectory>, CoreError> {
+        let key = format!(
+            "{:x}",
+            Sha1::digest(request.parent().to_ascii_lowercase().as_bytes())
+        );
+        let guard = lock(paths.root(), &format!(".artifact-locks/{key}.lock"), cancel).await?;
+        let paths = paths.clone();
+        let relative = request.relative.to_owned();
+        let cancel = cancel.clone();
+        on_disk(move || {
+            cancel.check()?;
+            let (directory, _) = ensure_parent(paths.root(), &relative)?;
+            let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
+            cleanup_partials(&directory, &paths.root().join(parent))?;
+            Ok(Arc::new(CacheDirectory {
+                directory,
+                _guard: guard,
+            }))
+        })
+        .await
+    }
+
+    async fn cache_in_directory(
+        &self,
+        paths: &AppPaths,
+        request: CacheRequest<'_>,
+        context: Arc<CacheDirectory>,
+        cancel: &Cancellation,
+        progress: &(dyn Fn(DownloadProgress) + Sync),
+    ) -> Result<PathBuf, CoreError> {
         let CacheRequest {
             relative,
             artifact,
             executable,
         } = request;
-        artifact.validate()?;
-        safe_path(relative)?;
-        if executable && !relative.starts_with("runtime/") {
-            return Err(invalid());
-        }
-        if !["libraries/", "assets/", "versions/", "runtime/"]
-            .iter()
-            .any(|prefix| relative.starts_with(prefix))
-        {
-            return Err(invalid());
-        }
-        // A parent-directory lock also protects stale atomic-temporary cleanup.
-        let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
-        let key = format!("{:x}", Sha1::digest(parent.to_ascii_lowercase().as_bytes()));
-        let _guard = lock(paths.root(), &format!(".artifact-locks/{key}.lock"), cancel).await?;
-        let (directory, name) = ensure_parent(paths.root(), relative)?;
-        cleanup_partials(&directory, &paths.root().join(parent))?;
-        cancel.check()?;
-        if verified_planned_file(&directory, &name, artifact, executable)? {
-            #[cfg(target_os = "linux")]
-            if executable {
-                super::executable::enable(&directory, &name)?;
-            }
-            progress(DownloadProgress {
-                bytes: artifact.size,
-                total: artifact.size,
-                reused: true,
-            });
-            return Ok(paths.root().join(relative));
-        }
-        if let Some(alias) = legacy_alias(relative, artifact)?
-            && import_verified(paths, &alias, &directory, &name, artifact, cancel)?
-        {
+        let name = relative.rsplit('/').next().ok_or_else(invalid)?.to_owned();
+        let reused = {
+            let context = context.clone();
+            let paths = paths.clone();
+            let relative = relative.to_owned();
+            let name = name.clone();
+            let artifact = artifact.clone();
+            let cancel = cancel.clone();
+            on_disk(move || {
+                cancel.check()?;
+                let directory = &context.directory;
+                let reused = if verified_planned_file(directory, &name, &artifact, executable)? {
+                    #[cfg(target_os = "linux")]
+                    if executable {
+                        super::executable::enable(directory, &name)?;
+                    }
+                    true
+                } else if let Some(alias) = legacy_alias(&relative, &artifact)? {
+                    import_verified(&paths, &alias, directory, &name, &artifact, &cancel)?
+                } else {
+                    false
+                };
+                cancel.check()?;
+                Ok(reused)
+            })
+            .await?
+        };
+        if reused {
             progress(DownloadProgress {
                 bytes: artifact.size,
                 total: artifact.size,
@@ -559,9 +698,19 @@ impl Downloader {
         } else {
             name.clone()
         };
-        let mut output = directory
-            .atomic_durable(&target)
-            .map_err(map_private_error)?;
+        let mut output = {
+            let context = context.clone();
+            let target = target.clone();
+            let cancel = cancel.clone();
+            on_disk(move || {
+                cancel.check()?;
+                context
+                    .directory
+                    .atomic_durable(&target)
+                    .map_err(map_private_error)
+            })
+            .await?
+        };
         let mut hash = Sha1::new();
         let mut count = 0u64;
         loop {
@@ -588,11 +737,18 @@ impl Downloader {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
         cancel.check()?;
-        output.commit().map_err(map_private_error)?;
-        #[cfg(target_os = "linux")]
-        if staged {
-            super::executable::publish(&directory, &target, &name)?;
-        }
+        let cancellation = cancel.clone();
+        on_disk(move || {
+            let _context = context;
+            cancellation.check()?;
+            output.commit().map_err(map_private_error)?;
+            #[cfg(target_os = "linux")]
+            if staged {
+                super::executable::publish(&_context.directory, &target, &name)?;
+            }
+            Ok(())
+        })
+        .await?;
         Ok(paths.root().join(relative))
     }
 }
@@ -691,6 +847,109 @@ mod tests {
             std::env::temp_dir().join(format!("panita-download-{}", uuid::Uuid::new_v4())),
         )
         .unwrap_or_else(|_| panic!("paths"))
+    }
+
+    #[tokio::test]
+    async fn batches_reuse_verified_files_repair_same_size_corruption_and_scan_once() {
+        let bytes = b"verified";
+        let server = Server::new(bytes.to_vec(), bytes.len(), Duration::ZERO);
+        let downloader = server.downloader();
+        let paths = paths();
+        let files: Vec<_> = (0..12)
+            .map(|index| super::super::plan::PlannedArtifact {
+                destination: format!("libraries/batch/{index}.jar"),
+                artifact: artifact(bytes),
+                executable: false,
+            })
+            .collect();
+        let cancel = Cancellation::default();
+        // Competing operations must use one shared lease and download each file once.
+        let (first, second) = tokio::join!(
+            downloader.cache_batch(&paths, &files, &cancel, &|_| {}),
+            downloader.cache_batch(&paths, &files, &cancel, &|_| {})
+        );
+        assert!(first.is_ok() && second.is_ok(), "{first:?}, {second:?}");
+        assert_eq!(server.requests.load(Ordering::SeqCst), 12);
+        let (directory, name) = ensure_parent(paths.root(), &files[0].destination)
+            .unwrap_or_else(|_| panic!("directory"));
+        directory
+            .write_atomic_durable(&name, b"tampered")
+            .unwrap_or_else(|_| panic!("same-size corruption"));
+        let stale = format!(".private-fs-{}.tmp", uuid::Uuid::new_v4().simple());
+        let scanned = AtomicBool::new(false);
+        let reused = AtomicUsize::new(0);
+        downloader
+            .cache_batch(&paths, &files, &cancel, &|progress| {
+                if progress.bytes == progress.total && progress.reused {
+                    reused.fetch_add(1, Ordering::SeqCst);
+                }
+                if !scanned.swap(true, Ordering::SeqCst) {
+                    // A later batch must scan again, but this batch must not rescan
+                    // the directory for each subsequent artifact.
+                    directory
+                        .write_atomic_durable(&stale, b"abandoned")
+                        .unwrap_or_else(|_| panic!("partial"));
+                }
+            })
+            .await
+            .unwrap_or_else(|error| panic!("batch: {error:?}"));
+        assert_eq!(server.requests.load(Ordering::SeqCst), 13);
+        assert_eq!(reused.load(Ordering::SeqCst), 11);
+        assert!(paths.root().join("libraries/batch").join(&stale).exists());
+        assert!(verified_file(&directory, &name, &files[0].artifact).unwrap_or(false));
+        downloader
+            .cache_batch(&paths, &files, &cancel, &|_| {})
+            .await
+            .unwrap_or_else(|_| panic!("reuse"));
+        assert!(!paths.root().join("libraries/batch").join(stale).exists());
+        assert_eq!(server.requests.load(Ordering::SeqCst), 13);
+    }
+
+    #[tokio::test]
+    async fn cancelled_batches_release_the_lease_and_reject_mixed_or_unsafe_parents() {
+        let bytes = b"verified";
+        let server = Server::new(bytes.to_vec(), bytes.len(), Duration::ZERO);
+        let downloader = server.downloader();
+        let paths = paths();
+        let mut files: Vec<_> = ["libraries/batch/a.jar", "libraries/batch/b.jar"]
+            .into_iter()
+            .map(|destination| super::super::plan::PlannedArtifact {
+                destination: destination.into(),
+                artifact: artifact(bytes),
+                executable: false,
+            })
+            .collect();
+        let cancel = Cancellation::default();
+        let result = downloader
+            .cache_batch(&paths, &files, &cancel, &|progress| {
+                if progress.bytes == progress.total {
+                    cancel.cancel();
+                }
+            })
+            .await;
+        assert_eq!(
+            result.err().map(|error| error.code()),
+            Some(ErrorCode::OperationCancelled)
+        );
+        assert_eq!(server.requests.load(Ordering::SeqCst), 1);
+        assert!(!paths.root().join(&files[1].destination).exists());
+        downloader
+            .cache_batch(&paths, &files, &Cancellation::default(), &|_| {})
+            .await
+            .unwrap_or_else(|_| panic!("resume after cancellation"));
+        // Cancellation happened before atomic publication, so retry downloads
+        // the first file again as well as the previously unstarted second file.
+        assert_eq!(server.requests.load(Ordering::SeqCst), 3);
+        for invalid in ["assets/other.jar", "libraries/../outside.jar"] {
+            files[1].destination = invalid.into();
+            assert!(
+                downloader
+                    .cache_batch(&paths, &files, &Cancellation::default(), &|_| {})
+                    .await
+                    .is_err()
+            );
+        }
+        assert_eq!(server.requests.load(Ordering::SeqCst), 3);
     }
 
     #[cfg(target_os = "linux")]
