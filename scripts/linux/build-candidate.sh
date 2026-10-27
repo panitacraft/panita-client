@@ -27,4 +27,16 @@ if grep -q 'not found' "$artifact/verification/runtime-libraries.txt"; then
   exit 1
 fi
 cp /work/package-check/usr/share/applications/*.desktop "$artifact/verification/"
+appimage=$(find "$artifact" -maxdepth 1 -type f -name '*.AppImage' -print -quit)
+test -n "$appimage"
+chmod u+x "$appimage"
+mkdir /work/appimage-check
+cd /work/appimage-check
+"/work/panita-client/$appimage" --appimage-extract > /work/panita-client/"$artifact/verification/appimage-files.txt"
+test -x squashfs-root/AppRun
+test -x squashfs-root/usr/bin/panita-client
+desktop-file-validate squashfs-root/*.desktop
+file "/work/panita-client/$appimage" squashfs-root/usr/bin/panita-client > /work/panita-client/"$artifact/verification/appimage-info.txt"
+cd "/work/panita-client/$artifact"
+sha256sum --check SHA256SUMS
 printf '%s\n' 'Package inspection passed. Installed-product testing remains pending.'

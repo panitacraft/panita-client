@@ -77,9 +77,9 @@ is still required before distribution. Windows candidates embed the WebView2
   presentation plugin; the launcher itself remains x64.
 
 From Windows with Docker Desktop running Linux containers, use
-`pwsh -File scripts/build-linux-beta.ps1` to prepare the Linux `.deb` in a separate
+`pwsh -File scripts/build-linux-beta.ps1` to prepare Linux `.deb` and `.AppImage` files in a separate
 Ubuntu 24.04 build environment. The command builds committed `develop`, verifies
-the package contents and runtime linkage, and copies the candidate into
+the package contents, AppImage extraction and runtime linkage, and copies both candidates into
 `target/beta/`. It does not install anything on the testing VM. Compilation and
 package inspection do not establish installed-product qualification.
 
