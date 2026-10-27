@@ -157,8 +157,18 @@ pub(super) fn recover_locked(
         return super::transaction::remove(root);
     }
     let registry = InstanceRegistry::new(paths.clone());
+    let mut recovered_state = InstallationState::NeedsRepair;
+    if let Some(installed) = read_json::<InstalledLock>(root, "installed.json")? {
+        super::maintenance::validate_manifest(&installed, id)?;
+        if installed.operation == journal.operation && installed.schema_version == 2 {
+            // A durable pointer is recoverable only after a complete local audit,
+            // including the exact loader generation. Failure retains the intent.
+            verify_manifest(paths, id, root, &installed, &Cancellation::default())?;
+            recovered_state = InstallationState::Installed;
+        }
+    }
     if let Some(mut record) = registry.get(id)? {
-        record.state = InstallationState::NeedsRepair;
+        record.state = recovered_state;
         registry.save_installation(&record)?;
     }
     journal.active = false;
@@ -449,7 +459,7 @@ pub(super) async fn prepare_recorded(
     id: Uuid,
     operation: Uuid,
     platform: &Platform,
-    plan: InstallPlan,
+    mut plan: InstallPlan,
     cancel: &Cancellation,
     progress: Progress,
 ) -> Result<InstalledLock, CoreError> {
@@ -462,6 +472,15 @@ pub(super) async fn prepare_recorded(
     download_all(paths, &downloader, &plan, cancel, progress).await?;
     plan.verify_dependencies(paths)?;
     verify_java(paths, &plan, platform, cancel).await?;
+    if let Some(loader) = &plan.loader {
+        match loader.verify(paths, cancel) {
+            Ok(()) => {}
+            Err(error) if error.code() == ErrorCode::ArtifactMismatch => {
+                plan.loader = Some(loader.repair(paths, &plan, cancel).await?);
+            }
+            Err(error) => return Err(error),
+        }
+    }
     let native_directory = format!("natives/{operation}");
     let native_root = root.join(&native_directory);
     if !plan.version.natives.is_empty() {
@@ -636,6 +655,39 @@ fn verify_manifest_inner(
         };
         if !matches {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+        }
+    }
+    if let Some(loader) = &installed.plan.loader {
+        loader.verify_marker(paths)?;
+        match cache {
+            None => loader.verify(paths, cancel)?,
+            Some(cache) => {
+                let directory = private_fs::PrivateDir::open(paths.root().join(loader.directory()))
+                    .map_err(map_private_error)?;
+                for file in &loader.files {
+                    cancel.check()?;
+                    let (parent, leaf) = file
+                        .path
+                        .rsplit_once('/')
+                        .map_or(("", file.path.as_str()), |(parent, leaf)| (parent, leaf));
+                    let key = format!("loader/{}/{}", loader.directory(), file.path);
+                    let matches = if parent.is_empty() {
+                        cache.verify_sha256(
+                            &directory,
+                            leaf,
+                            &key,
+                            &file.artifact(),
+                            &file.sha256,
+                        )?
+                    } else {
+                        let parent = directory.open_dir(parent).map_err(map_private_error)?;
+                        cache.verify_sha256(&parent, leaf, &key, &file.artifact(), &file.sha256)?
+                    };
+                    if !matches {
+                        return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+                    }
+                }
+            }
         }
     }
     Ok(())

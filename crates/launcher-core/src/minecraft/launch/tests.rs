@@ -88,6 +88,7 @@ fn fixture(id: &str, os: &str) -> (AppPaths, PathBuf, InstalledLock, Platform, A
             java_executable,
             documents: vec![],
             artifacts,
+            loader: None,
         },
         native_files: vec![],
         native_directory: None,
@@ -108,6 +109,105 @@ fn value_after<'a>(args: &'a [String], flag: &str) -> &'a str {
         .position(|arg| arg == flag)
         .unwrap_or_else(|| panic!("missing {flag}"));
     &args[index + 1]
+}
+
+#[test]
+fn loader_commands_merge_child_libraries_and_keep_module_arguments_platform_specific()
+-> Result<(), Box<dyn std::error::Error>> {
+    let staged_paths = AppPaths::new(
+        std::env::temp_dir().join(format!("panita-loader-command-{}", Uuid::new_v4())),
+    )?;
+    let loader = crate::neoforge::generation::tests::published(&staged_paths)?;
+    for os in ["windows", "linux"] {
+        let (paths, directory, mut installed, platform, account) = fixture("1.21.1", os);
+        installed.plan.schema_version = 2;
+        installed.plan.loader = Some(loader.clone());
+        let command = build_command(
+            &paths,
+            &directory,
+            &installed,
+            &platform,
+            &GlobalSettings::default(),
+            &InstanceSettings::default(),
+            LaunchIdentity {
+                account: &account,
+                minecraft_token: None,
+                xuid: None,
+            },
+        )?;
+        let separator = if os == "windows" { ';' } else { ':' };
+        let cp = value_after(&command.args, "-cp");
+        let entries: Vec<_> = cp.split(separator).collect();
+        let guava = entries
+            .iter()
+            .filter(|entry| entry.contains("guava-32.1.2-jre.jar"))
+            .count();
+        assert_eq!(guava, 1);
+        assert!(entries.iter().all(|entry| !entry.ends_with(&format!(
+            "1.21.1-{}.jar",
+            installed.plan.version.client.sha1
+        ))));
+        assert!(
+            value_after(&command.args, "-p")
+                .contains(&format!("bootstraplauncher-2.0.2.jar{separator}"))
+        );
+        assert_eq!(
+            value_after(&command.args, "--fml.neoForgeVersion"),
+            "21.1.264"
+        );
+        assert_eq!(value_after(&command.args, "--fml.mcVersion"), "1.21.1");
+        assert_eq!(value_after(&command.args, "--version"), "neoforge-21.1.264");
+        let main = command
+            .args
+            .iter()
+            .position(|arg| arg == "cpw.mods.bootstraplauncher.BootstrapLauncher")
+            .ok_or("main")?;
+        let module = command
+            .args
+            .iter()
+            .position(|arg| arg == "-p")
+            .ok_or("module")?;
+        assert!(module < main);
+        assert_eq!(
+            command
+                .args
+                .iter()
+                .filter(|arg| arg.starts_with("-Xmx"))
+                .count(),
+            1
+        );
+        for option in [
+            "-DlibraryDirectory=C:/unverified",
+            "-Djdk.module.path=C:/unverified",
+        ] {
+            let settings = GlobalSettings {
+                extra_jvm_args: vec![option.into()],
+                ..GlobalSettings::default()
+            };
+            assert!(
+                build_command(
+                    &paths,
+                    &directory,
+                    &installed,
+                    &platform,
+                    &settings,
+                    &InstanceSettings::default(),
+                    LaunchIdentity {
+                        account: &account,
+                        minecraft_token: None,
+                        xuid: None
+                    }
+                )
+                .is_err()
+            );
+        }
+        installed.plan.schema_version = 1;
+        assert!(installed.plan.validate().is_err());
+        installed.plan.schema_version = 2;
+        installed.plan.loader = None;
+        assert!(installed.plan.validate().is_err());
+    }
+    Ok(())
 }
 
 #[test]

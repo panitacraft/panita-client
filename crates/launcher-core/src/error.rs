@@ -32,6 +32,8 @@ pub enum ErrorCode {
     InsufficientSpace,
     ProcessStartFailed,
     ProcessControlFailed,
+    LoaderProcessorFailed,
+    LoaderProcessorTimeout,
     CatalogConfirmationRequired,
     WorldBackupUnsafe,
     UpdateSelectionChanged,

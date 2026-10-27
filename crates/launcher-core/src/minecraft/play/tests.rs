@@ -285,6 +285,7 @@ pub(crate) fn complete_installation(paths: &AppPaths, id: Uuid) {
         asset_index_cache_path(&version.assets).unwrap_or_else(|_| panic!("asset path"));
     let runtime_path = format!("{runtime_root}/.runtime-manifest.json");
     let plan = InstallPlan {
+        loader: None,
         schema_version: 1,
         version,
         platform: "windows".into(),

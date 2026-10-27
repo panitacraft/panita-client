@@ -13,7 +13,7 @@ export type LauncherErrorCode =
   | 'accounts_file_invalid' | 'callback_not_active' | 'unsafe_permissions'
   | 'instance_disabled' | 'instance_missing' | 'unsupported_instance'
   | 'artifact_mismatch' | 'runtime_unsupported' | 'insufficient_space'
-  | 'process_start_failed' | 'process_control_failed' | 'catalog_confirmation_required'
+  | 'process_start_failed' | 'process_control_failed' | 'loader_processor_failed' | 'loader_processor_timeout' | 'catalog_confirmation_required'
   | 'activation_required' | 'activation_unavailable' | 'activation_unknown_account'
   | 'activation_not_activated' | 'activation_rate_limited' | 'activation_expired'
   | 'activation_consumed' | 'activation_file_invalid' | 'session_rejected' | 'api_key_rejected';
@@ -26,6 +26,8 @@ const messages: Record<LauncherErrorCode, string> = {
   catalog_confirmation_required: 'No pudimos comprobar el estado actual de esta instancia. Confirma la advertencia para jugar con la instalación local.',
   process_start_failed: 'No pudimos iniciar Minecraft. Revisa la instalación e inténtalo de nuevo.',
   process_control_failed: 'No pudimos confirmar el estado de Minecraft. Revisa si sigue abierto antes de intentarlo de nuevo.',
+  loader_processor_failed: 'No pudimos preparar NeoForge. La instalación anterior se conserva. Inténtalo de nuevo.',
+  loader_processor_timeout: 'NeoForge tardó demasiado en prepararse. La instalación anterior se conserva. Inténtalo de nuevo.',
   insufficient_space: 'No hay suficiente espacio disponible. Libera espacio e inténtalo de nuevo.',
   artifact_mismatch: 'Un archivo descargado no coincide con el original. Inténtalo de nuevo.',
   runtime_unsupported: 'No hay un Java compatible disponible para esta versión y plataforma.',

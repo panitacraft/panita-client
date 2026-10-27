@@ -23,6 +23,28 @@ fn chmod(p: &Path, mode: u32) {
 }
 
 #[test]
+fn relative_directory_open_preserves_missing_insecure_and_redirected_entries() {
+    each(|dir, root| {
+        let child = dir.create_dir("child").unwrap();
+        child.create("proof").unwrap().write_all(b"retained").unwrap();
+        dir.open_dir("child").unwrap().open_file("proof").unwrap();
+        assert!(dir.open_dir("missing").is_err());
+        assert!(!root.join("missing").exists());
+        chmod(&root.join("child"), 0o755);
+        assert!(matches!(dir.open_dir("child"), Err(Error::InsecurePermissions { .. })));
+        assert_eq!(std::fs::metadata(root.join("child")).unwrap().permissions().mode() & 0o7777, 0o755);
+        chmod(&root.join("child"), 0o700);
+        symlink(root.join("child"), root.join("redirect")).unwrap();
+        assert!(dir.open_dir("redirect").is_err());
+        assert!(root.join("redirect").is_symlink());
+        assert!(dir.open_dir("../child").is_err());
+        let renamed = root.with_file_name("renamed-private");
+        std::fs::rename(root, &renamed).unwrap();
+        dir.open_dir("child").unwrap().open_file("proof").unwrap();
+    });
+}
+
+#[test]
 fn proc_publication_preserves_inode_permissions_and_renamed_parent() {
     each(|dir, root| {
         let mut temp = dir

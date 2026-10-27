@@ -440,6 +440,11 @@ impl PrivateDir {
             links: 1,
         })
     }
+    /// Open an existing private directory relative to this retained capability.
+    pub fn open_dir(&self, path: impl AsRef<Path>) -> Result<Self> {
+        let (parent, leaf) = self.parent(path.as_ref())?;
+        Self::directory_at(parent, leaf, false, false, self.resolver)
+    }
     /// Exclusively create the final directory. Private parents must already exist.
     pub fn create_dir(&self, path: impl AsRef<Path>) -> Result<Self> {
         let (parent, leaf) = self.parent(path.as_ref())?;

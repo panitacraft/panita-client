@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { archPackageVersion, releaseVersion } from './release-version.mjs';
 
 // Artifact paths come from the release contract, never from a candidate manifest.
-export async function verifyBeta({ directory, platform, version, revision, release = false, withArch = false }) {
+export async function verifyBeta({ directory, platform, version, revision, release = false, withArch = false, loaderValidation = false }) {
+  if (loaderValidation && (release || withArch)) throw new Error('Loader validation cannot be a release');
   if (!['windows', 'linux'].includes(platform)
       || !(release ? releaseVersion(`v${version}`) === version : /^\d+\.\d+\.\d+-beta\.\d+$/.test(version))
       || !/^[a-f0-9]{40}$/.test(revision)) throw new Error('Invalid candidate identity');
@@ -28,7 +29,7 @@ export async function verifyBeta({ directory, platform, version, revision, relea
   if (checksums.size !== formats.length) throw new Error('Incomplete or unexpected checksum list');
   const verified = [];
   for (const [extension, manifestName, distribution = platform] of formats) {
-    const name = `panita-client_${version}_${distribution}_x64_unsigned${extension}`;
+    const name = `panita-client_${version}_${distribution}_x64_unsigned${loaderValidation ? '_loader-validation' : ''}${extension}`;
     const artifact = join(directory, name);
     const manifestPath = join(directory, manifestName);
     if (!(await lstat(artifact)).isFile() || !(await lstat(manifestPath)).isFile()) {
@@ -38,12 +39,14 @@ export async function verifyBeta({ directory, platform, version, revision, relea
     if (distribution === 'archlinux' && candidate.package_version !== `${archPackageVersion(version)}-1`) {
       throw new Error('Arch package version mismatch');
     }
-    if (candidate.schema !== 1 || candidate.type !== (release ? 'unsigned_release_candidate' : 'unsigned_beta_candidate')
+    if (candidate.schema !== 1 || candidate.type !== (loaderValidation ? 'unsigned_loader_validation_candidate' : release ? 'unsigned_release_candidate' : 'unsigned_beta_candidate')
         || candidate.version !== version || candidate.source_revision !== revision
         || candidate.platform !== `${platform}_x64` || candidate.artifact !== name
         || candidate.signed !== false || candidate.qualification !== 'pending') {
       throw new Error(`Candidate provenance mismatch: ${manifestName}`);
     }
+    if (loaderValidation && (JSON.stringify(candidate.features) !== '["loader-validation"]'
+        || candidate.distribution !== 'internal_validation_only')) throw new Error('Invalid loader validation provenance');
     const hash = createHash('sha256');
     for await (const chunk of createReadStream(artifact)) hash.update(chunk);
     const digest = hash.digest('hex');
@@ -62,8 +65,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   let revision;
   let releaseTag;
   let withArch = false;
+  let loaderValidation = false;
   for (let index = 0; index < args.length; index += 1) {
     if (args[index] === '--with-arch') { withArch = true; continue; }
+    if (args[index] === '--loader-validation') { loaderValidation = true; continue; }
     if (args[index] === '--platform') platform = args[index + 1];
     else if (args[index] === '--revision') revision = args[index + 1];
     else if (args[index] === '--release-tag') releaseTag = args[index + 1];
@@ -83,7 +88,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (!['windows', 'linux'].includes(platform) || (!releaseTag && !/^\d+\.\d+\.\d+-beta\.\d+$/.test(version))) {
     throw new Error('Unsupported platform or beta version');
   }
-  const verified = await verifyBeta({ directory: join(root, releaseTag ? 'target/releases' : 'target/beta', version, platform), platform, version, revision, release: Boolean(releaseTag), withArch });
+  const verified = await verifyBeta({ directory: join(root, loaderValidation ? 'target/loader-validation' : releaseTag ? 'target/releases' : 'target/beta', version, platform), platform, version, revision, release: Boolean(releaseTag), withArch, loaderValidation });
   for (const item of verified) console.log(`${item.artifact}: OK (${item.sha256})`);
   console.log('Integrity and provenance verified; installed-product qualification remains pending.');
 }

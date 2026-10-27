@@ -22,6 +22,8 @@ pub mod runtime;
 pub mod support;
 mod transaction;
 pub mod update;
+#[cfg(feature = "loader-validation")]
+pub mod validation;
 mod verification_cache;
 mod world_backup;
 
