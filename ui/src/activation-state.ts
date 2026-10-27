@@ -122,3 +122,8 @@ export function signOutNotice(serverClosed: boolean): string {
     ? 'Cerraste la sesión de Panitacraft en este equipo.'
     : 'Cerraste la sesión en este equipo, pero no pudimos avisar al servicio. Tu sesión sigue abierta en el servidor hasta que la cierres con /sessions en Discord.';
 }
+
+/** Activation needs the service, so these two are the only errors that mean "no connection". */
+export function isConnectivityError(code: string | null): boolean {
+  return code === 'network_unavailable' || code === 'service_unavailable';
+}

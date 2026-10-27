@@ -7,10 +7,12 @@ import { invokeAccount } from './account-api';
 import type { AccountsView } from './account-state';
 import { invokeActivation } from './activation-api';
 import {
-  activationFeedback, countdownText, gateStage, initialActivationFeedback, memberName, offlineNameSuggestion,
-  registrationHint, remainingSeconds, retryAfterText, signOutNotice, type ActivationView,
+  activationFeedback, countdownText, gateStage, initialActivationFeedback, isConnectivityError, memberName,
+  offlineNameSuggestion, registrationHint, remainingSeconds, retryAfterText, signOutNotice, type ActivationView,
 } from './activation-state';
 import { messageForError } from './errors';
+import { CrashNotifications } from './game-output';
+import { PlayControls, usePlaySnapshot } from './play';
 
 type Activation = {
   view: ActivationView | null;
@@ -137,10 +139,27 @@ function useAccountCount(enabled: boolean) {
   return { count, failed };
 }
 
+/**
+ * A game that is already open is a separate process: ending or never having a Panitacraft
+ * session does not close it, so its controls must stay reachable outside the launcher.
+ */
+function RunningGames() {
+  const snapshot = usePlaySnapshot();
+  const running = snapshot?.instances.filter(entry => entry.operation === 'play' && (entry.phase === 'running' || entry.phase === 'stopping')) ?? [];
+  if (running.length === 0) return null;
+  return <section aria-labelledby="running-games-heading">
+    <h2 id="running-games-heading">Minecraft sigue en ejecución</h2>
+    <p>Activar Panita Client no cierra un juego que ya está abierto. Puedes cerrarlo desde aquí.</p>
+    {running.map(entry => <PlayControls key={entry.instanceId} instanceId={entry.instanceId} allowed={false} />)}
+  </section>;
+}
+
 function Shell({ children }: { children: ReactNode }) {
   return <main>
     <header><span className="wordmark"><img src={logoWhite} alt="" aria-hidden="true" />Panita Client</span></header>
     {children}
+    <RunningGames />
+    <CrashNotifications names={{}} />
   </main>;
 }
 
@@ -174,7 +193,9 @@ function ActivationScreen() {
   const code = view?.error ?? activation.error;
   const shown = code ? `${messageForError(code)}${code === 'activation_rate_limited' ? retryAfterText(view?.retry_after ?? null) : ''}` : null;
   // While waiting, a network error is not final: polling continues until the code expires.
-  const waitingOffline = pending && (code === 'network_unavailable' || code === 'service_unavailable');
+  const waitingOffline = pending && isConnectivityError(code);
+  // Without a session there is nothing to play offline: activating is what needs the service.
+  const needsConnection = !pending && isConnectivityError(code);
 
   async function copySerial() {
     if (!serial) return;
@@ -192,7 +213,8 @@ function ActivationScreen() {
         <button type="button" onClick={activation.retryInitialization}>Reintentar</button>
       </div>}
       {!activation.initializationError && !view && <p role="status">Cargando…</p>}
-      {shown && !waitingOffline && <p role="alert" className="account-error">{shown}</p>}
+      {shown && !waitingOffline && !needsConnection && <p role="alert" className="account-error">{shown}</p>}
+      {needsConnection && <p role="alert" className="account-error">No pudimos conectar con Panitacraft. Activar el cliente necesita conexión: revisa tu red e inténtalo de nuevo. Cuando ya estés activado, podrás jugar sin conexión las instancias que tengas instaladas.</p>}
       {waitingOffline && <p role="status">No pudimos conectar con el servicio. Seguimos esperando tu confirmación mientras el código siga vigente.</p>}
       {view && !pending && <form className="activation-form" noValidate onSubmit={event => { event.preventDefault(); void activation.start(identifier); }}>
         <label htmlFor="member-identifier">Tu nombre de Minecraft o de Discord</label>
@@ -246,7 +268,7 @@ export function ActivationPanel() {
       <p>Tu sesión de Panitacraft no se ha guardado. Reintenta guardarla antes de cerrar el cliente.</p>
       <button type="button" onClick={() => void activation.retrySave()}>Reintentar guardado</button>
     </div>}
-    {activation.error && <p role="alert" className="account-error">{messageForError(activation.error)}</p>}
+    {(activation.error ?? (view.error === 'api_key_rejected' ? view.error : null)) && <p role="alert" className="account-error">{messageForError(activation.error ?? view.error)}</p>}
     {activation.notice && <p role="status">{activation.notice}</p>}
     <p><strong>{memberName(user)}</strong> <span>{user.discord_name}</span></p>
     {hint && <p>{hint}</p>}

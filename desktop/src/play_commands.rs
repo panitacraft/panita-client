@@ -1120,7 +1120,10 @@ pub(super) fn begin_play(
             .state()
             .is_ok_and(|state| state == launcher_core::activation::ActivationState::ActiveOffline)
         {
-            if let Ok(outcome) = activation.refresh().await {
+            // Bounded: a network that swallows requests must not stall every launch.
+            if let Ok(Ok(outcome)) =
+                tokio::time::timeout(std::time::Duration::from_secs(5), activation.refresh()).await
+            {
                 activation_commands::after_refresh(&app, &controller, &activation, outcome);
             }
             match activation.session_credentials() {

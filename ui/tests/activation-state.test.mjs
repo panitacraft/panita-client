@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  activationFeedback, countdownText, gateStage, initialActivationFeedback, memberName,
+  activationFeedback, countdownText, gateStage, initialActivationFeedback, isConnectivityError, memberName,
   offlineNameSuggestion, registrationHint, remainingSeconds, retryAfterText, signOutNotice,
 } from '../src/activation-state.ts';
 
@@ -105,4 +105,12 @@ test('signing out offline says the session stays open on the server', () => {
   assert.doesNotMatch(signOutNotice(true), /sigue abierta/);
   assert.match(signOutNotice(false), /sigue abierta/);
   assert.match(signOutNotice(false), /\/sessions/);
+});
+
+test('only connectivity errors are explained as needing a connection', () => {
+  assert.equal(isConnectivityError('network_unavailable'), true);
+  assert.equal(isConnectivityError('service_unavailable'), true);
+  for (const code of [null, 'activation_unknown_account', 'api_key_rejected', 'session_rejected', 'activation_file_invalid']) {
+    assert.equal(isConnectivityError(code), false);
+  }
 });

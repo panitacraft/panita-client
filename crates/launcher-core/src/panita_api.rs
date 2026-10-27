@@ -7,6 +7,7 @@ use chrono::DateTime;
 use reqwest::{Client, RequestBuilder, StatusCode, header};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use zeroize::Zeroize;
 
 use crate::accounts::Secret;
 use crate::catalog::BASE;
@@ -369,6 +370,13 @@ struct Reply {
     status: StatusCode,
     retry_after: Option<u32>,
     body: Vec<u8>,
+}
+
+/// A confirmed login carries the session token in this body.
+impl Drop for Reply {
+    fn drop(&mut self) {
+        self.body.zeroize();
+    }
 }
 
 impl Reply {
