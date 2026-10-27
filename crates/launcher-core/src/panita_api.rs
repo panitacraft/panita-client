@@ -133,6 +133,13 @@ fn clean_device_text(value: &str) -> Option<String> {
     (!kept.is_empty()).then(|| kept.to_owned())
 }
 
+/// Integer seconds of a `Retry-After` header, clamped to 1..=600; dates are ignored.
+pub(crate) fn retry_after_seconds(value: Option<&str>) -> Option<u32> {
+    value
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .map(|seconds| seconds.clamp(1, 600))
+}
+
 /// A code-only failure plus the wait the API asked for, when it asked.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PanitaApiError {
@@ -331,12 +338,12 @@ impl PanitaApiClient {
             .await
             .map_err(network)?;
         let status = response.status();
-        let retry_after = response
-            .headers()
-            .get(header::RETRY_AFTER)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.trim().parse::<u32>().ok())
-            .map(|seconds| seconds.clamp(1, 600));
+        let retry_after = retry_after_seconds(
+            response
+                .headers()
+                .get(header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok()),
+        );
         if response
             .content_length()
             .is_some_and(|length| length > MAX_RESPONSE as u64)

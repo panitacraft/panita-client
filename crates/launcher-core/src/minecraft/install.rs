@@ -305,7 +305,7 @@ async fn download_all(
     }
 }
 
-fn check_capacity(missing: u64, available: u64) -> Result<(), CoreError> {
+pub(crate) fn check_capacity(missing: u64, available: u64) -> Result<(), CoreError> {
     if missing
         .checked_add(64 * 1024 * 1024)
         .is_none_or(|required| required > available)

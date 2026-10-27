@@ -23,6 +23,8 @@ pub mod sessions;
 pub mod settings;
 pub mod storage;
 mod storage_json;
+#[cfg(test)]
+pub(crate) mod test_http;
 
 pub const APPLICATION_NAME: &str = "Panita Client";
 

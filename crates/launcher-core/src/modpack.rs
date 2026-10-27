@@ -11,8 +11,10 @@ use crate::{
 };
 
 pub mod cache;
+pub mod content;
 pub mod modrinth;
 pub mod state;
+pub mod transfer;
 
 pub const STORAGE_HOST: &str = "jqleaywgcoedgvglrvhc.supabase.co";
 pub const MAX_DOCUMENT_BYTES: usize = 8 * 1024 * 1024;
