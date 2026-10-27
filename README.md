@@ -35,6 +35,13 @@ also confirms teammate testing passed on clean Windows 11 and Ubuntu VMs.
 Other Windows/Linux versions are unqualified; macOS, ARM, Flatpak and modpacks
 are future scope.
 
+The next planned milestone is **0.2 Alpha (MLP)**: public custom and pinned
+Modrinth modpacks with NeoForge first, an interim interface facelift, and
+mandatory signed launcher updates with releases from merged PRs to `master`.
+Each implementation phase uses its own branch from `develop`. These features
+are planned and are not included in the current MVP release. See
+[AGENTS.md](AGENTS.md#7-post-mvp-02-alpha-decisions-2026-10-27) for the accepted policies.
+
 Microsoft accounts need an internet connection each time you start a game.
 Offline accounts can play an already installed instance without Microsoft
 sign-in. The launcher never changes your account type automatically.
