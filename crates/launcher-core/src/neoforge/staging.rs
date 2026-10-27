@@ -41,9 +41,9 @@ pub struct DerivedArtifact {
 
 /// A completed staging result, not an installed/reusable loader generation.
 pub struct StagedLoader {
-    root: PathBuf,
-    operation: Uuid,
-    files: Vec<DerivedArtifact>,
+    pub(super) root: PathBuf,
+    pub(super) operation: Uuid,
+    pub(super) files: Vec<DerivedArtifact>,
 }
 impl StagedLoader {
     pub fn directory(&self) -> &Path {
@@ -302,7 +302,7 @@ impl Workspace {
         let root = PrivateDir::ensure(paths.root()).map_err(map_private_error)?;
         let libraries = root.ensure_dir("libraries").map_err(map_private_error)?;
         let container = libraries
-            .ensure_dir(".neoforge-staging")
+            .ensure_dir("neoforge")
             .map_err(map_private_error)?;
         let operation = Uuid::new_v4();
         let directory = container
@@ -314,7 +314,7 @@ impl Workspace {
         Ok(Self {
             root: paths
                 .root()
-                .join("libraries/.neoforge-staging")
+                .join("libraries/neoforge")
                 .join(operation.to_string()),
             directory,
             operation,

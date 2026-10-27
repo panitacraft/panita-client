@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read};
 
 use serde::{
-    Deserialize, Deserializer,
+    Deserialize, Deserializer, Serialize,
     de::{MapAccess, Visitor},
 };
 use sha1::{Digest, Sha1};
@@ -12,6 +12,7 @@ use sha1::{Digest, Sha1};
 use crate::error::{CoreError, ErrorCode};
 use crate::minecraft::{safe_path, valid_hash};
 
+pub mod generation;
 pub mod plan;
 pub mod staging;
 mod transport;
@@ -106,7 +107,8 @@ pub fn library_url(raw: &str, path: &str) -> Result<url::Url, CoreError> {
     Ok(url)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InstallerIdentity {
     pub minecraft: String,
     pub version: String,
@@ -132,7 +134,7 @@ impl InstallerIdentity {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LibraryArtifact {
     pub path: String,
@@ -141,13 +143,13 @@ pub struct LibraryArtifact {
     pub size: u64,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LibraryDownloads {
     pub artifact: LibraryArtifact,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Library {
     pub name: String,
@@ -236,14 +238,14 @@ where
     deserializer.deserialize_map(Unique(std::marker::PhantomData))
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchArguments {
     pub game: Vec<String>,
     pub jvm: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchProfile {
     pub id: String,

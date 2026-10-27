@@ -138,12 +138,23 @@ pub fn build_command(
         _ => return Err(CoreError::new(ErrorCode::RuntimeUnsupported)),
     };
     let version = &plan.version;
-    let mut classpath = version
-        .classpath
-        .iter()
-        .map(|artifact| path_text(&paths.root().join(plan.library_path(artifact)?)))
-        .collect::<Result<Vec<_>, CoreError>>()?;
-    classpath.push(path_text(&paths.root().join(plan.client_path()?))?);
+    let loader = plan.loader.as_ref();
+    let classpath = match loader {
+        Some(loader) => loader
+            .classpath(paths, plan)?
+            .iter()
+            .map(|path| path_text(path))
+            .collect::<Result<Vec<_>, _>>()?,
+        None => {
+            let mut classpath = version
+                .classpath
+                .iter()
+                .map(|artifact| path_text(&paths.root().join(plan.library_path(artifact)?)))
+                .collect::<Result<Vec<_>, CoreError>>()?;
+            classpath.push(path_text(&paths.root().join(plan.client_path()?))?);
+            classpath
+        }
+    };
     if classpath.iter().any(|path| path.contains(separator)) {
         return Err(invalid());
     }
@@ -159,7 +170,10 @@ pub fn build_command(
         ("auth_xuid".into(), xuid.to_owned()),
         ("user_type".into(), user_type.into()),
         ("user_properties".into(), "{}".into()),
-        ("version_name".into(), version.id.clone()),
+        (
+            "version_name".into(),
+            loader.map_or_else(|| version.id.clone(), |loader| loader.profile.id.clone()),
+        ),
         ("version_type".into(), version.kind.clone()),
         ("game_directory".into(), path_text(game_directory)?),
         (
@@ -170,7 +184,10 @@ pub fn build_command(
         ("natives_directory".into(), path_text(&native_directory)?),
         (
             "library_directory".into(),
-            path_text(&paths.root().join("libraries"))?,
+            path_text(&loader.map_or_else(
+                || paths.root().join("libraries"),
+                |loader| paths.root().join(loader.directory()).join("libraries"),
+            ))?,
         ),
         ("classpath".into(), classpath.join(&separator.to_string())),
         ("classpath_separator".into(), separator.to_string()),
@@ -213,6 +230,11 @@ pub fn build_command(
                 Vec::new()
             },
         };
+        if let Some(loader) = loader {
+            for argument in &loader.profile.arguments.jvm {
+                command.args.push(substitute(argument, &replacements)?);
+            }
+        }
         if let Some(logging) = &version.logging {
             let path = path_text(&paths.root().join(format!(
                 "assets/log_configs/{}-{}",
@@ -225,10 +247,18 @@ pub fn build_command(
         }
         command.args.extend(settings.extra_jvm_args.clone());
         command.args.push(format!("-Xmx{}M", settings.ram_mib));
-        command.args.push(version.main_class.clone());
+        command.args.push(loader.map_or_else(
+            || version.main_class.clone(),
+            |loader| loader.profile.main_class.clone(),
+        ));
         command
             .args
             .extend(arguments(&metadata.game, &launch_platform, &replacements)?);
+        if let Some(loader) = loader {
+            for argument in &loader.profile.arguments.game {
+                command.args.push(substitute(argument, &replacements)?);
+            }
+        }
         if command.args.len() > 4096
             || command
                 .args

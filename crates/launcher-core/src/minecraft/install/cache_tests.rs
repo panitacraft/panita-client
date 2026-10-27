@@ -10,6 +10,64 @@ struct Fixture {
 }
 
 #[test]
+fn recorded_loader_state_survives_restart_and_receipts_never_hide_changed_or_missing_content()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = Fixture::new();
+    let loader = crate::neoforge::generation::tests::published_for(
+        &fixture.paths,
+        &fixture.installed.plan.version.id,
+        &fixture.installed.plan.version.java,
+    )?;
+    fixture.installed.plan.schema_version = 2;
+    fixture.installed.plan.loader = Some(loader.clone());
+    write_json(&fixture.root, "installed.json", &fixture.installed)?;
+    let loaded = verify_installed(&fixture.paths, fixture.id)?;
+    assert_eq!(
+        loaded.plan.loader.as_ref().map(|loader| loader.version()),
+        Some("21.1.264")
+    );
+    let first = fixture.audit();
+    assert!(first.hashed > loader.files.len());
+    assert_eq!(fixture.audit().hashed, 0);
+    let original = fixture
+        .paths
+        .root()
+        .join(loader.directory())
+        .join(&loader.files[0].path);
+    let mut content = std::fs::read(&original)?;
+    content[0] ^= 1;
+    std::fs::write(&original, &content)?;
+    assert!(
+        verify_play_under_lock(
+            &fixture.paths,
+            fixture.id,
+            &fixture.root,
+            &Cancellation::default()
+        )
+        .is_err()
+    );
+    assert!(verify_installed(&fixture.paths, fixture.id).is_err());
+    std::fs::remove_file(
+        fixture
+            .paths
+            .root()
+            .join(loader.directory())
+            .join("complete.json"),
+    )?;
+    assert_eq!(
+        verify_installed(&fixture.paths, fixture.id)
+            .err()
+            .map(|error| error.code()),
+        Some(ErrorCode::ArtifactMismatch)
+    );
+    let before = std::fs::read(fixture.root.join("installed.json"))?;
+    fixture.installed.plan.schema_version = 1;
+    assert!(fixture.installed.plan.validate().is_err());
+    assert_eq!(std::fs::read(fixture.root.join("installed.json"))?, before);
+    Ok(())
+}
+
+#[test]
 fn compact_installed_manifest_migrates_legacy_and_separates_format_from_status() {
     let fixture = Fixture::new();
     let mut value = serde_json::to_value(&fixture.installed).unwrap_or_else(|_| panic!("manifest"));

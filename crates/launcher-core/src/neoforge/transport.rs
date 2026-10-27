@@ -15,6 +15,37 @@ pub(super) struct Transport {
 }
 
 impl Transport {
+    pub(super) async fn installer(
+        &self,
+        paths: &AppPaths,
+        identity: &InstallerIdentity,
+        cancel: &Cancellation,
+    ) -> Result<Vec<u8>, CoreError> {
+        let path = Coordinate::parse(&format!(
+            "net.neoforged:neoforge:{}:installer",
+            identity.version
+        ))?;
+        let source = LibraryArtifact {
+            path: path.path().into(),
+            url: identity.url()?,
+            sha1: identity.sha1.clone(),
+            size: identity.size,
+        };
+        let cached = self.library(paths, &source, cancel).await?;
+        let directory = private_fs::PrivateDir::open(cached.parent().ok_or_else(invalid)?)
+            .map_err(map_private_error)?;
+        let mut file = directory
+            .open_file(cached.file_name().ok_or_else(invalid)?)
+            .map_err(map_private_error)?;
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(&mut file, MAX_INSTALLER_BYTES as u64 + 1),
+            &mut bytes,
+        )
+        .map_err(io)?;
+        InstallerMetadata::decode(&bytes, identity)?;
+        Ok(bytes)
+    }
     pub fn new() -> Result<Self, CoreError> {
         Ok(Self {
             client: reqwest::Client::builder()
