@@ -68,9 +68,11 @@ fn initialize(
         *state
             .activation
             .lock()
-            .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)? = Some(activation);
+            .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)? =
+            Some(activation.clone());
         *slot = Some(accounts.clone());
         settings_commands::restore_window(&app, &settings);
+        activation_commands::start_check(app.clone(), activation, state.plays.clone());
         account_commands::start_maintenance(app.clone(), accounts);
         Ok(())
     })();
@@ -215,6 +217,12 @@ pub fn run() {
             initialize,
             diagnostic_snapshot,
             catalog_snapshot,
+            activation_commands::activation_snapshot,
+            activation_commands::start_activation,
+            activation_commands::cancel_activation,
+            activation_commands::retry_activation_save,
+            activation_commands::refresh_activation,
+            activation_commands::sign_out_activation,
             settings_commands::settings_snapshot,
             settings_commands::save_global_settings,
             settings_commands::save_instance_settings,

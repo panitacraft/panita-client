@@ -1113,6 +1113,27 @@ pub(super) fn begin_play(
     let cancel = controller.reserve(instance_id, request_id)?;
     controller.publish(&app);
     tauri::async_runtime::spawn(async move {
+        // A session that could not be verified gets one check before Play, so a
+        // reconnected launcher recovers without a restart. If the API closed the
+        // session meanwhile, this launch ends here.
+        let credentials = if activation
+            .state()
+            .is_ok_and(|state| state == launcher_core::activation::ActivationState::ActiveOffline)
+        {
+            if let Ok(outcome) = activation.refresh().await {
+                activation_commands::after_refresh(&app, &controller, &activation, outcome);
+            }
+            match activation.session_credentials() {
+                Ok(fresh) => fresh,
+                Err(error) => {
+                    controller.fail(instance_id, request_id, error.code());
+                    controller.publish(&app);
+                    return;
+                }
+            }
+        } else {
+            credentials
+        };
         match launcher_core::minecraft::play::prepare_play(
             paths,
             instance_id,
