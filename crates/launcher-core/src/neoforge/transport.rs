@@ -47,15 +47,17 @@ impl Transport {
         Ok(bytes)
     }
     pub fn new() -> Result<Self, CoreError> {
+        let client = reqwest::Client::builder()
+            .user_agent(concat!("PanitaClient/", env!("CARGO_PKG_VERSION")))
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(15))
+            .read_timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(600));
+        // Local HTTP fixtures must not inherit a host's corporate proxy routing.
+        #[cfg(test)]
+        let client = client.no_proxy();
         Ok(Self {
-            client: reqwest::Client::builder()
-                .user_agent(concat!("PanitaClient/", env!("CARGO_PKG_VERSION")))
-                .redirect(reqwest::redirect::Policy::none())
-                .connect_timeout(Duration::from_secs(15))
-                .read_timeout(Duration::from_secs(30))
-                .timeout(Duration::from_secs(600))
-                .build()
-                .map_err(|_| invalid())?,
+            client: client.build().map_err(|_| invalid())?,
             mojang: Downloader::new()?,
             #[cfg(test)]
             endpoint: None,

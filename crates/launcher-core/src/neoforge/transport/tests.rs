@@ -40,6 +40,8 @@ fn server(response: Vec<u8>, count: usize) -> Result<Server, std::io::Error> {
         while !done.load(Ordering::SeqCst) && seen.load(Ordering::SeqCst) < count {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    // Windows accept inherits the listener's nonblocking mode.
+                    assert!(stream.set_nonblocking(false).is_ok());
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
                     let mut request = Vec::new();
                     let mut buffer = [0; 1024];
@@ -104,6 +106,11 @@ async fn concurrent_writers_download_once_and_reuse_only_verified_blobs()
     let (one, two) = tokio::join!(
         transport.library(&paths, &source, &cancel),
         transport.library(&paths, &source, &cancel)
+    );
+    assert!(
+        one.is_ok() && two.is_ok(),
+        "cache writers: {one:?}, {two:?}; requests={}",
+        server.requests.load(Ordering::SeqCst)
     );
     assert_eq!(one?, two?);
     let cached = transport.library(&paths, &source, &cancel).await?;

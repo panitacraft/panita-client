@@ -626,6 +626,8 @@ mod tests {
             let handle = std::thread::spawn(move || {
                 while !flag.load(Ordering::SeqCst) {
                     if let Ok((mut socket, _)) = listener.accept() {
+                        // Windows accept inherits the listener's nonblocking mode.
+                        assert!(socket.set_nonblocking(false).is_ok());
                         let _ = socket.set_read_timeout(Some(Duration::from_secs(2)));
                         let mut request = Vec::new();
                         while !request.ends_with(b"\r\n\r\n") && request.len() < 16 * 1024 {
