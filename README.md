@@ -28,11 +28,22 @@ The launcher handles the downloads and Java setup for you, with a friendly and i
 
 ## Before you play
 
-Panita Client is an **unsigned beta**. Packaged application tests are
-owner-reported as passed on Windows 11 x64 and Ubuntu 26.04.1 x64. The owner
+Panita Client is an **unsigned prerelease**. The agreed MVP phases are complete,
+and the owner confirms release validation on 2026-10-27. Packaged application
+tests are owner-reported as passed on Windows 11 x64 and Ubuntu 26.04.1 x64. The owner
 also confirms teammate testing passed on clean Windows 11 and Ubuntu VMs.
 Other Windows/Linux versions are unqualified; macOS, ARM, Flatpak and modpacks
 are future scope.
+
+The next planned milestone is **0.2 Alpha (MLP)**: public custom and pinned
+Modrinth modpacks with NeoForge first, an interim interface facelift, and
+mandatory signed launcher updates with releases from merged PRs to `master`.
+Each implementation phase uses its own branch from `develop`. These features
+are planned and are not included in the current MVP release. See
+[AGENTS.md](AGENTS.md#7-post-mvp-02-alpha-decisions-2026-10-27) for the accepted policies.
+Tracking runs from [Phase 8 (#13)](https://github.com/panitacraft/panita-client/issues/13)
+through [Phase 16 (#21)](https://github.com/panitacraft/panita-client/issues/21),
+with dependencies and acceptance criteria in each phase issue.
 
 Microsoft accounts need an internet connection each time you start a game.
 Offline accounts can play an already installed instance without Microsoft

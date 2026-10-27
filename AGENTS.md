@@ -7,7 +7,7 @@ This file is the source of truth for how work is done in this project. Every con
 Panita Client is an unofficial, plug-and-play Minecraft launcher for friends. It manages accounts, downloads the required game files and Java, and runs isolated instances from the Panita API catalog.
 
 - The MVP supports at least two independent vanilla instances, Microsoft and explicit offline accounts, and launching to the Minecraft main menu.
-- Prioritize Windows. Design for Linux from the beginning and validate each platform before claiming support. macOS and modpacks are future scope.
+- Prioritize Windows. Design for Linux from the beginning and validate each platform before claiming support. The 0.2 alpha plan includes public custom and pinned Modrinth modpacks, with NeoForge first, on Windows x64 and Ubuntu x64. macOS and other loaders remain later adoption scope.
 - Use Tauri v2 with a Rust core and a React/TypeScript interface. Keep detailed implementation steps in the implementation plan and `docs/`.
 - Follow the latest confirmed decisions. Do not expand scope or change product policies without discussing the proposal with the owner.
 
@@ -37,7 +37,7 @@ Panita Client is an unofficial, plug-and-play Minecraft launcher for friends. It
 ### Branch convention
 
 - Use `develop` as the development branch. Keep `master` as the existing primary branch; do not rename it or change remote defaults without explicit authorization.
-- When a separate task branch is needed, branch from `develop` and use `<type>/<short-description>`, for example `feat/auth-fundamentals`, `fix/session-renewal`, or `docs/development-setup`.
+- Every new phase must use its own new branch from `develop`, using `<type>/<short-description>`, for example `feat/auth-fundamentals`, `fix/session-renewal`, or `docs/development-setup`. Do not implement a phase directly on `develop` or reuse the previous phase's branch. Base each dependent phase on the accepted work integrated into `develop`; integration and pushes retain their authorization requirements. This owner decision applies from 2026-10-27.
 - Use the commit types listed below and lowercase, hyphen-separated descriptions. Do not create extra branches without a concrete reason.
 - Branch creation is local unless explicitly authorized otherwise. Pushes, remote branch changes, and GitHub issue mutations require authorization for that scope.
 
@@ -319,7 +319,7 @@ Microsoft accounts require successful current Play validation even for installed
 
 Check the specific instance's API status on every Play request. A disabled result blocks the launch workflow; show disabled cards dimmed with a lock and Spanish status text. During catalog API outages, show the last valid cached list and an on-load Spanish toast indicating that installed instances remain available. Require explicit user confirmation of a warning before each fallback launch of a complete local vanilla installation. A previously known disabled state remains blocked. This fallback does not bypass current Microsoft/Minecraft authentication validation, and explicit disabled/missing responses are not outages. Preserve local data in every case.
 
-Future modpack policy remains outside the MVP: require a successful current catalog check and synchronize changed pins before launch. Define allowable CDN cache age and behavior for disabled/deleted records before shipping modpacks. Catalog failures never delete worlds or installations.
+The owner-approved 0.2 alpha scope adds public custom and pinned Modrinth modpacks, prioritizing NeoForge. Check the instance status on each Play request. A complete installed outdated pack may launch after explicit warning and confirmation on each request, naming the installed/available versions and possible server incompatibility; updating is optional. During a catalog outage, a complete local modpack may launch after explicit warning that current status/version could not be verified and the pack may be outdated. Never bypass known disabled/missing results, corrupt/incomplete installations, or current Microsoft authentication requirements. Updates/installations/repair still require current availability checks. Catalog failures never delete worlds or installations. This owner decision on 2026-10-27 supersedes the earlier mandatory pack-pin synchronization and vanilla-only outage fallback restrictions for complete modpacks.
 
 ### Accepted tradeoffs and boundaries
 
@@ -356,9 +356,9 @@ OAuth reference: https://learn.microsoft.com/en-us/entra/identity-platform/v2-oa
 ## Annex B. Maintenance and Desktop Decisions Preserved from the README
 
 These existing decisions and implementation boundaries were consolidated from the
-README on 2026-10-25. They supplement the rules above; they do not authorize Phase 7
-implementation or a release. Historical test counts and individual measurements
-are evidence, not product guarantees.
+README on 2026-10-25. They supplement the rules above; their historical approval
+boundaries do not revoke later explicit owner decisions. Historical test counts
+and individual measurements are evidence, not product guarantees.
 
 ### Updates, repair, and world backups
 
@@ -476,8 +476,65 @@ are evidence, not product guarantees.
   GTK/WebKit runtimes; the previously recorded development tools/packages are
   absent. This inventory does not establish a fresh clean-install baseline or
   qualify the Phase 7 candidate. No package removal or VM reset is authorized.
-- Phase 6 was accepted on 2026-10-25. Its closure is recorded at
-  https://github.com/panitacraft/panita-client/issues/8. Installer polish,
-  clean-machine and advertised-platform qualification, release preparation, and
-  distribution remain Phase 7 work. Do not treat earlier BOX results as fresh
-  Linux native acceptance of the latest Phase 6 changes.
+- Phases 0–7 are accepted and complete; Phase 6 closed on 2026-10-25 and
+  Phase 7 on 2026-10-26. The owner accepts Windows/Linux functional results and
+  teammate-reported clean Windows 11/Ubuntu VM tests. On 2026-10-27 the owner
+  confirms release validation. Preserve these as owner-reported results;
+  historical BOX observations and beta candidate hashes retain their own scope.
+  The current release tag is `v0.1.1-alpha` at this documentation checkpoint.
+  CachyOS installation/game launch remain unverified in the available records;
+  OS code signing remains deferred. The 0.2 plan now includes signed launcher
+  self-update; it is planned, not implemented or qualified at this checkpoint.
+  Later explicit release decisions supersede earlier preparation-only boundaries
+  for their authorized scope. Future pushes, tags, merges and publication still
+  require authorization.
+
+## 7. Post-MVP 0.2 Alpha Decisions (2026-10-27)
+
+- Deliver public custom and pinned Modrinth `.mrpack` installation first, the
+  reference-based interim UI facelift second, and mandatory launcher updates and
+  automatic release management third. NeoForge is the first qualified loader;
+  Fabric, Quilt and Forge adoption follows separately. Do not silently install
+  unsupported packs as vanilla. Restricted instances and Panita account login
+  are outside this plan. Microsoft/offline account policies remain unchanged.
+- For custom packs, use the API's resolved URLs and exact hashes/sizes without
+  provider API keys. Files with permitted URLs download automatically. Explicit
+  manual CurseForge files require verified player import; required missing files
+  block completion and Play. Install optional client files automatically for now.
+- Player-added mods and configuration are permitted and remain player-owned.
+  Preserve them during update, repair and ordinary instance uninstall. Report
+  pack/user destination collisions rather than adopting or overwriting user files.
+  Additional mods are not a guarantee of compatibility. Preserve worlds and all
+  existing user-data protections; separately confirmed full-profile erasure and
+  disposable native cleanup retain their explicit scopes.
+- Apply defaults only to absent, never-consumed paths. Preserve that history so
+  deleted defaults are not recreated on update. Replace managed configuration
+  only when it still matches its recorded installed hash; otherwise keep the
+  entire edited file and report the skipped replacement. A change in one file
+  does not skip other unchanged configuration. Reset to pack requires an explicit
+  player action; do not silently merge arbitrary configuration formats.
+- Each newer published launcher release is mandatory. Automatically download and
+  verify updates; once an update is known and pending, block new game launches
+  until applied. Keep supervision, stop/log controls and safe recovery available.
+  Apply updates only after games and active mutations finish; do not force-close
+  games or interrupt transactions. If update checking is unavailable and no
+  mandatory update is already known, permit use with a warning. A failed check
+  never clears a known pending requirement. Verify updater signatures; private
+  signing keys stay in CI. This does not claim Windows publisher code signing.
+- Only merged PRs targeting `master` trigger public version allocation, tags and
+  releases after successful checks and packaging. Start at `v0.2.0-alpha` and
+  increment the patch for subsequent releases. `develop` runs CI and may produce
+  test artifacts, but does not publish releases or advance the update feed. Keep
+  version allocation serialized, retries idempotent, artifacts immutable and
+  update-feed publication last. Plan/workflow preparation does not itself push,
+  merge, create release tags or publish binaries.
+- Use the annotated launcher layout reference and supplied palette for the
+  interim facelift: dark `#141414`, `#1B1B1B`, `#515151`; light `#F9FFF8`,
+  `#E4FFDA`, `#BABABA`; primary `#54A636`, `#047500`. Theme switching is not
+  implied. Use `ui/src/assets/logo_background.svg` as the authoritative
+  background-bearing logo and icon source; preserve its embedded artwork/colors.
+  Keep Spanish player-facing text, keyboard access, contrast and decorated main
+  launcher windows. Final design remains a later plan.
+- Qualify the new installed-product scope on Windows 11 x64 and Ubuntu x64;
+  retain the separate Ubuntu 24.04 build baseline. macOS is outside scope.
+  Earlier MVP results do not qualify new modpack or updater behavior.
