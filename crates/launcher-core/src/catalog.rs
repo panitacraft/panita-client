@@ -40,6 +40,13 @@ pub enum CatalogSource {
         pack_version_id: String,
         loader: Option<String>,
     },
+    Custom {
+        minecraft_version: String,
+        loader: String,
+        current_version_id: Option<Uuid>,
+        label: Option<String>,
+        published_at: Option<String>,
+    },
     Unsupported {
         source_type: String,
     },
@@ -82,6 +89,9 @@ struct RawInstance {
     modrinth_project_id: Option<String>,
     pack_version_id: Option<String>,
     loader: Option<String>,
+    current_version_id: Option<Uuid>,
+    current_version_label: Option<String>,
+    current_version_published_at: Option<String>,
 }
 
 fn invalid() -> CoreError {
@@ -143,6 +153,13 @@ impl TryFrom<RawInstance> for CatalogInstance {
                 return Err(invalid());
             }
         }
+        if raw.source_type != "custom"
+            && (raw.current_version_id.is_some()
+                || raw.current_version_label.is_some()
+                || raw.current_version_published_at.is_some())
+        {
+            return Err(invalid());
+        }
         let source = match raw.source_type.as_str() {
             "vanilla" => {
                 if raw.modrinth_project_id.is_some()
@@ -160,9 +177,7 @@ impl TryFrom<RawInstance> for CatalogInstance {
                 let pack_version_id = raw.pack_version_id.ok_or_else(invalid)?;
                 if !pin(&project_id)
                     || !pin(&pack_version_id)
-                    || raw.loader.as_deref().is_some_and(|loader| {
-                        !matches!(loader, "fabric" | "quilt" | "forge" | "neoforge")
-                    })
+                    || raw.loader.as_deref().is_some_and(|loader| !pin(loader))
                 {
                     return Err(invalid());
                 }
@@ -170,6 +185,35 @@ impl TryFrom<RawInstance> for CatalogInstance {
                     project_id,
                     pack_version_id,
                     loader: raw.loader,
+                }
+            }
+            "custom" => {
+                let loader = raw.loader.ok_or_else(invalid)?;
+                if raw.modrinth_project_id.is_some()
+                    || raw.pack_version_id.is_some()
+                    || !pin(&loader)
+                    || raw.current_version_id.is_some_and(|id| id.is_nil())
+                    || raw
+                        .current_version_label
+                        .as_deref()
+                        .is_some_and(|label| !bounded_text(label, 32))
+                    || raw
+                        .current_version_published_at
+                        .as_deref()
+                        .is_some_and(|date| chrono::DateTime::parse_from_rfc3339(date).is_err())
+                    || (raw.enabled && raw.current_version_id.is_none())
+                    || (raw.current_version_id.is_some()
+                        != raw.current_version_published_at.is_some())
+                    || (raw.current_version_id.is_none() && raw.current_version_label.is_some())
+                {
+                    return Err(invalid());
+                }
+                CatalogSource::Custom {
+                    minecraft_version: raw.minecraft_version.clone().ok_or_else(invalid)?,
+                    loader,
+                    current_version_id: raw.current_version_id,
+                    label: raw.current_version_label,
+                    published_at: raw.current_version_published_at,
                 }
             }
             _ if bounded_text(&raw.source_type, 64) => CatalogSource::Unsupported {
@@ -214,13 +258,30 @@ impl CatalogInstance {
                 Some(pack_version_id.clone()),
                 loader.clone(),
             ),
+            CatalogSource::Custom {
+                minecraft_version,
+                loader,
+                ..
+            } if Some(minecraft_version) == self.minecraft_version.as_ref() => {
+                ("custom".to_owned(), None, None, Some(loader.clone()))
+            }
             CatalogSource::Unsupported { source_type }
-                if !matches!(source_type.as_str(), "vanilla" | "modrinth") =>
+                if !matches!(source_type.as_str(), "vanilla" | "modrinth" | "custom") =>
             {
                 (source_type.clone(), None, None, None)
             }
             _ => return Err(invalid()),
         };
+        let (current_version_id, current_version_label, current_version_published_at) =
+            match &self.source {
+                CatalogSource::Custom {
+                    current_version_id,
+                    label,
+                    published_at,
+                    ..
+                } => (*current_version_id, label.clone(), published_at.clone()),
+                _ => (None, None, None),
+            };
         Self::try_from(RawInstance {
             id: self.id,
             slug: self.slug.clone(),
@@ -238,6 +299,9 @@ impl CatalogInstance {
             modrinth_project_id: project,
             pack_version_id: pack,
             loader,
+            current_version_id,
+            current_version_label,
+            current_version_published_at,
         })?;
         Ok(())
     }
@@ -374,6 +438,13 @@ pub struct CatalogSnapshot {
 pub struct CatalogClient {
     client: Client,
     base: String,
+}
+
+#[cfg(test)]
+impl CatalogClient {
+    pub(crate) fn test_transport(self) -> (Client, String) {
+        (self.client, self.base)
+    }
 }
 
 impl CatalogClient {

@@ -104,6 +104,70 @@ fn catalog_validation_preserves_text_and_rejects_malformed_records() {
 }
 
 #[test]
+fn custom_catalog_pins_round_trip_without_authorizing_installation() {
+    let mut raw = record();
+    raw["source_type"] = json!("custom");
+    raw["loader"] = json!("neoforge");
+    raw["current_version_id"] = json!("04ac0877-11a5-4de2-9a41-a41dbb44f1ee");
+    raw["current_version_label"] = Value::Null;
+    raw["current_version_published_at"] = json!("2026-10-25T20:54:25.192Z");
+    let parsed =
+        parse_list(list(vec![raw.clone()]).as_bytes()).unwrap_or_else(|_| panic!("custom catalog"));
+    assert!(matches!(
+        parsed[0].source,
+        CatalogSource::Custom { label: None, .. }
+    ));
+    assert!(parsed[0].validate().is_ok());
+    assert_eq!(
+        parsed[0]
+            .installation_allowed(&Version::new(0, 2, 0))
+            .err()
+            .map(|error| error.code()),
+        Some(ErrorCode::UnsupportedInstance)
+    );
+    let encoded = serde_json::to_vec(&parsed[0]).unwrap_or_else(|_| panic!("encode"));
+    let restored: CatalogInstance =
+        serde_json::from_slice(&encoded).unwrap_or_else(|_| panic!("decode"));
+    assert_eq!(restored, parsed[0]);
+    assert!(restored.validate().is_ok());
+    for (field, value) in [
+        ("minecraft_version", Value::Null),
+        ("loader", Value::Null),
+        ("pack_version_id", json!("unexpected")),
+        ("current_version_id", Value::Null),
+        ("current_version_id", json!(Uuid::nil())),
+        ("current_version_label", json!("x".repeat(33))),
+        ("current_version_published_at", json!("invalid")),
+    ] {
+        let mut bad = raw.clone();
+        bad[field] = value;
+        assert!(parse_list(list(vec![bad]).as_bytes()).is_err(), "{field}");
+    }
+    raw["enabled"] = json!(false);
+    raw["current_version_id"] = Value::Null;
+    raw["current_version_published_at"] = Value::Null;
+    assert!(parse_list(list(vec![raw.clone()]).as_bytes()).is_ok());
+    raw["enabled"] = json!(true);
+    assert!(parse_list(list(vec![raw]).as_bytes()).is_err());
+}
+
+#[test]
+fn future_loader_is_retained_but_never_installed_as_vanilla() {
+    let mut raw = record();
+    raw["source_type"] = json!("modrinth");
+    raw["modrinth_project_id"] = json!("project");
+    raw["pack_version_id"] = json!("pinned");
+    raw["loader"] = json!("future-loader");
+    let parsed = parse_list(list(vec![raw]).as_bytes()).unwrap_or_else(|_| panic!("catalog"));
+    assert!(parsed[0].validate().is_ok());
+    assert!(
+        parsed[0]
+            .installation_allowed(&Version::new(0, 2, 0))
+            .is_err()
+    );
+}
+
+#[test]
 fn catalog_sources_minimum_versions_and_disabled_states_are_not_installable() {
     let mut raw = record();
     raw["min_launcher_version"] = json!("0.2.0");
