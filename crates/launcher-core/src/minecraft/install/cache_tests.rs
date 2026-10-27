@@ -10,6 +10,70 @@ struct Fixture {
 }
 
 #[test]
+fn interrupted_loader_pointer_publication_recovers_only_verified_content()
+-> Result<(), Box<dyn std::error::Error>> {
+    for corrupt in [false, true] {
+        let mut fixture = Fixture::new();
+        let loader = crate::neoforge::generation::tests::published_for(
+            &fixture.paths,
+            &fixture.installed.plan.version.id,
+            &fixture.installed.plan.version.java,
+        )?;
+        fixture.installed.plan.schema_version = 2;
+        fixture.installed.plan.loader = Some(loader.clone());
+        write_json(&fixture.root, "installed.json", &fixture.installed)?;
+        write_json(
+            &fixture.root,
+            "transaction.json",
+            &serde_json::json!({"schema_version":1,"operation":fixture.installed.operation,"active":true}),
+        )?;
+        let registry = InstanceRegistry::new(fixture.paths.clone());
+        let mut record = registry.get(fixture.id)?.ok_or("record")?;
+        record.state = InstallationState::Installing;
+        registry.save_installation(&record)?;
+        let (directory, leaf) = ensure_parent(&fixture.root, "minecraft/saves/World/level.dat")?;
+        directory.write_atomic_durable(leaf, b"world sentinel")?;
+        if corrupt {
+            std::fs::write(
+                fixture
+                    .paths
+                    .root()
+                    .join(loader.directory())
+                    .join(&loader.files[0].path),
+                b"bad loader input",
+            )?;
+        }
+        let lease = crate::minecraft::process::LaunchLease::acquire(&fixture.paths, fixture.id)?;
+        let result = lease.recover_installation();
+        if corrupt {
+            assert!(result.is_err());
+            assert_eq!(
+                read_json::<serde_json::Value>(&fixture.root, "transaction.json")?
+                    .ok_or("journal")?["active"],
+                true
+            );
+            assert_eq!(
+                registry.get(fixture.id)?.ok_or("record")?.state,
+                InstallationState::Installing
+            );
+        } else {
+            result?;
+            assert!(read_json::<serde_json::Value>(&fixture.root, "transaction.json")?.is_none());
+            assert_eq!(
+                registry.get(fixture.id)?.ok_or("record")?.state,
+                InstallationState::Installed
+            );
+            lease.verify_installation()?;
+        }
+        assert_eq!(
+            std::fs::read(fixture.root.join("minecraft/saves/World/level.dat"))?,
+            b"world sentinel"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn loader_receipts_bind_sha256_and_never_reuse_sha1_only_verification()
 -> Result<(), Box<dyn std::error::Error>> {
     use sha2::{Digest, Sha256};

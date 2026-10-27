@@ -156,8 +156,18 @@ pub(super) fn recover_locked(
         return super::transaction::remove(root);
     }
     let registry = InstanceRegistry::new(paths.clone());
+    let mut recovered_state = InstallationState::NeedsRepair;
+    if let Some(installed) = read_json::<InstalledLock>(root, "installed.json")? {
+        super::maintenance::validate_manifest(&installed, id)?;
+        if installed.operation == journal.operation && installed.schema_version == 2 {
+            // A durable pointer is recoverable only after a complete local audit,
+            // including the exact loader generation. Failure retains the intent.
+            verify_manifest(paths, id, root, &installed, &Cancellation::default())?;
+            recovered_state = InstallationState::Installed;
+        }
+    }
     if let Some(mut record) = registry.get(id)? {
-        record.state = InstallationState::NeedsRepair;
+        record.state = recovered_state;
         registry.save_installation(&record)?;
     }
     journal.active = false;
