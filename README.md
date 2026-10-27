@@ -29,9 +29,10 @@ The launcher handles the downloads and Java setup for you, with a friendly and i
 ## Before you play
 
 Panita Client is an **unsigned beta**. Packaged application tests are
-owner-reported as passed on Windows 11 x64 and Ubuntu 26.04.1 x64.
-Clean-computer prerequisite checks are still pending. Other Windows/Linux
-versions are unqualified; macOS, ARM, Flatpak and modpacks are future scope.
+owner-reported as passed on Windows 11 x64 and Ubuntu 26.04.1 x64. The owner
+also confirms teammate testing passed on clean Windows 11 and Ubuntu VMs.
+Other Windows/Linux versions are unqualified; macOS, ARM, Flatpak and modpacks
+are future scope.
 
 Microsoft accounts need an internet connection each time you start a game.
 Offline accounts can play an already installed instance without Microsoft
