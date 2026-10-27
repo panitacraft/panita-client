@@ -4,11 +4,12 @@ import { createReadStream } from 'node:fs';
 import { lstat, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { releaseVersion } from './release-version.mjs';
 
 // Artifact paths come from the release contract, never from a candidate manifest.
-export async function verifyBeta({ directory, platform, version, revision }) {
+export async function verifyBeta({ directory, platform, version, revision, release = false }) {
   if (!['windows', 'linux'].includes(platform)
-      || !/^\d+\.\d+\.\d+-beta\.\d+$/.test(version)
+      || !(release ? releaseVersion(`v${version}`) === version : /^\d+\.\d+\.\d+-beta\.\d+$/.test(version))
       || !/^[a-f0-9]{40}$/.test(revision)) throw new Error('Invalid candidate identity');
   const formats = platform === 'windows'
     ? [['.exe', 'candidate.json']]
@@ -32,7 +33,7 @@ export async function verifyBeta({ directory, platform, version, revision }) {
       throw new Error(`Expected regular candidate files: ${name}`);
     }
     const candidate = JSON.parse(await readFile(manifestPath, 'utf8'));
-    if (candidate.schema !== 1 || candidate.type !== 'unsigned_beta_candidate'
+    if (candidate.schema !== 1 || candidate.type !== (release ? 'unsigned_release_candidate' : 'unsigned_beta_candidate')
         || candidate.version !== version || candidate.source_revision !== revision
         || candidate.platform !== `${platform}_x64` || candidate.artifact !== name
         || candidate.signed !== false || candidate.qualification !== 'pending') {
@@ -54,10 +55,12 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const args = process.argv.slice(2);
   let platform = { win32: 'windows', linux: 'linux' }[process.platform];
   let revision;
+  let releaseTag;
   for (let index = 0; index < args.length; index += 2) {
     if (args[index] === '--platform') platform = args[index + 1];
     else if (args[index] === '--revision') revision = args[index + 1];
-    else throw new Error('Supported options: --platform windows|linux, --revision <full commit SHA>');
+    else if (args[index] === '--release-tag') releaseTag = args[index + 1];
+    else throw new Error('Supported options: --platform windows|linux, --revision <full commit SHA>, --release-tag <vVERSION>');
     if (!args[index + 1]) throw new Error('Missing option value');
   }
   if (revision === undefined) {
@@ -65,12 +68,14 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (result.status !== 0) throw new Error('Cannot resolve source revision');
     revision = result.stdout.trim();
   }
-  const { version } = JSON.parse(await readFile(join(root, 'desktop/tauri.beta.conf.json'), 'utf8'));
+  const { version } = releaseTag
+    ? { version: releaseVersion(releaseTag) }
+    : JSON.parse(await readFile(join(root, 'desktop/tauri.beta.conf.json'), 'utf8'));
   // Validate before using platform/version to construct a directory.
-  if (!['windows', 'linux'].includes(platform) || !/^\d+\.\d+\.\d+-beta\.\d+$/.test(version)) {
+  if (!['windows', 'linux'].includes(platform) || (!releaseTag && !/^\d+\.\d+\.\d+-beta\.\d+$/.test(version))) {
     throw new Error('Unsupported platform or beta version');
   }
-  const verified = await verifyBeta({ directory: join(root, 'target/beta', version, platform), platform, version, revision });
+  const verified = await verifyBeta({ directory: join(root, releaseTag ? 'target/releases' : 'target/beta', version, platform), platform, version, revision, release: Boolean(releaseTag) });
   for (const item of verified) console.log(`${item.artifact}: OK (${item.sha256})`);
   console.log('Integrity and provenance verified; installed-product qualification remains pending.');
 }

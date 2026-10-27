@@ -2,9 +2,14 @@
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$root"
-version=$(node -p "JSON.parse(require('fs').readFileSync('desktop/tauri.beta.conf.json')).version")
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]
-artifact="$root/target/beta/$version/linux"
+if [[ -n "${RELEASE_TAG:-}" ]]; then
+  version=$(node scripts/release-version.mjs "$RELEASE_TAG")
+  artifact="$root/target/releases/$version/linux"
+else
+  version=$(node -p "JSON.parse(require('fs').readFileSync('desktop/tauri.beta.conf.json')).version")
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]
+  artifact="$root/target/beta/$version/linux"
+fi
 mkdir -p "$artifact/verification"
 cat /etc/os-release > "$artifact/verification/build-os.txt"
 { rustc --version; cargo --version; node --version; pnpm --version; } > "$artifact/verification/toolchain.txt"

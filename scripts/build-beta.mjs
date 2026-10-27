@@ -4,16 +4,23 @@ import { createReadStream } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { releaseVersion } from './release-version.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const platform = { win32: ['windows', [['nsis', '.exe']]], linux: ['linux', [['deb', '.deb'], ['appimage', '.AppImage']]] }[process.platform];
-if (!platform || process.arch !== 'x64') throw new Error('Beta packaging currently requires Windows x64 or Linux x64.');
+if (!platform || process.arch !== 'x64') throw new Error('Packaging currently requires Windows x64 or Linux x64.');
 const [os, bundles] = platform;
 const config = JSON.parse(await readFile(join(root, 'desktop/tauri.beta.conf.json'), 'utf8'));
 const baseConfig = JSON.parse(await readFile(join(root, 'desktop/tauri.conf.json'), 'utf8'));
-if (!/^\d+\.\d+\.\d+-beta\.\d+$/.test(config.version)) throw new Error('Expected an explicit beta version.');
 const args = process.argv.slice(2);
-if (args.some(arg => arg !== '--check')) throw new Error('Supported option: --check');
+const releaseIndex = args.indexOf('--release-tag');
+const release = releaseIndex !== -1;
+const releaseTag = release ? args[releaseIndex + 1] : undefined;
+if (release) {
+  config.version = releaseVersion(releaseTag);
+  args.splice(releaseIndex, 2);
+} else if (!/^\d+\.\d+\.\d+-beta\.\d+$/.test(config.version)) throw new Error('Expected an explicit beta version.');
+if (args.some(arg => arg !== '--check')) throw new Error('Supported options: --check, --release-tag <vVERSION>');
 
 function run(command, commandArgs, capture = false) {
   const result = spawnSync(command, commandArgs, {
@@ -30,13 +37,16 @@ function run(command, commandArgs, capture = false) {
 
 const revision = run('git', ['rev-parse', 'HEAD'], true);
 const dirty = run('git', ['status', '--porcelain', '--untracked-files=normal'], true).length > 0;
-if (dirty) throw new Error('Commit task changes before producing a beta candidate.');
-const destination = join(root, 'target/beta', config.version, os);
-console.log(`Unsigned beta: ${config.version} (${bundles.map(([bundle]) => bundle).join(', ')})\nSource: ${revision}\nOutput: ${destination}`);
+if (dirty) throw new Error('Commit task changes before producing an installer candidate.');
+if (release && run('git', ['rev-parse', `refs/tags/${releaseTag}^{commit}`], true) !== revision) {
+  throw new Error('Release tag must identify the current source commit.');
+}
+const destination = join(root, release ? 'target/releases' : 'target/beta', config.version, os);
+console.log(`Unsigned ${release ? 'release' : 'beta'}: ${config.version} (${bundles.map(([bundle]) => bundle).join(', ')})\nSource: ${revision}\nOutput: ${destination}`);
 if (args.includes('--check')) process.exit(0);
 
 // No signing or publication is performed. Tauri retains the existing application identity.
-run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', '--no-sign', '--config', join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundles.map(([bundle]) => bundle).join(','), '--', '--locked']);
+run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', '--no-sign', '--config', release ? JSON.stringify(config) : join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundles.map(([bundle]) => bundle).join(','), '--', '--locked']);
 if (run('git', ['rev-parse', 'HEAD'], true) !== revision
     || run('git', ['status', '--porcelain', '--untracked-files=normal'], true).length > 0) {
   throw new Error('Source changed during compilation. Commit changes and rebuild before preparing a candidate.');
@@ -63,7 +73,7 @@ for (const [bundle, extension] of bundles) {
   const manifest = bundle === 'appimage' ? 'candidate-appimage.json' : 'candidate.json';
   await writeFile(join(destination, manifest), `${JSON.stringify({
     schema: 1,
-    type: 'unsigned_beta_candidate',
+    type: release ? 'unsigned_release_candidate' : 'unsigned_beta_candidate',
     version: config.version,
     source_revision: revision,
     platform: `${os}_x64`,
