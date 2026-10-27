@@ -53,7 +53,8 @@ fn initialize(
         // through the activation view and blocks activation instead.
         let activation = Arc::new(
             ActivationController::new(PrivateStore::open(&paths).map_err(|error| error.code())?)
-                .map_err(|error| error.code())?,
+                .map_err(|error| error.code())?
+                .with_diagnostics(state.logs.clone(), state.process),
         );
         let accounts = Arc::new(
             AccountController::new(

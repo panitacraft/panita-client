@@ -661,3 +661,51 @@ async fn sign_out_cancels_a_pending_login_and_reports_incomplete_cleanup() {
     requests(task);
     finish(&paths, controller);
 }
+
+#[tokio::test]
+async fn failures_are_recorded_as_codes_only() {
+    let paths = paths();
+    let (client, task) = server(vec![canned(401, failure_json("unknown_account"))]);
+    let logs = Arc::new(BoundedLog::default());
+    let controller = controller_with(&paths, client, Ok(credentials()))
+        .with_diagnostics(logs.clone(), ProcessSessionId::new());
+    assert_eq!(
+        code(
+            controller
+                .begin("secret-member-name", &DeviceInfo::default())
+                .await
+        ),
+        Some(ErrorCode::ActivationUnknownAccount)
+    );
+    seed_session(&paths, TOKEN);
+    assert!(controller.cancel().is_ok());
+    // A session activated by another process is adopted by the next begin.
+    assert_eq!(
+        code(
+            controller
+                .begin("secret-member-name", &DeviceInfo::default())
+                .await
+        ),
+        Some(ErrorCode::OperationBusy)
+    );
+    let credentials = controller
+        .session_credentials()
+        .unwrap_or_else(|_| panic!("credentials"));
+    assert_eq!(controller.note_rejection(&credentials).ok(), Some(true));
+    let events: Vec<_> = logs
+        .snapshot()
+        .into_iter()
+        .map(|record| record.event)
+        .collect();
+    assert_eq!(
+        events,
+        [
+            LogEvent::ActivationFailure(ErrorCode::ActivationUnknownAccount),
+            LogEvent::ActivationFailure(ErrorCode::SessionRejected),
+        ]
+    );
+    let text = format!("{:?}", logs.snapshot());
+    assert!(!text.contains("secret-member-name") && !text.contains(TOKEN));
+    requests(task);
+    finish(&paths, controller);
+}

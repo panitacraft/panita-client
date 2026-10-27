@@ -10,7 +10,8 @@ use serde::Serialize;
 
 use crate::accounts::Secret;
 use crate::error::{CoreError, ErrorCode};
-use crate::operation::OperationId;
+use crate::logging::{BoundedLog, LogEvent, LogRecord};
+use crate::operation::{OperationId, ProcessSessionId};
 use crate::panita_api::{
     DeviceInfo, LoginRequest, PanitaApiClient, PanitaApiError, PanitaCredentials, PollOutcome,
     now_seconds,
@@ -96,6 +97,11 @@ struct State {
     error: Option<(ErrorCode, Option<u32>)>,
 }
 
+struct Diagnostics {
+    logs: Arc<BoundedLog>,
+    process: ProcessSessionId,
+}
+
 pub struct ActivationController {
     snapshot_counter: AtomicU64,
     store: PrivateStore,
@@ -103,10 +109,28 @@ pub struct ActivationController {
     /// The launcher key alone, or why this build has none.
     key: Result<PanitaCredentials, ErrorCode>,
     poll_interval: Duration,
+    diagnostics: Option<Diagnostics>,
     state: Mutex<State>,
 }
 
 impl ActivationController {
+    /// Record failures in the structured diagnostics. Only the fixed error code is
+    /// recorded, never the account, the serial, the token or a service response.
+    pub fn with_diagnostics(mut self, logs: Arc<BoundedLog>, process: ProcessSessionId) -> Self {
+        self.diagnostics = Some(Diagnostics { logs, process });
+        self
+    }
+
+    fn record(&self, code: ErrorCode) {
+        if let Some(diagnostics) = &self.diagnostics {
+            diagnostics.logs.record(LogRecord {
+                process: diagnostics.process,
+                operation: None,
+                event: LogEvent::ActivationFailure(code),
+            });
+        }
+    }
+
     pub fn new(store: PrivateStore) -> Result<Self, CoreError> {
         Self::with_parts(
             store,
@@ -142,6 +166,7 @@ impl ActivationController {
             client,
             key,
             poll_interval,
+            diagnostics: None,
             state: Mutex::new(State {
                 generation: 0,
                 cancellation: tokio::sync::watch::channel(0).0,
@@ -253,6 +278,7 @@ impl ActivationController {
                 }
                 Err(error) => {
                     state.error = Some((error.code(), None));
+                    self.record(error.code());
                     return Err(error);
                 }
             }
@@ -286,6 +312,7 @@ impl ActivationController {
                 if current && error.code != ErrorCode::OperationCancelled {
                     state.phase = Phase::NoSession;
                     state.error = Some((error.code, error.retry_after));
+                    self.record(error.code);
                 }
                 Err(error.into())
             }
@@ -349,6 +376,7 @@ impl ActivationController {
         if error.code != ErrorCode::OperationCancelled && pending_is(&state, ticket) {
             state.phase = Phase::NoSession;
             state.error = Some((error.code, error.retry_after));
+            self.record(error.code);
         }
         Err(error.into())
     }
@@ -362,6 +390,9 @@ impl ActivationController {
         }
         let saved = panita_session::save(&self.store, &session);
         state.error = saved.as_ref().err().map(|error| (error.code(), None));
+        if let Err(error) = &saved {
+            self.record(error.code());
+        }
         state.phase = Phase::Active {
             session,
             offline: false,
@@ -390,6 +421,9 @@ impl ActivationController {
         let saved = panita_session::save(&self.store, session);
         *persisted = saved.is_ok();
         state.error = saved.as_ref().err().map(|error| (error.code(), None));
+        if let Err(error) = &saved {
+            self.record(error.code());
+        }
         saved
     }
 
@@ -417,6 +451,7 @@ impl ActivationController {
             Err(error) if error.code == ErrorCode::OperationCancelled => Err(error.into()),
             Err(error) => {
                 self.record_offline(&session, generation, error.code)?;
+                self.record(error.code);
                 Ok(RefreshOutcome::Offline)
             }
         }
@@ -502,6 +537,7 @@ impl ActivationController {
         invalidate(&mut state);
         state.phase = Phase::NoSession;
         state.error = Some((ErrorCode::SessionRejected, None));
+        self.record(ErrorCode::SessionRejected);
         // A file that cannot be removed now is rejected again on the next start.
         let _ = panita_session::clear(&self.store, Some(token));
         let _ = crate::catalog::purge_cache(&self.store);
@@ -538,6 +574,7 @@ impl ActivationController {
         let purged = crate::catalog::purge_cache(&self.store);
         if let Err(error) = cleared.map(|_| ()).and(purged) {
             self.lock()?.error = Some((error.code(), None));
+            self.record(error.code());
             return Err(error);
         }
         Ok(SignOutOutcome { server_closed })
