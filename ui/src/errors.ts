@@ -13,7 +13,10 @@ export type LauncherErrorCode =
   | 'accounts_file_invalid' | 'callback_not_active' | 'unsafe_permissions'
   | 'instance_disabled' | 'instance_missing' | 'unsupported_instance'
   | 'artifact_mismatch' | 'runtime_unsupported' | 'insufficient_space'
-  | 'process_start_failed' | 'process_control_failed' | 'catalog_confirmation_required';
+  | 'process_start_failed' | 'process_control_failed' | 'catalog_confirmation_required'
+  | 'activation_required' | 'activation_unavailable' | 'activation_unknown_account'
+  | 'activation_not_activated' | 'activation_rate_limited' | 'activation_expired'
+  | 'activation_consumed' | 'activation_file_invalid' | 'session_rejected' | 'api_key_rejected';
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
@@ -51,6 +54,16 @@ const messages: Record<LauncherErrorCode, string> = {
   callback_not_active: 'Se ignoró un regreso del navegador que ya no estaba activo. Si querías iniciar sesión, vuelve a intentarlo.',
   callback_registration_failed: 'No pudimos configurar el regreso desde el navegador. Reinicia el cliente e inténtalo de nuevo.',
   browser_unavailable: 'No pudimos abrir el navegador del sistema. Revisa tu navegador predeterminado e inténtalo de nuevo.',
+  activation_required: 'Activa Panita Client con tu cuenta de Panitacraft para continuar.',
+  activation_unavailable: 'Esta copia de Panita Client no puede activarse. Instala la versión oficial.',
+  activation_unknown_account: 'No encontramos una cuenta de Panitacraft con ese nombre. Revisa tu nombre de Minecraft o de Discord.',
+  activation_not_activated: 'Tu cuenta de Panitacraft todavía no está activada. Actívala con /register en el servidor de Discord y vuelve a intentarlo.',
+  activation_rate_limited: 'Tienes demasiados códigos pendientes.',
+  activation_expired: 'El código venció. Pide uno nuevo.',
+  activation_consumed: 'Este código ya no es válido. Pide uno nuevo.',
+  activation_file_invalid: 'El archivo de activación está dañado o pertenece a una versión no compatible. No lo modificamos para proteger tus datos. Cierra el cliente y elimina panita-session.json (un archivo oculto) de la carpeta PanitaClient de tus datos de aplicación para activar de nuevo.',
+  session_rejected: 'Tu sesión de Panitacraft se cerró. Actívala de nuevo para continuar.',
+  api_key_rejected: 'El servicio rechazó esta versión de Panita Client. Instala la versión más reciente.',
 };
 
 export function messageForError(error: unknown): string {
