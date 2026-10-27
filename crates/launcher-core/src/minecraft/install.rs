@@ -276,7 +276,7 @@ async fn download_all(
     let mut workers = tokio::task::JoinSet::new();
     let mut queue = plan.artifacts.iter();
     loop {
-        while workers.len() < 4 {
+        while workers.len() < 8 {
             let Some(file) = queue.next().cloned() else {
                 break;
             };
