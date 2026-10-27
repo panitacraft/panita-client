@@ -63,6 +63,10 @@ impl PanitaCredentials {
         self.token.is_some()
     }
 
+    pub(crate) fn token(&self) -> Option<&Arc<Secret>> {
+        self.token.as_ref()
+    }
+
     /// Identify the client only. Activation requests never carry a session.
     fn apply_key(&self, request: RequestBuilder) -> RequestBuilder {
         request.header("x-api-key", &self.key)

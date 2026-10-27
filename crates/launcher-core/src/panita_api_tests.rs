@@ -6,7 +6,8 @@ pub(crate) const KEY: &str = "test-key";
 pub(crate) const TOKEN: &str = "ps_fixture-token-value";
 pub(crate) const SECRET: &str = "abcdefghijklmnopqrstuvwxyz-_0123456789abcde";
 pub(crate) const REQUEST_ID: &str = "3b8f2c1d-6e4a-4f75-9a20-1c7d5e9b0a84";
-pub(crate) const EXPIRES: &str = "2026-10-27T15:03:00.000Z";
+// Far in the future so a fixture serial never expires while a test runs.
+pub(crate) const EXPIRES: &str = "2099-01-01T00:03:00.000Z";
 
 /// One scripted response of the loopback fixture.
 pub(crate) struct Canned {
@@ -138,7 +139,18 @@ pub(crate) fn confirmed_json(token: &str) -> String {
     )
 }
 
-fn failure_json(reason: &str) -> String {
+/// A client whose server is gone: every request is a transport failure.
+pub(crate) fn closed_client() -> PanitaApiClient {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap_or_else(|_| panic!("loopback"));
+    let base = format!(
+        "http://{}",
+        listener.local_addr().unwrap_or_else(|_| panic!("address"))
+    );
+    drop(listener);
+    PanitaApiClient::build(base, false).unwrap_or_else(|_| panic!("client"))
+}
+
+pub(crate) fn failure_json(reason: &str) -> String {
     format!(
         r#"{{"error":{{"code":"unauthenticated","message":"fixture","details":{{"reason":"{reason}"}}}}}}"#
     )

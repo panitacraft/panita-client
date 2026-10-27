@@ -1,6 +1,7 @@
 //! UI-independent domain logic for Panita Client.
 
 pub mod accounts;
+pub mod activation;
 pub mod authentication;
 pub mod catalog;
 #[cfg(any(windows, test))]

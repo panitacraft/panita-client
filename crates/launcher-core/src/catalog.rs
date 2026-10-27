@@ -29,6 +29,19 @@ fn read_cache(store: &PrivateStore) -> Result<Option<Vec<u8>>, CoreError> {
     })
 }
 
+/// A member's catalog can include restricted entries, so no copy of it outlives
+/// the session it was fetched with. Every cache spelling is attempted.
+pub(crate) fn purge_cache(store: &PrivateStore) -> Result<(), CoreError> {
+    store.with_lock(|transaction| {
+        let mut result = Ok(());
+        for name in [CACHE_FILE, PREVIOUS_CACHE_FILE, LEGACY_CACHE_FILE] {
+            let removed = transaction.remove_verified_file(name);
+            result = result.and(removed);
+        }
+        result
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CatalogSource {
