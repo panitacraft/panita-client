@@ -2,6 +2,7 @@
 //! Metadata equality avoids repeated content reads; it is not proof against tampering
 //! that preserves metadata. Full installation/repair audits never consult this cache.
 use std::collections::BTreeMap;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use private_fs::PrivateDir;
@@ -37,6 +38,8 @@ pub(super) struct VerificationCache {
 #[serde(deny_unknown_fields)]
 struct Receipt {
     sha1: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
     size: u64,
     stamp: Vec<u64>,
 }
@@ -44,6 +47,11 @@ struct Receipt {
 impl VerificationCache {
     /// The caller holds the instance installation lock through load, audit and save.
     pub fn load(root: &Path, installed: &InstalledLock) -> Result<Self, CoreError> {
+        let schema_version = if installed.plan.loader.is_some() {
+            3
+        } else {
+            2
+        };
         let manifest_hash = format!(
             "{:x}",
             Sha256::digest(serde_json::to_vec(installed).map_err(|_| invalid())?)
@@ -56,9 +64,11 @@ impl VerificationCache {
             Err(error) => return Err(error),
         };
         Ok(cached
-            .filter(|cache| cache.schema_version == 2 && cache.manifest_hash == manifest_hash)
+            .filter(|cache| {
+                cache.schema_version == schema_version && cache.manifest_hash == manifest_hash
+            })
             .unwrap_or_else(|| Self {
-                schema_version: 2,
+                schema_version,
                 manifest_hash,
                 dirty: true,
                 ..Self::default()
@@ -72,6 +82,29 @@ impl VerificationCache {
         key: &str,
         artifact: &Artifact,
         executable: bool,
+    ) -> Result<bool, CoreError> {
+        self.verify_expected(directory, leaf, key, artifact, executable, None)
+    }
+
+    pub fn verify_sha256(
+        &mut self,
+        directory: &PrivateDir,
+        leaf: &str,
+        key: &str,
+        artifact: &Artifact,
+        sha256: &str,
+    ) -> Result<bool, CoreError> {
+        self.verify_expected(directory, leaf, key, artifact, false, Some(sha256))
+    }
+
+    fn verify_expected(
+        &mut self,
+        directory: &PrivateDir,
+        leaf: &str,
+        key: &str,
+        artifact: &Artifact,
+        executable: bool,
+        sha256: Option<&str>,
     ) -> Result<bool, CoreError> {
         // Linux executable permissions use a dedicated no-follow reader. Keep its
         // full check rather than passing 0700 files through the 0600 file boundary.
@@ -88,7 +121,7 @@ impl VerificationCache {
             }
             Err(error) => return Err(map_private_error(error)),
         };
-        let input = native_file(&file)?;
+        let mut input = native_file(&file)?;
         let metadata = input.metadata().map_err(io)?;
         if metadata.len() != artifact.size {
             return Ok(false);
@@ -96,6 +129,7 @@ impl VerificationCache {
         let before = stamp(&metadata);
         if self.entries.get(key).is_some_and(|receipt| {
             receipt.sha1 == artifact.sha1
+                && receipt.sha256.as_deref() == sha256
                 && receipt.size == artifact.size
                 && receipt.stamp == before
         }) {
@@ -117,6 +151,27 @@ impl VerificationCache {
         if !verified_open_file(&file, artifact)? {
             return Ok(false);
         }
+        if let Some(expected) = sha256 {
+            input.seek(SeekFrom::Start(0)).map_err(io)?;
+            let mut hash = Sha256::new();
+            let mut buffer = [0; 64 * 1024];
+            let mut count = 0u64;
+            loop {
+                let size = input.read(&mut buffer).map_err(io)?;
+                if size == 0 {
+                    break;
+                }
+                count += size as u64;
+                if count > artifact.size {
+                    return Ok(false);
+                }
+                hash.update(&buffer[..size]);
+            }
+            file.verify().map_err(map_private_error)?;
+            if count != artifact.size || format!("{:x}", hash.finalize()) != expected {
+                return Ok(false);
+            }
+        }
         // Never attach an old hash result to metadata changed during the read.
         if stamp(&input.metadata().map_err(io)?) != before {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
@@ -125,6 +180,7 @@ impl VerificationCache {
             key.into(),
             Receipt {
                 sha1: artifact.sha1.clone(),
+                sha256: sha256.map(str::to_owned),
                 size: artifact.size,
                 stamp: before,
             },

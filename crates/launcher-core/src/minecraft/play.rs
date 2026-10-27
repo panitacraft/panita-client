@@ -122,7 +122,8 @@ async fn prepare_with_catalog(
             return Err(invalid());
         }
         let installed = lease.verify_installation_with_cancel(&audit_cancel)?;
-        if !matches!(&record.resolved_source, CatalogSource::Vanilla { minecraft_version } if minecraft_version == &installed.plan.version.id)
+        if installed.plan.loader.is_some()
+            || !matches!(&record.resolved_source, CatalogSource::Vanilla { minecraft_version } if minecraft_version == &installed.plan.version.id)
         {
             return Err(CoreError::new(ErrorCode::UnsupportedInstance));
         }

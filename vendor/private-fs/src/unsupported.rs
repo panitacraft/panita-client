@@ -24,6 +24,9 @@ impl PrivateDir {
     pub fn create(&self, _: impl AsRef<Path>) -> Result<PrivateFile> {
         unsupported()
     }
+    pub fn open_dir(&self, _: impl AsRef<Path>) -> Result<Self> {
+        unsupported()
+    }
     pub fn create_dir(&self, _: impl AsRef<Path>) -> Result<Self> {
         unsupported()
     }
