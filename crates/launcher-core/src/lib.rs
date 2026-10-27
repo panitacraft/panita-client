@@ -6,6 +6,7 @@ pub mod authentication;
 pub mod catalog;
 #[cfg(any(windows, test))]
 pub mod data_removal;
+mod device;
 pub mod error;
 mod instance_layout;
 pub mod logging;
