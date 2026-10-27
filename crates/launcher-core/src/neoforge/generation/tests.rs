@@ -40,6 +40,20 @@ fn fixture_for(
         .create_dir(operation.to_string())
         .map_err(map_private_error)?;
     let mut inputs = Vec::new();
+    let client = b"synthetic original client";
+    let (directory, leaf) = ensure_parent(&root, "minecraft-client.jar")?;
+    directory
+        .write_atomic_durable(leaf, client)
+        .map_err(map_private_error)?;
+    inputs.push(PlannedInput {
+        destination: "minecraft-client.jar".into(),
+        source: InputSource::Mojang(Artifact {
+            url: "https://piston-data.mojang.com/fixture".into(),
+            sha1: format!("{:x}", Sha1::digest(client)),
+            size: client.len() as u64,
+            path: None,
+        }),
+    });
     for library in &mut profile.libraries {
         let bytes = library.name.as_bytes();
         library.downloads.artifact.sha1 = format!("{:x}", Sha1::digest(bytes));

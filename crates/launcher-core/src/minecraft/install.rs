@@ -662,10 +662,16 @@ fn verify_manifest_inner(
                         .map_or(("", file.path.as_str()), |(parent, leaf)| (parent, leaf));
                     let key = format!("loader/{}/{}", loader.directory(), file.path);
                     let matches = if parent.is_empty() {
-                        cache.verify(&directory, leaf, &key, &file.artifact(), false)?
+                        cache.verify_sha256(
+                            &directory,
+                            leaf,
+                            &key,
+                            &file.artifact(),
+                            &file.sha256,
+                        )?
                     } else {
                         let parent = directory.open_dir(parent).map_err(map_private_error)?;
-                        cache.verify(&parent, leaf, &key, &file.artifact(), false)?
+                        cache.verify_sha256(&parent, leaf, &key, &file.artifact(), &file.sha256)?
                     };
                     if !matches {
                         return Err(CoreError::new(ErrorCode::ArtifactMismatch));

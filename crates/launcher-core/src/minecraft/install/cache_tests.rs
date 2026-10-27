@@ -10,6 +10,24 @@ struct Fixture {
 }
 
 #[test]
+fn loader_receipts_bind_sha256_and_never_reuse_sha1_only_verification()
+-> Result<(), Box<dyn std::error::Error>> {
+    use sha2::{Digest, Sha256};
+    let fixture = Fixture::new();
+    let file = &fixture.installed.plan.artifacts[1];
+    let (directory, leaf) = ensure_parent(fixture.paths.root(), &file.destination)?;
+    let mut cache = VerificationCache::load(&fixture.root, &fixture.installed)?;
+    assert!(cache.verify(&directory, &leaf, "candidate", &file.artifact, false)?);
+    let wrong = "0".repeat(64);
+    assert!(!cache.verify_sha256(&directory, &leaf, "candidate", &file.artifact, &wrong)?);
+    let expected = format!("{:x}", Sha256::digest(std::fs::read(fixture.client())?));
+    assert!(cache.verify_sha256(&directory, &leaf, "candidate", &file.artifact, &expected)?);
+    assert!(cache.verify_sha256(&directory, &leaf, "candidate", &file.artifact, &expected)?);
+    assert!(!cache.verify_sha256(&directory, &leaf, "candidate", &file.artifact, &wrong)?);
+    Ok(())
+}
+
+#[test]
 fn recorded_loader_state_survives_restart_and_receipts_never_hide_changed_or_missing_content()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut fixture = Fixture::new();

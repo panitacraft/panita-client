@@ -176,6 +176,31 @@ fn loader_commands_merge_child_libraries_and_keep_module_arguments_platform_spec
                 .count(),
             1
         );
+        for option in [
+            "-DlibraryDirectory=C:/unverified",
+            "-Djdk.module.path=C:/unverified",
+        ] {
+            let settings = GlobalSettings {
+                extra_jvm_args: vec![option.into()],
+                ..GlobalSettings::default()
+            };
+            assert!(
+                build_command(
+                    &paths,
+                    &directory,
+                    &installed,
+                    &platform,
+                    &settings,
+                    &InstanceSettings::default(),
+                    LaunchIdentity {
+                        account: &account,
+                        minecraft_token: None,
+                        xuid: None
+                    }
+                )
+                .is_err()
+            );
+        }
         installed.plan.schema_version = 1;
         assert!(installed.plan.validate().is_err());
         installed.plan.schema_version = 2;

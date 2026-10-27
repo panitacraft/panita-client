@@ -139,6 +139,16 @@ pub fn build_command(
     };
     let version = &plan.version;
     let loader = plan.loader.as_ref();
+    if loader.is_some()
+        && settings.extra_jvm_args.iter().any(|arg| {
+            matches!(
+                arg.split('=').next().unwrap_or_default(),
+                "-DlibraryDirectory" | "-DignoreList" | "-Djdk.module.path" | "-Djava.module.path"
+            )
+        })
+    {
+        return Err(invalid());
+    }
     let classpath = match loader {
         Some(loader) => loader
             .classpath(paths, plan)?
