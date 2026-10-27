@@ -34,6 +34,8 @@ jobs:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target/phase-7-build
       CARGO_BUILD_JOBS: 2
       EXPECTED_VERSION: ${{ inputs.version }}
+      # A public client identifier, so a repository variable and not a secret.
+      PANITA_LAUNCHER_API_KEY: ${{ vars.PANITA_LAUNCHER_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

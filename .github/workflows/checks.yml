@@ -12,6 +12,9 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    env:
+      # A public client identifier, so a repository variable and not a secret.
+      PANITA_LAUNCHER_API_KEY: ${{ vars.PANITA_LAUNCHER_API_KEY }}
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Install Linux system dependencies
