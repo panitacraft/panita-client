@@ -100,13 +100,31 @@ The tag supplies the packaged application version; the internal beta version
 does not need to match. Build metadata (`+...`) is not accepted.
 
 Both Windows x64 and Linux x64 must pass checks before publication. The workflow
-attaches an unsigned Windows `.exe`, Linux `.deb` and `.AppImage`, and a combined
+attaches an unsigned Windows `.exe`, Linux `.deb` and `.AppImage`, a CachyOS/Arch
+Linux `.pkg.tar.zst`, and a combined
 `SHA256SUMS` to the matching GitHub Release. If the release does not exist, it
 creates one with generated notes, marking prerelease versions accordingly.
 Existing release notes are preserved, and existing assets are not overwritten;
 an upload with conflicting filenames fails. Only the publication job has write
 permission. Unsigned Windows installers may display publisher/SmartScreen warnings.
 CI checks do not replace installed-product qualification.
+
+The CachyOS/Arch package reuses the verified Ubuntu-built binary, following
+[Tauri's Debian-to-Arch packaging approach](https://v2.tauri.app/distribute/aur/).
+It is packaged with `makepkg` on the Ubuntu build runner, with Arch runtime
+dependencies declared for installation by `pacman`. It is not compiled on CachyOS
+and does not use CachyOS-specific CPU optimizations. Installation and launch on
+CachyOS remain pending validation. This does not publish to AUR or an Arch repository.
+For a downloaded package, install it on CachyOS with:
+
+```sh
+sudo pacman -U ./panita-client_0.1.0-alpha_archlinux_x64_unsigned.pkg.tar.zst
+```
+
+Use the actual downloaded filename. Arch package metadata maps `0.1.0-alpha`
+to `0.1.0pre.alpha-1` so prereleases sort before `0.1.0-1`; the launcher retains
+its original version. Pacman manages the application files; removing the package
+preserves player data in the user's private application-data directory.
 
 Creating a local tag alone does not start GitHub Actions. Publish an approved tag
 only after the workflow changes are merged into the intended release commit.
@@ -123,6 +141,13 @@ Omit `--check` to build into
 `target/releases/<version>/<platform>/`, then run
 `node scripts/verify-beta.mjs --release-tag v0.1.0-alpha`. Linux package inspection
 also accepts `RELEASE_TAG=v0.1.0-alpha bash scripts/linux/verify-candidate.sh`.
+To additionally create the native CachyOS/Arch package on Ubuntu 24.04, install
+`makepkg=6.0.2-6ubuntu2`, `pacman-package-manager=6.0.2-6ubuntu2`, `fakeroot`,
+`libarchive-tools`, `zstd` and `desktop-file-utils`. Initialize the empty build-host
+package database with `sudo install -d /var/lib/pacman/local /var/lib/pacman/sync`
+and `sudo pacman-db-upgrade`, then run
+`node scripts/build-arch-package.mjs v0.1.0-alpha`. Verify the full Linux set with
+`node scripts/verify-beta.mjs --release-tag v0.1.0-alpha --with-arch`.
 
 Preview the proposed installer design with `node scripts/preview-installer.mjs`
 and open the printed local address. Its actions are simulated.

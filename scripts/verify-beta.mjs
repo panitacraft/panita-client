@@ -4,16 +4,18 @@ import { createReadStream } from 'node:fs';
 import { lstat, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { releaseVersion } from './release-version.mjs';
+import { archPackageVersion, releaseVersion } from './release-version.mjs';
 
 // Artifact paths come from the release contract, never from a candidate manifest.
-export async function verifyBeta({ directory, platform, version, revision, release = false }) {
+export async function verifyBeta({ directory, platform, version, revision, release = false, withArch = false }) {
   if (!['windows', 'linux'].includes(platform)
       || !(release ? releaseVersion(`v${version}`) === version : /^\d+\.\d+\.\d+-beta\.\d+$/.test(version))
       || !/^[a-f0-9]{40}$/.test(revision)) throw new Error('Invalid candidate identity');
+  if (withArch && (!release || platform !== 'linux')) throw new Error('Arch packages require a Linux release');
   const formats = platform === 'windows'
     ? [['.exe', 'candidate.json']]
     : [['.deb', 'candidate.json'], ['.AppImage', 'candidate-appimage.json']];
+  if (withArch) formats.push(['.pkg.tar.zst', 'candidate-arch.json', 'archlinux']);
   const checksums = new Map();
   const checksumPath = join(directory, 'SHA256SUMS');
   if (!(await lstat(checksumPath)).isFile()) throw new Error('Expected a regular checksum file');
@@ -25,14 +27,17 @@ export async function verifyBeta({ directory, platform, version, revision, relea
   }
   if (checksums.size !== formats.length) throw new Error('Incomplete or unexpected checksum list');
   const verified = [];
-  for (const [extension, manifestName] of formats) {
-    const name = `panita-client_${version}_${platform}_x64_unsigned${extension}`;
+  for (const [extension, manifestName, distribution = platform] of formats) {
+    const name = `panita-client_${version}_${distribution}_x64_unsigned${extension}`;
     const artifact = join(directory, name);
     const manifestPath = join(directory, manifestName);
     if (!(await lstat(artifact)).isFile() || !(await lstat(manifestPath)).isFile()) {
       throw new Error(`Expected regular candidate files: ${name}`);
     }
     const candidate = JSON.parse(await readFile(manifestPath, 'utf8'));
+    if (distribution === 'archlinux' && candidate.package_version !== `${archPackageVersion(version)}-1`) {
+      throw new Error('Arch package version mismatch');
+    }
     if (candidate.schema !== 1 || candidate.type !== (release ? 'unsigned_release_candidate' : 'unsigned_beta_candidate')
         || candidate.version !== version || candidate.source_revision !== revision
         || candidate.platform !== `${platform}_x64` || candidate.artifact !== name
@@ -56,12 +61,15 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   let platform = { win32: 'windows', linux: 'linux' }[process.platform];
   let revision;
   let releaseTag;
-  for (let index = 0; index < args.length; index += 2) {
+  let withArch = false;
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === '--with-arch') { withArch = true; continue; }
     if (args[index] === '--platform') platform = args[index + 1];
     else if (args[index] === '--revision') revision = args[index + 1];
     else if (args[index] === '--release-tag') releaseTag = args[index + 1];
-    else throw new Error('Supported options: --platform windows|linux, --revision <full commit SHA>, --release-tag <vVERSION>');
+    else throw new Error('Supported options: --platform windows|linux, --revision <full commit SHA>, --release-tag <vVERSION>, --with-arch');
     if (!args[index + 1]) throw new Error('Missing option value');
+    index += 1;
   }
   if (revision === undefined) {
     const result = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', windowsHide: true });
@@ -75,7 +83,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (!['windows', 'linux'].includes(platform) || (!releaseTag && !/^\d+\.\d+\.\d+-beta\.\d+$/.test(version))) {
     throw new Error('Unsupported platform or beta version');
   }
-  const verified = await verifyBeta({ directory: join(root, releaseTag ? 'target/releases' : 'target/beta', version, platform), platform, version, revision, release: Boolean(releaseTag) });
+  const verified = await verifyBeta({ directory: join(root, releaseTag ? 'target/releases' : 'target/beta', version, platform), platform, version, revision, release: Boolean(releaseTag), withArch });
   for (const item of verified) console.log(`${item.artifact}: OK (${item.sha256})`);
   console.log('Integrity and provenance verified; installed-product qualification remains pending.');
 }

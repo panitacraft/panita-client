@@ -54,6 +54,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y build-essential ca-certificates curl wget file git xz-utils pkg-config libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf desktop-file-utils xdg-utils
+          sudo apt-get install --no-install-recommends -y makepkg=6.0.2-6ubuntu2 pacman-package-manager=6.0.2-6ubuntu2 fakeroot libarchive-tools zstd
+          sudo install -d /var/lib/pacman/local /var/lib/pacman/sync
+          sudo pacman-db-upgrade
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
       - name: Test frontend state
@@ -80,6 +83,12 @@ jobs:
       - name: Inspect Linux packages
         if: runner.os == 'Linux'
         run: bash scripts/linux/verify-candidate.sh
+      - name: Package for CachyOS and Arch Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          node scripts/build-arch-package.mjs "$RELEASE_TAG"
+          node scripts/verify-beta.mjs --release-tag "$RELEASE_TAG" --with-arch
       - name: Check Windows signature status
         if: runner.os == 'Windows'
         shell: pwsh
@@ -97,6 +106,7 @@ jobs:
             target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.exe
             target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.deb
             target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.AppImage
+            target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.pkg.tar.zst
             target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
@@ -130,6 +140,7 @@ jobs:
           cp "installers/windows/panita-client_${version}_windows_x64_unsigned.exe" assets/
           cp "installers/linux/panita-client_${version}_linux_x64_unsigned.deb" assets/
           cp "installers/linux/panita-client_${version}_linux_x64_unsigned.AppImage" assets/
+          cp "installers/linux/panita-client_${version}_archlinux_x64_unsigned.pkg.tar.zst" assets/
           cat installers/windows/SHA256SUMS installers/linux/SHA256SUMS > assets/SHA256SUMS
           (cd assets && sha256sum --check SHA256SUMS)
       - name: Create release if needed and attach installers
