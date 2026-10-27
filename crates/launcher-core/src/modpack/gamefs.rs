@@ -1,0 +1,190 @@
+//! Capability-relative access to an instance's game directory. Files and folders
+//! there are ordinary player data, so private-fs ownership rules do not apply;
+//! instead every step refuses links, redirected entries and unusual nodes, and a
+//! new file is created absent-only through a temporary name and a rename.
+use std::io::{Read, Write};
+use std::path::Path;
+
+use cap_fs_ext::{DirExt, FollowSymlinks, MetadataExt, OpenOptionsFollowExt};
+use cap_std::fs::{Dir, OpenOptions};
+use uuid::Uuid;
+
+use super::{
+    game_path, invalid,
+    transfer::{Expected, Hashers},
+};
+use crate::{
+    error::{CoreError, ErrorCode},
+    minecraft::{
+        directory_capability,
+        download::{Cancellation, io},
+    },
+};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Entry {
+    Absent,
+    File,
+    /// A directory, link, hard-linked file or other node at a file destination.
+    Unsafe,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Content {
+    Absent,
+    Matches,
+    Differs,
+    Unsafe,
+}
+
+fn conflict() -> CoreError {
+    CoreError::new(ErrorCode::PackConflict)
+}
+
+pub struct GameDir {
+    dir: Dir,
+}
+
+impl GameDir {
+    /// Open `instances/{slug}/minecraft` as a retained directory capability.
+    pub fn open(game_directory: &Path) -> Result<Self, CoreError> {
+        let private = private_fs::PrivateDir::open(game_directory)
+            .map_err(crate::storage::map_private_error)?;
+        Ok(Self {
+            dir: directory_capability(&private)?,
+        })
+    }
+
+    /// Resolve the parent directory of `relative` one component at a time, never
+    /// following links. `create` makes missing parents; otherwise absence is `None`.
+    fn parent(&self, relative: &str, create: bool) -> Result<Option<(Dir, String)>, CoreError> {
+        game_path(relative)?;
+        let mut dir = self.dir.try_clone().map_err(io)?;
+        let mut parts = relative.split('/').peekable();
+        while let Some(part) = parts.next() {
+            if parts.peek().is_none() {
+                return Ok(Some((dir, part.to_owned())));
+            }
+            match dir.symlink_metadata(part) {
+                Ok(metadata) => {
+                    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                        return Err(conflict());
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    if !create {
+                        return Ok(None);
+                    }
+                    dir.create_dir(part).map_err(io)?;
+                }
+                Err(error) => return Err(io(error)),
+            }
+            dir = dir.open_dir_nofollow(part).map_err(io)?;
+        }
+        Err(invalid())
+    }
+
+    pub fn entry(&self, relative: &str) -> Result<Entry, CoreError> {
+        let Some((dir, name)) = self.parent(relative, false)? else {
+            return Ok(Entry::Absent);
+        };
+        match dir.symlink_metadata(&name) {
+            Ok(metadata) => Ok(
+                if !metadata.file_type().is_symlink() && metadata.is_file() && metadata.nlink() == 1
+                {
+                    Entry::File
+                } else {
+                    Entry::Unsafe
+                },
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Entry::Absent),
+            Err(error) => Err(io(error)),
+        }
+    }
+
+    /// Hash the existing file at `relative` against `expected` without following links.
+    pub fn compare(
+        &self,
+        relative: &str,
+        expected: &Expected,
+        cancel: &Cancellation,
+    ) -> Result<Content, CoreError> {
+        match self.entry(relative)? {
+            Entry::Absent => return Ok(Content::Absent),
+            Entry::Unsafe => return Ok(Content::Unsafe),
+            Entry::File => {}
+        }
+        let Some((dir, name)) = self.parent(relative, false)? else {
+            return Ok(Content::Absent);
+        };
+        let mut options = OpenOptions::new();
+        options.read(true).follow(FollowSymlinks::No);
+        let mut file = dir.open_with(&name, &options).map_err(io)?;
+        let metadata = file.metadata().map_err(io)?;
+        if !metadata.is_file() || metadata.nlink() != 1 {
+            return Ok(Content::Unsafe);
+        }
+        if metadata.len() != expected.size {
+            return Ok(Content::Differs);
+        }
+        let mut hashers = Hashers::new(expected);
+        let mut buffer = [0; 64 * 1024];
+        loop {
+            cancel.check()?;
+            let count = file.read(&mut buffer).map_err(io)?;
+            if count == 0 {
+                break;
+            }
+            hashers.update(&buffer[..count]);
+        }
+        Ok(if hashers.matches(expected) {
+            Content::Matches
+        } else {
+            Content::Differs
+        })
+    }
+
+    /// Create a file that does not exist yet. `fill` writes its bytes; nothing is
+    /// published unless it succeeds, and an existing entry is never replaced.
+    pub fn write_new(
+        &self,
+        relative: &str,
+        fill: impl FnOnce(&mut dyn Write) -> Result<(), CoreError>,
+    ) -> Result<(), CoreError> {
+        let (dir, name) = self.parent(relative, true)?.ok_or_else(invalid)?;
+        match dir.symlink_metadata(&name) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => return Err(conflict()),
+            Err(error) => return Err(io(error)),
+        }
+        let temp = format!(".panita-{}.tmp", Uuid::new_v4().simple());
+        let mut options = OpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .follow(FollowSymlinks::No);
+        let mut file = dir.open_with(&temp, &options).map_err(io)?;
+        let written = fill(&mut file).and_then(|()| file.sync_all().map_err(io));
+        drop(file);
+        let published = written.and_then(|()| dir.rename(&temp, &dir, &name).map_err(io));
+        if published.is_err() {
+            let _ = dir.remove_file(&temp);
+        }
+        published
+    }
+
+    /// Remove a regular file this launcher created. Links and other nodes stay.
+    pub fn remove_file(&self, relative: &str) -> Result<(), CoreError> {
+        let Some((dir, name)) = self.parent(relative, false)? else {
+            return Ok(());
+        };
+        match self.entry(relative)? {
+            Entry::Absent => Ok(()),
+            Entry::File => dir.remove_file(&name).map_err(io),
+            Entry::Unsafe => Err(conflict()),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests;

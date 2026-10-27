@@ -12,6 +12,8 @@ use crate::{
 
 pub mod cache;
 pub mod content;
+pub mod gamefs;
+pub mod manual;
 pub mod modrinth;
 pub mod state;
 pub mod transfer;

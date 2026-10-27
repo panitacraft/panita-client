@@ -213,6 +213,7 @@ fn state_retains_deleted_defaults_and_separates_skipped_desired_content() {
             path: "config/example.toml".into(),
             desired: hashes,
         }],
+        pending: Vec::new(),
     };
     assert!(state.validate(id).is_ok());
     let bytes = serde_json::to_vec(&state).unwrap_or_else(|_| panic!("encode"));

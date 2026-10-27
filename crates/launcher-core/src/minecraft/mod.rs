@@ -26,6 +26,7 @@ pub mod update;
 pub mod validation;
 mod verification_cache;
 mod world_backup;
+pub(crate) use world_backup::capability as directory_capability;
 
 pub const VERSION_MANIFEST: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";

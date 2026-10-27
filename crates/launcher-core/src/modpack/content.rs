@@ -2,7 +2,7 @@
 //! An entry is published only after its exact size and every supplied hash verify.
 //! The name is a claim, never proof: readers hash again while copying, and instances
 //! always receive copies, never links.
-use std::io::Read;
+use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 
 use private_fs::PrivateDir;
@@ -185,6 +185,42 @@ pub async fn ensure(
             Ok(Ensured::Ready { reused: false })
         }
     }
+}
+
+/// Verify a file the player supplied and publish it as a verified entry. The input
+/// is always read and checked in full, so a wrong file is rejected even when a
+/// matching entry already exists.
+pub async fn import(
+    paths: &AppPaths,
+    expected: &Expected,
+    input: &mut dyn Read,
+    cancel: &Cancellation,
+) -> Result<(), CoreError> {
+    let key = ContentKey::for_expected(expected)?;
+    let mismatch = || CoreError::new(ErrorCode::ArtifactMismatch);
+    let _guard = lock(paths.root(), &key.lock_path(), cancel).await?;
+    let (directory, name) = ensure_parent(paths.root(), &key.relative())?;
+    cleanup_partials(&directory, &paths.root().join(key.directory()))?;
+    let mut output = directory.atomic_durable(&name).map_err(map_private_error)?;
+    let mut hashers = Hashers::new(expected);
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        cancel.check()?;
+        let count = input.read(&mut buffer).map_err(io)?;
+        if count == 0 {
+            break;
+        }
+        if hashers.count().saturating_add(count as u64) > expected.size {
+            return Err(mismatch());
+        }
+        hashers.update(&buffer[..count]);
+        output.write_all(&buffer[..count]).map_err(io)?;
+    }
+    if !hashers.matches(expected) {
+        return Err(mismatch());
+    }
+    cancel.check()?;
+    output.commit().map_err(map_private_error)
 }
 
 /// Read an entry, hashing it again, and hand its bytes to `sink`. Only an `Ok`
