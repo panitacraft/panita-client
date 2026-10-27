@@ -13,6 +13,8 @@ use crate::error::{CoreError, ErrorCode};
 use crate::minecraft::{safe_path, valid_hash};
 
 pub mod plan;
+pub mod staging;
+mod transport;
 
 pub const MAVEN_ROOT: &str = "https://maven.neoforged.net/releases/";
 pub const MAX_INSTALLER_BYTES: usize = 64 * 1024 * 1024;
