@@ -28,9 +28,10 @@ The launcher handles the downloads and Java setup for you, with a friendly and i
 
 ## Before you play
 
-Panita Client is still **in development**. Windows is the main focus.
-Linux testing is underway, and final installer and clean-computer checks
-are still pending. macOS and modpacks are planned for the future.
+Panita Client is an **unsigned beta**. Packaged application tests are
+owner-reported as passed on Windows 11 x64 and Ubuntu 26.04.1 x64.
+Clean-computer prerequisite checks are still pending. Other Windows/Linux
+versions are unqualified; macOS, ARM, Flatpak and modpacks are future scope.
 
 Microsoft accounts need an internet connection each time you start a game.
 Offline accounts can play an already installed instance without Microsoft
@@ -82,6 +83,14 @@ Ubuntu 24.04 build environment. The command builds committed `develop`, verifies
 the package contents, AppImage extraction and runtime linkage, and copies both candidates into
 `target/beta/`. It does not install anything on the testing VM. Compilation and
 package inspection do not establish installed-product qualification.
+
+The [manual beta workflow](.github/workflows/prepare-beta.yml) checks and packages
+committed `develop` into temporary Actions artifacts for review. It requires an
+explicit dispatch with the matching beta version, uses read-only repository
+permissions, and does not create releases or tags. Dispatch and publication need
+owner authorization. Each newly built artifact requires its own qualification;
+prior test reports do not certify a different file. Release preparation documents
+remain local under the ignored `docs/` directory.
 
 Preview the proposed installer design with `node scripts/preview-installer.mjs`
 and open the printed local address. Its actions are simulated.
