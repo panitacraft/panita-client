@@ -45,7 +45,7 @@ pub struct PanitaUser {
 }
 
 impl PanitaUser {
-    fn validate(&self) -> Result<(), CoreError> {
+    pub(crate) fn validate(&self) -> Result<(), CoreError> {
         let text = |value: &str, limit: usize| {
             !value.is_empty()
                 && value.chars().count() <= limit
@@ -200,7 +200,7 @@ fn write_document(tx: &StoreTransaction<'_>, session: &PanitaSession) -> Result<
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::paths::AppPaths;
     use uuid::Uuid;

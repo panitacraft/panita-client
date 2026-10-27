@@ -12,7 +12,7 @@ use crate::storage::PrivateStore;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
 
-const BASE: &str = "https://api.panitacraft.com";
+pub(crate) const BASE: &str = "https://api.panitacraft.com";
 const MAX_BODY: usize = 512 * 1024;
 const MAX_RECORDS: usize = 1000;
 const CACHE_FILE: &str = "insts-cache.json";
