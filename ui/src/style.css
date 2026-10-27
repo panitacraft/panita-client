@@ -1,0 +1,83 @@
+:root {
+  font-family: system-ui, sans-serif;
+  color: #efece5;
+  background: #10231e;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; }
+button { font: inherit; }
+main { min-height: 100vh; }
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 32px;
+  border-bottom: 1px solid #335449;
+}
+.wordmark { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.2rem; }
+.wordmark img { width: 36px; height: 36px; }
+.preview-label { color: #bdc9bd; font-size: .85rem; }
+section { max-width: 1100px; margin: 0 auto; padding: 48px 32px; }
+h1 { margin: 0 0 8px; font-size: 2rem; }
+section > p { color: #c4d0c8; }
+.instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 32px; }
+.instance-card { padding: 24px; border: 1px solid #4c7564; border-radius: 12px; background: #1b392e; }
+.instance-card.disabled { opacity: .65; }
+.catalog-notice { margin-top: 20px; padding: 16px; border: 1px solid #d9bd76; border-radius: 8px; background: #29392c; }
+.card-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.card-heading h2 { margin: 0; }
+.card-heading span { font-size: .8rem; }
+.instance-card p { color: #d1dad2; }
+.instance-card .version { font-weight: 600; }
+button { padding: 10px 14px; color: #efece5; background: #315f49; border: 0; border-radius: 6px; }
+button:disabled { cursor: not-allowed; opacity: .7; }
+button:not(:disabled) { cursor: pointer; }
+button:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
+.accounts-section { padding-bottom: 0; }
+.accounts-section h2 { margin-top: 0; }
+.account-actions, .account-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.account-actions form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+input { font: inherit; color: #efece5; background: #142d24; border: 1px solid #6c9380; border-radius: 4px; padding: 9px; width: 180px; }
+input:focus-visible { outline: 3px solid #f2cf74; outline-offset: 2px; }
+.account-list { list-style: none; padding: 0; display: grid; gap: 16px; }
+.account-list li, .login-progress { border: 1px solid #4c7564; border-radius: 8px; padding: 16px; }
+.account-list li.selected-account { border-color: #f2cf74; }
+.account-list span { color: #bdc9bd; font-size: .85rem; margin-left: 8px; }
+.account-error { color: #ffb7af; }
+.instance-card.selected-instance { border-color: #f2cf74; }
+.settings-section { padding-top: 16px; }
+.settings-form { margin-top: 20px; }
+.settings-form fieldset { display: grid; gap: 12px; border: 1px solid #4c7564; border-radius: 8px; padding: 20px; }
+.settings-form label { display: flex; align-items: center; gap: 8px; }
+.settings-form input[type="checkbox"] { width: auto; }
+.settings-form textarea { display: block; width: 100%; max-width: 720px; padding: 10px; font: inherit; color: #efece5; background: #142d24; border: 1px solid #6c9380; border-radius: 4px; }
+.settings-form textarea:focus-visible, summary:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
+.settings-form summary { cursor: pointer; padding: 8px 0; }
+.settings-form button { justify-self: start; }
+.play-controls fieldset { min-width: 0; }
+.play-controls fieldset label { display: flex; align-items: start; gap: 8px; margin: 12px 0; }
+.play-controls input[type="radio"] { width: auto; flex-shrink: 0; }
+.diagnostics-section { padding-top: 16px; }
+.diagnostics-section summary { cursor: pointer; padding: 8px 0; }
+.diagnostic-list { max-height: 420px; overflow-y: auto; padding-inline: 28px 12px; }
+.diagnostic-list li { border-bottom: 1px solid #4c7564; padding: 8px 0; overflow-wrap: anywhere; }
+.diagnostic-list dd { margin-inline-start: 0; font-size: .85rem; }
+.diagnostic-list:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
+dialog { max-width: min(680px, 90vw); color: #efece5; background: #1b392e; border: 1px solid #6c9380; border-radius: 12px; padding: 24px; }
+dialog::backdrop { background: #000a; }
+.settings-form input[type="range"] { width: 100%; max-width: 720px; }
+.game-log-section { padding: 24px; }
+.game-log-lines { height: 60vh; overflow: auto; background: #10231e; border: 1px solid #4c7564; padding: 12px; }
+.game-log-lines pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
+.game-log-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 12px 0; }
+.game-log-tools label { display: flex; align-items: center; gap: 6px; }
+.game-log-lines.log-nowrap pre { white-space: pre; overflow-wrap: normal; }
+.game-log-lines.log-colored .log-error, .game-log-lines.log-colored .log-fatal { color: #ffb5ad; }
+.game-log-lines.log-colored .log-warn { color: #f2cf74; }
+.game-log-lines.log-colored .log-info { color: #c2e9ce; }
+.game-log-lines.log-colored .log-debug, .game-log-lines.log-colored .log-trace { color: #b4c9e9; }
+.game-log-lines .log-match { outline: 2px solid #f2cf74; outline-offset: 1px; background: #314236; }
+.log-metadata { font-weight: 600; }
+.game-log-lines:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
+.crash-summary { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

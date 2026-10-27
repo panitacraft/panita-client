@@ -1,0 +1,16 @@
+{
+  "name": "panita-client-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "scripts": {
+    "dev": "pnpm --dir ui dev",
+    "build:ui": "pnpm --dir ui build",
+    "check:ui": "pnpm --dir ui check",
+    "tauri": "node scripts/tauri.mjs",
+    "build:beta": "node scripts/build-beta.mjs"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.2"
+  }
+}

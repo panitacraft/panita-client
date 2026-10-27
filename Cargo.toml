@@ -1,0 +1,23 @@
+[workspace]
+members = ["crates/launcher-core", "desktop"]
+exclude = ["vendor/private-fs"]
+resolver = "2"
+
+[patch.crates-io]
+private-fs = { path = "vendor/private-fs" }
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.96"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+# Keep full game-file hashing practical in native development/validation builds.
+[profile.dev.package.sha1]
+opt-level = 3

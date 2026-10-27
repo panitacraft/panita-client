@@ -1,0 +1,52 @@
+name: Checks
+
+on:
+  push:
+    branches: [develop, master]
+  pull_request:
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: '24.16.0'
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          version: '11.25.0'
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.96.0'
+          components: rustfmt, clippy
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check frontend
+        run: pnpm build:ui
+      - name: Test frontend state
+        run: pnpm --dir ui test
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+      - name: Check Rust
+        run: cargo check --workspace --locked
+      - name: Test Rust
+        run: cargo test --workspace --locked
+      - name: Test patched Linux filesystem dependency
+        if: runner.os == 'Linux'
+        run: |
+          cargo test --manifest-path vendor/private-fs/Cargo.toml --lib --locked
+          cargo test --manifest-path vendor/private-fs/Cargo.toml --lib --features force-walk --locked
+      - name: Lint Rust
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Build desktop application
+        run: pnpm tauri build --no-bundle

@@ -1,0 +1,24 @@
+# Keep internal plans, contracts, and decision documents local.
+/docs/
+
+# Keep new local test files out of version control.
+/tests/
+
+# Build products and local development state.
+/target/
+/desktop/target/
+/desktop/gen/
+/ui/node_modules/
+/ui/dist/
+/node_modules/
+/.env
+/.env.*
+!/.env.example
+*.log
+
+# Runtime account data must never enter this repository.
+/PanitaClient/
+**/accounts.json
+**/accounts.json.*
+**/pending-account-removals.json
+**/.private-fs-*.tmp

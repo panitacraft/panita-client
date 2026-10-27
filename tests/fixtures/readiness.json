@@ -1,0 +1,1414 @@
+{
+  "checked_at": "2026-10-11T21:11:04.755Z",
+  "manifest_url": "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+  "latest_release": "26.3",
+  "catalog": {
+    "data": [
+      {
+        "id": "62d7e99d-fb4e-4167-8732-ce3a334d4a58",
+        "slug": "vanilla-actual",
+        "name": "Vanilla actual",
+        "description": "La última versión estable de Minecraft, sin mods.",
+        "icon_url": null,
+        "banner_url": null,
+        "min_launcher_version": null,
+        "sort_order": 10,
+        "updated_at": "2026-10-05T05:27:18.567Z",
+        "source_type": "vanilla",
+        "minecraft_version": "26.3",
+        "modrinth_project_id": null,
+        "pack_version_id": null,
+        "loader": null
+      },
+      {
+        "id": "65ee13c6-bc34-4914-aa09-41205f3691a0",
+        "slug": "vanilla-clasica",
+        "name": "Vanilla clásica",
+        "description": "Una versión anterior, con mundos y ajustes independientes.",
+        "icon_url": null,
+        "banner_url": null,
+        "min_launcher_version": null,
+        "sort_order": 20,
+        "updated_at": "2026-10-05T05:27:18.567Z",
+        "source_type": "vanilla",
+        "minecraft_version": "1.21.1",
+        "modrinth_project_id": null,
+        "pack_version_id": null,
+        "loader": null
+      },
+      {
+        "id": "7fd3f5a0-876d-4ca6-98a2-c4e4bedbbec2",
+        "slug": "cobblemon-oficial",
+        "name": "Cobblemon (oficial)",
+        "description": "El modpack oficial de Cobblemon: captura, entrena y combate con Pokémon en Minecraft.",
+        "icon_url": "https://cdn.modrinth.com/data/5FFgwNNP/e7f9ee2e9d361623847853fe2ddce42f519ee64f.png",
+        "banner_url": "https://cdn.modrinth.com/data/5FFgwNNP/images/b35c1c743230736b7f1a658681b9e2474551d3de_350.webp",
+        "min_launcher_version": null,
+        "sort_order": 30,
+        "updated_at": "2026-10-05T06:39:51.583Z",
+        "source_type": "modrinth",
+        "minecraft_version": "1.21.1",
+        "modrinth_project_id": "5FFgwNNP",
+        "pack_version_id": "Cqimd3JM",
+        "loader": "fabric"
+      },
+      {
+        "id": "c4808f52-3027-42c4-879e-4b370cd3ec9a",
+        "slug": "cobbleverse",
+        "name": "COBBLEVERSE",
+        "description": "Una aventura Pokémon completa sobre Cobblemon: los 1025 Pokémon, megaevoluciones, gimnasios y medallas.",
+        "icon_url": "https://cdn.modrinth.com/data/Jkb29YJU/581ecf54530972afb18a04660afd820f2f24f6c7.png",
+        "banner_url": "https://cdn.modrinth.com/data/Jkb29YJU/images/ce5388f2e850f2d203fc18c0981bfd3cb5a48025_350.webp",
+        "min_launcher_version": null,
+        "sort_order": 40,
+        "updated_at": "2026-10-05T06:39:51.583Z",
+        "source_type": "modrinth",
+        "minecraft_version": "1.21.1",
+        "modrinth_project_id": "Jkb29YJU",
+        "pack_version_id": "4SKGla61",
+        "loader": "fabric"
+      },
+      {
+        "id": "70eec089-33e8-437a-b272-3e561f6524b9",
+        "slug": "pixelmon",
+        "name": "Pixelmon",
+        "description": "Todo lo necesario para jugar Pixelmon: el mod, su banda sonora, JourneyMap, BYG y más.",
+        "icon_url": "https://cdn.modrinth.com/data/vwgtbO0y/e16493aab7b0a32a2c9920cb0d89ebe06c4b3726_96.webp",
+        "banner_url": "https://cdn.modrinth.com/data/vwgtbO0y/images/967de4295c8436fce0531056f6f4dcffffc7b406_350.webp",
+        "min_launcher_version": null,
+        "sort_order": 50,
+        "updated_at": "2026-10-05T06:39:51.583Z",
+        "source_type": "modrinth",
+        "minecraft_version": "1.21.1",
+        "modrinth_project_id": "vwgtbO0y",
+        "pack_version_id": "IHtaie13",
+        "loader": "neoforge"
+      },
+      {
+        "id": "4fe69cfd-5957-4a66-9e55-b66712c8dfc7",
+        "slug": "fabulously-optimized",
+        "name": "Fabulously Optimized",
+        "description": "Rendimiento y optimización para Minecraft sin cambiar su esencia. Pensado para jugar fluido.",
+        "icon_url": "https://cdn.modrinth.com/data/1KVo5zza/d8152911f8fd5d7e9a8c499fe89045af81fe816e_96.webp",
+        "banner_url": "https://cdn.modrinth.com/data/1KVo5zza/images/38f70f307f1a0b17d8ed4526d1636317e8c12d1d_350.webp",
+        "min_launcher_version": null,
+        "sort_order": 60,
+        "updated_at": "2026-10-05T06:39:51.583Z",
+        "source_type": "modrinth",
+        "minecraft_version": "26.2",
+        "modrinth_project_id": "1KVo5zza",
+        "pack_version_id": "ssWn7YI0",
+        "loader": "fabric"
+      },
+      {
+        "id": "8d9e77dc-7b2d-4990-be5c-8508188768df",
+        "slug": "vanilla-perfected",
+        "name": "Vanilla Perfected",
+        "description": "Mods y packs \"vanilla plus\" que mejoran la experiencia sin alejarse del espíritu del juego base.",
+        "icon_url": "https://cdn.modrinth.com/data/1ocGzRHv/ebec737126db7637001194ca5560ae58413d338f_96.webp",
+        "banner_url": "https://cdn.modrinth.com/data/1ocGzRHv/images/9dc0a7377d15f85a23465d628f6cc51a657bbd14_350.webp",
+        "min_launcher_version": null,
+        "sort_order": 70,
+        "updated_at": "2026-10-05T06:39:51.583Z",
+        "source_type": "modrinth",
+        "minecraft_version": "26.1.2",
+        "modrinth_project_id": "1ocGzRHv",
+        "pack_version_id": "zCNpmrT6",
+        "loader": "fabric"
+      }
+    ],
+    "meta": {
+      "count": 7
+    }
+  },
+  "checks": [
+    {
+      "path": "/v1/instances",
+      "status": 200,
+      "etag": "W/\"BMIL4OYrgfxts2AAsdkXebhJEkeb42d_6F5SUVIebbM\"",
+      "cache_control": "public",
+      "body_empty": false
+    },
+    {
+      "path": "/v1/instances",
+      "status": 304,
+      "etag": "\"BMIL4OYrgfxts2AAsdkXebhJEkeb42d_6F5SUVIebbM\"",
+      "cache_control": "public",
+      "body_empty": true
+    },
+    {
+      "path": "/v1/instances?launcher_version=0.0.0",
+      "status": 200,
+      "etag": "W/\"BMIL4OYrgfxts2AAsdkXebhJEkeb42d_6F5SUVIebbM\"",
+      "cache_control": "public",
+      "body_empty": false
+    },
+    {
+      "path": "/v1/instances?launcher_version=999.0.0",
+      "status": 200,
+      "etag": "W/\"BMIL4OYrgfxts2AAsdkXebhJEkeb42d_6F5SUVIebbM\"",
+      "cache_control": "public",
+      "body_empty": false
+    },
+    {
+      "path": "/v1/instances?launcher_version=0.0.0-beta.1",
+      "status": 200,
+      "etag": "W/\"BMIL4OYrgfxts2AAsdkXebhJEkeb42d_6F5SUVIebbM\"",
+      "cache_control": "public",
+      "body_empty": false
+    },
+    {
+      "path": "/v1/instances?launcher_version=invalid",
+      "status": 200,
+      "etag": "W/\"BMIL4OYrgfxts2AAsdkXebhJEkeb42d_6F5SUVIebbM\"",
+      "cache_control": "public",
+      "body_empty": false
+    },
+    {
+      "path": "/v1/instances/not-a-uuid",
+      "status": 400,
+      "etag": null,
+      "cache_control": "public, s-maxage=30",
+      "body_empty": false
+    },
+    {
+      "path": "/v1/instances/00000000-0000-4000-8000-000000000000",
+      "status": 404,
+      "etag": null,
+      "cache_control": "public",
+      "body_empty": false
+    },
+    {
+      "path": "/v1/instances/62d7e99d-fb4e-4167-8732-ce3a334d4a58",
+      "status": 200,
+      "etag": "W/\"QVxe0KlQ0VJ8urg-BSG6FRzti7wI8e594mLMtA2YCUw\"",
+      "cache_control": "public",
+      "body_empty": false
+    },
+    {
+      "path": "/v1/instances/62d7e99d-fb4e-4167-8732-ce3a334d4a58",
+      "status": 304,
+      "etag": "\"QVxe0KlQ0VJ8urg-BSG6FRzti7wI8e594mLMtA2YCUw\"",
+      "cache_control": "public",
+      "body_empty": true
+    },
+    {
+      "path": "/v1/instances/65ee13c6-bc34-4914-aa09-41205f3691a0",
+      "status": 200,
+      "etag": "W/\"A9zoMD4MLworfliVWqRBuiP0G5h5PLU2tag1nnsfBg8\"",
+      "cache_control": "public",
+      "body_empty": false
+    },
+    {
+      "path": "/v1/instances/65ee13c6-bc34-4914-aa09-41205f3691a0",
+      "status": 304,
+      "etag": "\"A9zoMD4MLworfliVWqRBuiP0G5h5PLU2tag1nnsfBg8\"",
+      "cache_control": "public",
+      "body_empty": true
+    }
+  ],
+  "targets": [
+    {
+      "catalog_id": "62d7e99d-fb4e-4167-8732-ce3a334d4a58",
+      "slug": "vanilla-actual",
+      "minecraft_version": "26.3",
+      "metadata_url": "https://piston-meta.mojang.com/v1/packages/702fe59163c6ee6578607daa85811d9bc9c7cc40/26.3.json",
+      "metadata_sha1": "702fe59163c6ee6578607daa85811d9bc9c7cc40",
+      "java": {
+        "component": "java-runtime-epsilon",
+        "majorVersion": 25
+      },
+      "client": {
+        "sha1": "e877b6a07acd633fb3bb475002175cec036e7b87",
+        "size": 41483720,
+        "url": "https://piston-data.mojang.com/v1/objects/e877b6a07acd633fb3bb475002175cec036e7b87/client.jar"
+      },
+      "asset_index": {
+        "id": "34",
+        "sha1": "1e4e4a68dece1c0f51b8f93b45da8fe8da51bcd3",
+        "size": 597035,
+        "totalSize": 483888065,
+        "url": "https://piston-meta.mojang.com/v1/packages/1e4e4a68dece1c0f51b8f93b45da8fe8da51bcd3/34.json"
+      },
+      "native_libraries": [
+        {
+          "name": "com.mojang:jtracy:1.14.38:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "com.mojang:jtracy:1.14.38:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "com.mojang:jtracy:1.14.38:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "com.mojang:jtracy:1.14.38:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.4.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.4.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.4.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.4.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.4.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.4.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.4.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.4.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.4.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.4.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.4.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.4.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-sdl:3.4.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-sdl:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-sdl:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-sdl:3.4.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-sdl:3.4.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-shaderc:3.4.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-shaderc:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-shaderc:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-shaderc:3.4.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-shaderc:3.4.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-spvc:3.4.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-spvc:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-spvc:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-spvc:3.4.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-spvc:3.4.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.4.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.4.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.4.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-vma:3.4.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-vma:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-vma:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-vma:3.4.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-vma:3.4.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-vulkan:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-vulkan:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.4.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.4.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.4.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.4.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.4.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        }
+      ],
+      "runtime_download_and_game_launch_verified": false
+    },
+    {
+      "catalog_id": "65ee13c6-bc34-4914-aa09-41205f3691a0",
+      "slug": "vanilla-clasica",
+      "minecraft_version": "1.21.1",
+      "metadata_url": "https://piston-meta.mojang.com/v1/packages/cedfc3b6dcbca34e2b478d498bf1d56a8fa2f404/1.21.1.json",
+      "metadata_sha1": "cedfc3b6dcbca34e2b478d498bf1d56a8fa2f404",
+      "java": {
+        "component": "java-runtime-delta",
+        "majorVersion": 21
+      },
+      "client": {
+        "sha1": "30c73b1c5da787909b2f73340419fdf13b9def88",
+        "size": 26836906,
+        "url": "https://piston-data.mojang.com/v1/objects/30c73b1c5da787909b2f73340419fdf13b9def88/client.jar"
+      },
+      "asset_index": {
+        "id": "17",
+        "sha1": "00551f206ccb65cb965fd0aebc14d22cda282db7",
+        "size": 449557,
+        "totalSize": 825109050,
+        "url": "https://piston-meta.mojang.com/v1/packages/00551f206ccb65cb965fd0aebc14d22cda282db7/17.json"
+      },
+      "native_libraries": [
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.3.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.3.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.3.3:natives-macos-patch",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.3.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.3.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-freetype:3.3.3:natives-windows-x86",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-glfw:3.3.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-glfw:3.3.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-glfw:3.3.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-glfw:3.3.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-glfw:3.3.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-glfw:3.3.3:natives-windows-x86",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.3.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.3.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.3.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.3.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.3.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-jemalloc:3.3.3:natives-windows-x86",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.3.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.3.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.3.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.3.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.3.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-openal:3.3.3:natives-windows-x86",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.3.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.3.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.3.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.3.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.3.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-opengl:3.3.3:natives-windows-x86",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.3.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.3.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.3.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.3.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.3.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-stb:3.3.3:natives-windows-x86",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-tinyfd:3.3.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-tinyfd:3.3.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-tinyfd:3.3.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-tinyfd:3.3.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-tinyfd:3.3.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl-tinyfd:3.3.3:natives-windows-x86",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.3.3:natives-linux",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "linux"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.3.3:natives-macos",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.3.3:natives-macos-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "osx"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.3.3:natives-windows",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.3.3:natives-windows-arm64",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        },
+        {
+          "name": "org.lwjgl:lwjgl:3.3.3:natives-windows-x86",
+          "rules": [
+            {
+              "action": "allow",
+              "os": {
+                "name": "windows"
+              }
+            }
+          ]
+        }
+      ],
+      "runtime_download_and_game_launch_verified": false
+    }
+  ],
+  "pending": [
+    "Known disabled UUID unavailable; cannot independently verify disabled detail behavior.",
+    "All minimum launcher versions are null; exclusion threshold behavior is untested.",
+    "No deliberate server failure was induced; 500 handling remains untested.",
+    "Java runtime downloads, native compatibility and game launch remain unverified."
+  ]
+}
