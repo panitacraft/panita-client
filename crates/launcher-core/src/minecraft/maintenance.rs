@@ -8,6 +8,7 @@ use super::{
 use crate::{
     catalog::{CatalogClient, CatalogSource},
     error::{CoreError, ErrorCode},
+    panita_api::PanitaCredentials,
     paths::AppPaths,
     registry::{InstallationState, InstanceRegistry},
     storage::map_private_error,
@@ -425,8 +426,10 @@ pub async fn repair(
     platform: &Platform,
     cancel: &Cancellation,
     progress: Progress,
+    auth: Option<PanitaCredentials>,
 ) -> Result<MaintenanceOutcome, CoreError> {
-    repair_with_catalog(paths, id, platform, cancel, progress, CatalogClient::new()?).await
+    let catalog = CatalogClient::new()?.with_auth(auth);
+    repair_with_catalog(paths, id, platform, cancel, progress, catalog).await
 }
 
 async fn repair_with_catalog(

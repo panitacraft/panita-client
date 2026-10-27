@@ -18,6 +18,7 @@ use super::{Artifact, Platform, invalid};
 use crate::{
     catalog::{CatalogClient, CatalogSource},
     error::{CoreError, ErrorCode},
+    panita_api::PanitaCredentials,
     paths::AppPaths,
     registry::{InstallationRecord, InstallationState, InstanceRegistry},
     storage::map_private_error,
@@ -313,8 +314,9 @@ pub async fn install(
     platform: &Platform,
     cancel: &Cancellation,
     progress: Progress,
+    auth: Option<PanitaCredentials>,
 ) -> Result<InstalledLock, CoreError> {
-    let catalog_client = CatalogClient::new()?;
+    let catalog_client = CatalogClient::new()?.with_auth(auth);
     let catalog = tokio::select! {
         _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
         result = catalog_client.detail(id) => result?,
@@ -325,10 +327,8 @@ pub async fn install(
     if !catalog.enabled {
         return Err(CoreError::new(ErrorCode::InstanceDisabled));
     }
-    if catalog.restricted
-        || !catalog.compatible_with(
-            &semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?,
-        )
+    if !catalog
+        .compatible_with(&semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?)
     {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     }

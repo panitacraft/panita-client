@@ -1,7 +1,9 @@
+use launcher_core::activation::ActivationController;
 use launcher_core::sessions::AccountController;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 mod account_commands;
+mod activation_commands;
 #[cfg(any(target_os = "linux", test))]
 mod linux_activation;
 mod play_commands;
@@ -16,6 +18,7 @@ struct DesktopState {
     process: launcher_core::operation::ProcessSessionId,
     logs: Arc<launcher_core::logging::BoundedLog>,
     accounts: Mutex<Option<Arc<AccountController>>>,
+    activation: Mutex<Option<Arc<ActivationController>>>,
     orphaned_callback: bool,
     catalog_fetch: tokio::sync::Mutex<()>,
     plays: Arc<play_commands::PlayController>,
@@ -46,6 +49,12 @@ fn initialize(
         let paths = AppPaths::new(root).map_err(|error| error.code())?;
         let store = PrivateStore::open(&paths).map_err(|error| error.code())?;
         let settings = GlobalSettings::load(&store).map_err(|error| error.code())?;
+        // A damaged Panita session file does not fail initialization: it is reported
+        // through the activation view and blocks activation instead.
+        let activation = Arc::new(
+            ActivationController::new(PrivateStore::open(&paths).map_err(|error| error.code())?)
+                .map_err(|error| error.code())?,
+        );
         let accounts = Arc::new(
             AccountController::new(
                 launcher_core::accounts::AccountRepository::new(store),
@@ -56,6 +65,10 @@ fn initialize(
         if state.orphaned_callback {
             accounts.report_orphaned_callback().map_err(|e| e.code())?;
         }
+        *state
+            .activation
+            .lock()
+            .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)? = Some(activation);
         *slot = Some(accounts.clone());
         settings_commands::restore_window(&app, &settings);
         account_commands::start_maintenance(app.clone(), accounts);
@@ -96,9 +109,17 @@ async fn catalog_snapshot(
         .app_data_dir()
         .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
     let paths = launcher_core::paths::AppPaths::new(root).map_err(|error| error.code())?;
-    let result = launcher_core::registry::load_catalog(paths)
+    // The catalog belongs to an activated member; restricted entries need the session.
+    let activation = activation_commands::controller(&state)?;
+    let credentials = activation
+        .session_credentials()
+        .map_err(|error| error.code())?;
+    let result = launcher_core::registry::load_catalog(paths, Some(credentials.clone()))
         .await
         .map_err(|error| error.code());
+    if let Err(code) = &result {
+        activation_commands::observe(&app, &state.plays, &activation, &credentials, *code);
+    }
     let warning = match &result {
         Err(code) => Some(*code),
         Ok(snapshot) => snapshot.cache_warning.or(snapshot.registry_warning),
@@ -157,6 +178,7 @@ pub fn run() {
             process,
             logs: logs.clone(),
             accounts: Mutex::new(None),
+            activation: Mutex::new(None),
             catalog_fetch: tokio::sync::Mutex::new(()),
             plays: Arc::new(play_commands::PlayController::with_logs(process, logs)),
             window: Mutex::new(settings_commands::WindowPreferences::default()),

@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::catalog::{CatalogInstance, CatalogSnapshot, CatalogSource};
 use crate::error::{CoreError, ErrorCode};
+use crate::panita_api::PanitaCredentials;
 use crate::paths::AppPaths;
 use crate::settings::InstanceSettings;
 use crate::storage::PrivateStore;
@@ -599,7 +600,11 @@ pub struct CatalogOverview {
     pub registry_warning: Option<ErrorCode>,
 }
 
-pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError> {
+/// `auth` is the member's credentials: restricted instances are only listed to them.
+pub async fn load_catalog(
+    paths: AppPaths,
+    auth: Option<PanitaCredentials>,
+) -> Result<CatalogOverview, CoreError> {
     let store = PrivateStore::open(&paths)?;
     let registry = InstanceRegistry::new(paths.clone());
     let (mut local, migration_warning) = registry.load_for_overview()?;
@@ -619,7 +624,10 @@ pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError>
         local = registry.load()?;
     }
     let version = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?;
-    let remote = crate::catalog::CatalogClient::new()?.refresh(&store).await;
+    let remote = crate::catalog::CatalogClient::new()?
+        .with_auth(auth)
+        .refresh(&store)
+        .await;
     let mut overview = match remote {
         Ok(snapshot) => {
             let registry_warning = if snapshot.stale {
@@ -725,7 +733,7 @@ fn view(
     client: &Version,
 ) -> InstanceView {
     let compatible = catalog.compatible_with(client);
-    let supported = matches!(catalog.source, CatalogSource::Vanilla { .. }) && !catalog.restricted;
+    let supported = matches!(catalog.source, CatalogSource::Vanilla { .. });
     let local_state = installed.map_or(InstallationState::NotInstalled, |record| {
         if matches!(
             record.state,

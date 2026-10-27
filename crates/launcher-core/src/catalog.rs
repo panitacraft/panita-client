@@ -334,10 +334,8 @@ impl CatalogInstance {
         if !self.enabled {
             return Err(CoreError::new(ErrorCode::InstanceDisabled));
         }
-        if !self.compatible_with(client)
-            || !matches!(self.source, CatalogSource::Vanilla { .. })
-            || self.restricted
-        {
+        // A restricted entry only reaches a member the API allows; it needs no extra gate here.
+        if !self.compatible_with(client) || !matches!(self.source, CatalogSource::Vanilla { .. }) {
             return Err(CoreError::new(ErrorCode::UnsupportedInstance));
         }
         Ok(())
@@ -481,8 +479,10 @@ impl CatalogClient {
         })
     }
 
-    pub fn with_auth(mut self, auth: PanitaCredentials) -> Self {
-        self.auth = Some(auth);
+    /// `None` reaches only the public catalog. The desktop always passes the
+    /// member's credentials, which is what makes restricted instances visible.
+    pub fn with_auth(mut self, auth: impl Into<Option<PanitaCredentials>>) -> Self {
+        self.auth = auth.into();
         self
     }
 

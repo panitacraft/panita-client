@@ -612,6 +612,24 @@ async fn a_cached_member_catalog_is_never_served_to_another_identity() {
 }
 
 #[test]
+fn a_restricted_entry_is_installable_because_only_members_receive_it() {
+    let client = Version::new(9, 0, 0);
+    let parsed = parse_list(list(vec![restricted_record()]).as_bytes())
+        .unwrap_or_else(|_| panic!("restricted catalog"));
+    assert!(parsed[0].restricted);
+    assert!(parsed[0].installation_allowed(&client).is_ok());
+    // Restriction never widens what else is blocked.
+    let mut disabled = restricted_record();
+    disabled["enabled"] = json!(false);
+    let mut future = restricted_record();
+    future["source_type"] = json!("something_new");
+    for raw in [disabled, future] {
+        let parsed = parse_list(list(vec![raw]).as_bytes()).unwrap_or_else(|_| panic!("catalog"));
+        assert!(parsed[0].installation_allowed(&client).is_err());
+    }
+}
+
+#[test]
 fn purging_removes_every_cache_spelling_and_tolerates_absence() {
     let (paths, store) = temporary_store();
     assert!(purge_cache(&store).is_ok());
