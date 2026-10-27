@@ -43,6 +43,26 @@ pub enum ErrorCode {
     CallbackNotActive,
     /// The data directory or a file in it does not have owner-only permissions.
     UnsafePermissions,
+    /// A Panita activation is required before this operation.
+    ActivationRequired,
+    /// This build cannot reach the activation service (no launcher key compiled in).
+    ActivationUnavailable,
+    /// Nobody has the ign or Discord name that was typed.
+    ActivationUnknownAccount,
+    /// The Panita account exists but is disabled.
+    ActivationNotActivated,
+    /// Too many open login requests; wait before asking again.
+    ActivationRateLimited,
+    /// The login request outlived its three minutes.
+    ActivationExpired,
+    /// The login request is unknown or its session was already handed over.
+    ActivationConsumed,
+    /// The persisted Panita session file is damaged or unsupported; it is left untouched.
+    ActivationFileInvalid,
+    /// The API closed or refused the Panita session token.
+    SessionRejected,
+    /// The API refused the launcher key (for example, after a key rotation).
+    ApiKeyRejected,
 }
 
 #[derive(Debug)]

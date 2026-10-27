@@ -10,6 +10,7 @@ use super::{Platform, invalid};
 use crate::catalog::{CatalogClient, CatalogInstance, CatalogSource};
 use crate::error::{CoreError, ErrorCode};
 use crate::operation::{OperationId, ProcessSessionId};
+use crate::panita_api::PanitaCredentials;
 use crate::paths::AppPaths;
 use crate::registry::{InstallationState, InstanceRegistry};
 use crate::sessions::{AccountController, PlaySelection};
@@ -68,8 +69,9 @@ pub async fn prepare_play(
     platform: Platform,
     process: ProcessSessionId,
     cancel: Cancellation,
+    auth: Option<PanitaCredentials>,
 ) -> Result<PendingPlay, CoreError> {
-    let catalog = CatalogClient::new()?;
+    let catalog = CatalogClient::new()?.with_auth(auth);
     prepare_with_catalog(
         paths, instance, accounts, platform, process, cancel, catalog,
     )

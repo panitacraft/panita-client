@@ -44,6 +44,9 @@ pub enum LogEvent {
     OperationCancelled,
     StorageFailure(ErrorCode),
     CatalogFailure(ErrorCode),
+    /// A Panita activation step failed or the session ended. Never the account,
+    /// serial, token or service response, only the fixed error code.
+    ActivationFailure(ErrorCode),
     WorkflowChanged {
         request: Uuid,
         workflow: Workflow,
@@ -129,6 +132,10 @@ impl BoundedLog {
                         view.event = "catalog_failure";
                         view.error = Some(code);
                     }
+                    LogEvent::ActivationFailure(code) => {
+                        view.event = "activation_failure";
+                        view.error = Some(code);
+                    }
                     LogEvent::WorkflowChanged {
                         request,
                         workflow,
@@ -175,6 +182,22 @@ mod tests {
         let records = log.snapshot();
         assert_eq!(records.len(), MAX_EVENTS);
         assert_ne!(records[0].operation, Some(first));
+    }
+
+    #[test]
+    fn activation_failures_expose_only_a_fixed_event_and_an_error_code() {
+        let log = BoundedLog::default();
+        log.record(LogRecord {
+            process: ProcessSessionId::new(),
+            operation: None,
+            event: LogEvent::ActivationFailure(ErrorCode::SessionRejected),
+        });
+        let value = serde_json::to_value(log.view()).unwrap_or_else(|_| panic!("serialize"));
+        let record = &value["records"][0];
+        assert_eq!(record["event"], "activation_failure");
+        assert_eq!(record["error"], "session_rejected");
+        assert_eq!(record["operationId"], serde_json::Value::Null);
+        assert_eq!(record["workflow"], serde_json::Value::Null);
     }
 
     #[test]

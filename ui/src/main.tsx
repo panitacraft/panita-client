@@ -6,6 +6,7 @@ import { messageForError } from './errors';
 import logoWhite from './assets/logo-white.svg';
 import './style.css';
 import { Accounts } from './accounts';
+import { ActivationGate, ActivationPanel, ActivationProvider, useActivation } from './activation';
 import { PlayControls, PlayNotice, PlayProvider, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
 import { canInstall, canRepair, canUninstall, updateTarget } from './library-state';
@@ -28,8 +29,10 @@ const localStateText: Record<CatalogInstance['localState'], string> = {
   running: 'En ejecución', failed: 'La operación falló', cancelled: 'Operación cancelada',
 };
 
-function App() {
+function Launcher() {
   const [catalog, setCatalog] = useState<CatalogState>({ kind: 'loading' });
+  // Installing, updating and repairing need a verified session, like a fresh catalog.
+  const unverified = useActivation()?.view?.state === 'active_offline';
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
@@ -60,6 +63,7 @@ function App() {
         <span className="wordmark"><img src={logoWhite} alt="" aria-hidden="true" />Panita Client</span>
         <span className="preview-label">Vista previa de desarrollo</span>
       </header>
+      <ActivationPanel />
       <Accounts />
       <CrashNotifications names={catalog.kind === 'ready' ? Object.fromEntries(catalog.instances.map(instance => [instance.id, instance.name])) : {}} />
       <section aria-labelledby="instances-heading">
@@ -109,9 +113,9 @@ function App() {
                 {!instance.compatible && <p>Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
                 {!instance.supported && <p>Este tipo de instancia o su acceso todavía no es compatible.</p>}
                 <PlayControls instanceId={instance.id}
-                  installAllowed={canInstall(instance, catalog.stale)}
-                  updateTarget={updateTarget(instance, catalog.stale)}
-                  repairAllowed={canRepair(instance, catalog.stale)}
+                  installAllowed={canInstall(instance, catalog.stale || unverified)}
+                  updateTarget={updateTarget(instance, catalog.stale || unverified)}
+                  repairAllowed={canRepair(instance, catalog.stale || unverified)}
                   uninstallAllowed={canUninstall(instance)}
                   cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'}
                   allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
@@ -126,9 +130,15 @@ function App() {
   );
 }
 
+// Activation comes first: the launcher only mounts for an activated member. Play state
+// lives above the gate, so a running game keeps its controls if the session ends.
+function App() {
+  return <ActivationGate><Launcher /></ActivationGate>;
+}
+
 const logIdentity = isTauri() ? logWindowIdentity(getCurrentWindow().label) : null;
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {logIdentity ? <GameLogWindow {...logIdentity} /> : <PreferencesProvider><PlayProvider><App /></PlayProvider></PreferencesProvider>}
+    {logIdentity ? <GameLogWindow {...logIdentity} /> : <PreferencesProvider><PlayProvider><ActivationProvider><App /></ActivationProvider></PlayProvider></PreferencesProvider>}
   </React.StrictMode>,
 );

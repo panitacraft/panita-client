@@ -11,10 +11,11 @@ const statusText: Record<AccountStatus, string> = {
   sign_in_required: 'Sesión pendiente', error: 'No se pudo verificar la sesión',
 };
 
-export function Accounts() {
+// `suggestedName` only pre-fills the offline name during onboarding; it is never a requirement.
+export function Accounts({ suggestedName = '' }: { suggestedName?: string }) {
   const [{ view, error, notice, busy, blocked, cleanupWarning }, dispatch] = useReducer(accountFeedback, initialAccountFeedback);
   const [attempt, setAttempt] = useState(0);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(suggestedName);
   const [confirming, setConfirming] = useState<string | null>(null);
   const loginStarting = useRef(false);
   const inFlight = useRef(new Set<string>());

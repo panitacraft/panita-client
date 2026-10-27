@@ -81,3 +81,12 @@ dialog::backdrop { background: #000a; }
 .log-metadata { font-weight: 600; }
 .game-log-lines:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
 .crash-summary { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.activation-section { max-width: 640px; }
+.activation-form { display: grid; gap: 12px; margin-top: 24px; justify-items: start; }
+.activation-form input { width: min(100%, 360px); }
+.serial-box { margin-top: 24px; padding: 24px; border: 1px solid #f2cf74; border-radius: 12px; background: #1b392e; }
+.serial { margin: 8px 0 16px; font-size: 2rem; font-weight: 700; letter-spacing: .12em; }
+.serial code, .serial-box code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.activation-panel { padding-bottom: 0; }
+.activation-panel h2 { margin-top: 0; }
+.activation-panel > p span { color: #bdc9bd; font-size: .85rem; margin-left: 8px; }

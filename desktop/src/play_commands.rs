@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
-use super::{DesktopState, account_commands};
+use super::{DesktopState, account_commands, activation_commands};
 
 #[derive(Clone, Copy, PartialEq)]
 enum OperationKind {
@@ -958,6 +958,18 @@ fn begin_maintenance(
     .map_err(|error| error.code())?;
     // Use the same initialized private root as the other desktop workflows.
     account_commands::controller(&state)?;
+    let activation = activation_commands::controller(&state)?;
+    // Installing, updating and repairing need a recently verified session; removing
+    // local files only needs the files.
+    let credentials = if kind == OperationKind::Uninstall {
+        None
+    } else {
+        Some(
+            activation
+                .online_credentials()
+                .map_err(|error| error.code())?,
+        )
+    };
     let controller = state.plays.clone();
     let cancel = controller.reserve_operation(instance_id, request_id, kind)?;
     controller.update(instance_id, request_id, |entry| {
@@ -1007,6 +1019,7 @@ fn begin_maintenance(
                     platform,
                     &cancel,
                     progress,
+                    credentials.clone(),
                 )
                 .await
                 .map_err(|error| error.code())?;
@@ -1019,6 +1032,7 @@ fn begin_maintenance(
                     update,
                     &cancel,
                     progress,
+                    credentials.clone(),
                 )
                 .await
                 .map_err(|error| error.code())?;
@@ -1034,6 +1048,7 @@ fn begin_maintenance(
                     platform,
                     &cancel,
                     progress,
+                    credentials.clone(),
                 )
                 .await
                 .map_err(|error| error.code())?;
@@ -1056,7 +1071,18 @@ fn begin_maintenance(
                     entry.native_cleanup = native_cleanup;
                 })
             }
-            Err(error) => controller.fail(instance_id, request_id, error),
+            Err(error) => {
+                if let Some(credentials) = &credentials {
+                    activation_commands::observe(
+                        &app,
+                        &controller,
+                        &activation,
+                        credentials,
+                        error,
+                    );
+                }
+                controller.fail(instance_id, request_id, error)
+            }
         }
         controller.publish(&app);
     });
@@ -1078,10 +1104,39 @@ pub(super) fn begin_play(
     )
     .map_err(|error| error.code())?;
     let accounts = account_commands::controller(&state)?;
+    // An unverified session still launches installed instances; none at all does not.
+    let activation = activation_commands::controller(&state)?;
+    let credentials = activation
+        .session_credentials()
+        .map_err(|error| error.code())?;
     let controller = state.plays.clone();
     let cancel = controller.reserve(instance_id, request_id)?;
     controller.publish(&app);
     tauri::async_runtime::spawn(async move {
+        // A session that could not be verified gets one check before Play, so a
+        // reconnected launcher recovers without a restart. If the API closed the
+        // session meanwhile, this launch ends here.
+        let credentials = if activation
+            .state()
+            .is_ok_and(|state| state == launcher_core::activation::ActivationState::ActiveOffline)
+        {
+            // Bounded: a network that swallows requests must not stall every launch.
+            if let Ok(Ok(outcome)) =
+                tokio::time::timeout(std::time::Duration::from_secs(5), activation.refresh()).await
+            {
+                activation_commands::after_refresh(&app, &controller, &activation, outcome);
+            }
+            match activation.session_credentials() {
+                Ok(fresh) => fresh,
+                Err(error) => {
+                    controller.fail(instance_id, request_id, error.code());
+                    controller.publish(&app);
+                    return;
+                }
+            }
+        } else {
+            credentials
+        };
         match launcher_core::minecraft::play::prepare_play(
             paths,
             instance_id,
@@ -1089,6 +1144,7 @@ pub(super) fn begin_play(
             platform,
             controller.process,
             cancel.clone(),
+            Some(credentials.clone()),
         )
         .await
         {
@@ -1122,7 +1178,16 @@ pub(super) fn begin_play(
                     return;
                 }
             }
-            Err(error) => controller.fail(instance_id, request_id, error.code()),
+            Err(error) => {
+                activation_commands::observe(
+                    &app,
+                    &controller,
+                    &activation,
+                    &credentials,
+                    error.code(),
+                );
+                controller.fail(instance_id, request_id, error.code())
+            }
         }
         controller.publish(&app);
     });

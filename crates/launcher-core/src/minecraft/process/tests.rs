@@ -73,6 +73,7 @@ fn child_output_fixture() {
     println!("access-token");
     eprintln!("stderr {TOKEN}");
     println!("Authorization: Bearer unrecognized-sensitive-value");
+    println!("X-Api-Key: fixture-launcher-key");
     println!("{}{}", "x".repeat(MAX_LINE + 1), TOKEN);
     std::process::exit(7);
 }
@@ -129,6 +130,7 @@ async fn captures_split_secret_both_streams_and_nonzero_exit_without_leaks() {
     )));
     assert!(!format!("{events:?}").contains(TOKEN));
     assert!(!format!("{events:?}").contains("unrecognized-sensitive-value"));
+    assert!(!format!("{events:?}").contains("fixture-launcher-key"));
     assert!(events.iter().any(|event| matches!(&event.kind, ProcessEventKind::Output { text, .. } if text == "[sensitive output omitted]")));
     assert_eq!(
         game.force_stop().await.ok(),
