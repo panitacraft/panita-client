@@ -67,6 +67,36 @@ pub enum CatalogSource {
 }
 
 impl CatalogSource {
+    /// Whether two sources name the same pinned content. A pack's label, date or
+    /// informational loader may differ between a catalog answer and an installation.
+    pub fn same_pin(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Custom {
+                    current_version_id: left,
+                    ..
+                },
+                Self::Custom {
+                    current_version_id: right,
+                    ..
+                },
+            ) => left == right,
+            (
+                Self::Modrinth {
+                    project_id: left_project,
+                    pack_version_id: left,
+                    ..
+                },
+                Self::Modrinth {
+                    project_id: right_project,
+                    pack_version_id: right,
+                    ..
+                },
+            ) => left_project == right_project && left == right,
+            _ => self == other,
+        }
+    }
+
     /// The sources this launcher can install: vanilla, published NeoForge custom
     /// packs and pinned Modrinth packs. A Modrinth pin's loader is informational;
     /// its index decides whether the pack is really supported when it installs.

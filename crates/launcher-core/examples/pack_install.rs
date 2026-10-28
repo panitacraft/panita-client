@@ -16,7 +16,8 @@ use launcher_core::{
     modpack::{
         gamefs::GameDir,
         install::{
-            Installed, Outcome, import_pending, install_any, install_catalog, pending_files,
+            Installed, Outcome, UpdateOutcome, UpdateRequest, import_pending, install_any,
+            install_catalog, pending_files, repair_catalog, uninstall_pack, update_catalog,
             verify_files,
         },
     },
@@ -32,9 +33,11 @@ use uuid::Uuid;
 fn usage() -> Box<dyn std::error::Error> {
     "usage: pack_install install <root> <instance> | \
      install-modrinth <root> <new-instance-uuid> <project> <version> [loader] | \
+     update-modrinth <root> <instance> <project> <version> [move-aside] | \
+     repair-modrinth <root> <instance> | uninstall-pack <root> <instance> | \
      pending <root> <instance> | \
      import <root> <instance> <manifest-path> <file> | verify <root> <instance> | \
-     launch <root> <instance> <seconds> | play-flow <root> <instance> <seconds> | play-check <root> <instance>; <root> must be a new directory named phase-10-* or phase-11-*"
+     launch <root> <instance> <seconds> | play-flow <root> <instance> <seconds> | play-check <root> <instance>; <root> must be a new directory named phase-10-*, phase-11-* or phase-12-*"
         .into()
 }
 
@@ -50,8 +53,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    if !name.starts_with("phase-10-") && !name.starts_with("phase-11-") {
-        return Err("expected an isolated phase-10-* or phase-11-* scratch root".into());
+    if !["phase-10-", "phase-11-", "phase-12-"]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+    {
+        return Err(
+            "expected an isolated phase-10-*, phase-11-* or phase-12-* scratch root".into(),
+        );
     }
     let id = Uuid::parse_str(&args[2])?;
     let platform = Platform::x64(std::env::consts::OS, "")?;
@@ -151,6 +159,78 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     )
                 }
             }
+        }
+        // Update an installed Modrinth pack to another pinned version, the way the
+        // launcher's update workflow does once the catalog names that version.
+        "update-modrinth" | "repair-modrinth" => {
+            let record = InstanceRegistry::new(paths.clone())
+                .get(id)?
+                .ok_or("not installed")?;
+            let mut catalog = record.last_catalog.clone();
+            let base = Arc::new(|_: launcher_core::minecraft::download::DownloadProgress| {});
+            let pack = Arc::new(|p: launcher_core::modpack::content::PackProgress| {
+                if p.files_done == p.files_total {
+                    eprintln!("pack files {}/{}", p.files_done, p.files_total);
+                }
+            });
+            let started = std::time::Instant::now();
+            if args[0] == "repair-modrinth" {
+                let report =
+                    repair_catalog(&paths, id, &platform, &cancel, base, pack, catalog).await?;
+                println!(
+                    "{}",
+                    serde_json::json!({"result": "repaired", "restored": report.restored,
+                        "backed_up": report.backed_up, "seconds": started.elapsed().as_secs()})
+                );
+            } else {
+                let (project, version) = (
+                    args.get(3).ok_or_else(usage)?.clone(),
+                    args.get(4).ok_or_else(usage)?.clone(),
+                );
+                // Read the recorded pin without auditing: the player may have edited files.
+                let document: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(
+                    paths.instance(id)?.join("installed.json"),
+                )?)?;
+                let from = document["pack"]["source"]["version_id"]
+                    .as_str()
+                    .ok_or("not a pack installation")?
+                    .to_owned();
+                catalog.source = CatalogSource::Modrinth {
+                    project_id: project,
+                    pack_version_id: version.clone(),
+                    loader: None,
+                };
+                let request = UpdateRequest {
+                    from_version: from,
+                    to_version: version,
+                    backup_worlds: false,
+                    move_aside: args.get(5).is_some_and(|flag| flag == "move-aside"),
+                };
+                match update_catalog(&paths, id, &platform, request, &cancel, base, pack, catalog)
+                    .await?
+                {
+                    UpdateOutcome::Updated(report) => println!(
+                        "{}",
+                        serde_json::json!({"result": "updated", "added": report.added,
+                            "replaced": report.replaced, "removed": report.removed,
+                            "released": report.released, "kept_configuration": report.skipped_configuration,
+                            "backed_up": report.backed_up, "seconds": started.elapsed().as_secs()})
+                    ),
+                    UpdateOutcome::Blocked(blocked) => println!(
+                        "{}",
+                        serde_json::json!({"result": "blocked",
+                            "conflicts": blocked.conflicts.iter().map(|c| (&c.path, format!("{:?}", c.reason))).collect::<Vec<_>>(),
+                            "files": blocked.files.iter().map(|f| &f.path).collect::<Vec<_>>()})
+                    ),
+                }
+            }
+        }
+        "uninstall-pack" => {
+            let report = uninstall_pack(&paths, id, &cancel)?;
+            println!(
+                "{}",
+                serde_json::json!({"result": "uninstalled", "removed": report.removed, "kept": report.kept})
+            );
         }
         "pending" => {
             for file in pending_files(&paths, id)? {

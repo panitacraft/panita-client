@@ -25,7 +25,7 @@ pub mod update;
 #[cfg(feature = "loader-validation")]
 pub mod validation;
 mod verification_cache;
-mod world_backup;
+pub(crate) mod world_backup;
 pub(crate) use world_backup::capability as directory_capability;
 
 pub const VERSION_MANIFEST: &str =

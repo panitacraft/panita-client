@@ -45,6 +45,13 @@ use crate::{
 
 const KIND: &str = "pack_install";
 
+mod maintain;
+pub use maintain::{
+    Blocked, RepairReport, UninstallReport, UpdateOutcome, UpdateReport, UpdateRequest, is_pack,
+    pin_of, repair as repair_pack, repair_with_catalog as repair_catalog,
+    uninstall as uninstall_pack, update as update_pack, update_with_catalog as update_catalog,
+};
+
 /// A destination this operation created because it was absent at preflight.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -86,6 +93,9 @@ impl Journal {
 }
 
 pub(crate) fn journal_inactive(value: Value, id: Uuid) -> bool {
+    if value["schema_version"] == 5 {
+        return maintain::journal_inactive(value, id);
+    }
     serde_json::from_value::<Journal>(value)
         .is_ok_and(|journal| journal.validate(id).is_ok() && !journal.active)
 }
@@ -167,6 +177,9 @@ pub(crate) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
     let Some(value) = read_json::<Value>(root, "transaction.json")? else {
         return Ok(false);
     };
+    if value["schema_version"] == 5 {
+        return maintain::recover(paths, id, root, value);
+    }
     if value["schema_version"] != 4 {
         return Ok(false);
     }
@@ -304,8 +317,10 @@ impl Plan {
 
     /// The index is authoritative for versions: the catalog's informational loader
     /// and Minecraft version may only agree with it, never override it.
+    /// `catalog` is absent when an installed pin is rebuilt for repair: that pin is
+    /// historical, so only the index itself is authoritative.
     fn mrpack(
-        catalog: &CatalogInstance,
+        catalog: Option<&CatalogInstance>,
         project: &str,
         version: &str,
         artifact: &PackArtifact,
@@ -322,21 +337,23 @@ impl Plan {
         else {
             return Err(CoreError::new(ErrorCode::UnsupportedInstance));
         };
-        if catalog
-            .minecraft_version
-            .as_ref()
-            .is_some_and(|catalog| catalog != minecraft)
-        {
-            return Err(invalid());
-        }
-        // The catalog's loader is informational: it may agree with the index only.
-        if let CatalogSource::Modrinth {
-            loader: Some(named),
-            ..
-        } = &catalog.source
-            && named != kind.name()
-        {
-            return Err(invalid());
+        if let Some(catalog) = catalog {
+            if catalog
+                .minecraft_version
+                .as_ref()
+                .is_some_and(|catalog| catalog != minecraft)
+            {
+                return Err(invalid());
+            }
+            // The catalog's loader is informational: it may agree with the index only.
+            if let CatalogSource::Modrinth {
+                loader: Some(named),
+                ..
+            } = &catalog.source
+                && named != kind.name()
+            {
+                return Err(invalid());
+            }
         }
         let mut items = Vec::new();
         for file in &index.files {
@@ -448,6 +465,11 @@ pub(crate) async fn publish_plan(request: PlanPublish<'_>) -> Result<Outcome, Co
         progress,
     } = request;
     let game = GameDir::open(&root.join("minecraft"))?;
+    // An earlier installation that was uninstalled leaves its configuration history.
+    let history: BTreeSet<String> = read_json::<InstalledLock>(root, "installed.json")?
+        .and_then(|installed| installed.pack)
+        .map(|pack| pack.consumed_defaults)
+        .unwrap_or_default();
     let mut pending: Vec<PendingFile> = plan.pending.clone();
     // Existing player content is reported, never adopted or overwritten.
     let mut conflicts = BTreeSet::new();
@@ -582,12 +604,11 @@ pub(crate) async fn publish_plan(request: PlanPublish<'_>) -> Result<Outcome, Co
                 baseline: Some(file.hashes.clone()),
             })
             .collect();
-        let mut consumed = BTreeSet::new();
+        let mut consumed = history.clone();
         let mut skipped = Vec::new();
         for (kind, opened) in &mut layers {
             let mut budget = opened.budget();
-            let outcome =
-                config::apply(opened, *kind, &game, &BTreeSet::new(), &mut budget, cancel)?;
+            let outcome = config::apply(opened, *kind, &game, &history, &mut budget, cancel)?;
             files.extend(outcome.files);
             consumed.extend(outcome.consumed_defaults);
             skipped.extend(outcome.skipped);
@@ -699,13 +720,26 @@ async fn custom_plan(
     else {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     };
+    custom_plan_pinned(*version, Some(catalog), id, cancel).await
+}
+
+/// The manifest of one exact published version. Only the current pin is bound to
+/// the catalog; an installed pin, used for repair, is historical.
+async fn custom_plan_pinned(
+    version: Uuid,
+    bind: Option<&CatalogInstance>,
+    id: Uuid,
+    cancel: &Cancellation,
+) -> Result<Plan, CoreError> {
     let manifests = ManifestClient::new()?;
     let cached = tokio::select! {
         _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
-        result = manifests.fetch(id, *version, None) => result?,
+        result = manifests.fetch(id, version, None) => result?,
     };
     let manifest = cached.manifest();
-    manifest.bind_current(catalog)?;
+    if let Some(catalog) = bind {
+        manifest.bind_current(catalog)?;
+    }
     if !manifest.supported_loader() {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     }
@@ -735,6 +769,28 @@ async fn mrpack_plan(
     {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     }
+    mrpack_plan_pinned(
+        paths,
+        downloader,
+        project_id,
+        pack_version_id,
+        Some(catalog),
+        cancel,
+        progress,
+    )
+    .await
+}
+
+/// One exact Modrinth version of a project, verified before its index is read.
+async fn mrpack_plan_pinned(
+    paths: &AppPaths,
+    downloader: &PackDownloader,
+    project_id: &str,
+    pack_version_id: &str,
+    catalog: Option<&CatalogInstance>,
+    cancel: &Cancellation,
+    progress: ProgressSink,
+) -> Result<Plan, CoreError> {
     let modrinth = ModrinthClient::new()?;
     let artifact = tokio::select! {
         _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),

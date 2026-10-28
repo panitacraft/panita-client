@@ -82,6 +82,14 @@ pub fn apply<R: Read + Seek>(
             }
         };
         let absent = game.entry(&entry.path)? == Entry::Absent;
+        if kind == Kind::Override
+            && !content
+            && absent
+            && consumed.contains(&entry.path.to_ascii_lowercase())
+        {
+            // Offered before and deleted since: the player's choice stands.
+            continue;
+        }
         if content && !absent {
             // Immutable pack content never adopts a file the player already placed.
             return Err(CoreError::new(ErrorCode::PackConflict));

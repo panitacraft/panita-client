@@ -6,6 +6,10 @@ import { acceptPlaySnapshot, playActive, type PlayPhase, type PlaySnapshot } fro
 import type { UpdateTarget } from './library-state';
 import { invokePlay, type PlayArguments, type PlayCommand } from './play-api';
 import { nativeCleanupSummary, nativeRetentionReason, type NativeCleanupReport } from './native-cleanup-state';
+import {
+  backedUpSummary, conflictReasonText, conflictsResolvable, folderHint, manualHeading, reasonText, releasedSummary,
+  skippedSummary, updateConflictHeading, versionTitle, type VersionNames,
+} from './pack-state';
 
 type PlayContextValue = {
   snapshot: PlaySnapshot | null;
@@ -72,13 +76,15 @@ export function usePlaySnapshot() {
   return useContext(PlayContext)?.snapshot ?? null;
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean }) {
+export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [forceQuestion, setForceQuestion] = useState<string | null>(null);
   const [updateQuestion, setUpdateQuestion] = useState<(UpdateTarget & { backupWorlds: boolean }) | null>(null);
   const [uninstallQuestion, setUninstallQuestion] = useState(false);
+  const [names, setNames] = useState<VersionNames | null>(null);
+  const [lastBackup, setLastBackup] = useState(true);
   const [logError, setLogError] = useState<string | null>(null);
   const [cleanupText, setCleanupText] = useState<string | null>(null);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
@@ -126,15 +132,15 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       ? `Minecraft se cerró de forma inesperada.${entry.exitCode !== null ? ` Código: ${entry.exitCode}.` : ''}`
       : entry.operation === 'install' && entry.phase === 'failed' ? 'No pudimos completar la instalación.'
       : entry.operation === 'install' && entry.phase === 'cancelled' ? 'Instalación cancelada. Puedes reintentarla.'
-      : entry.operation === 'update' && entry.phase === 'installing' ? 'Preparando la actualización. La versión instalada se conserva hasta completar la preparación.'
+      : entry.operation === 'update' && entry.phase === 'installing' ? (pack ? 'Actualizando el modpack. Si algo falla, volvemos a la versión instalada.' : 'Preparando la actualización. La versión instalada se conserva hasta completar la preparación.')
       : entry.operation === 'update' && entry.phase === 'installed' ? 'Actualización completa. Ya puedes jugar.'
       : entry.operation === 'update' && entry.phase === 'failed' ? 'No pudimos completar la actualización.'
       : entry.operation === 'update' && entry.phase === 'cancelled' ? 'Actualización cancelada.'
-      : entry.operation === 'repair' && entry.phase === 'installing' ? 'Reparando los archivos de la versión registrada…'
+      : entry.operation === 'repair' && entry.phase === 'installing' ? (pack ? 'Reparando los archivos de la versión instalada del modpack…' : 'Reparando los archivos de la versión registrada…')
       : entry.operation === 'repair' && entry.phase === 'installed' ? 'Reparación completa. Ya puedes jugar.'
       : entry.operation === 'repair' && entry.phase === 'failed' ? 'No pudimos completar la reparación.'
       : entry.operation === 'repair' && entry.phase === 'cancelled' ? 'Reparación cancelada.'
-      : entry.operation === 'uninstall' && entry.phase === 'installing' ? 'Desinstalando y conservando tus datos…'
+      : entry.operation === 'uninstall' && entry.phase === 'installing' ? (pack ? 'Quitando los archivos del modpack que no modificaste…' : 'Desinstalando y conservando tus datos…')
       : entry.operation === 'uninstall' && entry.phase === 'failed' ? 'No pudimos completar la desinstalación. Conservamos los archivos restantes para recuperar la operación.'
       : entry.operation === 'uninstall' && entry.phase === 'cancelled' ? 'Desinstalación cancelada.'
       : entry.operation === 'uninstall' && entry.phase === 'uninstalled' && (entry.nativeCleanup?.retainedGenerations ?? 0) > 0 ? 'La instancia está desinstalada. La limpieza de nativos sigue pendiente.'
@@ -157,8 +163,42 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       ? `Copia de mundos guardada en la carpeta de esta instancia: world-backups/${entry.backupOperation}/worlds.zip.`
       : entry.backupRequested ? 'No había mundos locales para copiar.' : 'Actualizaste sin crear una copia de mundos.'}</p>}
     {entry?.error && entry.error !== 'operation_cancelled' && <p className="account-error" role="alert">{messageForError(entry.error)}</p>}
+    {!active && entry?.operation === 'update' && entry.error === 'pack_conflict' && (entry.packConflicts?.length ?? 0) > 0 && updateTarget && <fieldset className="catalog-notice">
+      <legend>{updateConflictHeading(entry.packConflicts?.length ?? 0)}</legend>
+      <p>No cambiamos nada: tu instalación sigue como estaba.</p>
+      <ul>{(entry.packConflicts ?? []).map(conflict => <li key={conflict.path}><code>{conflict.path}</code>: {conflictReasonText(conflict.reason)}</li>)}</ul>
+      {conflictsResolvable(entry.packConflicts ?? [])
+        ? <>
+          <p>Si continúas, movemos tus archivos a la carpeta <code>pack-backups</code> de esta instancia (no los borramos) e instalamos los del modpack.</p>
+          <div className="account-buttons">
+            <button type="button" disabled={busy || !isTauri()} onClick={() => void act('begin_update', { requestId: crypto.randomUUID(), update: { from_version: updateTarget.fromVersion, to_version: updateTarget.toVersion, backup_worlds: lastBackup, move_aside: true } })}>Continuar y guardar mis archivos</button>
+          </div>
+        </>
+        : <p>Mueve esa carpeta o enlace fuera de la instancia y vuelve a actualizar.</p>}
+    </fieldset>}
+    {!active && entry?.operation === 'update' && entry.error === 'manual_files_required' && (entry.packAwaiting?.length ?? 0) > 0 && updateTarget && <fieldset className="catalog-notice">
+      <legend>{manualHeading(entry.packAwaiting?.length ?? 0)}</legend>
+      <p>No cambiamos nada. Descarga estos archivos, guárdalos en la carpeta indicada y vuelve a pulsar «Actualizar…».</p>
+      <ul>{(entry.packAwaiting ?? []).map(file => <li key={file.path}>
+        <strong>{file.name}</strong> (<code>{file.fileName}</code>)
+        <p>{reasonText(file.reason)} {folderHint(file)}</p>
+        <div className="account-buttons">
+          <button type="button" disabled={busy || !isTauri()} onClick={() => void invoke('open_curseforge_project', { projectId: file.projectId }).catch(cause => setLogError(messageForError(cause)))}>Abrir CurseForge</button>
+          <button type="button" disabled={busy || !isTauri()} onClick={() => void invoke('open_instance_folder', { instanceId, folder: file.folder }).catch(cause => setLogError(messageForError(cause)))}>Abrir carpeta</button>
+        </div>
+      </li>)}</ul>
+    </fieldset>}
+    {!active && (entry?.operation === 'update' || entry?.operation === 'repair') && entry.phase === 'installed' && ((entry.packSkipped?.length ?? 0) > 0 || (entry.packReleased?.length ?? 0) > 0 || (entry.packBackedUp?.length ?? 0) > 0) && <div role="status">
+      {(entry.packSkipped?.length ?? 0) > 0 && <p>{skippedSummary(entry.packSkipped ?? [])}</p>}
+      {(entry.packReleased?.length ?? 0) > 0 && <p>{releasedSummary(entry.packReleased ?? [])}</p>}
+      {(entry.packBackedUp?.length ?? 0) > 0 && <>
+        <p>{backedUpSummary(entry.packBackedUp ?? [])}</p>
+        <button type="button" disabled={busy || !isTauri()} onClick={() => void invoke('open_instance_folder', { instanceId, folder: 'pack-backups' }).catch(cause => setLogError(messageForError(cause)))}>Abrir copias de archivos</button>
+      </>}
+    </div>}
     {entry?.phase === 'warning' && <div className="catalog-notice" role="alert">
       <p>No pudimos comprobar si esta instancia sigue habilitada. Usaremos la instalación local verificada. Si usas una cuenta Microsoft, necesitas conexión para verificarla.</p>
+      {pack && <p>Tampoco podemos comprobar si hay una versión más nueva del modpack, así que esta instalación puede estar desactualizada.</p>}
       <div className="account-buttons">
         <button type="button" disabled={busy || !entry.confirmationId} onClick={() => { if (entry.confirmationId) void act('confirm_play', { requestId: entry.requestId, confirmationId: entry.confirmationId }); }}>Jugar de todos modos</button>
         <button type="button" disabled={busy} onClick={() => void act('cancel_play', { requestId: entry.requestId })}>Cancelar</button>
@@ -181,8 +221,15 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       </div>}
     </>}
     {!active && installAllowed && entry?.phase !== 'installed' && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}>{entry?.operation === 'install' ? 'Reintentar instalación' : 'Instalar'}</button>}
-    {!active && !installAllowed && <button type="button" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}>{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</button>}
-    {!active && updateTarget && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUpdateQuestion({ ...updateTarget, backupWorlds: true })}>Actualizar…</button>}
+    {!active && !installAllowed && !updateTarget?.pack && <button type="button" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}>{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</button>}
+    {!active && updateTarget?.pack && <p role="status">Hay una versión nueva de este modpack. Debes actualizarla antes de jugar.</p>}
+    {!active && updateTarget && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {
+      setUpdateQuestion({ ...updateTarget, backupWorlds: true });
+      if (updateTarget.pack) {
+        setNames(null);
+        void invoke<VersionNames>('pack_version_names', { instanceId }).then(setNames).catch(() => setNames(null));
+      }
+    }}>Actualizar…</button>}
     {!active && repairAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_repair', { requestId: crypto.randomUUID() })}>Reparar archivos</button>}
     {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void cleanNatives()}>Limpiar nativos antiguos</button>}
     {cleanupText && <p role="status">{cleanupText}</p>}
@@ -193,7 +240,9 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     {!active && uninstallAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUninstallQuestion(true)}>Desinstalar…</button>}
     {!active && uninstallQuestion && <fieldset className="catalog-notice">
       <legend>Desinstalar conservando mis datos</legend>
-      <p>Quitaremos esta instalación de las disponibles para jugar y eliminaremos todas sus carpetas nativas, incluidos archivos antiguos, modificados o añadidos allí. Conservaremos tus mundos, ajustes, capturas y copias de mundos en la carpeta de Minecraft. Los archivos compartidos de Minecraft y Java también se conservan.</p>
+      {pack
+        ? <p>Quitaremos esta instalación de las disponibles para jugar y eliminaremos solo los mods, packs de recursos y shaders del modpack que no hayas modificado. Conservaremos tus mundos, capturas, tu configuración, los archivos que modificaste o añadiste tú y tus copias de mundos. También eliminaremos las carpetas nativas de esta instancia. Los archivos compartidos de Minecraft y Java también se conservan.</p>
+        : <p>Quitaremos esta instalación de las disponibles para jugar y eliminaremos todas sus carpetas nativas, incluidos archivos antiguos, modificados o añadidos allí. Conservaremos tus mundos, ajustes, capturas y copias de mundos en la carpeta de Minecraft. Los archivos compartidos de Minecraft y Java también se conservan.</p>}
       <p>Puedes reinstalar esta instancia cuando esté habilitada en el catálogo. Esta acción no elimina todos sus archivos ni libera el espacio de las cachés compartidas.</p>
       <div className="account-buttons">
         <button type="button" disabled={busy} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID() }); }}>Confirmar desinstalación</button>
@@ -201,7 +250,8 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       </div>
     </fieldset>}
     {!active && updateQuestion && <fieldset className="catalog-notice">
-      <legend>Actualizar de Minecraft {updateQuestion.fromVersion} a {updateQuestion.toVersion}</legend>
+      <legend>{updateQuestion.pack ? versionTitle(names, updateQuestion.fromVersion, updateQuestion.toVersion) : `Actualizar de Minecraft ${updateQuestion.fromVersion} a ${updateQuestion.toVersion}`}</legend>
+      {updateQuestion.pack && <p>Cambiaremos solo los archivos del modpack que no hayas modificado. Conservamos los mods que añadiste, tu configuración editada y tus mundos. Si algún archivo tuyo estorba, te lo mostraremos antes de cambiar nada.</p>}
       <p>Una versión nueva puede modificar tus mundos cuando los abras. Volver a los archivos de una versión anterior no recupera los cambios en tus mundos.</p>
       <label><input type="radio" name={`${instanceId}-backup`} checked={updateQuestion.backupWorlds} onChange={() => setUpdateQuestion({ ...updateQuestion, backupWorlds: true })} /> Crear una copia de mis mundos antes de actualizar (recomendado)</label>
       <label><input type="radio" name={`${instanceId}-backup`} checked={!updateQuestion.backupWorlds} onChange={() => setUpdateQuestion({ ...updateQuestion, backupWorlds: false })} /> Actualizar sin copia de mundos</label>
@@ -209,6 +259,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         <button type="button" disabled={busy} onClick={() => {
           const choice = updateQuestion;
           setUpdateQuestion(null);
+          setLastBackup(choice.backupWorlds);
           void act('begin_update', { requestId: crypto.randomUUID(), update: { from_version: choice.fromVersion, to_version: choice.toVersion, backup_worlds: choice.backupWorlds } });
         }}>Confirmar actualización</button>
         <button type="button" disabled={busy} onClick={() => setUpdateQuestion(null)}>Conservar versión instalada</button>

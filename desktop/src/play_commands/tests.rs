@@ -473,6 +473,8 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
             "packAwaiting",
             "packSkipped",
             "packConflicts",
+            "packBackedUp",
+            "packReleased",
         ];
         expected.sort_unstable();
         assert_eq!(keys, expected);

@@ -9,17 +9,18 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha512};
 use std::collections::BTreeMap;
 
-const BASE: &str = "/data/project/versions/version/";
-const ARCHIVE: &str = "/storage/v1/object/public/modpacks/by-hash/sha256-abc/defaults.zip";
+pub(super) const BASE: &str = "/data/project/versions/version/";
+pub(super) const ARCHIVE: &str =
+    "/storage/v1/object/public/modpacks/by-hash/sha256-abc/defaults.zip";
 
-struct World {
-    paths: AppPaths,
-    id: Uuid,
-    root: std::path::PathBuf,
-    base: InstalledLock,
+pub(super) struct World {
+    pub(super) paths: AppPaths,
+    pub(super) id: Uuid,
+    pub(super) root: std::path::PathBuf,
+    pub(super) base: InstalledLock,
 }
 
-fn world() -> World {
+pub(super) fn world() -> World {
     let (paths, accounts, id) = fixture();
     drop(accounts);
     complete_installation(&paths, id);
@@ -35,7 +36,7 @@ fn world() -> World {
     }
 }
 
-fn mod_json(path: &str, body: &[u8]) -> Value {
+pub(super) fn mod_json(path: &str, body: &[u8]) -> Value {
     let name = path.rsplit('/').next().unwrap_or_default();
     json!({"type": if path.starts_with("mods/") { "mod" } else if path.starts_with("shaderpacks/") { "shaderpack" } else { "resourcepack" },
         "source": "modrinth", "path": path, "name": name,
@@ -45,7 +46,7 @@ fn mod_json(path: &str, body: &[u8]) -> Value {
         "size": body.len()})
 }
 
-fn curseforge_json(path: &str, body: &[u8], manual: bool) -> Value {
+pub(super) fn curseforge_json(path: &str, body: &[u8], manual: bool) -> Value {
     let mut value = json!({"type": "mod", "source": "curseforge", "path": path, "name": "CrazyPhone",
         "env": {"client": "required", "server": "required"},
         "hashes": {"sha1": format!("{:x}", Sha1::digest(body))}, "size": body.len(),
@@ -58,12 +59,12 @@ fn curseforge_json(path: &str, body: &[u8], manual: bool) -> Value {
     value
 }
 
-fn archive_json(bytes: &[u8]) -> Value {
+pub(super) fn archive_json(bytes: &[u8]) -> Value {
     json!({"url": format!("https://jqleaywgcoedgvglrvhc.supabase.co{ARCHIVE}"),
         "sha256": format!("{:x}", Sha256::digest(bytes)), "size": bytes.len()})
 }
 
-fn manifest(id: Uuid, files: Vec<Value>, defaults: Option<Value>) -> Manifest {
+pub(super) fn manifest(id: Uuid, files: Vec<Value>, defaults: Option<Value>) -> Manifest {
     let version = Uuid::new_v4();
     let document = json!({"data": {
         "instance_id": id, "version_id": version, "number": 2, "label": "0.2",
@@ -74,14 +75,14 @@ fn manifest(id: Uuid, files: Vec<Value>, defaults: Option<Value>) -> Manifest {
         .unwrap_or_else(|_| panic!("manifest"))
 }
 
-fn server(routes: BTreeMap<String, Vec<u8>>) -> Server {
+pub(super) fn server(routes: BTreeMap<String, Vec<u8>>) -> Server {
     Server::start(move |request| match routes.get(&request.path) {
         Some(body) => Reply::ok(body.clone()),
         None => Reply::status(404),
     })
 }
 
-async fn run(
+pub(super) async fn run(
     world: &World,
     manifest: &Manifest,
     server: &Server,
@@ -101,30 +102,30 @@ async fn run(
     .await
 }
 
-fn read(world: &World, path: &str) -> Vec<u8> {
+pub(super) fn read(world: &World, path: &str) -> Vec<u8> {
     std::fs::read(world.root.join("minecraft").join(path)).unwrap_or_default()
 }
 
-fn exists(world: &World, path: &str) -> bool {
+pub(super) fn exists(world: &World, path: &str) -> bool {
     world.root.join("minecraft").join(path).exists()
 }
 
-fn installed(world: &World) -> Option<InstalledLock> {
+pub(super) fn installed(world: &World) -> Option<InstalledLock> {
     read_json::<InstalledLock>(&world.root, "installed.json").unwrap_or_default()
 }
 
-fn state(world: &World) -> Option<InstallationState> {
+pub(super) fn state(world: &World) -> Option<InstallationState> {
     InstanceRegistry::new(world.paths.clone())
         .get(world.id)
         .unwrap_or_default()
         .map(|record| record.state)
 }
 
-fn cleanup(world: &World) {
+pub(super) fn cleanup(world: &World) {
     let _ = std::fs::remove_dir_all(world.paths.root());
 }
 
-fn code<T>(result: Result<T, CoreError>) -> Option<ErrorCode> {
+pub(super) fn code<T>(result: Result<T, CoreError>) -> Option<ErrorCode> {
     result.err().map(|error| error.code())
 }
 
@@ -200,7 +201,7 @@ async fn a_pack_installs_content_defaults_and_publishes_schema_five() {
 }
 
 /// Another empty game directory under the same data root shares its cache.
-fn world_copy(world: &World) -> World {
+pub(super) fn world_copy(world: &World) -> World {
     let other = world.root.join("other-instance");
     assert!(private_fs::PrivateDir::ensure(&other).is_ok());
     assert!(private_fs::PrivateDir::ensure(other.join("minecraft")).is_ok());
@@ -632,7 +633,12 @@ async fn plan_for(
     .await?;
     let inspected = mrpack::inspect(&world.paths, &expected, &cancel)?;
     Plan::mrpack(
-        catalog, "project", "version", &artifact, expected, inspected,
+        Some(catalog),
+        "project",
+        "version",
+        &artifact,
+        expected,
+        inspected,
     )
 }
 

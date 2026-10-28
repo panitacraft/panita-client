@@ -1,5 +1,5 @@
 use super::*;
-use sha1::{Digest as _, Sha1};
+use sha1::Sha1;
 use sha2::Sha512;
 
 pub(crate) fn game() -> (std::path::PathBuf, GameDir) {
@@ -182,5 +182,108 @@ fn only_regular_files_are_removed() {
     assert_eq!(game.entry("mods/a.jar").ok(), Some(Entry::Absent));
     assert!(game.remove_file("mods/a.jar").is_ok());
     assert!(game.remove_file("shaderpacks/none.zip").is_ok());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn fingerprints_report_absent_files_unsafe_nodes_and_exact_hashes() {
+    let (root, game) = game();
+    let cancel = Cancellation::default();
+    assert_eq!(
+        game.fingerprint("mods/a.jar", &cancel).ok(),
+        Some(Local::Absent)
+    );
+    assert!(
+        game.write_new("mods/a.jar", |w| w.write_all(b"bytes").map_err(io))
+            .is_ok()
+    );
+    let wanted = expected(b"bytes");
+    assert_eq!(
+        game.fingerprint("mods/a.jar", &cancel).ok(),
+        Some(Local::File(Hashes {
+            sha1: wanted.sha1,
+            sha512: wanted.sha512
+        }))
+    );
+    assert!(std::fs::create_dir_all(root.join("minecraft/folder")).is_ok());
+    assert_eq!(
+        game.fingerprint("folder", &cancel).ok(),
+        Some(Local::Unsafe)
+    );
+    let stopped = Cancellation::default();
+    stopped.cancel();
+    assert!(game.fingerprint("mods/a.jar", &stopped).is_err());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn a_file_moves_into_the_stash_and_back_without_replacing_anything() {
+    let (root, game) = game();
+    let operation = Uuid::new_v4();
+    let stash =
+        Stash::open(&root, ".pack-transaction", operation).unwrap_or_else(|_| panic!("stash"));
+    assert!(
+        game.write_new("mods/a.jar", |w| w.write_all(b"old").map_err(io))
+            .is_ok()
+    );
+    // Nothing to move for an absent path.
+    assert_eq!(game.stash("mods/none.jar", &stash).ok(), Some(false));
+    assert_eq!(game.stash("mods/a.jar", &stash).ok(), Some(true));
+    assert_eq!(game.entry("mods/a.jar").ok(), Some(Entry::Absent));
+    assert_eq!(stash.has("mods/a.jar").ok(), Some(true));
+    assert_eq!(
+        std::fs::read(
+            root.join(".pack-transaction")
+                .join(operation.to_string())
+                .join("mods/a.jar")
+        )
+        .unwrap_or_default(),
+        b"old"
+    );
+    // The stash never overwrites an earlier entry, and a restore never replaces a new file.
+    assert!(
+        game.write_new("mods/a.jar", |w| w.write_all(b"new").map_err(io))
+            .is_ok()
+    );
+    assert_eq!(
+        code(game.restore("mods/a.jar", &stash)),
+        Some(ErrorCode::PackConflict)
+    );
+    assert_eq!(
+        code(game.stash("mods/a.jar", &stash)),
+        Some(ErrorCode::PackConflict)
+    );
+    assert!(game.remove_file("mods/a.jar").is_ok());
+    assert_eq!(game.restore("mods/a.jar", &stash).ok(), Some(true));
+    assert_eq!(
+        std::fs::read(root.join("minecraft/mods/a.jar")).unwrap_or_default(),
+        b"old"
+    );
+    assert_eq!(stash.has("mods/a.jar").ok(), Some(false));
+    assert_eq!(game.restore("mods/a.jar", &stash).ok(), Some(false));
+
+    // A folder is not a file and is never moved.
+    assert!(std::fs::create_dir_all(root.join("minecraft/folder")).is_ok());
+    assert_eq!(
+        code(game.stash("folder", &stash)),
+        Some(ErrorCode::PackConflict)
+    );
+    // Reopening finds the same stash. Discarding needs every handle closed, which
+    // Windows enforces, and removes the folder with its contents.
+    drop(stash);
+    assert!(
+        Stash::existing(&root, ".pack-transaction", operation)
+            .ok()
+            .flatten()
+            .is_some()
+    );
+    assert!(Stash::discard(&root, ".pack-transaction", operation).is_ok());
+    assert!(
+        Stash::existing(&root, ".pack-transaction", operation)
+            .ok()
+            .flatten()
+            .is_none()
+    );
+    assert!(Stash::discard(&root, ".pack-transaction", operation).is_ok());
     let _ = std::fs::remove_dir_all(&root);
 }

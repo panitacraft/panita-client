@@ -19,7 +19,9 @@ export type PlayEntry = {
   packProgress?: import('./pack-state').PackProgress | null;
   packAwaiting?: import('./pack-state').PackFile[];
   packSkipped?: string[] | null;
-  packConflicts?: string[] | null;
+  packConflicts?: import('./pack-state').PackConflict[] | null;
+  packBackedUp?: string[] | null;
+  packReleased?: string[] | null;
 };
 export type PlaySnapshot = {
   revision: number;

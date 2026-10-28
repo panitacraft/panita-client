@@ -14,6 +14,7 @@ pub mod archive;
 pub mod cache;
 pub mod config;
 pub mod content;
+pub mod diff;
 pub mod gamefs;
 pub mod install;
 pub mod manual;

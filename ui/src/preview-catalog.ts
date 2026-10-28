@@ -11,7 +11,18 @@ export interface CatalogInstance {
   compatible: boolean;
   supported: boolean;
   minLauncherVersion: string | null;
-  source?: { type: string; label?: string | null; loader?: string | null };
+  source?: PackSource;
+  /** What the installation was made from; for a pack, its recorded pin. */
+  installedSource?: PackSource | null;
+}
+
+export interface PackSource {
+  type: string;
+  label?: string | null;
+  loader?: string | null;
+  current_version_id?: string | null;
+  pack_version_id?: string | null;
+  project_id?: string | null;
 }
 
 export interface CatalogOverview {

@@ -24,6 +24,9 @@ pub struct UpdateRequest {
     pub from_version: String,
     pub to_version: String,
     pub backup_worlds: bool,
+    /// Packs only: continue past conflicts by moving the player's files aside.
+    #[serde(default)]
+    pub move_aside: bool,
 }
 
 pub struct UpdateOutcome {

@@ -116,7 +116,21 @@ impl Phase {
 struct PackResult {
     awaiting: Vec<launcher_core::modpack::manual::PendingFile>,
     skipped: Vec<String>,
-    conflicts: Vec<String>,
+    conflicts: Vec<launcher_core::modpack::diff::Conflict>,
+    /// Player files an update or repair moved to the permanent pack backups.
+    backed_up: Vec<String>,
+    /// Pack files that stopped being managed and stay as the player's.
+    released: Vec<String>,
+}
+
+fn occupied(paths: Vec<String>) -> Vec<launcher_core::modpack::diff::Conflict> {
+    paths
+        .into_iter()
+        .map(|path| launcher_core::modpack::diff::Conflict {
+            path,
+            reason: launcher_core::modpack::diff::Reason::Occupied,
+        })
+        .collect()
 }
 
 struct Entry {
@@ -486,6 +500,8 @@ impl PlayController {
                     "packAwaiting": entry.pack.as_ref().map(|p| super::pack_commands::files_json(&p.awaiting)).unwrap_or(json!([])),
                     "packSkipped": entry.pack.as_ref().map(|p| &p.skipped),
                     "packConflicts": entry.pack.as_ref().map(|p| &p.conflicts),
+                    "packBackedUp": entry.pack.as_ref().map(|p| &p.backed_up),
+                    "packReleased": entry.pack.as_ref().map(|p| &p.released),
                 })
             })
             .collect();
@@ -1074,6 +1090,91 @@ fn begin_maintenance(
                     progress_controller.publish(&progress_app);
                 }
             });
+            let is_pack = launcher_core::modpack::install::is_pack(&paths, instance_id)
+                .map_err(|error| error.code())?;
+            if is_pack && kind != OperationKind::Install {
+                use launcher_core::modpack::install::{
+                    UpdateOutcome, UpdateRequest as PackUpdateRequest, repair_pack, update_pack,
+                };
+                let pack_controller = controller.clone();
+                let pack_app = app.clone();
+                let pack_progress = Arc::new(move |progress| {
+                    if pack_controller.pack_progress(instance_id, request_id, progress) {
+                        pack_controller.publish(&pack_app);
+                    }
+                });
+                if kind == OperationKind::Repair {
+                    let report = repair_pack(
+                        &paths,
+                        instance_id,
+                        platform,
+                        &cancel,
+                        progress,
+                        pack_progress,
+                        credentials.clone(),
+                    )
+                    .await
+                    .map_err(|error| error.code())?;
+                    controller.update(instance_id, request_id, |entry| {
+                        entry.pack = Some(PackResult {
+                            backed_up: report.backed_up,
+                            ..PackResult::default()
+                        });
+                    });
+                    return Ok((None, 0, None));
+                }
+                let update = update.ok_or(ErrorCode::InvalidData)?;
+                let outcome = update_pack(
+                    &paths,
+                    instance_id,
+                    platform,
+                    PackUpdateRequest {
+                        from_version: update.from_version,
+                        to_version: update.to_version,
+                        backup_worlds: update.backup_worlds,
+                        move_aside: update.move_aside,
+                    },
+                    &cancel,
+                    progress,
+                    pack_progress,
+                    credentials.clone(),
+                )
+                .await
+                .map_err(|error| error.code())?;
+                return match outcome {
+                    // Nothing was changed: the player decides, then asks again.
+                    UpdateOutcome::Blocked(blocked) => {
+                        let error = if blocked.conflicts.is_empty() {
+                            ErrorCode::ManualFilesRequired
+                        } else {
+                            ErrorCode::PackConflict
+                        };
+                        controller.update(instance_id, request_id, |entry| {
+                            entry.pack = Some(PackResult {
+                                awaiting: blocked.files,
+                                conflicts: blocked.conflicts,
+                                ..PackResult::default()
+                            });
+                        });
+                        Err(error)
+                    }
+                    UpdateOutcome::Updated(report) => {
+                        controller.update(instance_id, request_id, |entry| {
+                            entry.pack = Some(PackResult {
+                                skipped: report.skipped_configuration,
+                                backed_up: report.backed_up,
+                                released: report.released,
+                                ..PackResult::default()
+                            });
+                        });
+                        Ok((
+                            report.backup.map(|backup| backup.operation),
+                            0,
+                            report.native_cleanup,
+                        ))
+                    }
+                };
+            }
             if kind == OperationKind::Repair {
                 let outcome = launcher_core::minecraft::maintenance::repair(
                     &paths,
@@ -1128,7 +1229,7 @@ fn begin_maintenance(
                     Installed::Pack(Outcome::Conflicts(conflicts)) => {
                         controller.update(instance_id, request_id, |entry| {
                             entry.pack = Some(PackResult {
-                                conflicts,
+                                conflicts: occupied(conflicts),
                                 ..PackResult::default()
                             });
                         });
@@ -1139,7 +1240,7 @@ fn begin_maintenance(
                             entry.pack = Some(PackResult {
                                 awaiting: report.awaiting,
                                 skipped: report.skipped_configuration,
-                                conflicts: Vec::new(),
+                                ..PackResult::default()
                             });
                         });
                     }

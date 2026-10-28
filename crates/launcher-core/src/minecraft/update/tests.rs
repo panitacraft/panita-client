@@ -407,6 +407,7 @@ async fn updates_require_a_current_enabled_catalog_pin_and_do_not_fall_back_offl
                 from_version: "26.3".into(),
                 to_version: TARGET.into(),
                 backup_worlds: true,
+                move_aside: false,
             },
             &Cancellation::default(),
             Arc::new(|_| {}),

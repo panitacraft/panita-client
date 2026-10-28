@@ -70,3 +70,32 @@ test('a pack waiting for manual files is not an active operation and triggers a 
   const newer = snapshot([entry('awaiting_files', 'r1')], 5);
   assert.equal(acceptPlaySnapshot(newer, snapshot([entry('installing', 'r1')], 4)), newer);
 });
+
+test('update conflicts explain each reason and only offer to move files aside when that can work', async () => {
+  const state = await import('../src/pack-state.ts');
+  for (const reason of ['edited', 'occupied', 'blocked']) assert.ok(state.conflictReasonText(reason).length > 10);
+  assert.equal(state.conflictReasonText('something else'), 'Este archivo estorba.');
+  assert.equal(state.conflictsResolvable([]), false);
+  assert.equal(state.conflictsResolvable([{ path: 'mods/a.jar', reason: 'edited' }, { path: 'mods/b.jar', reason: 'occupied' }]), true);
+  assert.equal(state.conflictsResolvable([{ path: 'mods/a.jar', reason: 'edited' }, { path: 'mods/b.jar', reason: 'blocked' }]), false);
+  assert.match(state.updateConflictHeading(1), /1 archivo tuyo/);
+  assert.match(state.updateConflictHeading(3), /3 archivos tuyos/);
+});
+
+test('version titles name both versions and shorten raw identifiers', async () => {
+  const state = await import('../src/pack-state.ts');
+  assert.equal(state.versionTitle({ installed: '0.1', available: '0.2' }, 'a', 'b'), 'Actualizar el modpack de 0.1 a 0.2');
+  assert.equal(state.versionTitle(null, 'v1', 'v2'), 'Actualizar el modpack de v1 a v2');
+  assert.equal(
+    state.versionTitle({ installed: null, available: null }, '04ac0877-11a5-4de2-9a41-a41dbb44f1ee', '9f3c1d2e-aaaa-bbbb-cccc-111122223333'),
+    'Actualizar el modpack de 04ac0877… a 9f3c1d2e…',
+  );
+});
+
+test('summaries of backed up and released files use the right number', async () => {
+  const state = await import('../src/pack-state.ts');
+  assert.match(state.backedUpSummary(['mods/a.jar']), /1 archivo tuyo/);
+  assert.match(state.backedUpSummary(['a', 'b']), /2 archivos tuyos/);
+  assert.match(state.releasedSummary(['a']), /1 archivo que/);
+  assert.match(state.releasedSummary(['a', 'b']), /2 archivos que/);
+});

@@ -56,7 +56,30 @@ impl ModrinthClient {
         project: &str,
         version: &str,
     ) -> Result<PackArtifact, CoreError> {
-        if !pin(project) || !pin(version) {
+        if !pin(project) {
+            return Err(invalid());
+        }
+        let bytes = self.version_document(version).await?;
+        resolve_version(&bytes, project, version)
+    }
+
+    /// The readable version number of one version, for naming it to the player.
+    pub async fn version_number(&self, version: &str) -> Result<String, CoreError> {
+        #[derive(Deserialize)]
+        struct Named {
+            id: String,
+            version_number: String,
+        }
+        let bytes = self.version_document(version).await?;
+        let named: Named = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+        if named.id != version || !text(&named.version_number, 64) {
+            return Err(invalid());
+        }
+        Ok(named.version_number)
+    }
+
+    async fn version_document(&self, version: &str) -> Result<Vec<u8>, CoreError> {
+        if !pin(version) {
             return Err(invalid());
         }
         let mut response = self
@@ -94,7 +117,7 @@ impl ModrinthClient {
             }
             bytes.extend_from_slice(&chunk);
         }
-        resolve_version(&bytes, project, version)
+        Ok(bytes)
     }
 }
 
