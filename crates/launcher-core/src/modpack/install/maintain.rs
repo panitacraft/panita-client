@@ -213,7 +213,12 @@ fn source_of(pack: &PackState) -> CatalogSource {
 
 /// True when the instance's installation is a pack, tombstones included.
 pub fn is_pack(paths: &AppPaths, id: Uuid) -> Result<bool, CoreError> {
-    let root = paths.instance(id)?;
+    // An instance that was never installed has no directory yet and is not a pack.
+    let root = match paths.instance(id) {
+        Ok(root) => root,
+        Err(error) if error.code() == ErrorCode::InstanceMissing => return Ok(false),
+        Err(error) => return Err(error),
+    };
     Ok(read_json::<InstalledLock>(&root, "installed.json")?
         .is_some_and(|installed| installed.pack.is_some()))
 }
