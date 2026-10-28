@@ -370,6 +370,8 @@ pub async fn ensure_all(
     cancel: &Cancellation,
     progress: ProgressSink,
 ) -> Result<Vec<Ensured>, CoreError> {
+    // Free space is read from the data root, which a first run may not have created yet.
+    private_fs::PrivateDir::ensure(paths.root()).map_err(map_private_error)?;
     let mut missing = 0u64;
     for request in requests {
         cancel.check()?;
