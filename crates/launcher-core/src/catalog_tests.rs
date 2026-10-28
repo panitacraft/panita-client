@@ -221,12 +221,21 @@ fn catalog_sources_minimum_versions_and_disabled_states_are_not_installable() {
     assert!(parse_list(list(vec![raw.clone()]).as_bytes()).is_err());
     raw["modrinth_project_id"] = json!("fixture");
     raw["pack_version_id"] = json!("pinned");
-    raw["loader"] = json!("fabric");
-    let pack = parse_list(list(vec![raw]).as_bytes())
+    raw["loader"] = json!("liteloader");
+    let pack = parse_list(list(vec![raw.clone()]).as_bytes())
         .unwrap_or_else(|_| panic!("catalog"))
         .remove(0);
     assert!(matches!(pack.source, CatalogSource::Modrinth { .. }));
     assert!(pack.installation_allowed(&Version::new(9, 0, 0)).is_err());
+    // Pinned NeoForge packs install; a missing loader leaves the decision to the index.
+    for loader in [json!("neoforge"), Value::Null] {
+        let mut raw = raw.clone();
+        raw["loader"] = loader;
+        let pack = parse_list(list(vec![raw]).as_bytes())
+            .unwrap_or_else(|_| panic!("catalog"))
+            .remove(0);
+        assert!(pack.installation_allowed(&Version::new(9, 0, 0)).is_ok());
+    }
 }
 
 #[tokio::test]

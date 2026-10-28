@@ -810,6 +810,90 @@ fn only_other_published_pack_versions_require_an_update() {
     assert!(require_current_pack(&vanilla, &vanilla).is_ok());
 }
 
+fn modrinth(project: &str, version: &str, loader: Option<&str>) -> CatalogSource {
+    CatalogSource::Modrinth {
+        project_id: project.into(),
+        pack_version_id: version.into(),
+        loader: loader.map(str::to_owned),
+    }
+}
+
+#[test]
+fn a_changed_modrinth_pin_requires_an_update_but_the_same_pin_does_not() {
+    let pin = |version| modrinth("project", version, Some("neoforge"));
+    assert!(require_current_pack(&pin("v1"), &pin("v1")).is_ok());
+    let newer = require_current_pack(&pin("v1"), &pin("v2"));
+    assert_eq!(
+        newer.err().map(|e| e.code()),
+        Some(ErrorCode::UpdateRequired)
+    );
+    // Another project under the same instance is not the installed pack either.
+    let moved = require_current_pack(&pin("v1"), &modrinth("other", "v1", None));
+    assert_eq!(
+        moved.err().map(|e| e.code()),
+        Some(ErrorCode::UpdateRequired)
+    );
+}
+
+fn state_for(source: crate::modpack::state::PackIdentity, loader: &str) -> PackState {
+    PackState {
+        schema: 1,
+        id: Uuid::new_v4(),
+        source,
+        minecraft_version: "1.21.1".into(),
+        loader: loader.into(),
+        loader_version: "21.1.248".into(),
+        files: Vec::new(),
+        consumed_defaults: Default::default(),
+        skipped_configuration: Vec::new(),
+        pending: Vec::new(),
+    }
+}
+
+#[test]
+fn an_installed_pack_must_be_the_one_the_catalog_pins_in_the_same_format() {
+    use crate::modpack::state::PackIdentity;
+    let installed = state_for(
+        PackIdentity::Modrinth {
+            project_id: "project".into(),
+            version_id: "v1".into(),
+            archive_sha512: "a".repeat(128),
+            index_sha256: "b".repeat(64),
+        },
+        "neoforge",
+    );
+    assert!(pack_matches(
+        &modrinth("project", "v1", Some("neoforge")),
+        &installed
+    ));
+    assert!(pack_matches(&modrinth("project", "v1", None), &installed));
+    // Another version, project, loader, or a differently sourced pack is refused.
+    for source in [
+        modrinth("project", "v2", None),
+        modrinth("other", "v1", None),
+        modrinth("project", "v1", Some("fabric")),
+        pack_catalog(Uuid::new_v4()).source,
+        local().source,
+    ] {
+        assert!(!pack_matches(&source, &installed));
+    }
+    let custom = state_for(
+        PackIdentity::Custom {
+            version_id: Uuid::new_v4(),
+            published_at: "2026-10-25T20:54:25Z".into(),
+            label: None,
+        },
+        "neoforge",
+    );
+    assert!(pack_matches(&pack_catalog(Uuid::new_v4()).source, &custom));
+    assert!(!pack_matches(&modrinth("project", "v1", None), &custom));
+    let other_loader = state_for(custom.source.clone(), "fabric");
+    assert!(!pack_matches(
+        &pack_catalog(Uuid::new_v4()).source,
+        &other_loader
+    ));
+}
+
 #[tokio::test]
 async fn account_validation_starts_with_the_audit_only_for_launches_without_a_warning() {
     let (paths, accounts, id) = fixture();

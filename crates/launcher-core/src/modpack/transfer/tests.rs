@@ -4,6 +4,7 @@ use crate::test_http::{Reply, Server};
 const MODRINTH: &str = "https://cdn.modrinth.com/data/project/versions/version/file.jar";
 const CURSEFORGE: &str = "https://edge.forgecdn.net/files/1234/5678/file.jar";
 const GITHUB: &str = "https://github.com/owner/repo/releases/download/tag/asset.jar";
+const RAW: &str = "https://raw.githubusercontent.com/owner/repo/main/file.jar";
 const UPLOAD: &str = "https://jqleaywgcoedgvglrvhc.supabase.co/storage/v1/object/public/modpacks/by-hash/sha256-abc/defaults.zip";
 
 pub(super) fn expected(body: &[u8]) -> Expected {
@@ -51,6 +52,7 @@ async fn every_origin_downloads_verified_bytes_without_credentials() {
         (MODRINTH, Origin::Modrinth, expected(&body)),
         (CURSEFORGE, Origin::Curseforge, sha1_only),
         (GITHUB, Origin::Github, expected(&body)),
+        (RAW, Origin::Mirror, expected(&body)),
         (UPLOAD, Origin::Upload, archive),
     ] {
         let bytes = fetch(&downloader, url, origin, &expected, &cancel).await;
@@ -213,6 +215,7 @@ async fn only_github_may_redirect() {
         (MODRINTH, Origin::Modrinth),
         (CURSEFORGE, Origin::Curseforge),
         (UPLOAD, Origin::Upload),
+        (RAW, Origin::Mirror),
     ] {
         assert_eq!(
             code(fetch(&downloader, url, origin, &expected(b"x"), &cancel).await),
@@ -220,7 +223,7 @@ async fn only_github_may_redirect() {
             "{url}"
         );
     }
-    assert_eq!(server.requests().len(), 3);
+    assert_eq!(server.requests().len(), 4);
 }
 
 #[tokio::test]

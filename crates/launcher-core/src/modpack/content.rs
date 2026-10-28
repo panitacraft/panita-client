@@ -95,6 +95,18 @@ pub struct Request {
     pub url: String,
     pub origin: Origin,
     pub expected: Expected,
+    /// Further mirrors, tried in order when the earlier ones cannot deliver
+    /// content that verifies. Each carries its own source policy.
+    pub fallbacks: Vec<(String, Origin)>,
+}
+
+/// A failed mirror may be replaced by the next one; cancellation, a full disk and
+/// local storage faults are not the mirror's fault and end the attempt.
+fn next_mirror(error: &CoreError) -> bool {
+    matches!(
+        error.code(),
+        ErrorCode::NetworkUnavailable | ErrorCode::ServiceUnavailable | ErrorCode::ArtifactMismatch
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,24 +184,27 @@ pub async fn ensure(
         progress(request.expected.size);
         return Ok(Ensured::Ready { reused: true });
     }
-    let fetched = downloader
-        .download(
-            &request.url,
-            &request.origin,
-            &request.expected,
-            cancel,
-            progress,
-            || directory.atomic_durable(&name).map_err(map_private_error),
-        )
-        .await?;
-    match fetched {
-        Fetch::Withdrawn => Ok(Ensured::Withdrawn),
-        Fetch::Done(file) => {
-            cancel.check()?;
-            file.commit().map_err(map_private_error)?;
-            Ok(Ensured::Ready { reused: false })
+    let sources = std::iter::once((&request.url, &request.origin))
+        .chain(request.fallbacks.iter().map(|(url, origin)| (url, origin)));
+    let mut failure = None;
+    for (url, origin) in sources {
+        let fetched = downloader
+            .download(url, origin, &request.expected, cancel, progress, || {
+                directory.atomic_durable(&name).map_err(map_private_error)
+            })
+            .await;
+        match fetched {
+            Ok(Fetch::Withdrawn) => return Ok(Ensured::Withdrawn),
+            Ok(Fetch::Done(file)) => {
+                cancel.check()?;
+                file.commit().map_err(map_private_error)?;
+                return Ok(Ensured::Ready { reused: false });
+            }
+            Err(error) if next_mirror(&error) => failure = Some(error),
+            Err(error) => return Err(error),
         }
     }
+    Err(failure.unwrap_or_else(invalid))
 }
 
 /// Verify a file the player supplied and publish it as a verified entry. The input

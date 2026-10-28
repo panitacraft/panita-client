@@ -60,7 +60,14 @@ impl Maven {
     #[cfg(test)]
     fn target(&self, url: &str) -> String {
         match &self.base {
-            Some(base) => format!("{base}/{}", url.strip_prefix(MAVEN_ROOT).unwrap_or(url)),
+            Some(base) => match url.strip_prefix(MAVEN_ROOT) {
+                Some(path) => format!("{base}/{path}"),
+                // Other hosts map onto the same loopback server by their path.
+                None => match url::Url::parse(url) {
+                    Ok(parsed) => format!("{base}{}", parsed.path()),
+                    Err(_) => url.to_owned(),
+                },
+            },
             None => url.to_owned(),
         }
     }
@@ -70,7 +77,7 @@ impl Maven {
         url.to_owned()
     }
 
-    async fn get(
+    pub(crate) async fn get(
         &self,
         url: &str,
         limit: usize,
@@ -192,7 +199,7 @@ pub async fn prepare_plan(
     .await?;
     let loader = super::generation::publish(paths, &processors, staged, cancel)?;
     base.schema_version = 2;
-    base.loader = Some(loader);
+    base.loader = Some(loader.into());
     base.validate()?;
     Ok(base)
 }

@@ -232,3 +232,63 @@ fn state_retains_deleted_defaults_and_separates_skipped_desired_content() {
     future["schema_version"] = json!(1);
     assert!(PackState::decode(future.to_string().as_bytes(), id).is_err());
 }
+
+#[test]
+fn mrpack_mirrors_are_classified_by_host_and_only_the_known_hosts_pass() {
+    for (url, origin) in [
+        (
+            "https://cdn.modrinth.com/data/p/versions/v/a.jar",
+            Origin::Modrinth,
+        ),
+        (
+            "https://github.com/owner/repo/releases/download/v1/a.jar",
+            Origin::Github,
+        ),
+        (
+            "https://raw.githubusercontent.com/owner/repo/main/a.jar",
+            Origin::Mirror,
+        ),
+        (
+            "https://gitlab.com/owner/repo/-/raw/main/a.jar",
+            Origin::Mirror,
+        ),
+        (
+            "https://gitlab.com/owner/repo/-/releases/v1/downloads/a.jar",
+            Origin::Mirror,
+        ),
+    ] {
+        assert_eq!(mrpack_origin(url).ok(), Some(origin), "{url}");
+    }
+    for refused in [
+        "http://cdn.modrinth.com/data/p/versions/v/a.jar",
+        "https://cdn.modrinth.com/data/p/files/v/a.jar",
+        "https://evil.example/data/p/versions/v/a.jar",
+        "https://github.com/owner/repo/archive/main.zip",
+        "https://raw.githubusercontent.com/owner/repo",
+        "https://gitlab.com/owner/repo/a.jar",
+        "https://gitlab.com/owner/repo/-/raw/main/a.jar?token=1",
+        "https://user:pass@raw.githubusercontent.com/owner/repo/main/a.jar",
+        "https://raw.githubusercontent.com:8443/owner/repo/main/a.jar",
+        "https://objects.githubusercontent.com/owner/repo/main/a.jar",
+    ] {
+        assert!(mrpack_origin(refused).is_err(), "{refused}");
+    }
+    // A public manifest can never claim the mrpack-only policy as its source.
+    assert!(serde_json::from_str::<Origin>("\"mirror\"").is_err());
+    assert!(serde_json::to_string(&Origin::Mirror).is_err());
+    // Every mirror an index lists keeps its own order and policy.
+    let file: MrpackFile = serde_json::from_value(json!({"path": "mods/a.jar",
+        "hashes": {"sha1": "a".repeat(40), "sha512": "b".repeat(128)},
+        "downloads": ["https://cdn.modrinth.com/data/p/versions/v/a.jar",
+            "https://raw.githubusercontent.com/owner/repo/main/a.jar"], "fileSize": 1}))
+    .unwrap_or_else(|_| panic!("file"));
+    assert_eq!(
+        file.sources()
+            .map(|sources| sources
+                .into_iter()
+                .map(|(_, origin)| origin)
+                .collect::<Vec<_>>())
+            .ok(),
+        Some(vec![Origin::Modrinth, Origin::Mirror])
+    );
+}

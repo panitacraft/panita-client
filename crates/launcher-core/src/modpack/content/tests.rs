@@ -26,6 +26,7 @@ fn request(name: &str, body: &[u8]) -> Request {
         url: format!("https://cdn.modrinth.com/data/project/versions/version/{name}"),
         origin: Origin::Modrinth,
         expected: expected(body),
+        fallbacks: Vec::new(),
     }
 }
 
@@ -163,6 +164,7 @@ async fn failed_and_withdrawn_transfers_publish_nothing_and_leave_no_partials() 
             sha512: None,
             ..expected(&body)
         },
+        fallbacks: Vec::new(),
     };
     assert_eq!(
         ensure(&paths, &downloader, &withdrawn, &cancel, &|_| {})
@@ -309,6 +311,7 @@ async fn many_files_report_progress_and_report_withdrawn_files() {
             sha512: None,
             ..expected(&gone)
         },
+        fallbacks: Vec::new(),
     });
     let last = Arc::new(Mutex::new(PackProgress::default()));
     let seen = last.clone();
@@ -376,4 +379,85 @@ async fn one_failure_aborts_the_batch_and_cancellation_is_honored() {
         Some(ErrorCode::OperationCancelled)
     );
     let _ = std::fs::remove_dir_all(paths.root());
+}
+
+#[tokio::test]
+async fn a_failing_mirror_falls_through_to_the_next_and_cancellation_does_not() {
+    let paths = root();
+    let cancel = Cancellation::default();
+    let body = b"mirrored content".to_vec();
+    let served = body.clone();
+    let server = Server::start(move |request| match request.path.as_str() {
+        // Verifiable but wrong bytes, then an overloaded host, then the real file.
+        "/data/project/versions/version/wrong.jar" => Reply::ok(b"someone else's bytes".to_vec()),
+        "/data/project/versions/version/busy.jar" => Reply::status(503),
+        "/owner/repo/main/good.jar" => Reply::ok(served.clone()),
+        _ => Reply::status(404),
+    });
+    let downloader = PackDownloader::for_tests(server.base());
+    let mirrored = Request {
+        url: "https://cdn.modrinth.com/data/project/versions/version/wrong.jar".into(),
+        origin: Origin::Modrinth,
+        expected: expected(&body),
+        fallbacks: vec![
+            (
+                "https://cdn.modrinth.com/data/project/versions/version/busy.jar".into(),
+                Origin::Modrinth,
+            ),
+            (
+                "https://raw.githubusercontent.com/owner/repo/main/good.jar".into(),
+                Origin::Mirror,
+            ),
+        ],
+    };
+    assert_eq!(
+        ensure(&paths, &downloader, &mirrored, &cancel, &|_| {})
+            .await
+            .ok(),
+        Some(Ensured::Ready { reused: false })
+    );
+    assert!(entry(&paths, &mirrored.expected).exists());
+    assert_eq!(partials(&paths, &mirrored.expected), 0);
+    let hits = |name: &str| {
+        server
+            .requests()
+            .iter()
+            .filter(|request| request.path.ends_with(name))
+            .count()
+    };
+    assert_eq!(
+        (hits("wrong.jar"), hits("busy.jar"), hits("good.jar")),
+        (2, 3, 1)
+    );
+
+    // With every mirror failing, the last error is reported and nothing is published.
+    let paths = root();
+    let hopeless = Request {
+        fallbacks: vec![(
+            "https://cdn.modrinth.com/data/project/versions/version/busy.jar".into(),
+            Origin::Modrinth,
+        )],
+        ..mirrored.clone()
+    };
+    let failed = ensure(&paths, &downloader, &hopeless, &cancel, &|_| {}).await;
+    assert_eq!(
+        failed.err().map(|error| error.code()),
+        Some(ErrorCode::NetworkUnavailable)
+    );
+    assert!(!entry(&paths, &hopeless.expected).exists());
+    assert_eq!(partials(&paths, &hopeless.expected), 0);
+
+    // A cancelled operation stops at once instead of trying the next mirror.
+    let paths = root();
+    let before = server.requests().len();
+    let stopped = Cancellation::default();
+    stopped.cancel();
+    assert_eq!(
+        ensure(&paths, &downloader, &mirrored, &stopped, &|_| {})
+            .await
+            .err()
+            .map(|error| error.code()),
+        Some(ErrorCode::OperationCancelled)
+    );
+    assert_eq!(server.requests().len(), before);
 }

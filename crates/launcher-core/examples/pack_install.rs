@@ -1,10 +1,11 @@
-//! Development validation harness for custom pack installation; not a product CLI.
+//! Development validation harness for pack installation; not a product CLI.
 //! It reads the public catalog without credentials and writes only inside the
 //! explicitly supplied, new, isolated root. It never reads account or session files.
 use std::sync::Arc;
 
 use launcher_core::{
     accounts::{AccountInfo, AccountKind, AccountRepository},
+    catalog::{CatalogInstance, CatalogSource},
     minecraft::{
         Platform,
         download::Cancellation,
@@ -14,7 +15,10 @@ use launcher_core::{
     },
     modpack::{
         gamefs::GameDir,
-        install::{Installed, Outcome, import_pending, install_any, pending_files, verify_files},
+        install::{
+            Installed, Outcome, import_pending, install_any, install_catalog, pending_files,
+            verify_files,
+        },
     },
     operation::{OperationId, ProcessSessionId},
     paths::AppPaths,
@@ -26,9 +30,11 @@ use launcher_core::{
 use uuid::Uuid;
 
 fn usage() -> Box<dyn std::error::Error> {
-    "usage: pack_install install <root> <instance> | pending <root> <instance> | \
+    "usage: pack_install install <root> <instance> | \
+     install-modrinth <root> <new-instance-uuid> <project> <version> [loader] | \
+     pending <root> <instance> | \
      import <root> <instance> <manifest-path> <file> | verify <root> <instance> | \
-     launch <root> <instance> <seconds> | play-flow <root> <instance> <seconds> | play-check <root> <instance>; <root> must be a new directory named phase-10-*"
+     launch <root> <instance> <seconds> | play-flow <root> <instance> <seconds> | play-check <root> <instance>; <root> must be a new directory named phase-10-* or phase-11-*"
         .into()
 }
 
@@ -44,8 +50,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    if !name.starts_with("phase-10-") {
-        return Err("expected an isolated phase-10-* scratch root".into());
+    if !name.starts_with("phase-10-") && !name.starts_with("phase-11-") {
+        return Err("expected an isolated phase-10-* or phase-11-* scratch root".into());
     }
     let id = Uuid::parse_str(&args[2])?;
     let platform = Platform::x64(std::env::consts::OS, "")?;
@@ -93,6 +99,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     )
                 }
                 Installed::Vanilla => println!("{}", serde_json::json!({"result": "vanilla"})),
+            }
+        }
+        // Install an arbitrary public Modrinth pin without a catalog entry, for
+        // validating loaders the Panita catalog does not offer yet.
+        "install-modrinth" => {
+            if std::fs::symlink_metadata(paths.root()).is_ok() {
+                return Err("the scratch root must be new; existing roots are preserved".into());
+            }
+            let (project, version) = (
+                args.get(3).ok_or_else(usage)?.clone(),
+                args.get(4).ok_or_else(usage)?.clone(),
+            );
+            let catalog = CatalogInstance {
+                id,
+                slug: "modrinth-test".into(),
+                name: "Modrinth test pack".into(),
+                description: "Development validation".into(),
+                minecraft_version: None,
+                enabled: true,
+                restricted: false,
+                min_launcher_version: None,
+                icon_url: None,
+                banner_url: None,
+                sort_order: 1,
+                updated_at: "2026-10-28T00:00:00Z".into(),
+                source: CatalogSource::Modrinth {
+                    project_id: project,
+                    pack_version_id: version,
+                    loader: args.get(5).cloned(),
+                },
+            };
+            let base = Arc::new(|_: launcher_core::minecraft::download::DownloadProgress| {});
+            let pack = Arc::new(|p: launcher_core::modpack::content::PackProgress| {
+                if p.files_done == p.files_total {
+                    eprintln!("pack files {}/{}", p.files_done, p.files_total);
+                }
+            });
+            let started = std::time::Instant::now();
+            match install_catalog(&paths, catalog, &platform, &cancel, base, pack).await? {
+                Outcome::Installed(report) => println!(
+                    "{}",
+                    serde_json::json!({"result": "installed", "files": report.files,
+                        "skipped_configuration": report.skipped_configuration,
+                        "seconds": started.elapsed().as_secs()})
+                ),
+                Outcome::Conflicts(paths) => {
+                    println!(
+                        "{}",
+                        serde_json::json!({"result": "conflicts", "paths": paths})
+                    )
+                }
             }
         }
         "pending" => {

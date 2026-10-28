@@ -18,7 +18,7 @@ use sha2::Sha256;
 use std::io::Read;
 use uuid::Uuid;
 
-const MARKER: &str = "complete.json";
+pub(crate) const MARKER: &str = "complete.json";
 const MAX_FILES: usize = 8192;
 const MAX_TOTAL: u64 = 16 * 1024 * 1024 * 1024;
 
@@ -47,10 +47,10 @@ pub struct GenerationFile {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Completion {
-    schema: u32,
-    id: Uuid,
-    plan_sha256: String,
+pub(crate) struct Completion {
+    pub(crate) schema: u32,
+    pub(crate) id: Uuid,
+    pub(crate) plan_sha256: String,
 }
 
 impl GenerationRef {
@@ -149,6 +149,18 @@ impl GenerationRef {
     }
     pub fn directory(&self) -> String {
         format!("libraries/neoforge/{}", self.id)
+    }
+    pub fn kind(&self) -> &str {
+        &self.loader
+    }
+    pub fn java(&self) -> &crate::minecraft::JavaRequirement {
+        &self.java
+    }
+    pub fn profile(&self) -> &LaunchProfile {
+        &self.profile
+    }
+    pub fn files(&self) -> &[GenerationFile] {
+        &self.files
     }
     pub fn minecraft(&self) -> &str {
         &self.installer.minecraft
@@ -426,7 +438,7 @@ pub fn publish(
     Ok(reference)
 }
 
-fn hash256(hash: &str) -> bool {
+pub(crate) fn hash256(hash: &str) -> bool {
     hash.len() == 64
         && hash
             .bytes()
@@ -447,7 +459,7 @@ fn flag<'a>(args: &'a [String], key: &str) -> Result<&'a str, CoreError> {
         .ok_or_else(invalid)
 }
 
-fn maven_key(path: &str) -> Result<String, CoreError> {
+pub(crate) fn maven_key(path: &str) -> Result<String, CoreError> {
     safe_path(path)?;
     let parts: Vec<_> = path.split('/').collect();
     if parts.len() < 4 {
@@ -466,7 +478,7 @@ fn maven_key(path: &str) -> Result<String, CoreError> {
     Ok(format!("{}:{suffix}", parts[..parts.len() - 2].join("/")))
 }
 
-fn fingerprint(
+pub(crate) fn fingerprint(
     directory: &PrivateDir,
     path: &str,
     cancel: &Cancellation,
@@ -519,7 +531,7 @@ impl GenerationFile {
     }
 }
 
-fn read_error(error: private_fs::Error) -> CoreError {
+pub(crate) fn read_error(error: private_fs::Error) -> CoreError {
     match &error {
         private_fs::Error::Io(error) if error.kind() == std::io::ErrorKind::NotFound => {
             CoreError::new(ErrorCode::ArtifactMismatch)

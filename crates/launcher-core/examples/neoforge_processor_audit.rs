@@ -136,7 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let loader =
         launcher_core::neoforge::generation::publish(&paths, &plan, result, &cancellation)?;
     base.schema_version = 2;
-    base.loader = Some(loader);
+    base.loader = Some(loader.into());
     base.validate()?;
     let mut bytes = serde_json::to_vec_pretty(&base)?;
     bytes.push(b'\n');

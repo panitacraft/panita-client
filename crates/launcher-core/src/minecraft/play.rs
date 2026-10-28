@@ -9,6 +9,7 @@ use super::process::{LaunchLease, RunningGame};
 use super::{Platform, invalid};
 use crate::catalog::{CatalogClient, CatalogInstance, CatalogSource};
 use crate::error::{CoreError, ErrorCode};
+use crate::modpack::state::{PackIdentity, PackState};
 use crate::operation::{OperationId, ProcessSessionId};
 use crate::panita_api::PanitaCredentials;
 use crate::paths::AppPaths;
@@ -121,7 +122,57 @@ fn require_current_pack(
                 ..
             },
         ) if installed != current => Err(CoreError::new(ErrorCode::UpdateRequired)),
+        (
+            CatalogSource::Modrinth {
+                project_id: installed_project,
+                pack_version_id: installed,
+                ..
+            },
+            CatalogSource::Modrinth {
+                project_id: current_project,
+                pack_version_id: current,
+                ..
+            },
+        ) if installed_project != current_project || installed != current => {
+            Err(CoreError::new(ErrorCode::UpdateRequired))
+        }
         _ => Ok(()),
+    }
+}
+
+/// The installed pack must be the one this catalog entry pins, in the same format.
+fn pack_matches(source: &CatalogSource, pack: &PackState) -> bool {
+    match (source, &pack.source) {
+        (
+            CatalogSource::Custom {
+                minecraft_version,
+                loader,
+                ..
+            },
+            PackIdentity::Custom { .. },
+        ) => {
+            loader == "neoforge"
+                && pack.loader == *loader
+                && &pack.minecraft_version == minecraft_version
+        }
+        (
+            CatalogSource::Modrinth {
+                project_id,
+                pack_version_id,
+                loader,
+            },
+            PackIdentity::Modrinth {
+                project_id: installed_project,
+                version_id: installed_version,
+                ..
+            },
+        ) => {
+            crate::loader::supported(&pack.loader)
+                && loader.as_deref().is_none_or(|loader| loader == pack.loader)
+                && project_id == installed_project
+                && pack_version_id == installed_version
+        }
+        _ => false,
     }
 }
 
@@ -133,25 +184,14 @@ fn verify_pack(
     record: &crate::registry::InstallationRecord,
     cancel: &Cancellation,
 ) -> Result<(), CoreError> {
-    let (
-        CatalogSource::Custom {
-            minecraft_version,
-            loader,
-            ..
-        },
-        Some(pack),
-        Some(_),
-    ) = (
-        &record.resolved_source,
-        &installed.pack,
-        &installed.plan.loader,
-    )
-    else {
+    let (Some(pack), Some(loader)) = (&installed.pack, &installed.plan.loader) else {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     };
-    if loader != "neoforge"
-        || pack.loader != *loader
-        || &pack.minecraft_version != minecraft_version
+    // The pack's recorded loader is the one the verified plan actually launches.
+    if loader.kind() != pack.loader || loader.version() != pack.loader_version {
+        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    }
+    if !pack_matches(&record.resolved_source, pack)
         || pack.minecraft_version != installed.plan.version.id
     {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
@@ -226,7 +266,9 @@ async fn prepare_with_catalog(
                 if installed.plan.loader.is_none()
                     && installed.pack.is_none()
                     && minecraft_version == &installed.plan.version.id => {}
-            CatalogSource::Custom { .. } => verify_pack(&installed, &record, &audit_cancel)?,
+            CatalogSource::Custom { .. } | CatalogSource::Modrinth { .. } => {
+                verify_pack(&installed, &record, &audit_cancel)?
+            }
             _ => return Err(CoreError::new(ErrorCode::UnsupportedInstance)),
         }
         let global = GlobalSettings::load(&PrivateStore::open(&root)?)?;

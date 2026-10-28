@@ -30,7 +30,7 @@ fn invalid() -> CoreError {
     CoreError::new(ErrorCode::InvalidData)
 }
 
-fn component(value: &str) -> bool {
+pub(crate) fn component(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value
@@ -268,7 +268,7 @@ pub struct InstallerMetadata {
     pub launch: LaunchProfile,
 }
 
-fn bounded_text(value: &str) -> bool {
+pub(crate) fn bounded_text(value: &str) -> bool {
     !value.is_empty() && value.len() <= 16 * 1024 && !value.chars().any(char::is_control)
 }
 

@@ -535,3 +535,450 @@ async fn journals_and_schema_five_documents_reject_inconsistent_data() {
     assert!(serde_json::from_value::<InstalledLock>(vanilla).is_ok());
     cleanup(&world);
 }
+
+// ---- Pinned Modrinth packs -------------------------------------------------
+
+const PACK_PATH: &str = "/data/project/versions/version/pack.mrpack";
+
+fn mrpack_catalog(id: Uuid, loader: Option<&str>, minecraft: Option<&str>) -> CatalogInstance {
+    CatalogInstance {
+        id,
+        slug: "pixelmon".into(),
+        name: "Pixelmon".into(),
+        description: "Pack".into(),
+        minecraft_version: minecraft.map(str::to_owned),
+        enabled: true,
+        restricted: false,
+        min_launcher_version: None,
+        icon_url: None,
+        banner_url: None,
+        sort_order: 1,
+        updated_at: "2026-10-27T00:00:00Z".into(),
+        source: CatalogSource::Modrinth {
+            project_id: "project".into(),
+            pack_version_id: "version".into(),
+            loader: loader.map(str::to_owned),
+        },
+    }
+}
+
+fn modrinth_url(name: &str) -> String {
+    format!("https://cdn.modrinth.com{BASE}{name}")
+}
+
+fn listed(path: &str, body: &[u8], downloads: &[String]) -> Value {
+    json!({"path": path, "env": {"client": "required", "server": "required"},
+        "hashes": {"sha1": format!("{:x}", Sha1::digest(body)), "sha512": format!("{:x}", Sha512::digest(body))},
+        "downloads": downloads, "fileSize": body.len()})
+}
+
+fn neoforge() -> Value {
+    json!({"minecraft": "1.21.1", "neoforge": "21.1.248"})
+}
+
+fn index_document(files: Vec<Value>, dependencies: Value) -> Vec<u8> {
+    json!({"formatVersion": 1, "game": "minecraft", "versionId": "9.4.1", "name": "Fixture pack",
+        "files": files, "dependencies": dependencies})
+    .to_string()
+    .into_bytes()
+}
+
+fn mrpack(index: &[u8], entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut all: Vec<(&str, &[u8])> = vec![("modrinth.index.json", index)];
+    all.extend_from_slice(entries);
+    build(&all)
+}
+
+fn archive_expectation(archive: &[u8]) -> Expected {
+    Expected {
+        size: archive.len() as u64,
+        sha1: Some(format!("{:x}", Sha1::digest(archive))),
+        sha256: None,
+        sha512: Some(format!("{:x}", Sha512::digest(archive))),
+    }
+}
+
+/// Download the archive the way an installation does, then reduce it to a plan.
+async fn plan_for(
+    world: &World,
+    catalog: &CatalogInstance,
+    archive: &[u8],
+    server: &Server,
+) -> Result<Plan, CoreError> {
+    let downloader = PackDownloader::for_tests(server.base());
+    let expected = archive_expectation(archive);
+    let artifact = PackArtifact {
+        url: modrinth_url("pack.mrpack"),
+        hashes: Hashes {
+            sha1: expected.sha1.clone(),
+            sha512: expected.sha512.clone(),
+        },
+        size: expected.size,
+    };
+    let request = Request {
+        url: artifact.url.clone(),
+        origin: Origin::Modrinth,
+        expected: expected.clone(),
+        fallbacks: Vec::new(),
+    };
+    let cancel = Cancellation::default();
+    content::ensure_all(
+        &world.paths,
+        &downloader,
+        &[request],
+        &cancel,
+        Arc::new(|_| {}),
+    )
+    .await?;
+    let inspected = mrpack::inspect(&world.paths, &expected, &cancel)?;
+    Plan::mrpack(
+        catalog, "project", "version", &artifact, expected, inspected,
+    )
+}
+
+async fn run_plan(
+    world: &World,
+    plan: Plan,
+    server: &Server,
+    cancel: &Cancellation,
+) -> Result<Outcome, CoreError> {
+    let downloader = PackDownloader::for_tests(server.base());
+    publish_plan(PlanPublish {
+        paths: &world.paths,
+        id: world.id,
+        root: &world.root,
+        base: world.base.clone(),
+        plan,
+        downloader: &downloader,
+        cancel,
+        progress: Arc::new(|_| {}),
+    })
+    .await
+}
+
+struct Fixture {
+    archive: Vec<u8>,
+    index: Vec<u8>,
+    server: Server,
+}
+
+/// A pack with a mirrored mod, an optional mod, a server-only mod, a shader and
+/// every override layer.
+fn pixelmon_like() -> Fixture {
+    let (a, b, shader) = (
+        b"mod a".to_vec(),
+        b"optional mod".to_vec(),
+        b"shader pack".to_vec(),
+    );
+    let mut optional = listed("mods/b.jar", &b, &[modrinth_url("b.jar")]);
+    optional["env"] = json!({"client": "optional", "server": "unsupported"});
+    let mut server_only = listed(
+        "mods/server-only.jar",
+        b"never installed",
+        &[modrinth_url("server-only.jar")],
+    );
+    server_only["env"] = json!({"client": "unsupported", "server": "required"});
+    let index = index_document(
+        vec![
+            // The first mirror is gone; the second one serves the file.
+            listed(
+                "mods/a.jar",
+                &a,
+                &[modrinth_url("gone.jar"), modrinth_url("a.jar")],
+            ),
+            optional,
+            server_only,
+            listed("shaderpacks/s.zip", &shader, &[modrinth_url("s.zip")]),
+        ],
+        neoforge(),
+    );
+    let archive = mrpack(
+        &index,
+        &[
+            ("overrides/options.txt", b"fov:90"),
+            ("overrides/config/a.toml", b"common = 1\n"),
+            ("client-overrides/config/a.toml", b"client = 1\n"),
+            ("overrides/mods/bundled.jar", b"bundled"),
+            ("server-overrides/config/server.toml", b"server\n"),
+        ],
+    );
+    let server = server(BTreeMap::from([
+        (PACK_PATH.to_owned(), archive.clone()),
+        (format!("{BASE}a.jar"), a),
+        (format!("{BASE}b.jar"), b),
+        (format!("{BASE}s.zip"), shader),
+    ]));
+    Fixture {
+        archive,
+        index,
+        server,
+    }
+}
+
+#[tokio::test]
+async fn a_pinned_mrpack_installs_files_and_overrides_and_records_its_identity() {
+    let world = world();
+    let fixture = pixelmon_like();
+    let catalog = mrpack_catalog(world.id, Some("neoforge"), None);
+    let plan = plan_for(&world, &catalog, &fixture.archive, &fixture.server)
+        .await
+        .unwrap_or_else(|error| panic!("plan: {:?}", error.code()));
+    assert_eq!(plan.minecraft_version, "1.21.1");
+    assert_eq!(
+        (plan.loader.as_str(), plan.loader_version.as_str()),
+        ("neoforge", "21.1.248")
+    );
+    let outcome = run_plan(
+        &world,
+        plan.clone(),
+        &fixture.server,
+        &Cancellation::default(),
+    )
+    .await;
+    let Ok(Outcome::Installed(report)) = outcome else {
+        panic!("install: {:?}", code(outcome));
+    };
+    assert!(report.awaiting.is_empty() && report.skipped_configuration.is_empty());
+    assert_eq!(read(&world, "mods/a.jar"), b"mod a");
+    assert_eq!(read(&world, "mods/b.jar"), b"optional mod");
+    assert_eq!(read(&world, "shaderpacks/s.zip"), b"shader pack");
+    assert_eq!(read(&world, "options.txt"), b"fov:90");
+    // The client layer wins over the common one; server overrides never apply.
+    assert_eq!(read(&world, "config/a.toml"), b"client = 1\n");
+    assert_eq!(read(&world, "mods/bundled.jar"), b"bundled");
+    assert!(!exists(&world, "config/server.toml"));
+    assert!(!exists(&world, "mods/server-only.jar"));
+    let requested = |name: &str| {
+        fixture
+            .server
+            .requests()
+            .iter()
+            .any(|request| request.path.ends_with(name))
+    };
+    assert!(requested("gone.jar") && requested("a.jar"));
+    assert!(!requested("server-only.jar"));
+
+    let lock = installed(&world).unwrap_or_else(|| panic!("installed"));
+    let Some(pack) = &lock.pack else {
+        panic!("pack state");
+    };
+    assert_eq!(
+        pack.source,
+        PackIdentity::Modrinth {
+            project_id: "project".into(),
+            version_id: "version".into(),
+            archive_sha512: format!("{:x}", Sha512::digest(&fixture.archive)),
+            index_sha256: format!("{:x}", Sha256::digest(&fixture.index)),
+        }
+    );
+    assert_eq!(
+        (pack.loader.as_str(), pack.loader_version.as_str()),
+        ("neoforge", "21.1.248")
+    );
+    let owner = |path: &str| {
+        pack.files
+            .iter()
+            .find(|file| file.path == path)
+            .map(|file| file.ownership.clone())
+    };
+    for content in [
+        "mods/a.jar",
+        "mods/b.jar",
+        "shaderpacks/s.zip",
+        "mods/bundled.jar",
+    ] {
+        assert_eq!(owner(content), Some(Ownership::Content), "{content}");
+    }
+    for configuration in ["config/a.toml", "options.txt"] {
+        assert_eq!(
+            owner(configuration),
+            Some(Ownership::Override),
+            "{configuration}"
+        );
+    }
+    assert_eq!(pack.files.len(), 6);
+    assert!(pack.consumed_defaults.contains("config/a.toml"));
+    assert!(pack.consumed_defaults.contains("options.txt"));
+    assert!(!pack.consumed_defaults.contains("mods/bundled.jar"));
+    let on_disk = std::fs::read_to_string(world.root.join("installed.json")).unwrap_or_default();
+    assert!(on_disk.contains("\"schema\": 5") && on_disk.contains("\"modrinth\""));
+    assert!(!world.root.join("transaction.json").exists());
+    assert_eq!(state(&world), Some(InstallationState::Installed));
+    let game = GameDir::open(&world.root.join("minecraft")).unwrap_or_else(|_| panic!("game"));
+    assert!(verify_files(&game, pack, &Cancellation::default()).is_ok());
+
+    // A second instance reuses the cache: the archive and every file stay downloaded once.
+    let before = fixture.server.requests().len();
+    let again = world_copy(&world);
+    let second = run_plan(&again, plan, &fixture.server, &Cancellation::default()).await;
+    assert!(matches!(second, Ok(Outcome::Installed(_))));
+    assert_eq!(fixture.server.requests().len(), before);
+    assert_eq!(read(&again, "config/a.toml"), b"client = 1\n");
+    cleanup(&world);
+}
+
+#[tokio::test]
+async fn player_files_in_the_way_block_content_but_never_replace_configuration() {
+    let world = world();
+    let fixture = pixelmon_like();
+    let catalog = mrpack_catalog(world.id, None, Some("1.21.1"));
+    let plan = plan_for(&world, &catalog, &fixture.archive, &fixture.server)
+        .await
+        .unwrap_or_else(|error| panic!("plan: {:?}", error.code()));
+    let game = world.root.join("minecraft");
+    assert!(std::fs::create_dir_all(game.join("mods")).is_ok());
+    assert!(std::fs::create_dir_all(game.join("config")).is_ok());
+    assert!(std::fs::write(game.join("mods/a.jar"), b"the player's own mod").is_ok());
+    assert!(std::fs::write(game.join("mods/bundled.jar"), b"the player's other mod").is_ok());
+    assert!(std::fs::write(game.join("config/a.toml"), b"player = 1\n").is_ok());
+    let before = fixture.server.requests().len();
+    let outcome = run_plan(
+        &world,
+        plan.clone(),
+        &fixture.server,
+        &Cancellation::default(),
+    )
+    .await;
+    // Both a downloaded file and a bundled content file collide: nothing is written.
+    assert_eq!(
+        outcome.ok(),
+        Some(Outcome::Conflicts(vec![
+            "mods/a.jar".into(),
+            "mods/bundled.jar".into()
+        ]))
+    );
+    assert_eq!(fixture.server.requests().len(), before);
+    assert_eq!(read(&world, "mods/a.jar"), b"the player's own mod");
+    assert!(!exists(&world, "mods/b.jar") && !exists(&world, "options.txt"));
+    assert!(!world.root.join("transaction.json").exists());
+    assert!(installed(&world).is_some_and(|lock| lock.pack.is_none()));
+
+    // With the content paths free, only the existing configuration is kept and reported.
+    assert!(std::fs::remove_file(game.join("mods/a.jar")).is_ok());
+    assert!(std::fs::remove_file(game.join("mods/bundled.jar")).is_ok());
+    let outcome = run_plan(&world, plan, &fixture.server, &Cancellation::default()).await;
+    let Ok(Outcome::Installed(report)) = outcome else {
+        panic!("install: {:?}", code(outcome));
+    };
+    assert_eq!(report.skipped_configuration, ["config/a.toml"]);
+    assert_eq!(read(&world, "config/a.toml"), b"player = 1\n");
+    assert_eq!(read(&world, "options.txt"), b"fov:90");
+    let lock = installed(&world).unwrap_or_else(|| panic!("installed"));
+    let skipped = lock.pack.as_ref().map(|pack| {
+        pack.files
+            .iter()
+            .find(|file| file.path == "config/a.toml")
+            .map(|file| file.baseline.is_none())
+    });
+    assert_eq!(skipped, Some(Some(true)));
+    cleanup(&world);
+}
+
+#[tokio::test]
+async fn unsupported_or_contradictory_pins_never_become_a_plan() {
+    let world = world();
+    let catalog = mrpack_catalog(world.id, Some("neoforge"), None);
+    for (dependencies, expected) in [
+        (
+            json!({"minecraft": "1.21.1", "forge": "52.0.0"}),
+            ErrorCode::UnsupportedInstance,
+        ),
+        // The catalog names NeoForge, so an index pinning another loader disagrees.
+        (
+            json!({"minecraft": "1.21.1", "fabric-loader": "0.16.0"}),
+            ErrorCode::InvalidData,
+        ),
+        (
+            json!({"minecraft": "1.21.1", "neoforge": "21.1.248", "extra": "1"}),
+            ErrorCode::UnsupportedInstance,
+        ),
+        (
+            json!({"minecraft": "1.21.1"}),
+            ErrorCode::UnsupportedInstance,
+        ),
+        (
+            json!({"minecraft": "1.21.1", "neoforge": "21.1.248", "forge": "52.0.0"}),
+            ErrorCode::InvalidData,
+        ),
+    ] {
+        let archive = mrpack(&index_document(Vec::new(), dependencies.clone()), &[]);
+        let server = server(BTreeMap::from([(PACK_PATH.to_owned(), archive.clone())]));
+        assert_eq!(
+            code(plan_for(&world, &catalog, &archive, &server).await),
+            Some(expected),
+            "{dependencies}"
+        );
+    }
+    // The catalog's informational Minecraft version may agree with the index, not override it.
+    let archive = mrpack(&index_document(Vec::new(), neoforge()), &[]);
+    let server = server(BTreeMap::from([(PACK_PATH.to_owned(), archive.clone())]));
+    let mismatch = mrpack_catalog(world.id, Some("neoforge"), Some("1.20.1"));
+    assert_eq!(
+        code(plan_for(&world, &mismatch, &archive, &server).await),
+        Some(ErrorCode::InvalidData)
+    );
+    let agreeing = mrpack_catalog(world.id, Some("neoforge"), Some("1.21.1"));
+    assert!(plan_for(&world, &agreeing, &archive, &server).await.is_ok());
+    // Fabric and Quilt packs become plans for their own loader, whatever the catalog
+    // leaves unsaid; the version comes from the index.
+    for (key, kind) in [
+        ("fabric-loader", crate::loader::Kind::Fabric),
+        ("quilt-loader", crate::loader::Kind::Quilt),
+    ] {
+        let archive = mrpack(
+            &index_document(Vec::new(), json!({"minecraft": "1.21.1", key: "0.16.14"})),
+            &[],
+        );
+        let served = self::server(BTreeMap::from([(PACK_PATH.to_owned(), archive.clone())]));
+        for named in [None, Some(kind.name())] {
+            let catalog = mrpack_catalog(world.id, named, None);
+            let plan = plan_for(&world, &catalog, &archive, &served).await;
+            let plan = plan.unwrap_or_else(|error| panic!("{key}: {:?}", error.code()));
+            assert_eq!(plan.kind, kind);
+            assert_eq!(
+                (plan.loader.as_str(), plan.loader_version.as_str()),
+                (kind.name(), "0.16.14")
+            );
+        }
+        let mismatched = mrpack_catalog(world.id, Some("neoforge"), None);
+        assert_eq!(
+            code(plan_for(&world, &mismatched, &archive, &served).await),
+            Some(ErrorCode::InvalidData)
+        );
+    }
+    cleanup(&world);
+}
+
+#[tokio::test]
+async fn a_damaged_download_or_cancellation_installs_nothing() {
+    let world = world();
+    let fixture = pixelmon_like();
+    let catalog = mrpack_catalog(world.id, Some("neoforge"), None);
+    let plan = plan_for(&world, &catalog, &fixture.archive, &fixture.server)
+        .await
+        .unwrap_or_else(|error| panic!("plan: {:?}", error.code()));
+    // Every mirror of one file serves the wrong bytes.
+    let (archive, a_body) = (fixture.archive.clone(), b"corrupt".to_vec());
+    let hostile = server(BTreeMap::from([
+        (PACK_PATH.to_owned(), archive),
+        (format!("{BASE}a.jar"), a_body),
+        (format!("{BASE}b.jar"), b"optional mod".to_vec()),
+        (format!("{BASE}s.zip"), b"shader pack".to_vec()),
+    ]));
+    assert_eq!(
+        code(run_plan(&world, plan.clone(), &hostile, &Cancellation::default()).await),
+        Some(ErrorCode::ArtifactMismatch)
+    );
+    assert!(!exists(&world, "mods/a.jar") && !exists(&world, "options.txt"));
+    assert!(!world.root.join("transaction.json").exists());
+    assert!(installed(&world).is_some_and(|lock| lock.pack.is_none()));
+
+    let cancelled = Cancellation::default();
+    cancelled.cancel();
+    assert_eq!(
+        code(run_plan(&world, plan, &fixture.server, &cancelled).await),
+        Some(ErrorCode::OperationCancelled)
+    );
+    assert!(!exists(&world, "mods/a.jar") && !exists(&world, "config/a.toml"));
+    cleanup(&world);
+}
