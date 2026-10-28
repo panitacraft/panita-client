@@ -123,6 +123,123 @@ pub(super) async fn open_pack_source(
     Ok(true)
 }
 
+/// Open a CurseForge project page by its numeric id. The address is built here.
+#[tauri::command]
+pub(super) async fn open_curseforge_project(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    project_id: u64,
+) -> Result<bool, ErrorCode> {
+    use tauri_plugin_opener::OpenerExt;
+    main_only(&window)?;
+    if project_id == 0 {
+        return Err(ErrorCode::InvalidData);
+    }
+    let url = format!("https://www.curseforge.com/projects/{project_id}");
+    tauri::async_runtime::spawn_blocking(move || {
+        app.opener()
+            .open_url(url, None::<&str>)
+            .map_err(|_| ErrorCode::StorageUnavailable)
+    })
+    .await
+    .map_err(|_| ErrorCode::StorageUnavailable)??;
+    Ok(true)
+}
+
+/// Open one of an instance's fixed content folders, or its pack backups. The
+/// frontend picks from a short list; it never supplies a path.
+#[tauri::command]
+pub(super) async fn open_instance_folder(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    instance_id: Uuid,
+    folder: String,
+) -> Result<bool, ErrorCode> {
+    use tauri_plugin_opener::OpenerExt;
+    main_only(&window)?;
+    let paths = paths(&app)?;
+    let directory = blocking(move || {
+        let directory = match folder.as_str() {
+            "mods" | "resourcepacks" | "shaderpacks" => {
+                paths.game_directory(instance_id)?.join(&folder)
+            }
+            "pack-backups" => paths.instance(instance_id)?.join("pack-backups"),
+            _ => return Err(launcher_core::error::CoreError::new(ErrorCode::InvalidData)),
+        };
+        std::fs::create_dir_all(&directory)
+            .map_err(|_| launcher_core::error::CoreError::new(ErrorCode::StorageUnavailable))?;
+        Ok(directory)
+    })
+    .await?;
+    let opening = tauri::async_runtime::spawn_blocking(move || {
+        app.opener()
+            .open_path(directory.to_string_lossy(), None::<&str>)
+            .map_err(|_| ErrorCode::StorageUnavailable)
+    });
+    match tokio::time::timeout(std::time::Duration::from_secs(5), opening).await {
+        Ok(result) => {
+            result.map_err(|_| ErrorCode::StorageUnavailable)??;
+            Ok(true)
+        }
+        Err(_) => Ok(true),
+    }
+}
+
+/// Readable names for the installed and the available version of a pack, for the
+/// update prompt. A failed lookup falls back to the plain identifiers.
+#[tauri::command]
+pub(super) async fn pack_version_names(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    instance_id: Uuid,
+) -> Result<Value, ErrorCode> {
+    use launcher_core::{
+        catalog::CatalogSource, modpack::modrinth::ModrinthClient, registry::InstanceRegistry,
+    };
+    main_only(&window)?;
+    let paths = paths(&app)?;
+    let record = blocking(move || {
+        InstanceRegistry::new(paths)
+            .get(instance_id)?
+            .ok_or_else(|| launcher_core::error::CoreError::new(ErrorCode::InstanceMissing))
+    })
+    .await?;
+    let name = |source: &CatalogSource| match source {
+        CatalogSource::Custom {
+            label,
+            current_version_id,
+            ..
+        } => label
+            .clone()
+            .or_else(|| current_version_id.map(|id| id.to_string())),
+        _ => None,
+    };
+    let installed = name(&record.resolved_source);
+    let available = name(&record.last_catalog.source);
+    if let (
+        CatalogSource::Modrinth {
+            pack_version_id: from,
+            ..
+        },
+        CatalogSource::Modrinth {
+            pack_version_id: to,
+            ..
+        },
+    ) = (&record.resolved_source, &record.last_catalog.source)
+    {
+        let lookup = async {
+            let client = ModrinthClient::new().ok()?;
+            let from = client.version_number(from).await.ok()?;
+            let to = client.version_number(to).await.ok()?;
+            Some((from, to))
+        };
+        if let Some((from, to)) = lookup.await {
+            return Ok(json!({"installed": from, "available": to}));
+        }
+    }
+    Ok(json!({"installed": installed, "available": available}))
+}
+
 #[tauri::command]
 pub(super) async fn open_pack_folder(
     app: tauri::AppHandle,
