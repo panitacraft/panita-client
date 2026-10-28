@@ -30,7 +30,7 @@ use crate::{
         download::{Cancellation, io, lock, try_lock},
         install::{
             InstalledLock, Progress, metadata_root, read_json, recover_locked as recover_base,
-            verify_manifest, write_json,
+            verify_manifest, verify_play_under_lock, write_json,
         },
         maintenance::validate_manifest,
         transaction,
@@ -565,7 +565,12 @@ pub async fn install(
     .await;
     match &result {
         // `publish` stored the final state, or reported conflicts without installing.
-        Ok(Outcome::Installed(_)) => {}
+        Ok(Outcome::Installed(_)) => {
+            // Record Play receipts now, while the installation lock is held, so the first
+            // launch does not hash every file again. Best effort: a failure only means
+            // the first Play does that work, and any real damage surfaces there.
+            let _ = verify_play_under_lock(paths, id, &root, &Cancellation::default());
+        }
         Ok(Outcome::Conflicts(_)) => {
             record.state = InstallationState::Failed;
             registry.save_installation(&record)?;
