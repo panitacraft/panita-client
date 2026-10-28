@@ -53,7 +53,10 @@ impl TryFrom<StoredInstalled> for InstalledLock {
                 // Schema 4 is vanilla; schema 5 is exactly a modpack installation.
                 match (value.schema, &value.pack, &value.status) {
                     (4, None, _) => {}
-                    (5, Some(pack), Status::Installed) => pack.validate(value.id)?,
+                    // An uninstalled pack keeps only its configuration history.
+                    (5, Some(pack), Status::Installed | Status::Uninstalled) => {
+                        pack.validate(value.id)?
+                    }
                     _ => return Err(invalid()),
                 }
                 Ok(Self {

@@ -643,7 +643,7 @@ fn read_installed_under_lock(
     cancel.check()?;
     let journal = read_json::<serde_json::Value>(root, "transaction.json")?;
     if journal.is_some_and(|journal| {
-        if journal["schema_version"] == 4 {
+        if journal["schema_version"] == 4 || journal["schema_version"] == 5 {
             !crate::modpack::install::journal_inactive(journal, id)
         } else if journal["schema_version"] == 3 {
             !super::maintenance::journal_inactive(journal, id)

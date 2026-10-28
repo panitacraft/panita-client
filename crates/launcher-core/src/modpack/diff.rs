@@ -173,11 +173,20 @@ pub fn diff(
                 out.files.push(entry(Some(new.desired.clone())));
             }
             Local::File(found) => {
+                if new.ownership == Ownership::Defaults {
+                    // A default seeds a path once. It never replaces a file that is there.
+                    if let Some(previous) = previous {
+                        out.files.push(previous.clone());
+                        continue;
+                    }
+                    if consumed_keys.contains(&k) {
+                        continue;
+                    }
+                }
                 let baseline = previous.and_then(|file| file.baseline.as_ref());
                 let ours = baseline.is_some_and(|baseline| same(&found, baseline));
                 let equal = same(&found, &new.desired);
-                if equal && (previous.is_some() || !is_content(&new.ownership) || new.adopt_equal)
-                {
+                if equal && (previous.is_some() || !is_content(&new.ownership) || new.adopt_equal) {
                     out.files.push(entry(Some(new.desired.clone())));
                 } else if ours {
                     out.steps.push(step(Op::Replace, false));
@@ -255,6 +264,50 @@ pub fn diff(
         }
     }
     out.consumed = consumed;
+    Ok(out)
+}
+
+/// Repair of the installed exact pin. Only content is touched: a missing file is
+/// restored and a changed one is set aside as the player's before the pack's bytes
+/// return. Configuration, history and every recorded baseline stay as they are.
+pub fn repair_diff(
+    old: &PackState,
+    incoming: Vec<Incoming>,
+    local: &mut dyn FnMut(&str) -> Result<Local, CoreError>,
+) -> Result<Diff, CoreError> {
+    let mut out = Diff {
+        files: old.files.clone(),
+        consumed: old.consumed_defaults.clone(),
+        skipped: old.skipped_configuration.clone(),
+        ..Diff::default()
+    };
+    for new in incoming {
+        // The pin is exact: every file must already be recorded with the same bytes.
+        let recorded = old
+            .files
+            .iter()
+            .find(|file| file.path.eq_ignore_ascii_case(&new.path))
+            .filter(|file| is_content(&file.ownership) && same(&file.desired, &new.desired))
+            .ok_or_else(super::invalid)?;
+        let step = |backup: bool| Step {
+            path: recorded.path.clone(),
+            op: if backup { Op::Replace } else { Op::Write },
+            incoming: Some(new.clone()),
+            backup,
+        };
+        match local(&recorded.path)? {
+            Local::Absent => out.steps.push(step(false)),
+            Local::File(found) if same(&found, &new.desired) => {}
+            Local::File(_) => {
+                out.edited.push(recorded.path.clone());
+                out.steps.push(step(true));
+            }
+            Local::Unsafe => out.conflicts.push(Conflict {
+                path: recorded.path.clone(),
+                reason: Reason::Blocked,
+            }),
+        }
+    }
     Ok(out)
 }
 

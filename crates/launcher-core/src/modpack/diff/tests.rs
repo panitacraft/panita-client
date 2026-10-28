@@ -108,7 +108,10 @@ fn unchanged_replaced_added_and_removed_content_follow_the_baseline() {
     );
     assert!(result.conflicts.is_empty() && result.released.is_empty());
     let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
-    assert_eq!(paths, ["mods/same.jar", "mods/new-version.jar", "mods/added.jar"]);
+    assert_eq!(
+        paths,
+        ["mods/same.jar", "mods/new-version.jar", "mods/added.jar"]
+    );
     // Every resulting content entry records its new bytes as the baseline.
     for entry in &result.files {
         assert_eq!(entry.baseline.as_ref(), Some(&entry.desired));
@@ -145,7 +148,10 @@ fn edited_content_is_a_conflict_only_when_the_pack_changes_it() {
         }]
     );
     // Resolving moves the player's file aside, then installs the pack's.
-    assert_eq!(ops(&result), [("mods/edited-changed.jar", Op::Replace, true)]);
+    assert_eq!(
+        ops(&result),
+        [("mods/edited-changed.jar", Op::Replace, true)]
+    );
     // The pack did not change this one: the player's edit stays and is reported.
     assert_eq!(result.edited, ["mods/edited-untouched.jar"]);
     let kept = result
@@ -168,7 +174,10 @@ fn a_player_file_where_the_pack_adds_one_is_a_collision() {
             want("mods/new.jar", Content, 5),
             want("mods/blocked.jar", Content, 6),
         ],
-        &[("mods/new.jar", file(5)), ("mods/blocked.jar", Local::Unsafe)],
+        &[
+            ("mods/new.jar", file(5)),
+            ("mods/blocked.jar", Local::Unsafe),
+        ],
     );
     // Identical bytes are still the player's file unless they came from a manual import.
     assert_eq!(
@@ -343,10 +352,7 @@ fn dropped_configuration_stops_being_managed_but_is_never_deleted() {
 
 #[test]
 fn paths_match_regardless_of_case_and_the_result_is_a_valid_pack_state() {
-    let old = state(
-        vec![managed("mods/Case.jar", Content, 1, Some(1))],
-        &[],
-    );
+    let old = state(vec![managed("mods/Case.jar", Content, 1, Some(1))], &[]);
     let result = run(
         &old,
         vec![

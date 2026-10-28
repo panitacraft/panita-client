@@ -76,7 +76,7 @@ pub(super) fn cleanup_locked(
 }
 
 /// A committed update remains usable if the OS prevents native cleanup.
-pub(super) fn after_update(root: &Path, installed: &InstalledLock) -> CleanupReport {
+pub(crate) fn after_update(root: &Path, installed: &InstalledLock) -> CleanupReport {
     cleanup_locked(root, installed, &Cancellation::default()).unwrap_or_else(|_| {
         let mut report = CleanupReport::default();
         report.retain("natives".into(), "accessFailure");
@@ -84,7 +84,7 @@ pub(super) fn after_update(root: &Path, installed: &InstalledLock) -> CleanupRep
     })
 }
 
-pub(super) fn remove_all(root: &Path) -> Result<CleanupReport, CoreError> {
+pub(crate) fn remove_all(root: &Path) -> Result<CleanupReport, CoreError> {
     purge(root, None, &Cancellation::default())
 }
 

@@ -40,6 +40,11 @@ fn canonical(mut value: Value) -> Result<Value, CoreError> {
             }
             Some(3) => (),
             Some(4) if object.get("kind").and_then(Value::as_str) == Some("pack_install") => (),
+            Some(5)
+                if matches!(
+                    object.get("kind").and_then(Value::as_str),
+                    Some("pack_update" | "pack_repair" | "pack_uninstall")
+                ) => {}
             _ => return Err(invalid()),
         }
     }
@@ -57,7 +62,7 @@ fn stored(mut value: Value) -> Result<Value, CoreError> {
             object.insert("kind".into(), "update".into());
         }
         Some(3) => (),
-        Some(4) => (),
+        Some(4 | 5) => (),
         _ => return Err(invalid()),
     }
     object.insert("schema".into(), schema);
