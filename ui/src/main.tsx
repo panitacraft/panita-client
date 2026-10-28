@@ -108,7 +108,7 @@ function Launcher() {
                 <p>{instance.description}</p>
                 <button type="button" aria-pressed={instance.id === preferences?.id} disabled={!preferences || preferences.busy || instance.id === preferences.id} onClick={() => void preferences?.select(instance.id)}>{instance.id === preferences?.id ? 'Instancia seleccionada' : 'Seleccionar instancia'}</button>
                 {instance.minecraftVersion && <p className="version">Minecraft {instance.minecraftVersion}</p>}
-                {instance.source?.type === 'custom' && <p className="version">Modpack{instance.source.label ? ` ${instance.source.label}` : ''}{instance.source.loader ? ` · ${instance.source.loader === 'neoforge' ? 'NeoForge' : instance.source.loader}` : ''}</p>}
+                {(instance.source?.type === 'custom' || instance.source?.type === 'modrinth') && <p className="version">Modpack{instance.source.label ? ` ${instance.source.label}` : ''}{instance.source.loader ? ` · ${instance.source.loader === 'neoforge' ? 'NeoForge' : instance.source.loader}` : ''}</p>}
                 <p>{localStateText[instance.localState]}</p>
                 {instance.installedVersion && <p>{['installed', 'update_available', 'running'].includes(instance.localState) ? 'Versión instalada' : 'Versión de la instalación'}: {instance.installedVersion}</p>}
                 {instance.availability === 'missing' && <p>Esta instancia ya no está en el catálogo. Conservamos tus datos locales.</p>}
