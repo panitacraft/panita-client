@@ -5,7 +5,7 @@ import { packApi } from './pack-api';
 import { playActive } from './play-state';
 import { usePlaySnapshot } from './play';
 import {
-  cacheRetainedReason, cacheSummary, clearSummary, conflictSummary, folderHint, importErrorText, manualHeading,
+  cacheRetainedReason, cacheSummary, clearSummary, conflictReasonText, conflictSummary, folderHint, importErrorText, manualHeading,
   packProgressFraction, packProgressText, reasonText, skippedSummary, formatBytes, type CacheReport, type PackFile, type PackList,
 } from './pack-state';
 
@@ -18,7 +18,7 @@ export function PackPanel({ instanceId, awaiting, onChanged }: { instanceId: str
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
-  const installing = entry?.operation === 'install' && playActive(entry.phase);
+  const installing = (entry?.operation === 'install' || entry?.operation === 'update' || entry?.operation === 'repair') && playActive(entry.phase);
 
   useEffect(() => {
     if (!awaiting || !isTauri()) { setFiles([]); return; }
@@ -49,7 +49,8 @@ export function PackPanel({ instanceId, awaiting, onChanged }: { instanceId: str
 
   const progress = entry?.packProgress ?? null;
   const skipped = entry?.packSkipped ?? [];
-  const conflicts = entry?.packConflicts ?? [];
+  // An update that stopped on conflicts explains them in the update controls.
+  const conflicts = entry?.operation === 'update' ? [] : entry?.packConflicts ?? [];
   if (!installing && !awaiting && skipped.length === 0 && conflicts.length === 0) return null;
 
   return <div className="pack-panel">
@@ -58,8 +59,8 @@ export function PackPanel({ instanceId, awaiting, onChanged }: { instanceId: str
       <p role="status">{packProgressText(progress)}</p>
     </div>}
     {!installing && conflicts.length > 0 && <div className="catalog-notice" role="alert">
-      <p>{conflictSummary(conflicts)}</p>
-      <details><summary>Archivos en conflicto</summary><ul>{conflicts.map(path => <li key={path}><code>{path}</code></li>)}</ul></details>
+      <p>{conflictSummary(conflicts.map(conflict => conflict.path))}</p>
+      <details><summary>Archivos en conflicto</summary><ul>{conflicts.map(conflict => <li key={conflict.path}><code>{conflict.path}</code>: {conflictReasonText(conflict.reason)}</li>)}</ul></details>
       <p>Muévelos o elimínalos y vuelve a intentar la instalación. Nunca los reemplazamos por nuestra cuenta.</p>
     </div>}
     {!installing && skipped.length > 0 && <div role="status">

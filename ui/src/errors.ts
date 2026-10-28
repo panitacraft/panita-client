@@ -69,7 +69,7 @@ const messages: Record<LauncherErrorCode, string> = {
   api_key_rejected: 'El servicio rechazó esta versión de Panita Client. Instala la versión más reciente.',
   manual_files_required: 'Faltan archivos que debes descargar tú mismo. Complétalos para poder jugar.',
   pack_conflict: 'Ya existen archivos tuyos donde este modpack necesita instalar los suyos. No cambiamos nada: revisa la lista, muévelos o elimínalos y vuelve a instalar.',
-  update_required: 'Hay una versión nueva de este modpack y debes actualizarla antes de jugar. La actualización desde Panita Client llegará en una próxima versión.',
+  update_required: 'Hay una versión nueva de este modpack y debes actualizarla antes de jugar. Usa el botón «Actualizar…» de esta instancia.',
 };
 
 export function messageForError(error: unknown): string {

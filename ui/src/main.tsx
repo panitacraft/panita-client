@@ -9,7 +9,7 @@ import { Accounts } from './accounts';
 import { ActivationGate, ActivationPanel, ActivationProvider, useActivation } from './activation';
 import { PlayControls, PlayNotice, PlayProvider, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
-import { canInstall, canRepair, canUninstall, updateTarget } from './library-state';
+import { canInstall, canRepair, canUninstall, isPack, updateTarget } from './library-state';
 import { PreferencesProvider, SettingsPanel, usePreferences } from './settings';
 import { DiagnosticsPanel } from './diagnostics';
 import { CachePanel, PackPanel } from './pack';
@@ -120,6 +120,7 @@ function Launcher() {
                   updateTarget={updateTarget(instance, catalog.stale || unverified)}
                   repairAllowed={canRepair(instance, catalog.stale || unverified)}
                   uninstallAllowed={canUninstall(instance)}
+                  pack={isPack(instance)}
                   cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'}
                   allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
                 <PackPanel instanceId={instance.id} awaiting={instance.localState === 'awaiting_files'} onChanged={() => setCatalogAttempt(previous => previous + 1)} />

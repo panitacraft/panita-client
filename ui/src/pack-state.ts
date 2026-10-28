@@ -13,6 +13,9 @@ export type PackProgress = { filesDone: number; filesTotal: number; bytesDone: n
 export type CacheDetail = { directory: string; reason: string };
 export type CacheReport = { removedEntries: number; removedBytes: number; retainedEntries: number; details: CacheDetail[] };
 
+export type PackConflict = { path: string; reason: 'edited' | 'occupied' | 'blocked' };
+export type VersionNames = { installed: string | null; available: string | null };
+
 const number = new Intl.NumberFormat('es', { maximumFractionDigits: 1 });
 
 export function formatBytes(bytes: number): string {
@@ -59,6 +62,42 @@ export function skippedSummary(paths: string[]): string {
   return paths.length === 1
     ? 'Conservamos 1 archivo de configuración que ya existía, sin cambiarlo.'
     : `Conservamos ${paths.length} archivos de configuración que ya existían, sin cambiarlos.`;
+}
+
+const conflictReasons: Record<PackConflict['reason'], string> = {
+  edited: 'Cambiaste este archivo y la versión nueva del modpack también lo cambia.',
+  occupied: 'Ya tenías un archivo con este nombre donde el modpack quiere instalar el suyo.',
+  blocked: 'Hay una carpeta o un enlace en este lugar, y no podemos moverlo.',
+};
+
+export function conflictReasonText(reason: string): string {
+  return Object.hasOwn(conflictReasons, reason) ? conflictReasons[reason as PackConflict['reason']] : 'Este archivo estorba.';
+}
+
+/** True when moving the player's files aside can resolve every conflict. */
+export function conflictsResolvable(conflicts: PackConflict[]): boolean {
+  return conflicts.length > 0 && conflicts.every(conflict => conflict.reason !== 'blocked');
+}
+
+export function updateConflictHeading(count: number): string {
+  return count === 1 ? 'Hay 1 archivo tuyo que estorba a la actualización' : `Hay ${count} archivos tuyos que estorban a la actualización`;
+}
+
+export function versionTitle(names: VersionNames | null, from: string, to: string): string {
+  const shown = (name: string | null | undefined, id: string) => name ?? (id.length > 12 ? `${id.slice(0, 8)}…` : id);
+  return `Actualizar el modpack de ${shown(names?.installed, from)} a ${shown(names?.available, to)}`;
+}
+
+export function backedUpSummary(paths: string[]): string {
+  return paths.length === 1
+    ? 'Guardamos 1 archivo tuyo en la carpeta pack-backups de esta instancia. No lo borramos.'
+    : `Guardamos ${paths.length} archivos tuyos en la carpeta pack-backups de esta instancia. No los borramos.`;
+}
+
+export function releasedSummary(paths: string[]): string {
+  return paths.length === 1
+    ? 'El modpack ya no incluye 1 archivo que habías modificado, así que lo conservamos como tuyo.'
+    : `El modpack ya no incluye ${paths.length} archivos que habías modificado, así que los conservamos como tuyos.`;
 }
 
 export function conflictSummary(paths: string[]): string {
