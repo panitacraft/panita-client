@@ -5,12 +5,13 @@ export interface CatalogInstance {
   minecraftVersion: string | null;
   enabled: boolean;
   availability: 'enabled' | 'disabled' | 'missing' | 'unverified';
-  localState: 'not_installed' | 'installing' | 'installed' | 'update_available' | 'needs_repair' | 'running' | 'failed' | 'cancelled';
+  localState: 'not_installed' | 'installing' | 'installed' | 'awaiting_files' | 'update_available' | 'needs_repair' | 'running' | 'failed' | 'cancelled';
   installedVersion: string | null;
   hasInstallationManifest: boolean;
   compatible: boolean;
   supported: boolean;
   minLauncherVersion: string | null;
+  source?: { type: string; label?: string | null; loader?: string | null };
 }
 
 export interface CatalogOverview {

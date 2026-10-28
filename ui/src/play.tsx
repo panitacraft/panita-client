@@ -17,6 +17,7 @@ const phaseText: Record<PlayPhase, string> = {
   preparing: 'Comprobando la instancia y sus archivos…',
   installing: 'Preparando Minecraft y Java. Descargando y comprobando archivos…',
   installed: 'Instalación completa. Ya puedes jugar.',
+  awaiting_files: 'Instalamos casi todo. Faltan archivos que debes descargar tú mismo para poder jugar.',
   uninstalled: 'Desinstalación completa. Conservamos tus mundos, ajustes y archivos personales.',
   warning: 'Necesitamos tu confirmación para continuar.',
   starting: 'Verificando la cuenta e iniciando Minecraft…',
