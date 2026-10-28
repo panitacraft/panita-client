@@ -24,6 +24,8 @@ use crate::{
 #[cfg(test)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Stage {
+    /// After the first file change, with the rest still pending.
+    MidApply,
     AfterApply,
     AfterPointer,
 }
@@ -591,8 +593,14 @@ fn apply(
 ) -> Result<(), CoreError> {
     let transient = Stash::open(root, TRANSIENT, operation)?;
     let backups = Stash::open(root, BACKUPS, operation)?;
-    for step in &diff.steps {
+    for (number, step) in diff.steps.iter().enumerate() {
         cancel.check()?;
+        #[cfg(test)]
+        if number == 1 {
+            interrupt(Stage::MidApply)?;
+        }
+        #[cfg(not(test))]
+        let _ = number;
         if step.op != Op::Write {
             let stash = if step.backup { &backups } else { &transient };
             game.stash(&step.path, stash)?;
@@ -730,7 +738,9 @@ pub async fn update(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn update_with_catalog(
+/// Update with an already fetched catalog entry. Development harnesses may supply
+/// their own; the entry must be the current by-ID answer.
+pub async fn update_with_catalog(
     paths: &AppPaths,
     id: Uuid,
     platform: &Platform,
@@ -1038,7 +1048,8 @@ pub async fn repair(
     .await
 }
 
-pub(crate) async fn repair_with_catalog(
+/// Repair with an already fetched catalog entry, for development harnesses.
+pub async fn repair_with_catalog(
     paths: &AppPaths,
     id: Uuid,
     platform: &Platform,

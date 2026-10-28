@@ -559,6 +559,36 @@ async fn a_crash_after_the_files_changed_is_undone_by_recovery_even_with_a_set_a
 }
 
 #[tokio::test]
+async fn a_crash_between_two_file_changes_is_undone_from_the_ledger() {
+    let world = world();
+    let pair = installed_pair(&world).await;
+    put(&world, "mods/mine.jar", b"the player's own mod");
+    interrupt_at(Stage::MidApply, true);
+    let crashed = update_to(&world, &pair.second, &pair.server, false).await;
+    clear_interrupt();
+    assert!(crashed.is_err());
+    // Only some of the planned changes happened before the process died.
+    let changed = [
+        read(&world, "mods/a.jar") != A1,
+        !exists(&world, "mods/c.jar"),
+        exists(&world, "mods/d.jar"),
+    ];
+    assert!(
+        changed.iter().any(|done| *done) && !changed.iter().all(|done| *done),
+        "{changed:?}"
+    );
+    assert!(world.root.join("transaction.json").exists());
+    assert!(crate::minecraft::install::recover_locked(&world.paths, world.id, &world.root).is_ok());
+    assert_eq!(read(&world, "mods/a.jar"), A1);
+    assert_eq!(read(&world, "mods/c.jar"), C);
+    assert!(!exists(&world, "mods/d.jar"));
+    assert_eq!(read(&world, "mods/mine.jar"), b"the player's own mod");
+    assert_eq!(pin_of(&pack(&world)), pair.first.version_id.to_string());
+    no_transaction(&world);
+    cleanup(&world);
+}
+
+#[tokio::test]
 async fn a_crash_after_the_pointer_is_finished_forward() {
     let world = world();
     let pair = installed_pair(&world).await;

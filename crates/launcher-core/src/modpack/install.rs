@@ -48,7 +48,8 @@ const KIND: &str = "pack_install";
 mod maintain;
 pub use maintain::{
     Blocked, RepairReport, UninstallReport, UpdateOutcome, UpdateReport, UpdateRequest, is_pack,
-    pin_of, repair as repair_pack, uninstall as uninstall_pack, update as update_pack,
+    pin_of, repair as repair_pack, repair_with_catalog as repair_catalog,
+    uninstall as uninstall_pack, update as update_pack, update_with_catalog as update_catalog,
 };
 
 /// A destination this operation created because it was absent at preflight.
