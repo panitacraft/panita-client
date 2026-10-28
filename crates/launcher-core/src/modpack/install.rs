@@ -180,9 +180,9 @@ pub(crate) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
     let state = if let Some(installed) = committed {
         // The pointer is durable: finish forward after a complete local audit.
         validate_manifest(&installed, id)?;
+        // The full audit includes every managed pack file.
         verify_manifest(paths, id, root, &installed, &cancel)?;
         let pack = installed.pack.as_ref().ok_or_else(invalid)?;
-        verify_files(&GameDir::open(&root.join("minecraft"))?, pack, &cancel)?;
         if pack.pending.is_empty() {
             InstallationState::Installed
         } else {

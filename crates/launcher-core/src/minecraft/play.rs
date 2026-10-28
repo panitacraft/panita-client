@@ -82,10 +82,10 @@ fn require_current_pack(
     }
 }
 
-/// A complete modpack launches only with its manual files supplied and every
-/// managed content file intact; a damaged one needs the explicit repair of Phase 12.
+/// A complete modpack launches only with its manual files supplied. Its managed
+/// content files were already checked, with receipts, by the installation audit; a
+/// damaged one needs the explicit repair of Phase 12.
 fn verify_pack(
-    lease: &LaunchLease,
     installed: &InstalledLock,
     record: &crate::registry::InstallationRecord,
     cancel: &Cancellation,
@@ -116,11 +116,8 @@ fn verify_pack(
     if !pack.pending.is_empty() {
         return Err(CoreError::new(ErrorCode::ManualFilesRequired));
     }
-    crate::modpack::install::verify_files(
-        &crate::modpack::gamefs::GameDir::open(lease.game_directory())?,
-        pack,
-        cancel,
-    )
+    // Content files were checked by the installation audit, with Play receipts.
+    cancel.check()
 }
 
 /// Reserve one instance, query its specific API status and verify a complete
@@ -199,9 +196,7 @@ async fn prepare_with_catalog(
                 if installed.plan.loader.is_none()
                     && installed.pack.is_none()
                     && minecraft_version == &installed.plan.version.id => {}
-            CatalogSource::Custom { .. } => {
-                verify_pack(&lease, &installed, &record, &audit_cancel)?
-            }
+            CatalogSource::Custom { .. } => verify_pack(&installed, &record, &audit_cancel)?,
             _ => return Err(CoreError::new(ErrorCode::UnsupportedInstance)),
         }
         let global = GlobalSettings::load(&PrivateStore::open(&root)?)?;

@@ -665,6 +665,16 @@ fn verify_manifest_inner(
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
     }
+    if let Some(pack) = &installed.pack {
+        let game = crate::modpack::gamefs::GameDir::open(&root.join("minecraft"))?;
+        let intact = match cache.as_deref_mut() {
+            Some(cache) => cache.verify_pack(&game, pack, cancel)?,
+            None => crate::modpack::install::verify_files(&game, pack, cancel).is_ok(),
+        };
+        if !intact {
+            return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+        }
+    }
     if let Some(loader) = &installed.plan.loader {
         loader.verify_marker(paths)?;
         match cache {

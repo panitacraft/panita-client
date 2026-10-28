@@ -102,6 +102,35 @@ impl GameDir {
         }
     }
 
+    /// Size and change markers of the regular file at `relative`, for Play receipts.
+    /// Equal markers mean the file was not touched since it was last hashed.
+    pub fn stamp(&self, relative: &str) -> Result<Option<Vec<u64>>, CoreError> {
+        let Some((dir, name)) = self.parent(relative, false)? else {
+            return Ok(None);
+        };
+        let metadata = match dir.symlink_metadata(&name) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(io(error)),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.nlink() != 1 {
+            return Ok(None);
+        }
+        let modified = metadata
+            .modified()
+            .map_err(io)?
+            .into_std()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| invalid())?;
+        Ok(Some(vec![
+            metadata.len(),
+            modified.as_secs(),
+            u64::from(modified.subsec_nanos()),
+            metadata.dev(),
+            metadata.ino(),
+        ]))
+    }
+
     /// Length of the regular file at `relative`, when there is one.
     pub fn size(&self, relative: &str) -> Result<Option<u64>, CoreError> {
         let Some((dir, name)) = self.parent(relative, false)? else {

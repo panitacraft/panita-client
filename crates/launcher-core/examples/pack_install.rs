@@ -27,7 +27,7 @@ use uuid::Uuid;
 fn usage() -> Box<dyn std::error::Error> {
     "usage: pack_install install <root> <instance> | pending <root> <instance> | \
      import <root> <instance> <manifest-path> <file> | verify <root> <instance> | \
-     launch <root> <instance> <seconds>; <root> must be a new directory named phase-10-*"
+     launch <root> <instance> <seconds> | play-check <root> <instance>; <root> must be a new directory named phase-10-*"
         .into()
 }
 
@@ -54,11 +54,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if std::fs::symlink_metadata(paths.root()).is_ok() {
                 return Err("the scratch root must be new; existing roots are preserved".into());
             }
-            let base = Arc::new(|progress: launcher_core::minecraft::download::DownloadProgress| {
-                if progress.bytes == progress.total && progress.total > 50 * 1024 * 1024 {
-                    eprintln!("base artifact done ({} MiB)", progress.total / 1024 / 1024);
-                }
-            });
+            let base = Arc::new(
+                |progress: launcher_core::minecraft::download::DownloadProgress| {
+                    if progress.bytes == progress.total && progress.total > 50 * 1024 * 1024 {
+                        eprintln!("base artifact done ({} MiB)", progress.total / 1024 / 1024);
+                    }
+                },
+            );
             let last = std::sync::Mutex::new(std::time::Instant::now());
             let pack = Arc::new(move |p: launcher_core::modpack::content::PackProgress| {
                 let mut last = last.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -84,7 +86,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "seconds": started.elapsed().as_secs()})
                 ),
                 Installed::Pack(Outcome::Conflicts(paths)) => {
-                    println!("{}", serde_json::json!({"result": "conflicts", "paths": paths}))
+                    println!(
+                        "{}",
+                        serde_json::json!({"result": "conflicts", "paths": paths})
+                    )
                 }
                 Installed::Vanilla => println!("{}", serde_json::json!({"result": "vanilla"})),
             }
@@ -118,6 +123,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "pending": pack.pending.len(), "consumed_defaults": pack.consumed_defaults.len(),
                     "skipped_configuration": pack.skipped_configuration.len()})
             );
+        }
+        // Time what Play does before starting Java: the cached installation audit
+        // (twice, to show receipt reuse) and the managed pack file check.
+        "play-check" => {
+            for round in 1..=2 {
+                let lease = LaunchLease::acquire(&paths, id)?;
+                let started = std::time::Instant::now();
+                let installed = lease.verify_installation()?;
+                let audit = started.elapsed().as_millis();
+                let started = std::time::Instant::now();
+                let pack = installed.pack.as_ref().ok_or("not a pack installation")?;
+                verify_files(&GameDir::open(lease.game_directory())?, pack, &cancel)?;
+                println!(
+                    "round {round}: installation audit {audit} ms, pack files {} ms",
+                    started.elapsed().as_millis()
+                );
+            }
         }
         "launch" => {
             let seconds: u64 = args.get(3).ok_or_else(usage)?.parse()?;
