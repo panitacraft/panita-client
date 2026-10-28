@@ -809,3 +809,33 @@ fn only_other_published_pack_versions_require_an_update() {
     let vanilla = local().source;
     assert!(require_current_pack(&vanilla, &vanilla).is_ok());
 }
+
+#[tokio::test]
+async fn account_validation_starts_with_the_audit_only_for_launches_without_a_warning() {
+    let (paths, accounts, id) = fixture();
+    complete_installation(&paths, id);
+    {
+        let attempt = controlled_attempt(&paths, &accounts, id, 200).await;
+        assert!(!attempt.catalog_warning_required());
+        let task = attempt.authorization.as_ref();
+        assert!(task.is_some_and(AuthorizationTask::fresh));
+    }
+    {
+        // A warned attempt validates only after its confirmation.
+        let warned = controlled_attempt(&paths, &accounts, id, 503).await;
+        assert!(warned.catalog_warning_required());
+        assert!(warned.authorization.is_none());
+    }
+    {
+        // A validation that waited too long is repeated instead of trusted.
+        let mut attempt = controlled_attempt(&paths, &accounts, id, 200).await;
+        if let Some(task) = attempt.authorization.as_mut() {
+            task.started =
+                std::time::Instant::now() - AUTHORIZATION_FRESH - std::time::Duration::from_secs(1);
+            assert!(!task.fresh());
+        }
+    }
+    assert!(LaunchLease::acquire(&paths, id).is_ok());
+    drop(accounts);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
