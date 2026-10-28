@@ -5,7 +5,12 @@ version=${1:?Expected upstream version}
 arch_version=${2:?Expected Arch package version}
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
 [[ "$arch_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z._]*$ ]]
-artifact="$root/target/releases/$version/linux"
+mode=${3:-release}
+case "$mode" in
+  release) artifact="$root/target/releases/$version/linux" ;;
+  beta) artifact="$root/target/beta/$version/linux" ;;
+  *) echo 'Expected beta or release package mode' >&2; exit 1 ;;
+esac
 deb="$artifact/panita-client_${version}_linux_x64_unsigned.deb"
 destination="$artifact/panita-client_${version}_archlinux_x64_unsigned.pkg.tar.zst"
 work=$(mktemp -d)

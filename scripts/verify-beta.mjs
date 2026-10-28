@@ -12,7 +12,7 @@ export async function verifyBeta({ directory, platform, version, revision, relea
   if (!['windows', 'linux'].includes(platform)
       || !(release ? releaseVersion(`v${version}`) === version : /^\d+\.\d+\.\d+-beta\.\d+$/.test(version))
       || !/^[a-f0-9]{40}$/.test(revision)) throw new Error('Invalid candidate identity');
-  if (withArch && (!release || platform !== 'linux')) throw new Error('Arch packages require a Linux release');
+  if (withArch && platform !== 'linux') throw new Error('Arch packages require Linux');
   const formats = platform === 'windows'
     ? [['.exe', 'candidate.json']]
     : [['.deb', 'candidate.json'], ['.AppImage', 'candidate-appimage.json']];

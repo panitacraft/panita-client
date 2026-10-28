@@ -40,3 +40,14 @@ diagnostic privacy and login concurrency), and desktop Clippy with warnings
 rejected. All 65 frontend tests, the TypeScript/production frontend build, Rust
 formatting and diff whitespace checks pass. These are source-level results;
 installed-product CachyOS confirmation remains pending.
+
+## Internal installer build
+
+The browser-fix candidate uses `0.1.1-beta.9`. Set the public
+`PANITA_LAUNCHER_API_KEY` environment variable and run
+`./scripts/build-linux-beta.ps1` on Windows with Docker Desktop available.
+The Ubuntu 24.04 build container produces a verified AppImage, Debian package
+and Arch/CachyOS package under `target/beta/0.1.1-beta.9/linux/`. Candidate
+manifests record the exact committed source revision and SHA-256 hashes.
+The identifier is passed through the build environment, never source control.
+No tag, push or publication is part of this build.

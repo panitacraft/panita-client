@@ -32,3 +32,12 @@ RUN curl -fsSL https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu
     && /tmp/rustup-init -y --profile minimal --default-toolchain "${RUST_VERSION}" --component rustfmt --component clippy \
     && rm /tmp/rustup-init /tmp/rustup-init.sha256
 WORKDIR /work
+
+# Package the same Ubuntu-baseline binary for Arch/CachyOS beta testing.
+USER root
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    makepkg=6.0.2-6ubuntu2 pacman-package-manager=6.0.2-6ubuntu2 fakeroot libarchive-tools zstd \
+    && mkdir -p /var/lib/pacman/local /var/lib/pacman/sync \
+    && pacman-db-upgrade \
+    && rm -rf /var/lib/apt/lists/*
+USER panita-build

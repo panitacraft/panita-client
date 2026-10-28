@@ -18,4 +18,6 @@ else
     node scripts/build-beta.mjs
     node scripts/verify-beta.mjs
     bash scripts/linux/verify-candidate.sh
+    node scripts/build-arch-package.mjs --beta
+    node scripts/verify-beta.mjs --with-arch
 fi
