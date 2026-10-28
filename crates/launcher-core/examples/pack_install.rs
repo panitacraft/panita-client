@@ -1,4 +1,4 @@
-//! Development validation harness for custom pack installation; not a product CLI.
+//! Development validation harness for pack installation; not a product CLI.
 //! It reads the public catalog without credentials and writes only inside the
 //! explicitly supplied, new, isolated root. It never reads account or session files.
 use std::sync::Arc;
@@ -28,7 +28,7 @@ use uuid::Uuid;
 fn usage() -> Box<dyn std::error::Error> {
     "usage: pack_install install <root> <instance> | pending <root> <instance> | \
      import <root> <instance> <manifest-path> <file> | verify <root> <instance> | \
-     launch <root> <instance> <seconds> | play-flow <root> <instance> <seconds> | play-check <root> <instance>; <root> must be a new directory named phase-10-*"
+     launch <root> <instance> <seconds> | play-flow <root> <instance> <seconds> | play-check <root> <instance>; <root> must be a new directory named phase-10-* or phase-11-*"
         .into()
 }
 
@@ -44,8 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or_default();
-    if !name.starts_with("phase-10-") {
-        return Err("expected an isolated phase-10-* scratch root".into());
+    if !name.starts_with("phase-10-") && !name.starts_with("phase-11-") {
+        return Err("expected an isolated phase-10-* or phase-11-* scratch root".into());
     }
     let id = Uuid::parse_str(&args[2])?;
     let platform = Platform::x64(std::env::consts::OS, "")?;

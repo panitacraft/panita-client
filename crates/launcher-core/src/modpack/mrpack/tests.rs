@@ -240,6 +240,16 @@ async fn hostile_or_conflicting_archives_are_rejected_before_anything_is_written
             "downloaded executable",
             pack(vec![listed("tools/run.sh")], &[]),
         ),
+        // Bytes that hash correctly can still be no archive at all, or a cut one.
+        ("not an archive", b"definitely not a zip file".to_vec()),
+        (
+            "truncated archive",
+            pack(vec![], &[("overrides/options.txt", b"fov:90")])[..40].to_vec(),
+        ),
+        (
+            "invalid index document",
+            build(&[("modrinth.index.json", b"{\"formatVersion\": 2}")]),
+        ),
     ];
     for (name, bytes) in cases {
         let expected = cached(&paths, &bytes).await;
