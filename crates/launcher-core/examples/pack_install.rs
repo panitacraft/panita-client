@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use launcher_core::{
-    accounts::{AccountInfo, AccountKind},
+    accounts::{AccountInfo, AccountKind, AccountRepository},
     minecraft::{
         Platform,
         download::Cancellation,
@@ -19,6 +19,7 @@ use launcher_core::{
     operation::{OperationId, ProcessSessionId},
     paths::AppPaths,
     registry::InstanceRegistry,
+    sessions::AccountController,
     settings::GlobalSettings,
     storage::PrivateStore,
 };
@@ -27,7 +28,7 @@ use uuid::Uuid;
 fn usage() -> Box<dyn std::error::Error> {
     "usage: pack_install install <root> <instance> | pending <root> <instance> | \
      import <root> <instance> <manifest-path> <file> | verify <root> <instance> | \
-     launch <root> <instance> <seconds> | play-check <root> <instance>; <root> must be a new directory named phase-10-*"
+     launch <root> <instance> <seconds> | play-flow <root> <instance> <seconds> | play-check <root> <instance>; <root> must be a new directory named phase-10-*"
         .into()
 }
 
@@ -141,6 +142,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
+        // The production Play path with an offline test account: catalog check, installation
+        // audit with receipts, authorization and process creation, timed stage by stage.
+        "play-flow" => {
+            let seconds: u64 = args.get(3).ok_or_else(usage)?.parse()?;
+            let flow = std::time::Instant::now();
+            let accounts = Arc::new(AccountController::new(
+                AccountRepository::new(PrivateStore::open(&paths)?),
+                ProcessSessionId::new(),
+            )?);
+            let _ = accounts.add_offline("Phase10_Check");
+            let pending = launcher_core::minecraft::play::prepare_play(
+                paths.clone(),
+                id,
+                accounts.clone(),
+                platform.clone(),
+                ProcessSessionId::new(),
+                cancel.clone(),
+                None,
+            )
+            .await?;
+            eprintln!(
+                "prepare_play (catalog + audit): {} ms",
+                flow.elapsed().as_millis()
+            );
+            let started = std::time::Instant::now();
+            let game = pending.start(None).await?;
+            eprintln!(
+                "start (authorize + spawn): {} ms",
+                started.elapsed().as_millis()
+            );
+            let spawned = std::time::Instant::now();
+            let (mut seen, until) = (
+                0usize,
+                std::time::Instant::now() + std::time::Duration::from_secs(seconds),
+            );
+            let mut early = false;
+            while std::time::Instant::now() < until {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                let events = game.events();
+                for event in events.iter().skip(seen) {
+                    if let ProcessEventKind::Output { text, .. } = &event.kind {
+                        if !early && text.contains("Trying GL version") {
+                            early = true;
+                            eprintln!(
+                                "early loading window: {:.1} s after spawn, {:.1} s after the Play request",
+                                spawned.elapsed().as_secs_f32(),
+                                flow.elapsed().as_secs_f32()
+                            );
+                        }
+                        if text.contains("Setting user") {
+                            eprintln!(
+                                "Minecraft window: {:.1} s after spawn, {:.1} s after the Play request",
+                                spawned.elapsed().as_secs_f32(),
+                                flow.elapsed().as_secs_f32()
+                            );
+                        }
+                    }
+                }
+                seen = events.len();
+            }
+            let _ = game.force_stop().await;
+        }
         "launch" => {
             let seconds: u64 = args.get(3).ok_or_else(usage)?.parse()?;
             let lease = LaunchLease::acquire(&paths, id)?;
@@ -148,7 +211,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let pack = installed.pack.as_ref().ok_or("not a pack installation")?;
             verify_files(&GameDir::open(lease.game_directory())?, pack, &cancel)?;
             let settings = InstanceRegistry::new(paths.clone()).load_settings(id)?;
-            let global = GlobalSettings::load(&PrivateStore::open(&paths)?)?;
+            let mut global = GlobalSettings::load(&PrivateStore::open(&paths)?)?;
+            // Experiment knob: extra JVM arguments separated by spaces (development only).
+            if let Ok(extra) = std::env::var("PACK_JVM_ARGS") {
+                global.extra_jvm_args = extra.split_whitespace().map(str::to_owned).collect();
+            }
             // A synthetic offline identity; no account file is read or written.
             let account = AccountInfo {
                 account_id: Uuid::new_v4(),
@@ -171,6 +238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             )?;
             let game = lease.spawn(command, ProcessSessionId::new(), OperationId::new())?;
+            let spawned = std::time::Instant::now();
             eprintln!("Minecraft started; watching its output for {seconds} s");
             let (mut seen, until) = (
                 0usize,
@@ -181,6 +249,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let events = game.events();
                 for event in events.iter().skip(seen) {
                     if let ProcessEventKind::Output { text, .. } = &event.kind {
+                        for (marker, label) in [
+                            ("Setting user", "window"),
+                            ("NeoForge mod loading", "mod loading"),
+                            ("Game took", "title screen"),
+                        ] {
+                            if text.contains(marker) {
+                                eprintln!(
+                                    "{label}: {:.1} s after spawn",
+                                    spawned.elapsed().as_secs_f32()
+                                );
+                            }
+                        }
                         println!("{text}");
                     }
                 }
