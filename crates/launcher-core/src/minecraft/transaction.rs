@@ -39,6 +39,7 @@ fn canonical(mut value: Value) -> Result<Value, CoreError> {
                 object.remove("kind");
             }
             Some(3) => (),
+            Some(4) if object.get("kind").and_then(Value::as_str) == Some("pack_install") => (),
             _ => return Err(invalid()),
         }
     }
@@ -56,6 +57,7 @@ fn stored(mut value: Value) -> Result<Value, CoreError> {
             object.insert("kind".into(), "update".into());
         }
         Some(3) => (),
+        Some(4) => (),
         _ => return Err(invalid()),
     }
     object.insert("schema".into(), schema);
@@ -71,7 +73,7 @@ fn stored(mut value: Value) -> Result<Value, CoreError> {
 }
 
 /// The caller retains the installation lease. Conflicting copies remain untouched.
-pub(super) fn read(root: &Path) -> Result<Option<Value>, CoreError> {
+pub(crate) fn read(root: &Path) -> Result<Option<Value>, CoreError> {
     let current = read_json_raw::<Value>(root, FILE)?
         .map(canonical)
         .transpose()?;
@@ -83,7 +85,7 @@ pub(super) fn read(root: &Path) -> Result<Option<Value>, CoreError> {
     }
 }
 
-pub(super) fn write(root: &Path, value: Value) -> Result<(), CoreError> {
+pub(crate) fn write(root: &Path, value: Value) -> Result<(), CoreError> {
     // Copy the original intent first, durably, before removing its old name. A
     // crash here leaves equivalent copies that read() accepts. Never replace a
     // conflicting transaction or remove the only durable intent before publication.
@@ -120,7 +122,7 @@ fn remove_one(root: &Path, name: &str) -> Result<(), CoreError> {
 
 /// Only remove a durably inactive, recognized journal. If deletion is interrupted,
 /// its possible reappearance is harmless and the next recovery repeats cleanup.
-pub(super) fn remove(root: &Path) -> Result<(), CoreError> {
+pub(crate) fn remove(root: &Path) -> Result<(), CoreError> {
     if let Some(value) = read(root)? {
         if value.get("active") != Some(&Value::Bool(false)) {
             return Err(invalid());

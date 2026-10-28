@@ -59,6 +59,9 @@ pub struct PackState {
     /// Includes defaults the player subsequently deleted; never inferred from existence.
     pub consumed_defaults: BTreeSet<String>,
     pub skipped_configuration: Vec<SkippedConfiguration>,
+    /// Manual files the player must still supply; Play stays blocked while any remain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending: Vec<super::manual::PendingFile>,
 }
 
 impl PackState {
@@ -82,6 +85,7 @@ impl PackState {
             || self.files.len() > MAX_FILES
             || self.consumed_defaults.len() > MAX_FILES
             || self.skipped_configuration.len() > MAX_FILES
+            || self.pending.len() > MAX_FILES
         {
             return Err(invalid());
         }
@@ -138,6 +142,14 @@ impl PackState {
                 if paths.contains_key(&path[..end]) {
                     return Err(invalid());
                 }
+            }
+        }
+        let mut waiting = BTreeSet::new();
+        for file in &self.pending {
+            file.validate()?;
+            let key = file.path.to_ascii_lowercase();
+            if paths.contains_key(&key) || !waiting.insert(key) {
+                return Err(invalid());
             }
         }
         let mut consumed = BTreeSet::new();

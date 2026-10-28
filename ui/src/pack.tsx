@@ -1,0 +1,140 @@
+import { useEffect, useRef, useState } from 'react';
+import { isTauri } from '@tauri-apps/api/core';
+import { messageForError } from './errors';
+import { packApi } from './pack-api';
+import { playActive } from './play-state';
+import { usePlaySnapshot } from './play';
+import {
+  cacheRetainedReason, cacheSummary, clearSummary, conflictSummary, folderHint, importErrorText, manualHeading,
+  packProgressFraction, packProgressText, reasonText, skippedSummary, formatBytes, type CacheReport, type PackFile, type PackList,
+} from './pack-state';
+
+const packImportError = (cause: unknown) => importErrorText(cause) ?? messageForError(cause);
+
+/** Progress, manual files and kept configuration for one modpack instance. */
+export function PackPanel({ instanceId, awaiting, onChanged }: { instanceId: string; awaiting: boolean; onChanged: () => void }) {
+  const entry = usePlaySnapshot()?.instances.find(candidate => candidate.instanceId === instanceId);
+  const [files, setFiles] = useState<PackFile[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const installing = entry?.operation === 'install' && playActive(entry.phase);
+
+  useEffect(() => {
+    if (!awaiting || !isTauri()) { setFiles([]); return; }
+    let active = true;
+    packApi.files(instanceId).then(list => { if (active) setFiles(list.files); })
+      .catch(cause => { if (active) setError(packImportError(cause)); });
+    return () => { active = false; };
+  }, [instanceId, awaiting, entry?.requestId, entry?.phase]);
+
+  async function run(work: () => Promise<PackList | boolean>) {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await work();
+      if (typeof result !== 'boolean' && !result.cancelled) {
+        setFiles(result.files);
+        if (result.complete || result.files.length !== files.length) onChanged();
+      }
+    } catch (cause) {
+      setError(packImportError(cause));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  const progress = entry?.packProgress ?? null;
+  const skipped = entry?.packSkipped ?? [];
+  const conflicts = entry?.packConflicts ?? [];
+  if (!installing && !awaiting && skipped.length === 0 && conflicts.length === 0) return null;
+
+  return <div className="pack-panel">
+    {installing && <div>
+      <progress aria-label="Descarga de los archivos del modpack" max={1} value={progress ? packProgressFraction(progress) : undefined} />
+      <p role="status">{packProgressText(progress)}</p>
+    </div>}
+    {!installing && conflicts.length > 0 && <div className="catalog-notice" role="alert">
+      <p>{conflictSummary(conflicts)}</p>
+      <details><summary>Archivos en conflicto</summary><ul>{conflicts.map(path => <li key={path}><code>{path}</code></li>)}</ul></details>
+      <p>Muévelos o elimínalos y vuelve a intentar la instalación. Nunca los reemplazamos por nuestra cuenta.</p>
+    </div>}
+    {!installing && skipped.length > 0 && <div role="status">
+      <p>{skippedSummary(skipped)}</p>
+      <details><summary>Archivos conservados</summary><ul>{skipped.map(path => <li key={path}><code>{path}</code></li>)}</ul></details>
+    </div>}
+    {awaiting && !installing && <fieldset className="catalog-notice">
+      <legend>{manualHeading(files.length)}</legend>
+      <p>Sin ellos no puedes jugar. Los demás archivos ya están instalados.</p>
+      <ul>
+        {files.map(file => <li key={file.path}>
+          <strong>{file.name}</strong> (<code>{file.fileName}</code>)
+          <p>{reasonText(file.reason)} {folderHint(file)}</p>
+          <div className="account-buttons">
+            <button type="button" disabled={busy || !isTauri()} onClick={() => void run(() => packApi.openSource(instanceId, file.path))}>Abrir CurseForge</button>
+            <button type="button" disabled={busy || !isTauri()} onClick={() => void run(() => packApi.openFolder(instanceId, file.path))}>Abrir carpeta</button>
+            <button type="button" disabled={busy || !isTauri()} onClick={() => void run(() => packApi.importFile(instanceId, file.path))}>Seleccionar archivo…</button>
+          </div>
+        </li>)}
+      </ul>
+      <button type="button" disabled={busy || !isTauri()} onClick={() => void run(() => packApi.verify(instanceId))}>Verificar</button>
+    </fieldset>}
+    {error && <p className="account-error" role="alert">{error}</p>}
+  </div>;
+}
+
+/** Size of the disposable download cache and the explicit action that clears it. */
+export function CachePanel() {
+  const [size, setSize] = useState<number | null>(null);
+  const [question, setQuestion] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const [report, setReport] = useState<CacheReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    try { setSize(await packApi.cacheSize()); } catch (cause) { setError(packImportError(cause)); }
+  }
+  useEffect(() => { if (isTauri()) void refresh(); }, []);
+
+  async function clear() {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true); setError(null); setQuestion(false);
+    try {
+      setReport(await packApi.clearCache());
+      await refresh();
+    } catch (cause) {
+      setError(packImportError(cause));
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  return <section className="settings-section" aria-labelledby="cache-heading">
+    <h2 id="cache-heading">Caché de archivos de modpacks</h2>
+    <p>{cacheSummary(size)}</p>
+    <p>Guarda los archivos ya verificados de los modpacks para no descargarlos de nuevo. Puedes borrarla sin riesgo: tus instancias, mundos y ajustes no dependen de ella.</p>
+    <button type="button" disabled={busy || !isTauri() || size === 0} onClick={() => setQuestion(true)}>Limpiar caché…</button>
+    {question && <fieldset className="catalog-notice">
+      <legend>Limpiar la caché de archivos de modpacks</legend>
+      <p>Eliminaremos la carpeta <code>content</code> dentro de la carpeta PanitaClient de tus datos de aplicación ({size === null ? 'tamaño desconocido' : formatBytes(size)}). No tocamos tus instancias, mundos, cuentas ni los archivos de Minecraft y Java.</p>
+      <p>Los archivos se descargarán de nuevo la próxima vez que instales o repares un modpack. No se puede deshacer.</p>
+      <div className="account-buttons">
+        <button type="button" disabled={busy} onClick={() => void clear()}>Confirmar limpieza</button>
+        <button type="button" disabled={busy} onClick={() => setQuestion(false)}>Volver</button>
+      </div>
+    </fieldset>}
+    {report && <div role="status">
+      <p>{clearSummary(report)}</p>
+      {report.details.length > 0 && <details><summary>Por qué se conservaron algunos archivos</summary>
+        <ul>{report.details.map(detail => <li key={`${detail.directory}:${detail.reason}`}><code>{detail.directory}</code>: {cacheRetainedReason(detail.reason)}</li>)}</ul>
+      </details>}
+    </div>}
+    {error && <p role="alert">{error}</p>}
+  </section>;
+}

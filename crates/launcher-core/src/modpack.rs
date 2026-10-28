@@ -10,9 +10,17 @@ use crate::{
     minecraft::safe_path,
 };
 
+pub mod archive;
 pub mod cache;
+pub mod config;
+pub mod content;
+pub mod gamefs;
+pub mod install;
+pub mod manual;
 pub mod modrinth;
 pub mod state;
+pub mod store;
+pub mod transfer;
 
 pub const STORAGE_HOST: &str = "jqleaywgcoedgvglrvhc.supabase.co";
 pub const MAX_DOCUMENT_BYTES: usize = 8 * 1024 * 1024;

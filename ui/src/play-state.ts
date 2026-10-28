@@ -1,4 +1,4 @@
-export type PlayPhase = 'preparing' | 'installing' | 'installed' | 'uninstalled' | 'warning' | 'starting' | 'running' | 'stopping' | 'cancelling' | 'exited' | 'failed' | 'cancelled';
+export type PlayPhase = 'preparing' | 'installing' | 'installed' | 'awaiting_files' | 'uninstalled' | 'warning' | 'starting' | 'running' | 'stopping' | 'cancelling' | 'exited' | 'failed' | 'cancelled';
 export type PlayEntry = {
   instanceId: string;
   requestId: string;
@@ -16,6 +16,10 @@ export type PlayEntry = {
   reusedFiles: number;
   retainedFiles: number;
   nativeCleanup?: import('./native-cleanup-state').NativeCleanupReport | null;
+  packProgress?: import('./pack-state').PackProgress | null;
+  packAwaiting?: import('./pack-state').PackFile[];
+  packSkipped?: string[] | null;
+  packConflicts?: string[] | null;
 };
 export type PlaySnapshot = {
   revision: number;
@@ -31,7 +35,7 @@ export function acceptPlaySnapshot(previous: PlaySnapshot | null, next: PlaySnap
 }
 
 export function playActive(phase: PlayPhase): boolean {
-  return phase !== 'installed' && phase !== 'uninstalled' && phase !== 'exited' && phase !== 'failed' && phase !== 'cancelled';
+  return phase !== 'installed' && phase !== 'awaiting_files' && phase !== 'uninstalled' && phase !== 'exited' && phase !== 'failed' && phase !== 'cancelled';
 }
 
 export function installationRefreshKey(snapshot: PlaySnapshot | null): string {

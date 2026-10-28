@@ -16,7 +16,8 @@ export type LauncherErrorCode =
   | 'process_start_failed' | 'process_control_failed' | 'loader_processor_failed' | 'loader_processor_timeout' | 'catalog_confirmation_required'
   | 'activation_required' | 'activation_unavailable' | 'activation_unknown_account'
   | 'activation_not_activated' | 'activation_rate_limited' | 'activation_expired'
-  | 'activation_consumed' | 'activation_file_invalid' | 'session_rejected' | 'api_key_rejected';
+  | 'activation_consumed' | 'activation_file_invalid' | 'session_rejected' | 'api_key_rejected'
+  | 'manual_files_required' | 'pack_conflict' | 'update_required';
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
@@ -66,6 +67,9 @@ const messages: Record<LauncherErrorCode, string> = {
   activation_file_invalid: 'El archivo de activación está dañado o pertenece a una versión no compatible. No lo modificamos para proteger tus datos. Cierra el cliente y elimina panita-session.json (un archivo oculto) de la carpeta PanitaClient de tus datos de aplicación para activar de nuevo.',
   session_rejected: 'Tu sesión de Panitacraft se cerró. Actívala de nuevo para continuar.',
   api_key_rejected: 'El servicio rechazó esta versión de Panita Client. Instala la versión más reciente.',
+  manual_files_required: 'Faltan archivos que debes descargar tú mismo. Complétalos para poder jugar.',
+  pack_conflict: 'Ya existen archivos tuyos donde este modpack necesita instalar los suyos. No cambiamos nada: revisa la lista, muévelos o elimínalos y vuelve a instalar.',
+  update_required: 'Hay una versión nueva de este modpack y debes actualizarla antes de jugar. La actualización desde Panita Client llegará en una próxima versión.',
 };
 
 export function messageForError(error: unknown): string {

@@ -4,8 +4,8 @@ use super::*;
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub(super) enum StoredInstalled {
-    Current(Current),
-    Legacy(Legacy),
+    Current(Box<Current>),
+    Legacy(Box<Legacy>),
 }
 
 #[derive(Serialize, Deserialize)]
@@ -19,6 +19,10 @@ pub(super) struct Current {
     natives: Vec<NativeFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     native_directory: Option<String>,
+    /// Schema 5 only. Older builds reject the unknown field and the schema, so they
+    /// never operate on a modpack installation as if it were vanilla.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack: Option<crate::modpack::state::PackState>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -46,8 +50,11 @@ impl TryFrom<StoredInstalled> for InstalledLock {
     fn try_from(value: StoredInstalled) -> Result<Self, Self::Error> {
         match value {
             StoredInstalled::Current(value) => {
-                if value.schema != 4 {
-                    return Err(invalid());
+                // Schema 4 is vanilla; schema 5 is exactly a modpack installation.
+                match (value.schema, &value.pack, &value.status) {
+                    (4, None, _) => {}
+                    (5, Some(pack), Status::Installed) => pack.validate(value.id)?,
+                    _ => return Err(invalid()),
                 }
                 Ok(Self {
                     schema_version: match value.status {
@@ -59,6 +66,7 @@ impl TryFrom<StoredInstalled> for InstalledLock {
                     plan: value.plan,
                     native_files: value.natives,
                     native_directory: value.native_directory,
+                    pack: value.pack,
                 })
             }
             StoredInstalled::Legacy(value) => {
@@ -72,6 +80,7 @@ impl TryFrom<StoredInstalled> for InstalledLock {
                     plan: value.plan,
                     native_files: value.native_files,
                     native_directory: value.native_directory,
+                    pack: None,
                 })
             }
         }
@@ -81,8 +90,8 @@ impl TryFrom<StoredInstalled> for InstalledLock {
 impl From<InstalledLock> for StoredInstalled {
     fn from(value: InstalledLock) -> Self {
         if matches!(value.schema_version, 2 | 3) {
-            Self::Current(Current {
-                schema: 4,
+            Self::Current(Box::new(Current {
+                schema: if value.pack.is_some() { 5 } else { 4 },
                 id: value.instance_id,
                 operation: value.operation,
                 status: if value.schema_version == 2 {
@@ -93,16 +102,17 @@ impl From<InstalledLock> for StoredInstalled {
                 plan: value.plan,
                 natives: value.native_files,
                 native_directory: value.native_directory,
-            })
+                pack: value.pack,
+            }))
         } else {
-            Self::Legacy(Legacy {
+            Self::Legacy(Box::new(Legacy {
                 schema_version: value.schema_version,
                 instance_id: value.instance_id,
                 operation: value.operation,
                 plan: value.plan,
                 native_files: value.native_files,
                 native_directory: value.native_directory,
-            })
+            }))
         }
     }
 }

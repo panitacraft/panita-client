@@ -67,6 +67,7 @@ struct State {
     flights: HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>,
 }
 
+#[derive(Clone)]
 pub(crate) struct PlaySelection {
     controller: Uuid,
     id: Uuid,

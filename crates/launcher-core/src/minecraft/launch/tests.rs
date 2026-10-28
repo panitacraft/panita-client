@@ -91,6 +91,7 @@ fn fixture(id: &str, os: &str) -> (AppPaths, PathBuf, InstalledLock, Platform, A
             loader: None,
         },
         native_files: vec![],
+        pack: None,
         native_directory: None,
     };
     let account = AccountInfo {

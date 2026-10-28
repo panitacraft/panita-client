@@ -55,7 +55,7 @@ struct Journal {
     retained_files: u32,
 }
 
-pub(super) fn validate_manifest(manifest: &InstalledLock, id: Uuid) -> Result<(), CoreError> {
+pub(crate) fn validate_manifest(manifest: &InstalledLock, id: Uuid) -> Result<(), CoreError> {
     if !matches!(manifest.schema_version, 2 | 3)
         || manifest.instance_id != id
         || id.is_nil()
@@ -400,6 +400,10 @@ pub fn uninstall(
     recover_for_maintenance(paths, id, &root)?;
     let previous = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
     validate_manifest(&previous, id)?;
+    // Modpack uninstall preserves player files and arrives with Phase 12.
+    if previous.pack.is_some() {
+        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    }
     let mut journal = Journal {
         schema_version: 3,
         instance_id: id,

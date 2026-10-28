@@ -47,6 +47,8 @@ pub struct InstalledLock {
     pub native_files: Vec<NativeFile>,
     /// Missing in older manifests, which retain their original generation path.
     pub native_directory: Option<String>,
+    /// Modpack state; present only for disk schema 5, absent for vanilla installations.
+    pub pack: Option<crate::modpack::state::PackState>,
 }
 
 impl InstalledLock {
@@ -61,14 +63,14 @@ impl InstalledLock {
 
 pub type Progress = Arc<dyn Fn(DownloadProgress) + Send + Sync>;
 
-pub(super) fn metadata_root(paths: &AppPaths, id: Uuid) -> Result<std::path::PathBuf, CoreError> {
+pub(crate) fn metadata_root(paths: &AppPaths, id: Uuid) -> Result<std::path::PathBuf, CoreError> {
     if id.is_nil() {
         return Err(invalid());
     }
     InstanceRegistry::new(paths.clone()).prepare_instance(id)
 }
 
-pub(super) fn read_json<T: serde::de::DeserializeOwned>(
+pub(crate) fn read_json<T: serde::de::DeserializeOwned>(
     root: &std::path::Path,
     name: &str,
 ) -> Result<Option<T>, CoreError> {
@@ -80,7 +82,7 @@ pub(super) fn read_json<T: serde::de::DeserializeOwned>(
     read_json_raw(root, name)
 }
 
-pub(super) fn read_json_raw<T: serde::de::DeserializeOwned>(
+pub(crate) fn read_json_raw<T: serde::de::DeserializeOwned>(
     root: &std::path::Path,
     name: &str,
 ) -> Result<Option<T>, CoreError> {
@@ -102,7 +104,7 @@ pub(super) fn read_json_raw<T: serde::de::DeserializeOwned>(
     }
     Ok(Some(serde_json::from_slice(&bytes).map_err(|_| invalid())?))
 }
-pub(super) fn write_json(
+pub(crate) fn write_json(
     root: &std::path::Path,
     relative: &str,
     value: &impl Serialize,
@@ -116,7 +118,7 @@ pub(super) fn write_json(
     write_json_raw(root, relative, value)
 }
 
-pub(super) fn write_json_raw(
+pub(crate) fn write_json_raw(
     root: &std::path::Path,
     relative: &str,
     value: &impl Serialize,
@@ -138,11 +140,14 @@ pub(super) fn write_json_raw(
 
 /// A pending journal is conservative: files are retained for verified reuse, but
 /// completion must be retried explicitly. No network access or Java execution occurs.
-pub(super) fn recover_locked(
+pub(crate) fn recover_locked(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
 ) -> Result<(), CoreError> {
+    if crate::modpack::install::recover_locked(paths, id, root)? {
+        return Ok(());
+    }
     if super::maintenance::recover_locked(paths, id, root)? {
         return Ok(());
     }
@@ -362,7 +367,7 @@ fn required_cache_space(
         })
 }
 
-fn check_capacity(missing: u64, available: u64) -> Result<(), CoreError> {
+pub(crate) fn check_capacity(missing: u64, available: u64) -> Result<(), CoreError> {
     if missing
         .checked_add(64 * 1024 * 1024)
         .is_none_or(|required| required > available)
@@ -521,7 +526,7 @@ fn previous_record_requires_installation(paths: &AppPaths, id: Uuid) -> Result<b
         }))
 }
 
-pub(super) async fn prepare_recorded(
+pub(crate) async fn prepare_recorded(
     paths: &AppPaths,
     id: Uuid,
     operation: Uuid,
@@ -590,6 +595,7 @@ pub(super) async fn prepare_recorded(
         plan,
         native_files,
         native_directory: Some(native_directory),
+        pack: None,
     };
     Ok(installed)
 }
@@ -603,7 +609,7 @@ pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, Cor
 }
 
 /// Caller must retain this instance's installation lock for the whole audit.
-pub(super) fn verify_under_lock(
+pub(crate) fn verify_under_lock(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
@@ -615,7 +621,7 @@ pub(super) fn verify_under_lock(
 }
 
 /// Cached Play preflight. Installation, repair and recovery use the full audit above.
-pub(super) fn verify_play_under_lock(
+pub(crate) fn verify_play_under_lock(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
@@ -637,7 +643,9 @@ fn read_installed_under_lock(
     cancel.check()?;
     let journal = read_json::<serde_json::Value>(root, "transaction.json")?;
     if journal.is_some_and(|journal| {
-        if journal["schema_version"] == 3 {
+        if journal["schema_version"] == 4 {
+            !crate::modpack::install::journal_inactive(journal, id)
+        } else if journal["schema_version"] == 3 {
             !super::maintenance::journal_inactive(journal, id)
         } else if journal["schema_version"] == 2 {
             !super::update::journal_inactive(journal, id)
@@ -658,7 +666,27 @@ fn read_installed_under_lock(
     Ok(installed)
 }
 
-pub(super) fn verify_manifest(
+/// Map `items` on a few threads, keeping their order. `None` means a worker panicked.
+fn parallel<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Option<Vec<R>> {
+    let threads = std::thread::available_parallelism().map_or(2, |count| count.get().min(8));
+    if items.len() < 64 || threads == 1 {
+        return Some(items.iter().map(&work).collect());
+    }
+    let size = items.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = items
+            .chunks(size)
+            .map(|part| scope.spawn(|| part.iter().map(&work).collect::<Vec<_>>()))
+            .collect();
+        let mut results = Vec::with_capacity(items.len());
+        for worker in workers {
+            results.extend(worker.join().ok()?);
+        }
+        Some(results)
+    })
+}
+
+pub(crate) fn verify_manifest(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
@@ -686,23 +714,54 @@ fn verify_manifest_inner(
     // unchanged content reads, while every file still crosses the private boundary.
     let mut parents = std::collections::HashMap::new();
     for file in &installed.plan.artifacts {
-        cancel.check()?;
-        let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+        let (parent, _) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
         if !parents.contains_key(parent) {
+            cancel.check()?;
             let (directory, _) = super::download::existing_parent(paths.root(), &file.destination)?
                 .ok_or_else(|| CoreError::new(ErrorCode::ArtifactMismatch))?;
             parents.insert(parent, directory);
         }
+    }
+    // Receipt hits need only metadata, so they are looked up on several threads;
+    // anything else falls through to the sequential full check below.
+    let hits: Vec<Option<bool>> = match cache.as_deref() {
+        Some(cache) => parallel(&installed.plan.artifacts, |file| {
+            cancel.check()?;
+            let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+            let directory = parents.get(parent).ok_or_else(invalid)?;
+            cache.check(
+                directory,
+                leaf,
+                &format!("managed/{}", file.destination),
+                &file.artifact,
+                file.executable,
+            )
+        })
+        .ok_or_else(|| CoreError::new(ErrorCode::StorageUnavailable))?
+        .into_iter()
+        .collect::<Result<_, _>>()?,
+        None => vec![None; installed.plan.artifacts.len()],
+    };
+    #[cfg(test)]
+    if let Some(cache) = cache.as_deref_mut() {
+        cache.reused += hits.iter().filter(|hit| **hit == Some(true)).count();
+    }
+    for (file, hit) in installed.plan.artifacts.iter().zip(hits) {
+        cancel.check()?;
+        let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
         let directory = parents.get(parent).ok_or_else(invalid)?;
-        let matches = match cache.as_deref_mut() {
-            Some(cache) => cache.verify(
+        let matches = match (hit, cache.as_deref_mut()) {
+            (Some(verdict), _) => verdict,
+            (None, Some(cache)) => cache.verify(
                 directory,
                 leaf,
                 &format!("managed/{}", file.destination),
                 &file.artifact,
                 file.executable,
             )?,
-            None => verified_planned_file(directory, leaf, &file.artifact, file.executable)?,
+            (None, None) => {
+                verified_planned_file(directory, leaf, &file.artifact, file.executable)?
+            }
         };
         if !matches {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
@@ -730,6 +789,16 @@ fn verify_manifest_inner(
             None => verified_file(&directory, &leaf, &artifact)?,
         };
         if !matches {
+            return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+        }
+    }
+    if let Some(pack) = &installed.pack {
+        let game = crate::modpack::gamefs::GameDir::open(&root.join("minecraft"))?;
+        let intact = match cache.as_deref_mut() {
+            Some(cache) => cache.verify_pack(&game, pack, cancel)?,
+            None => crate::modpack::install::verify_files(&game, pack, cancel).is_ok(),
+        };
+        if !intact {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
     }
