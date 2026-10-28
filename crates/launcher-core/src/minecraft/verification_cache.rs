@@ -93,6 +93,53 @@ impl VerificationCache {
         self.verify_expected(directory, leaf, key, artifact, executable, None)
     }
 
+    /// Read-only receipt lookup, safe to run from several threads. `Some(true)` is a
+    /// receipt hit with the file still unchanged, `Some(false)` a missing or resized
+    /// file, and `None` a file that needs the full check of `verify`.
+    pub fn check(
+        &self,
+        directory: &PrivateDir,
+        leaf: &str,
+        key: &str,
+        artifact: &Artifact,
+        executable: bool,
+    ) -> Result<Option<bool>, CoreError> {
+        #[cfg(target_os = "linux")]
+        if executable {
+            return Ok(None);
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = executable;
+        let file = match directory.open_file(leaf) {
+            Ok(file) => file,
+            Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Some(false));
+            }
+            Err(error) => return Err(map_private_error(error)),
+        };
+        let input = native_file(&file)?;
+        let metadata = input.metadata().map_err(io)?;
+        if metadata.len() != artifact.size {
+            return Ok(Some(false));
+        }
+        let before = stamp(&metadata);
+        let hit = self.entries.get(key).is_some_and(|receipt| {
+            receipt.sha1 == artifact.sha1
+                && receipt.sha256.is_none()
+                && receipt.size == artifact.size
+                && receipt.stamp == before
+        });
+        if !hit {
+            return Ok(None);
+        }
+        // Recheck the retained protected handle even when content reads are skipped.
+        file.verify().map_err(map_private_error)?;
+        if stamp(&input.metadata().map_err(io)?) != before {
+            return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+        }
+        Ok(Some(true))
+    }
+
     pub fn verify_sha256(
         &mut self,
         directory: &PrivateDir,

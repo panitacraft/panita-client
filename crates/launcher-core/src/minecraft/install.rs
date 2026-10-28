@@ -590,6 +590,26 @@ fn read_installed_under_lock(
     Ok(installed)
 }
 
+/// Map `items` on a few threads, keeping their order. `None` means a worker panicked.
+fn parallel<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Option<Vec<R>> {
+    let threads = std::thread::available_parallelism().map_or(2, |count| count.get().min(8));
+    if items.len() < 64 || threads == 1 {
+        return Some(items.iter().map(&work).collect());
+    }
+    let size = items.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = items
+            .chunks(size)
+            .map(|part| scope.spawn(|| part.iter().map(&work).collect::<Vec<_>>()))
+            .collect();
+        let mut results = Vec::with_capacity(items.len());
+        for worker in workers {
+            results.extend(worker.join().ok()?);
+        }
+        Some(results)
+    })
+}
+
 pub(crate) fn verify_manifest(
     paths: &AppPaths,
     id: Uuid,
@@ -618,23 +638,54 @@ fn verify_manifest_inner(
     // unchanged content reads, while every file still crosses the private boundary.
     let mut parents = std::collections::HashMap::new();
     for file in &installed.plan.artifacts {
-        cancel.check()?;
-        let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+        let (parent, _) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
         if !parents.contains_key(parent) {
+            cancel.check()?;
             let (directory, _) = super::download::existing_parent(paths.root(), &file.destination)?
                 .ok_or_else(|| CoreError::new(ErrorCode::ArtifactMismatch))?;
             parents.insert(parent, directory);
         }
+    }
+    // Receipt hits need only metadata, so they are looked up on several threads;
+    // anything else falls through to the sequential full check below.
+    let hits: Vec<Option<bool>> = match cache.as_deref() {
+        Some(cache) => parallel(&installed.plan.artifacts, |file| {
+            cancel.check()?;
+            let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+            let directory = parents.get(parent).ok_or_else(invalid)?;
+            cache.check(
+                directory,
+                leaf,
+                &format!("managed/{}", file.destination),
+                &file.artifact,
+                file.executable,
+            )
+        })
+        .ok_or_else(|| CoreError::new(ErrorCode::StorageUnavailable))?
+        .into_iter()
+        .collect::<Result<_, _>>()?,
+        None => vec![None; installed.plan.artifacts.len()],
+    };
+    #[cfg(test)]
+    if let Some(cache) = cache.as_deref_mut() {
+        cache.reused += hits.iter().filter(|hit| **hit == Some(true)).count();
+    }
+    for (file, hit) in installed.plan.artifacts.iter().zip(hits) {
+        cancel.check()?;
+        let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
         let directory = parents.get(parent).ok_or_else(invalid)?;
-        let matches = match cache.as_deref_mut() {
-            Some(cache) => cache.verify(
+        let matches = match (hit, cache.as_deref_mut()) {
+            (Some(verdict), _) => verdict,
+            (None, Some(cache)) => cache.verify(
                 directory,
                 leaf,
                 &format!("managed/{}", file.destination),
                 &file.artifact,
                 file.executable,
             )?,
-            None => verified_planned_file(directory, leaf, &file.artifact, file.executable)?,
+            (None, None) => {
+                verified_planned_file(directory, leaf, &file.artifact, file.executable)?
+            }
         };
         if !matches {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
