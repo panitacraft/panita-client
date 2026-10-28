@@ -49,6 +49,8 @@ enum Phase {
     Preparing,
     Installing,
     Installed,
+    /// A modpack is installed except for manual files the player must supply.
+    AwaitingFiles,
     Uninstalled,
     Warning,
     Starting,
@@ -65,7 +67,7 @@ impl Phase {
         match self {
             Self::Preparing => WorkflowPhase::Preparing,
             Self::Installing => WorkflowPhase::Installing,
-            Self::Installed => WorkflowPhase::Installed,
+            Self::Installed | Self::AwaitingFiles => WorkflowPhase::Installed,
             Self::Uninstalled => WorkflowPhase::Uninstalled,
             Self::Warning => WorkflowPhase::Warning,
             Self::Starting => WorkflowPhase::Starting,
@@ -81,7 +83,12 @@ impl Phase {
     fn active(self) -> bool {
         !matches!(
             self,
-            Self::Installed | Self::Uninstalled | Self::Exited | Self::Failed | Self::Cancelled
+            Self::Installed
+                | Self::AwaitingFiles
+                | Self::Uninstalled
+                | Self::Exited
+                | Self::Failed
+                | Self::Cancelled
         )
     }
     fn text(self) -> &'static str {
@@ -89,6 +96,7 @@ impl Phase {
             Self::Preparing => "preparing",
             Self::Installing => "installing",
             Self::Installed => "installed",
+            Self::AwaitingFiles => "awaiting_files",
             Self::Uninstalled => "uninstalled",
             Self::Warning => "warning",
             Self::Starting => "starting",
@@ -100,6 +108,15 @@ impl Phase {
             Self::Cancelled => "cancelled",
         }
     }
+}
+
+/// What a pack installation left for the player to see: missing manual files,
+/// configuration kept whole, or existing files that blocked the install.
+#[derive(Default)]
+struct PackResult {
+    awaiting: Vec<launcher_core::modpack::manual::PendingFile>,
+    skipped: Vec<String>,
+    conflicts: Vec<String>,
 }
 
 struct Entry {
@@ -120,6 +137,8 @@ struct Entry {
     reused_files: u64,
     retained_files: u32,
     native_cleanup: Option<launcher_core::minecraft::native_cache::CleanupReport>,
+    pack_progress: Option<launcher_core::modpack::content::PackProgress>,
+    pack: Option<PackResult>,
     last_progress: std::time::Instant,
     last_logged: Option<(WorkflowPhase, Option<ErrorCode>)>,
 }
@@ -336,6 +355,8 @@ impl PlayController {
                 reused_files: 0,
                 retained_files: 0,
                 native_cleanup: None,
+                pack_progress: None,
+                pack: None,
                 last_progress: std::time::Instant::now(),
                 last_logged: None,
             },
@@ -404,6 +425,42 @@ impl PlayController {
         publish
     }
 
+    /// Pack downloads report whole-install file and byte totals.
+    fn pack_progress(
+        &self,
+        instance: Uuid,
+        request: Uuid,
+        progress: launcher_core::modpack::content::PackProgress,
+    ) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        let Some(entry) = state
+            .entries
+            .get_mut(&instance)
+            .filter(|entry| entry.request == request && entry.phase == Phase::Installing)
+        else {
+            return false;
+        };
+        entry.pack_progress = Some(progress);
+        let publish = entry.last_progress.elapsed() >= std::time::Duration::from_millis(250);
+        if publish {
+            entry.last_progress = std::time::Instant::now();
+        }
+        state.changed();
+        publish
+    }
+
+    /// True while any installation is running; the content cache is then in use.
+    pub(super) fn installing(&self) -> bool {
+        self.state.lock().map_or(true, |state| {
+            state
+                .entries
+                .values()
+                .any(|entry| entry.kind == OperationKind::Install && entry.phase.active())
+        })
+    }
+
     pub fn snapshot(&self) -> Result<Value, ErrorCode> {
         let state = self
             .state
@@ -425,6 +482,10 @@ impl PlayController {
                     "receivedFiles": entry.received_files, "reusedFiles": entry.reused_files,
                     "retainedFiles": entry.retained_files,
                     "nativeCleanup": entry.native_cleanup,
+                    "packProgress": entry.pack_progress.map(|p| json!({"filesDone": p.files_done, "filesTotal": p.files_total, "bytesDone": p.bytes_done, "bytesTotal": p.bytes_total, "reusedFiles": p.reused_files})),
+                    "packAwaiting": entry.pack.as_ref().map(|p| super::pack_commands::files_json(&p.awaiting)).unwrap_or(json!([])),
+                    "packSkipped": entry.pack.as_ref().map(|p| &p.skipped),
+                    "packConflicts": entry.pack.as_ref().map(|p| &p.conflicts),
                 })
             })
             .collect();
@@ -987,6 +1048,7 @@ fn begin_maintenance(
                     matches!(
                         record.state,
                         InstallationState::Installed
+                            | InstallationState::AwaitingFiles
                             | InstallationState::UpdateAvailable
                             | InstallationState::Running
                     )
@@ -1042,16 +1104,46 @@ fn begin_maintenance(
                     Some(outcome.native_cleanup),
                 ))
             } else {
-                launcher_core::minecraft::install::install(
+                use launcher_core::modpack::install::{Installed, Outcome, install_any};
+                let pack_controller = controller.clone();
+                let pack_app = app.clone();
+                let pack_progress = Arc::new(move |progress| {
+                    if pack_controller.pack_progress(instance_id, request_id, progress) {
+                        pack_controller.publish(&pack_app);
+                    }
+                });
+                let installed = install_any(
                     &paths,
                     instance_id,
                     platform,
                     &cancel,
                     progress,
+                    pack_progress,
                     credentials.clone(),
                 )
                 .await
                 .map_err(|error| error.code())?;
+                match installed {
+                    Installed::Vanilla => {}
+                    Installed::Pack(Outcome::Conflicts(conflicts)) => {
+                        controller.update(instance_id, request_id, |entry| {
+                            entry.pack = Some(PackResult {
+                                conflicts,
+                                ..PackResult::default()
+                            });
+                        });
+                        return Err(ErrorCode::PackConflict);
+                    }
+                    Installed::Pack(Outcome::Installed(report)) => {
+                        controller.update(instance_id, request_id, |entry| {
+                            entry.pack = Some(PackResult {
+                                awaiting: report.awaiting,
+                                skipped: report.skipped_configuration,
+                                conflicts: Vec::new(),
+                            });
+                        });
+                    }
+                }
                 Ok((None, 0, None))
             }
         }
@@ -1063,6 +1155,12 @@ fn begin_maintenance(
                 controller.update(instance_id, request_id, |entry| {
                     entry.phase = if kind == OperationKind::Uninstall {
                         Phase::Uninstalled
+                    } else if entry
+                        .pack
+                        .as_ref()
+                        .is_some_and(|pack| !pack.awaiting.is_empty())
+                    {
+                        Phase::AwaitingFiles
                     } else {
                         Phase::Installed
                     };
