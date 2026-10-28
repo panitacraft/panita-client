@@ -67,7 +67,7 @@ pub(super) fn add_offline_account(
 }
 
 #[tauri::command]
-pub(super) fn start_microsoft_login(
+pub(super) async fn start_microsoft_login(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
     account_id: Option<String>,
@@ -99,12 +99,25 @@ pub(super) fn start_microsoft_login(
         return Ok(launch.operation_id.to_string());
     }
     #[cfg(target_os = "linux")]
-    let browser_result = super::linux_activation::open_browser(&app, launch.browser_url);
+    let browser_result = {
+        let handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            super::linux_browser::open_browser(&handle, launch.browser_url)
+        })
+        .await
+        .unwrap_or(Err(()))
+    };
     #[cfg(not(target_os = "linux"))]
     let browser_result = app.opener().open_url(launch.browser_url, None::<&str>);
     if browser_result.is_err() {
-        let _ = accounts.cancel_login();
-        return Err(ErrorCode::BrowserUnavailable);
+        let cancelled = accounts
+            .cancel_pending_login(launch.operation_id)
+            .map_err(|error| error.code())?;
+        if cancelled {
+            emit_accounts(&app, &accounts);
+            return Err(ErrorCode::BrowserUnavailable);
+        }
+        // A callback or a later account action already owns the outcome.
     }
     emit_accounts(&app, &accounts);
     Ok(launch.operation_id.to_string())

@@ -272,6 +272,21 @@ impl AccountController {
         Ok(())
     }
 
+    /// A delayed opener failure must not cancel a newer login or an exchange
+    /// whose callback already arrived while the opener was still running.
+    pub fn cancel_pending_login(&self, operation: Uuid) -> Result<bool, CoreError> {
+        let mut state = self.state()?;
+        if state
+            .interactive
+            .is_some_and(|ticket| ticket.operation.value() == operation)
+            && state.pending.is_active()
+        {
+            invalidate(&mut state);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     pub fn expire_login(&self) -> Result<bool, CoreError> {
         let mut state = self.state()?;
         if state.pending.expire() {
@@ -1127,6 +1142,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn late_browser_failure_cannot_cancel_a_newer_login() {
+        let (client, task) = mock_client(Vec::new());
+        let (paths, controller, id) = saved_microsoft(client);
+        let first = controller
+            .begin_login(Some(id))
+            .unwrap_or_else(|_| panic!("login"));
+        assert!(controller.cancel_login().is_ok());
+        let second = controller
+            .begin_login(Some(id))
+            .unwrap_or_else(|_| panic!("login"));
+        assert!(matches!(
+            controller.cancel_pending_login(first.operation_id),
+            Ok(false)
+        ));
+        assert!(
+            controller
+                .view()
+                .unwrap_or_else(|_| panic!("view"))
+                .login_pending
+        );
+        assert!(matches!(
+            controller.cancel_pending_login(second.operation_id),
+            Ok(true)
+        ));
+        assert!(
+            !controller
+                .view()
+                .unwrap_or_else(|_| panic!("view"))
+                .login_pending
+        );
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
     async fn duplicate_callback_during_exchange_does_not_cancel_valid_login() {
         let (client, task, observed, resume) = gated_client(chain());
         let (paths, controller, id) = saved_microsoft(client);
@@ -1149,6 +1200,10 @@ mod tests {
         let login = tokio::spawn(async move { worker.callback(&first_callback).await });
         assert!(observed.await.is_ok());
         assert!(controller.callback(&callback).await.is_err());
+        assert!(matches!(
+            controller.cancel_pending_login(launch.operation_id),
+            Ok(false)
+        ));
         assert!(
             controller
                 .view()

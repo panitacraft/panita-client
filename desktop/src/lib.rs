@@ -6,6 +6,8 @@ mod account_commands;
 mod activation_commands;
 #[cfg(any(target_os = "linux", test))]
 mod linux_activation;
+#[cfg(any(target_os = "linux", test))]
+mod linux_browser;
 mod pack_commands;
 mod play_commands;
 mod protocol;

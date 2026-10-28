@@ -36,11 +36,36 @@ pub enum WorkflowPhase {
     Cancelled,
 }
 
+/// Fixed browser launch stages; never include URLs or native error messages.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrowserLaunchEvent {
+    DispatchFailed,
+    ContextUnavailable,
+    GioFailed,
+    SystemOpenerFailed,
+    SystemOpenerTimedOut,
+    FallbackSucceeded,
+}
+
+impl BrowserLaunchEvent {
+    fn name(self) -> &'static str {
+        match self {
+            Self::DispatchFailed => "browser_dispatch_failed",
+            Self::ContextUnavailable => "browser_context_unavailable",
+            Self::GioFailed => "browser_gio_failed",
+            Self::SystemOpenerFailed => "browser_system_opener_failed",
+            Self::SystemOpenerTimedOut => "browser_system_opener_timed_out",
+            Self::FallbackSucceeded => "browser_fallback_succeeded",
+        }
+    }
+}
+
 /// Events contain only fixed identifiers and error codes. There is no API for
 /// arbitrary messages, request URLs, account data, or token-bearing errors.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LogEvent {
     ApplicationStarted,
+    BrowserLaunch(BrowserLaunchEvent),
     OperationCancelled,
     StorageFailure(ErrorCode),
     CatalogFailure(ErrorCode),
@@ -123,6 +148,16 @@ impl BoundedLog {
                 };
                 match record.event {
                     LogEvent::ApplicationStarted => (),
+                    LogEvent::BrowserLaunch(event) => {
+                        view.event = event.name();
+                        if !matches!(
+                            event,
+                            BrowserLaunchEvent::FallbackSucceeded
+                                | BrowserLaunchEvent::ContextUnavailable
+                        ) {
+                            view.error = Some(ErrorCode::BrowserUnavailable);
+                        }
+                    }
                     LogEvent::OperationCancelled => view.event = "operation_cancelled",
                     LogEvent::StorageFailure(code) => {
                         view.event = "storage_failure";
@@ -162,6 +197,43 @@ impl BoundedLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_diagnostics_contain_only_fixed_stages_and_public_identifiers() {
+        let log = BoundedLog::default();
+        let events = [
+            BrowserLaunchEvent::DispatchFailed,
+            BrowserLaunchEvent::ContextUnavailable,
+            BrowserLaunchEvent::GioFailed,
+            BrowserLaunchEvent::SystemOpenerFailed,
+            BrowserLaunchEvent::SystemOpenerTimedOut,
+            BrowserLaunchEvent::FallbackSucceeded,
+        ];
+        for event in events {
+            log.record(LogRecord {
+                process: ProcessSessionId::new(),
+                operation: None,
+                event: LogEvent::BrowserLaunch(event),
+            });
+        }
+        let value = serde_json::to_value(log.view()).unwrap_or_else(|_| panic!("serialize"));
+        for (index, event) in events.into_iter().enumerate() {
+            let record = &value["records"][index];
+            assert_eq!(record["event"], event.name());
+            assert_eq!(
+                record["error"],
+                if matches!(
+                    event,
+                    BrowserLaunchEvent::FallbackSucceeded | BrowserLaunchEvent::ContextUnavailable
+                ) {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!("browser_unavailable")
+                }
+            );
+            assert_eq!(record.as_object().map(|object| object.len()), Some(6));
+        }
+    }
 
     #[test]
     fn ring_keeps_only_the_last_256_structured_events() {
