@@ -68,8 +68,16 @@ weaker publication or durability guarantees.
 The regression holds newly created and re-ensured parent/child capabilities
 while opening a writer that shares read access only, then performs a durable
 write. All 52 dependency tests and 404 core tests pass on Windows 11 (one core
-test remains ignored); library Clippy also passes. Repeat the updated probe and
-installed-launcher account-save/restart checks on Windows 10 before qualification.
+test remains ignored); library Clippy also passes.
+
+On 2026-10-28 the owner returned the updated probe results for commit `bbfbfff`
+on Windows 10 22H2 build 19045.3803. All five checks pass: fresh private-store
+creation/reopening, retained-directory sharing compatibility, classic atomic
+rename, atomic publication/replacement with durable writes, and directory flush.
+This resolves both failures from the previous synthetic probe on that VM.
+Installed-launcher Panita session and Minecraft account save/restart checks
+remain pending; the probe does not establish end-to-end authentication or game
+launch qualification.
 
 References:
 - https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-querydosdevicew
