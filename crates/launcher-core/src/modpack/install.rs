@@ -241,6 +241,7 @@ pub(crate) enum Layer {
 pub(crate) struct Plan {
     identity: PackIdentity,
     minecraft_version: String,
+    kind: crate::loader::Kind,
     loader: String,
     loader_version: String,
     items: Vec<Item>,
@@ -292,6 +293,7 @@ impl Plan {
                 label: manifest.label.clone(),
             },
             minecraft_version: manifest.minecraft_version.clone(),
+            kind: crate::loader::Kind::NeoForge,
             loader: manifest.loader.clone(),
             loader_version: manifest.loader_version.clone(),
             items,
@@ -315,17 +317,24 @@ impl Plan {
             index_sha256,
             ..
         } = inspected;
-        let (Some(minecraft), Some(loader_version), true) = (
-            index.dependencies.get("minecraft"),
-            index.dependencies.get("neoforge"),
-            index.supported_loader(),
-        ) else {
+        let (Some(minecraft), Some((kind, loader_version))) =
+            (index.dependencies.get("minecraft"), index.loader())
+        else {
             return Err(CoreError::new(ErrorCode::UnsupportedInstance));
         };
         if catalog
             .minecraft_version
             .as_ref()
             .is_some_and(|catalog| catalog != minecraft)
+        {
+            return Err(invalid());
+        }
+        // The catalog's loader is informational: it may agree with the index only.
+        if let CatalogSource::Modrinth {
+            loader: Some(named),
+            ..
+        } = &catalog.source
+            && named != kind.name()
         {
             return Err(invalid());
         }
@@ -354,8 +363,9 @@ impl Plan {
                 index_sha256: index_sha256.clone(),
             },
             minecraft_version: minecraft.clone(),
-            loader: "neoforge".to_owned(),
-            loader_version: loader_version.clone(),
+            kind,
+            loader: kind.name().to_owned(),
+            loader_version: loader_version.to_owned(),
             items,
             pending: Vec::new(),
             layers: vec![Layer::Overrides {
@@ -719,7 +729,10 @@ async fn mrpack_plan(
     else {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     };
-    if loader.as_deref().is_some_and(|loader| loader != "neoforge") {
+    if loader
+        .as_deref()
+        .is_some_and(|loader| !crate::loader::supported(loader))
+    {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     }
     let modrinth = ModrinthClient::new()?;
@@ -764,6 +777,20 @@ pub async fn install(
         _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
         result = catalog_client.detail(id) => result?,
     };
+    install_catalog(paths, catalog, platform, cancel, progress, pack_progress).await
+}
+
+/// Install the pack a catalog entry that was already fetched pins. The entry must be
+/// the current by-ID response; development harnesses may supply their own.
+pub async fn install_catalog(
+    paths: &AppPaths,
+    catalog: CatalogInstance,
+    platform: &Platform,
+    cancel: &Cancellation,
+    progress: Progress,
+    pack_progress: ProgressSink,
+) -> Result<Outcome, CoreError> {
+    let id = catalog.id;
     let registry = InstanceRegistry::new(paths.clone());
     registry.remember_catalog(std::slice::from_ref(&catalog))?;
     if !catalog.enabled {
@@ -804,11 +831,12 @@ pub async fn install(
     registry.save_installation(&record)?;
     let result = async {
         let operation = Uuid::new_v4();
-        let base = crate::neoforge::loader::prepare_base(
+        let base = crate::loader::prepare_base(
             paths,
             id,
             operation,
             platform,
+            plan.kind,
             &plan.minecraft_version,
             &plan.loader_version,
             cancel,

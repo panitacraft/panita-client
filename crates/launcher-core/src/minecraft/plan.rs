@@ -44,7 +44,7 @@ pub struct InstallPlan {
     pub artifacts: Vec<PlannedArtifact>,
     /// Exact loader inventory; absent in legacy and current vanilla plans.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub loader: Option<crate::neoforge::generation::GenerationRef>,
+    pub loader: Option<crate::loader::LoaderRef>,
 }
 
 #[derive(Deserialize)]
@@ -396,8 +396,8 @@ impl InstallPlan {
         }
         if let Some(loader) = &self.loader {
             loader.validate(&self.version.id)?;
-            if loader.java.major_version != self.version.java.major_version
-                || loader.java.component != self.version.java.component
+            if loader.java().major_version != self.version.java.major_version
+                || loader.java().component != self.version.java.component
             {
                 return Err(invalid());
             }

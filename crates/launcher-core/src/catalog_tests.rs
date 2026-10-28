@@ -221,7 +221,7 @@ fn catalog_sources_minimum_versions_and_disabled_states_are_not_installable() {
     assert!(parse_list(list(vec![raw.clone()]).as_bytes()).is_err());
     raw["modrinth_project_id"] = json!("fixture");
     raw["pack_version_id"] = json!("pinned");
-    raw["loader"] = json!("fabric");
+    raw["loader"] = json!("liteloader");
     let pack = parse_list(list(vec![raw.clone()]).as_bytes())
         .unwrap_or_else(|_| panic!("catalog"))
         .remove(0);

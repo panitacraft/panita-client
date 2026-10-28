@@ -78,7 +78,7 @@ impl CatalogSource {
                 current_version_id: Some(_),
                 ..
             } => loader == "neoforge",
-            Self::Modrinth { loader, .. } => loader.as_deref().is_none_or(|v| v == "neoforge"),
+            Self::Modrinth { loader, .. } => loader.as_deref().is_none_or(crate::loader::supported),
             _ => false,
         }
     }

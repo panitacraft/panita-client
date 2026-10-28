@@ -809,7 +809,7 @@ fn verify_manifest_inner(
             Some(cache) => {
                 let directory = private_fs::PrivateDir::open(paths.root().join(loader.directory()))
                     .map_err(map_private_error)?;
-                for file in &loader.files {
+                for file in loader.files() {
                     cancel.check()?;
                     let (parent, leaf) = file
                         .path

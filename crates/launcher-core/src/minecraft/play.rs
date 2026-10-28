@@ -167,8 +167,8 @@ fn pack_matches(source: &CatalogSource, pack: &PackState) -> bool {
                 ..
             },
         ) => {
-            pack.loader == "neoforge"
-                && loader.as_deref().is_none_or(|loader| loader == "neoforge")
+            crate::loader::supported(&pack.loader)
+                && loader.as_deref().is_none_or(|loader| loader == pack.loader)
                 && project_id == installed_project
                 && pack_version_id == installed_version
         }
@@ -184,9 +184,13 @@ fn verify_pack(
     record: &crate::registry::InstallationRecord,
     cancel: &Cancellation,
 ) -> Result<(), CoreError> {
-    let (Some(pack), Some(_)) = (&installed.pack, &installed.plan.loader) else {
+    let (Some(pack), Some(loader)) = (&installed.pack, &installed.plan.loader) else {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     };
+    // The pack's recorded loader is the one the verified plan actually launches.
+    if loader.kind() != pack.loader || loader.version() != pack.loader_version {
+        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    }
     if !pack_matches(&record.resolved_source, pack)
         || pack.minecraft_version != installed.plan.version.id
     {

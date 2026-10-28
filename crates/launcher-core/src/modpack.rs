@@ -480,8 +480,19 @@ impl MrpackIndex {
         Ok(index)
     }
 
+    /// The one loader this pack pins besides Minecraft, when it is one the launcher
+    /// installs. Any other dependency makes the pack unsupported.
+    pub fn loader(&self) -> Option<(crate::loader::Kind, &str)> {
+        if self.dependencies.len() != 2 {
+            return None;
+        }
+        self.dependencies.iter().find_map(|(key, version)| {
+            crate::loader::Kind::from_dependency(key).map(|kind| (kind, version.as_str()))
+        })
+    }
+
     pub fn supported_loader(&self) -> bool {
-        self.dependencies.contains_key("neoforge") && self.dependencies.len() == 2
+        self.loader().is_some()
     }
 }
 

@@ -182,7 +182,10 @@ pub fn build_command(
         ("user_properties".into(), "{}".into()),
         (
             "version_name".into(),
-            loader.map_or_else(|| version.id.clone(), |loader| loader.profile.id.clone()),
+            loader.map_or_else(
+                || version.id.clone(),
+                |loader| loader.profile_id().to_owned(),
+            ),
         ),
         ("version_type".into(), version.kind.clone()),
         ("game_directory".into(), path_text(game_directory)?),
@@ -196,7 +199,7 @@ pub fn build_command(
             "library_directory".into(),
             path_text(&loader.map_or_else(
                 || paths.root().join("libraries"),
-                |loader| paths.root().join(loader.directory()).join("libraries"),
+                |loader| loader.library_directory(paths),
             ))?,
         ),
         ("classpath".into(), classpath.join(&separator.to_string())),
@@ -241,7 +244,7 @@ pub fn build_command(
             },
         };
         if let Some(loader) = loader {
-            for argument in &loader.profile.arguments.jvm {
+            for argument in loader.jvm_arguments() {
                 command.args.push(substitute(argument, &replacements)?);
             }
         }
@@ -259,13 +262,13 @@ pub fn build_command(
         command.args.push(format!("-Xmx{}M", settings.ram_mib));
         command.args.push(loader.map_or_else(
             || version.main_class.clone(),
-            |loader| loader.profile.main_class.clone(),
+            |loader| loader.main_class().to_owned(),
         ));
         command
             .args
             .extend(arguments(&metadata.game, &launch_platform, &replacements)?);
         if let Some(loader) = loader {
-            for argument in &loader.profile.arguments.game {
+            for argument in loader.game_arguments() {
                 command.args.push(substitute(argument, &replacements)?);
             }
         }

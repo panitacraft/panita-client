@@ -880,8 +880,13 @@ async fn unsupported_or_contradictory_pins_never_become_a_plan() {
     let catalog = mrpack_catalog(world.id, Some("neoforge"), None);
     for (dependencies, expected) in [
         (
-            json!({"minecraft": "1.21.1", "fabric-loader": "0.16.0"}),
+            json!({"minecraft": "1.21.1", "forge": "52.0.0"}),
             ErrorCode::UnsupportedInstance,
+        ),
+        // The catalog names NeoForge, so an index pinning another loader disagrees.
+        (
+            json!({"minecraft": "1.21.1", "fabric-loader": "0.16.0"}),
+            ErrorCode::InvalidData,
         ),
         (
             json!({"minecraft": "1.21.1", "neoforge": "21.1.248", "extra": "1"}),
@@ -914,6 +919,33 @@ async fn unsupported_or_contradictory_pins_never_become_a_plan() {
     );
     let agreeing = mrpack_catalog(world.id, Some("neoforge"), Some("1.21.1"));
     assert!(plan_for(&world, &agreeing, &archive, &server).await.is_ok());
+    // Fabric and Quilt packs become plans for their own loader, whatever the catalog
+    // leaves unsaid; the version comes from the index.
+    for (key, kind) in [
+        ("fabric-loader", crate::loader::Kind::Fabric),
+        ("quilt-loader", crate::loader::Kind::Quilt),
+    ] {
+        let archive = mrpack(
+            &index_document(Vec::new(), json!({"minecraft": "1.21.1", key: "0.16.14"})),
+            &[],
+        );
+        let served = self::server(BTreeMap::from([(PACK_PATH.to_owned(), archive.clone())]));
+        for named in [None, Some(kind.name())] {
+            let catalog = mrpack_catalog(world.id, named, None);
+            let plan = plan_for(&world, &catalog, &archive, &served).await;
+            let plan = plan.unwrap_or_else(|error| panic!("{key}: {:?}", error.code()));
+            assert_eq!(plan.kind, kind);
+            assert_eq!(
+                (plan.loader.as_str(), plan.loader_version.as_str()),
+                (kind.name(), "0.16.14")
+            );
+        }
+        let mismatched = mrpack_catalog(world.id, Some("neoforge"), None);
+        assert_eq!(
+            code(plan_for(&world, &mismatched, &archive, &served).await),
+            Some(ErrorCode::InvalidData)
+        );
+    }
     cleanup(&world);
 }
 

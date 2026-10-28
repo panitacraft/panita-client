@@ -20,7 +20,7 @@ fn interrupted_loader_pointer_publication_recovers_only_verified_content()
             &fixture.installed.plan.version.java,
         )?;
         fixture.installed.plan.schema_version = 2;
-        fixture.installed.plan.loader = Some(loader.clone());
+        fixture.installed.plan.loader = Some(loader.clone().into());
         write_json(&fixture.root, "installed.json", &fixture.installed)?;
         write_json(
             &fixture.root,
@@ -101,7 +101,7 @@ fn recorded_loader_state_survives_restart_and_receipts_never_hide_changed_or_mis
         &fixture.installed.plan.version.java,
     )?;
     fixture.installed.plan.schema_version = 2;
-    fixture.installed.plan.loader = Some(loader.clone());
+    fixture.installed.plan.loader = Some(loader.clone().into());
     write_json(&fixture.root, "installed.json", &fixture.installed)?;
     let loaded = verify_installed(&fixture.paths, fixture.id)?;
     assert_eq!(

@@ -122,7 +122,7 @@ fn loader_commands_merge_child_libraries_and_keep_module_arguments_platform_spec
     for os in ["windows", "linux"] {
         let (paths, directory, mut installed, platform, account) = fixture("1.21.1", os);
         installed.plan.schema_version = 2;
-        installed.plan.loader = Some(loader.clone());
+        installed.plan.loader = Some(loader.clone().into());
         let command = build_command(
             &paths,
             &directory,
