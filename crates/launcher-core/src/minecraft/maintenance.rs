@@ -389,6 +389,14 @@ pub fn uninstall(
 ) -> Result<MaintenanceOutcome, CoreError> {
     cancel.check()?;
     let root = install::metadata_root(paths, id)?;
+    // A pack has its own uninstall: it removes only unedited pack content.
+    if crate::modpack::install::is_pack(paths, id)? {
+        let report = crate::modpack::install::uninstall_pack(paths, id, cancel)?;
+        return Ok(MaintenanceOutcome {
+            retained_files: u32::try_from(report.kept).unwrap_or(u32::MAX),
+            native_cleanup: report.native_cleanup,
+        });
+    }
     let _lease = try_lock(&root, ".installation.lock")?
         .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
     if let Some(native_cleanup) = retry_uninstall_cleanup(paths, id, &root)? {

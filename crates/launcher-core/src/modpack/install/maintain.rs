@@ -209,6 +209,13 @@ fn source_of(pack: &PackState) -> CatalogSource {
     }
 }
 
+/// True when the instance's installation is a pack, tombstones included.
+pub fn is_pack(paths: &AppPaths, id: Uuid) -> Result<bool, CoreError> {
+    let root = paths.instance(id)?;
+    Ok(read_json::<InstalledLock>(&root, "installed.json")?
+        .is_some_and(|installed| installed.pack.is_some()))
+}
+
 /// The pin string the update request names: the custom version UUID or Modrinth id.
 pub fn pin_of(pack: &PackState) -> String {
     identity_pin(&pack.source)

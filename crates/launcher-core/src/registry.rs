@@ -588,6 +588,8 @@ pub struct InstanceView {
     pub availability: Availability,
     pub local_state: InstallationState,
     pub installed_version: Option<String>,
+    /// What the installation was made from; for a pack, its pin and label.
+    pub installed_source: Option<CatalogSource>,
     pub has_installation_manifest: bool,
     pub compatible: bool,
     pub supported: bool,
@@ -740,7 +742,7 @@ fn view(
         if matches!(
             record.state,
             InstallationState::Installed | InstallationState::UpdateAvailable
-        ) && record.resolved_source != catalog.source
+        ) && !record.resolved_source.same_pin(&catalog.source)
         {
             InstallationState::UpdateAvailable
         } else if record.state == InstallationState::UpdateAvailable {
@@ -758,6 +760,7 @@ fn view(
         availability,
         local_state,
         installed_version,
+        installed_source: installed.map(|record| record.resolved_source.clone()),
         has_installation_manifest: false,
         compatible,
         supported,
