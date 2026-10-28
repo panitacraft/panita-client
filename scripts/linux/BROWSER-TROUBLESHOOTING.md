@@ -11,7 +11,7 @@ GIO/dispatch failure. The fallback runs off the window event loop, passes the
 URL as one literal argument and suppresses child output. AppImage library/GTK
 module overrides are removed only from the fallback child environment. Desktop,
 D-Bus and activation variables remain available. Fallback window focus is best
-effort and still needs installed-product validation.
+effort; focus behavior has not been separately confirmed.
 
 The helper exit is observed for up to 15 seconds. A successful exit means the
 opener accepted the request, not proof of a visible browser. A timeout is reported
@@ -22,7 +22,16 @@ Diagnostics expose only fixed Spanish messages for dispatch, unavailable context
 GIO failure, system-opener failure/timeout and fallback success. They never include
 authorization URLs, callbacks, native error text or child output.
 
-## Installed-product retest
+## Installed-product verification
+
+On 2026-10-28, the owner and a teammate report successful browser opening on
+CachyOS using the supplied browser-fix test build, 0.1.1-beta.9. This is an
+owner-reported result, not a locally observed run. Package-specific results,
+desktop session, browser, fallback diagnostic stage and focus behavior were not
+recorded. Full HTTPS/PKCE callback completion, restart/renewal, Play validation,
+sign-out and Ubuntu regression testing are not established by this report.
+
+Remaining retest guidance:
 
 Use a new build containing this fix; reinstalling 0.1.1-alpha does not include it.
 On CachyOS, test both the native package and AppImage. Record the package/version,
@@ -39,7 +48,7 @@ compilation, six focused Rust tests (opener behavior, URL/environment handling,
 diagnostic privacy and login concurrency), and desktop Clippy with warnings
 rejected. All 65 frontend tests, the TypeScript/production frontend build, Rust
 formatting and diff whitespace checks pass. These are source-level results;
-installed-product CachyOS confirmation remains pending.
+the later owner-reported CachyOS browser-opening result is recorded above.
 
 ## Internal installer build
 
