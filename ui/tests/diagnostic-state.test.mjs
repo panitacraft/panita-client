@@ -26,3 +26,12 @@ test('diagnostic rendering stays bounded and newest first without mutating the s
   assert.equal(records[0].operationId, '0');
   assert.deepEqual(visibleDiagnosticRecords({ capacity: 256, records: [] }), []);
 });
+
+test('browser diagnostics show fixed Spanish messages without native error text', () => {
+  for (const event of ['browser_dispatch_failed', 'browser_context_unavailable', 'browser_gio_failed', 'browser_system_opener_failed', 'browser_system_opener_timed_out', 'browser_fallback_succeeded']) {
+    const text = diagnosticText({ event, message: 'SYNTHETIC-OAUTH-URL' });
+    assert.match(text, /navegador/);
+    assert.equal(text.includes('SYNTHETIC-OAUTH-URL'), false);
+    assert.equal(text.includes('no reconocido'), false);
+  }
+});

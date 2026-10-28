@@ -14,6 +14,9 @@ $outputKind = if ($LoaderValidation) { 'loader-validation' } else { 'beta' }
 $destination = Join-Path $workspace "target/$outputKind/$version/linux"
 Write-Output "Linux beta: $version; source: $revision; output: $destination"
 if ($Check) { return }
+if ([string]::IsNullOrWhiteSpace($env:PANITA_LAUNCHER_API_KEY)) {
+  throw 'Set the public PANITA_LAUNCHER_API_KEY build variable before packaging.'
+}
 $runId = [guid]::NewGuid().ToString('N')
 $buildRoot = Join-Path $workspace "target/linux-build/$runId"
 [IO.Directory]::CreateDirectory($buildRoot) | Out-Null
@@ -28,6 +31,7 @@ $scriptPath = Join-Path $workspace 'scripts/linux/build-candidate.sh'
 $scriptMount = "type=bind,source=$scriptPath,target=/build-candidate.sh,readonly"
 Invoke-BuildTool 'docker' @('create', '--platform', 'linux/amd64', '--name', $container,
   '--cpus', '2', '--memory', '4g', '--memory-swap', '6g', '--env', 'CARGO_BUILD_JOBS=2',
+  '--env', 'PANITA_LAUNCHER_API_KEY',
   '--mount', $inputMount, '--mount', $scriptMount,
   '--mount', 'type=volume,source=panita-linux-cargo-registry,target=/home/panita-build/.cargo/registry',
   '--mount', 'type=volume,source=panita-linux-cargo-git,target=/home/panita-build/.cargo/git',

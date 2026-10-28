@@ -27,7 +27,7 @@ test('Arch package versions preserve stable versions and map prereleases without
 
 for (const platform of ['windows', 'linux']) {
   for (const [release, loaderValidation] of [[true, false], [false, false], [false, true]]) {
-    for (const withArch of platform === 'linux' && release ? [false, true] : [false]) {
+    for (const withArch of platform === 'linux' && !loaderValidation ? [false, true] : [false]) {
       test(`${platform} ${loaderValidation ? 'loader validation' : release ? 'release' : 'beta'}${withArch ? ' with Arch package' : ''} verification rejects corruption and incorrect provenance`, async () => {
         const directory = await mkdtemp(join(tmpdir(), 'panita-release-test-'));
         try {
