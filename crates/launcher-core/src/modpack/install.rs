@@ -443,6 +443,37 @@ pub async fn publish(request: Publish<'_>) -> Result<Outcome, CoreError> {
     }
 }
 
+/// What a completed first installation produced.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Installed {
+    Vanilla,
+    Pack(Outcome),
+}
+
+/// Install a catalog instance of any installable source: vanilla, or a custom pack.
+pub async fn install_any(
+    paths: &AppPaths,
+    id: Uuid,
+    platform: &Platform,
+    cancel: &Cancellation,
+    progress: Progress,
+    pack_progress: ProgressSink,
+    auth: Option<PanitaCredentials>,
+) -> Result<Installed, CoreError> {
+    let client = CatalogClient::new()?.with_auth(auth.clone());
+    let catalog = tokio::select! {
+        _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
+        result = client.detail(id) => result?,
+    };
+    if matches!(catalog.source, CatalogSource::Custom { .. }) {
+        return install(paths, id, platform, cancel, progress, pack_progress, auth)
+            .await
+            .map(Installed::Pack);
+    }
+    crate::minecraft::install::install(paths, id, platform, cancel, progress, auth).await?;
+    Ok(Installed::Vanilla)
+}
+
 /// Install the current exact catalog pin of a custom pack.
 pub async fn install(
     paths: &AppPaths,

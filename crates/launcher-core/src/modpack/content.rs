@@ -80,9 +80,14 @@ impl ContentKey {
 
     /// One lock per shard directory also protects stale temporary cleanup there.
     fn lock_path(&self) -> String {
-        let digest = Sha256::digest(self.directory().as_bytes());
-        format!(".artifact-locks/content-{digest:x}.lock")
+        shard_lock(&self.directory())
     }
+}
+
+/// The interprocess lock that guards one shard directory such as `content/sha512/ab`.
+pub(super) fn shard_lock(directory: &str) -> String {
+    let digest = Sha256::digest(directory.as_bytes());
+    format!(".artifact-locks/content-{digest:x}.lock")
 }
 
 #[derive(Clone, Debug)]
@@ -193,7 +198,7 @@ pub async fn ensure(
 pub async fn import(
     paths: &AppPaths,
     expected: &Expected,
-    input: &mut dyn Read,
+    input: &mut (dyn Read + Send),
     cancel: &Cancellation,
 ) -> Result<(), CoreError> {
     let key = ContentKey::for_expected(expected)?;
