@@ -223,6 +223,46 @@ pub async fn import(
     output.commit().map_err(map_private_error)
 }
 
+/// Open an entry for random access after hashing all of it. The same handle is
+/// rewound and returned, so callers parse exactly the file that was verified.
+pub fn open_verified(
+    paths: &AppPaths,
+    expected: &Expected,
+    cancel: &Cancellation,
+) -> Result<std::fs::File, CoreError> {
+    use std::io::Seek;
+    let key = ContentKey::for_expected(expected)?;
+    let mismatch = || CoreError::new(ErrorCode::ArtifactMismatch);
+    let (directory, name) = existing_parent(paths.root(), &key.relative())?.ok_or_else(mismatch)?;
+    let file = match directory.open_file(name) {
+        Ok(file) => file,
+        Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(mismatch());
+        }
+        Err(error) => return Err(map_private_error(error)),
+    };
+    let mut input = crate::minecraft::download::native_file(&file)?;
+    if input.metadata().map_err(io)?.len() != expected.size {
+        return Err(mismatch());
+    }
+    let mut hashers = Hashers::new(expected);
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        cancel.check()?;
+        let count = input.read(&mut buffer).map_err(io)?;
+        if count == 0 {
+            break;
+        }
+        hashers.update(&buffer[..count]);
+    }
+    file.verify().map_err(map_private_error)?;
+    if !hashers.matches(expected) {
+        return Err(mismatch());
+    }
+    input.rewind().map_err(io)?;
+    Ok(input)
+}
+
 /// Read an entry, hashing it again, and hand its bytes to `sink`. Only an `Ok`
 /// result proves the bytes the sink saw were exactly the expected content, so the
 /// sink must publish nothing until this returns.

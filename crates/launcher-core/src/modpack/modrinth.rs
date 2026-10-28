@@ -124,12 +124,18 @@ pub fn verified_index(bytes: &[u8], artifact: &PackArtifact) -> Result<MrpackInd
 /// Bound allocation before the ZIP reader builds its directory map. Comparing
 /// the original count afterwards rejects duplicate names hidden by that map.
 fn bounded_entry_count(bytes: &[u8]) -> Result<usize, CoreError> {
-    if bytes.len() < 22 {
+    let start = bytes.len().saturating_sub(22 + u16::MAX as usize);
+    directory_entry_count(&bytes[start..], start as u64)
+}
+
+/// `tail` is the end of the archive starting at absolute offset `base`; it must
+/// hold the whole end-of-central-directory record and its comment.
+pub(super) fn directory_entry_count(tail: &[u8], base: u64) -> Result<usize, CoreError> {
+    if tail.len() < 22 {
         return Err(invalid());
     }
-    let start = bytes.len().saturating_sub(22 + u16::MAX as usize);
-    for position in (start..=bytes.len() - 22).rev() {
-        let footer = &bytes[position..];
+    for position in (0..=tail.len() - 22).rev() {
+        let footer = &tail[position..];
         if footer[..4] != *b"PK\x05\x06" {
             continue;
         }
@@ -143,7 +149,9 @@ fn bounded_entry_count(bytes: &[u8]) -> Result<usize, CoreError> {
         }
         let size = u32::from_le_bytes(footer[12..16].try_into().map_err(|_| invalid())?);
         let offset = u32::from_le_bytes(footer[16..20].try_into().map_err(|_| invalid())?);
-        if size == u32::MAX || offset == u32::MAX || offset as u64 + size as u64 != position as u64
+        if size == u32::MAX
+            || offset == u32::MAX
+            || offset as u64 + size as u64 != base + position as u64
         {
             return Err(invalid());
         }
