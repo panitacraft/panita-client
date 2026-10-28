@@ -237,3 +237,103 @@ fn an_exhausted_budget_or_cancellation_publishes_no_partial_file() {
     assert_eq!(game.entry("c.txt").ok(), Some(Entry::Absent));
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// An archive whose entry names are already game paths, as an mrpack layer's are.
+fn layered(entries: &[(&str, &[u8])]) -> Opened<Cursor<Vec<u8>>> {
+    crate::modpack::archive::preflight_with(
+        Cursor::new(build(entries)),
+        Limits::PACK,
+        &|path, _| Ok(Some(path.to_owned())),
+    )
+    .unwrap_or_else(|_| panic!("archive"))
+}
+
+#[test]
+fn overrides_split_content_from_configuration_and_never_replace_what_exists() {
+    let (root, game) = game();
+    assert!(std::fs::create_dir_all(root.join("minecraft/config")).is_ok());
+    assert!(std::fs::write(root.join("minecraft/config/kept.toml"), b"player = 1\n").is_ok());
+    let mut archive = layered(&[
+        ("mods/bundled.jar", b"jar"),
+        ("resourcepacks/pack.zip", b"zip"),
+        ("config/new.toml", b"pack = 1\n"),
+        ("config/kept.toml", b"pack = 2\n"),
+        ("options.txt", b"fov:90"),
+    ]);
+    let mut budget = archive.budget();
+    let outcome = apply(
+        &mut archive,
+        Kind::Override,
+        &game,
+        &BTreeSet::new(),
+        &mut budget,
+        &Cancellation::default(),
+    )
+    .unwrap_or_else(|_| panic!("overrides"));
+    assert_eq!(read(&root, "mods/bundled.jar"), b"jar");
+    assert_eq!(read(&root, "config/new.toml"), b"pack = 1\n");
+    // The player's file is kept whole and reported, never replaced.
+    assert_eq!(read(&root, "config/kept.toml"), b"player = 1\n");
+    assert_eq!(
+        outcome
+            .skipped
+            .iter()
+            .map(|s| s.path.as_str())
+            .collect::<Vec<_>>(),
+        ["config/kept.toml"]
+    );
+    let owner = |path: &str| {
+        outcome
+            .files
+            .iter()
+            .find(|file| file.path == path)
+            .map(|file| (file.ownership.clone(), file.baseline.is_some()))
+    };
+    assert_eq!(owner("mods/bundled.jar"), Some((Ownership::Content, true)));
+    assert_eq!(
+        owner("resourcepacks/pack.zip"),
+        Some((Ownership::Content, true))
+    );
+    assert_eq!(owner("config/new.toml"), Some((Ownership::Override, true)));
+    assert_eq!(
+        owner("config/kept.toml"),
+        Some((Ownership::Override, false))
+    );
+    assert_eq!(owner("options.txt"), Some((Ownership::Override, true)));
+    // Configuration keeps consumed history so a deleted override never returns;
+    // immutable content does not need it.
+    assert_eq!(
+        outcome
+            .consumed_defaults
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["config/kept.toml", "config/new.toml", "options.txt"]
+    );
+    let id = Uuid::new_v4();
+    assert!(state(id, &[&outcome]).validate(id).is_ok());
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn an_override_never_adopts_a_content_file_the_player_already_has() {
+    let (root, game) = game();
+    assert!(std::fs::create_dir_all(root.join("minecraft/mods")).is_ok());
+    assert!(std::fs::write(root.join("minecraft/mods/bundled.jar"), b"player jar").is_ok());
+    let mut archive = layered(&[("mods/bundled.jar", b"pack jar")]);
+    let mut budget = archive.budget();
+    let outcome = apply(
+        &mut archive,
+        Kind::Override,
+        &game,
+        &BTreeSet::new(),
+        &mut budget,
+        &Cancellation::default(),
+    );
+    assert_eq!(
+        outcome.err().map(|error| error.code()),
+        Some(ErrorCode::PackConflict)
+    );
+    assert_eq!(read(&root, "mods/bundled.jar"), b"player jar");
+    let _ = std::fs::remove_dir_all(&root);
+}

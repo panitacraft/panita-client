@@ -12,7 +12,10 @@ use super::{
 };
 use crate::{
     error::CoreError,
-    minecraft::download::{Cancellation, io},
+    minecraft::{
+        download::{Cancellation, io},
+        safe_path,
+    },
 };
 
 /// Executable or native content never belongs in a configuration archive.
@@ -38,8 +41,43 @@ impl Limits {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ArchiveEntry {
     pub index: usize,
+    /// The game-directory path this entry is written to.
     pub path: String,
+    /// The entry's own name inside the archive.
+    pub source: String,
     pub size: u64,
+}
+
+/// Maps one archive name (without a trailing slash) to the game path it is written
+/// to, or `None` for an entry that is never extracted. The structural checks of
+/// `preflight_with` apply to every entry regardless of what the rule decides.
+pub type Rule<'a> = &'a dyn Fn(&str, bool) -> Result<Option<String>, CoreError>;
+
+/// The rule for configuration archives: the entry name is the game path and nothing
+/// executable or pack-managed may appear.
+fn configuration_rule(path: &str, directory: bool) -> Result<Option<String>, CoreError> {
+    game_path(path)?;
+    if MANAGED_ROOTS.contains(
+        &path
+            .split('/')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+    ) {
+        return Err(invalid());
+    }
+    if !directory && forbidden_extension(path, &FORBIDDEN_EXTENSIONS) {
+        return Err(invalid());
+    }
+    Ok(Some(path.to_owned()))
+}
+
+/// True when the file name ends in one of the listed extensions, ignoring case.
+pub(crate) fn forbidden_extension(path: &str, list: &[&str]) -> bool {
+    path.to_ascii_lowercase()
+        .rsplit_once('.')
+        .is_some_and(|(_, extension)| list.contains(&extension))
 }
 
 pub struct Opened<R: Read + Seek> {
@@ -73,8 +111,19 @@ fn has_zip64_extra(extra: Option<&[u8]>) -> bool {
     !data.is_empty()
 }
 
-/// Validate the whole directory without reading any entry data.
-pub fn preflight<R: Read + Seek>(mut reader: R, limits: Limits) -> Result<Opened<R>, CoreError> {
+/// Validate the whole directory of a configuration archive without reading data.
+pub fn preflight<R: Read + Seek>(reader: R, limits: Limits) -> Result<Opened<R>, CoreError> {
+    preflight_with(reader, limits, &configuration_rule)
+}
+
+/// Validate the whole directory without reading any entry data. Duplicate names,
+/// links, encryption, Zip64 and file/folder conflicts are rejected for every entry;
+/// `rule` decides which entries are extracted and where they go.
+pub fn preflight_with<R: Read + Seek>(
+    mut reader: R,
+    limits: Limits,
+    rule: Rule<'_>,
+) -> Result<Opened<R>, CoreError> {
     let length = reader.seek(SeekFrom::End(0)).map_err(io)?;
     let start = length.saturating_sub(22 + u64::from(u16::MAX));
     reader.seek(SeekFrom::Start(start)).map_err(io)?;
@@ -112,36 +161,27 @@ pub fn preflight<R: Read + Seek>(mut reader: R, limits: Limits) -> Result<Opened
         let raw = entry.name().to_owned();
         let directory = entry.is_dir();
         let path = raw.trim_end_matches('/');
-        game_path(path)?;
-        if MANAGED_ROOTS.contains(
-            &path
-                .split('/')
-                .next()
-                .unwrap_or_default()
-                .to_ascii_lowercase()
-                .as_str(),
-        ) {
-            return Err(invalid());
-        }
+        safe_path(path)?;
         let lower = path.to_ascii_lowercase();
         if !names.insert(lower.clone()) {
             return Err(invalid());
         }
+        let destination = rule(path, directory)?;
         if directory {
             continue;
         }
-        let extension = lower.rsplit_once('.').map(|(_, extension)| extension);
-        if extension.is_some_and(|extension| FORBIDDEN_EXTENSIONS.contains(&extension)) {
-            return Err(invalid());
-        }
+        files.insert(lower);
+        let Some(destination) = destination else {
+            continue;
+        };
         total = total.checked_add(entry.size()).ok_or_else(invalid)?;
         if total > limits.bytes || entry.compressed_size() > limits.bytes {
             return Err(invalid());
         }
-        files.insert(lower);
         entries.push(ArchiveEntry {
             index,
-            path: path.to_owned(),
+            path: destination,
+            source: path.to_owned(),
             size: entry.size(),
         });
     }

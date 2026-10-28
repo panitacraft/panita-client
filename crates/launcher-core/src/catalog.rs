@@ -67,7 +67,9 @@ pub enum CatalogSource {
 }
 
 impl CatalogSource {
-    /// The sources this launcher can install: vanilla, and published NeoForge custom packs.
+    /// The sources this launcher can install: vanilla, published NeoForge custom
+    /// packs and pinned Modrinth packs. A Modrinth pin's loader is informational;
+    /// its index decides whether the pack is really supported when it installs.
     pub fn installable(&self) -> bool {
         match self {
             Self::Vanilla { .. } => true,
@@ -76,6 +78,7 @@ impl CatalogSource {
                 current_version_id: Some(_),
                 ..
             } => loader == "neoforge",
+            Self::Modrinth { loader, .. } => loader.as_deref().is_none_or(|v| v == "neoforge"),
             _ => false,
         }
     }

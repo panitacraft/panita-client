@@ -1,6 +1,7 @@
-//! First-install policy for the `defaults` and `enforced` configuration archives.
-//! Nothing here overwrites: a path that already exists is kept whole and reported
-//! as skipped, and a default is applied only to a path that was never offered before.
+//! First-install policy for the `defaults` and `enforced` configuration archives and
+//! for mrpack overrides. Nothing here overwrites: a path that already exists is kept
+//! whole and reported as skipped, and a default is applied only to a path that was
+//! never offered before.
 use std::collections::BTreeSet;
 use std::io::{Read, Seek};
 
@@ -10,12 +11,18 @@ use super::{
     invalid,
     state::{ManagedFile, Ownership, SkippedConfiguration},
 };
-use crate::{error::CoreError, minecraft::download::Cancellation};
+use crate::{
+    error::{CoreError, ErrorCode},
+    minecraft::download::Cancellation,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Defaults,
     Enforced,
+    /// An mrpack override layer: pack content under the content folders, and
+    /// configuration everywhere else.
+    Override,
 }
 
 /// What applying one archive changed and what it left alone.
@@ -50,10 +57,6 @@ pub fn apply<R: Read + Seek>(
     budget: &mut u64,
     cancel: &Cancellation,
 ) -> Result<Outcome, CoreError> {
-    let ownership = match kind {
-        Kind::Defaults => Ownership::Defaults,
-        Kind::Enforced => Ownership::Enforced,
-    };
     let consumed: BTreeSet<_> = already_consumed
         .iter()
         .map(|path| path.to_ascii_lowercase())
@@ -67,7 +70,22 @@ pub fn apply<R: Read + Seek>(
             }
             outcome.consumed_defaults.insert(entry.path.clone());
         }
+        let content = kind == Kind::Override && super::mrpack::is_content(&entry.path);
+        let ownership = match kind {
+            Kind::Defaults => Ownership::Defaults,
+            Kind::Enforced => Ownership::Enforced,
+            Kind::Override if content => Ownership::Content,
+            Kind::Override => {
+                // A deleted override is never recreated, as for deleted defaults.
+                outcome.consumed_defaults.insert(entry.path.clone());
+                Ownership::Override
+            }
+        };
         let absent = game.entry(&entry.path)? == Entry::Absent;
+        if content && !absent {
+            // Immutable pack content never adopts a file the player already placed.
+            return Err(CoreError::new(ErrorCode::PackConflict));
+        }
         let digest = if absent {
             let mut digest = None;
             game.write_new(&entry.path, |output| {
@@ -81,7 +99,7 @@ pub fn apply<R: Read + Seek>(
         };
         outcome.files.push(ManagedFile {
             path: entry.path.clone(),
-            ownership: ownership.clone(),
+            ownership,
             desired: digest.hashes.clone(),
             size: digest.size,
             baseline: absent.then(|| digest.hashes.clone()),

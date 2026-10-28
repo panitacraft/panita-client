@@ -18,6 +18,7 @@ pub mod gamefs;
 pub mod install;
 pub mod manual;
 pub mod modrinth;
+pub mod mrpack;
 pub mod state;
 pub mod store;
 pub mod transfer;
@@ -60,6 +61,9 @@ pub enum Origin {
     Curseforge,
     Github,
     Upload,
+    /// Hosts only an mrpack index may name; a public manifest can never claim it.
+    #[serde(skip)]
+    Mirror,
 }
 
 /// Validate before connecting. Redirect authorization is separate from initial URLs.
@@ -86,6 +90,13 @@ pub fn download_url(raw: &str, origin: &Origin) -> Result<url::Url, CoreError> {
                 && parts[2] == "releases"
                 && parts[3] == "download"
         }
+        Origin::Mirror => match url.host_str() {
+            Some("raw.githubusercontent.com") => parts.len() >= 4,
+            Some("gitlab.com") => {
+                url.path().contains("/-/raw/") || url.path().contains("/-/releases/")
+            }
+            _ => false,
+        },
         Origin::Upload => {
             url.host_str() == Some(STORAGE_HOST)
                 && url
@@ -393,6 +404,16 @@ pub struct MrpackFile {
     pub file_size: u64,
 }
 
+impl MrpackFile {
+    /// Every mirror with its own source policy, in the order the pack lists them.
+    pub fn sources(&self) -> Result<Vec<(String, Origin)>, CoreError> {
+        self.downloads
+            .iter()
+            .map(|url| Ok((url.clone(), mrpack_origin(url)?)))
+            .collect()
+    }
+}
+
 impl MrpackIndex {
     pub fn parse(bytes: &[u8]) -> Result<Self, CoreError> {
         if bytes.len() > MAX_DOCUMENT_BYTES {
@@ -441,7 +462,7 @@ impl MrpackIndex {
                 return Err(invalid());
             }
             for url in &file.downloads {
-                mrpack_url(url)?;
+                mrpack_origin(url)?;
             }
             total = total.checked_add(file.file_size).ok_or_else(invalid)?;
         }
@@ -492,19 +513,17 @@ pub fn game_path(path: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn mrpack_url(raw: &str) -> Result<url::Url, CoreError> {
-    let url = clean_url(raw)?;
-    match url.host_str() {
-        Some("cdn.modrinth.com") => download_url(raw, &Origin::Modrinth),
-        Some("github.com") => download_url(raw, &Origin::Github),
-        Some("raw.githubusercontent.com") if url.path().split('/').count() >= 5 => Ok(url),
-        Some("gitlab.com")
-            if url.path().contains("/-/raw/") || url.path().contains("/-/releases/") =>
-        {
-            Ok(url)
-        }
-        _ => Err(invalid()),
-    }
+/// The source policy for one mrpack download URL, chosen by its host. Only GitHub
+/// releases may redirect; every other mrpack host must answer directly.
+pub fn mrpack_origin(raw: &str) -> Result<Origin, CoreError> {
+    let origin = match clean_url(raw)?.host_str() {
+        Some("cdn.modrinth.com") => Origin::Modrinth,
+        Some("github.com") => Origin::Github,
+        Some("raw.githubusercontent.com" | "gitlab.com") => Origin::Mirror,
+        _ => return Err(invalid()),
+    };
+    download_url(raw, &origin)?;
+    Ok(origin)
 }
 
 #[cfg(test)]

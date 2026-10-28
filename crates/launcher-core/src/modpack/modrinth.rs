@@ -1,11 +1,102 @@
 //! Pinned public version resolution and verified index inspection. Overrides are
 //! not extracted here; their publication and ownership belong to installation.
 use super::*;
+use reqwest::{Client, StatusCode, header};
 use sha1::Sha1;
 use sha2::{Digest, Sha512};
 use std::io::Read;
+use std::time::Duration;
 
 pub const MAX_MRPACK_BYTES: u64 = 128 * 1024 * 1024;
+const API: &str = "https://api.modrinth.com";
+
+/// Public Modrinth version metadata. It sends no credentials and follows no
+/// redirects, and it only ever asks for the exact version the catalog pins.
+pub struct ModrinthClient {
+    client: Client,
+    base: String,
+}
+
+impl ModrinthClient {
+    pub fn new() -> Result<Self, CoreError> {
+        let client = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
+            .user_agent(concat!(
+                "PanitaClient/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://www.panitacraft.com/)"
+            ))
+            .build()
+            .map_err(|_| invalid())?;
+        Ok(Self {
+            client,
+            base: API.to_owned(),
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_tests(base: &str) -> Self {
+        let client = Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_else(|_| panic!("client"));
+        Self {
+            client,
+            base: base.to_owned(),
+        }
+    }
+
+    /// Resolve the pinned version of a project to its pack archive. A response for a
+    /// different project or version, or an ambiguous archive, is rejected.
+    pub async fn pack_artifact(
+        &self,
+        project: &str,
+        version: &str,
+    ) -> Result<PackArtifact, CoreError> {
+        if !pin(project) || !pin(version) {
+            return Err(invalid());
+        }
+        let mut response = self
+            .client
+            .get(format!("{}/v2/version/{version}", self.base))
+            .header(header::ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
+        let status = response.status();
+        if status == StatusCode::NOT_FOUND {
+            return Err(CoreError::new(ErrorCode::InstanceMissing));
+        }
+        if status == StatusCode::REQUEST_TIMEOUT
+            || status == StatusCode::TOO_MANY_REQUESTS
+            || status.is_server_error()
+        {
+            return Err(CoreError::new(ErrorCode::ServiceUnavailable));
+        }
+        if status != StatusCode::OK
+            || response
+                .content_length()
+                .is_some_and(|length| length > MAX_DOCUMENT_BYTES as u64)
+        {
+            return Err(invalid());
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?
+        {
+            if chunk.len() > MAX_DOCUMENT_BYTES - bytes.len() {
+                return Err(invalid());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        resolve_version(&bytes, project, version)
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PackArtifact {
@@ -163,6 +254,7 @@ pub(super) fn directory_entry_count(tail: &[u8], base: u64) -> Result<usize, Cor
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_http::{Reply, Server};
     use serde_json::json;
     use std::io::Write;
 
@@ -229,5 +321,70 @@ mod tests {
             verified_index(&corrupt, &artifact).err().map(|e| e.code()),
             Some(ErrorCode::ArtifactMismatch)
         );
+    }
+
+    fn pinned(project: &str, version: &str) -> String {
+        json!({"id": version, "project_id": project, "status": "listed",
+            "date_published": "2026-10-25T20:54:25Z",
+            "files": [{"filename": "pack.mrpack", "primary": true,
+                "url": format!("https://cdn.modrinth.com/data/{project}/versions/{version}/pack.mrpack"),
+                "size": 100, "hashes": {"sha1": "a".repeat(40), "sha512": "b".repeat(128)}}]})
+        .to_string()
+    }
+
+    fn code<T>(result: Result<T, CoreError>) -> Option<ErrorCode> {
+        result.err().map(|error| error.code())
+    }
+
+    #[tokio::test]
+    async fn the_pinned_version_resolves_without_credentials_redirects_or_substitution() {
+        let found = pinned("project", "version");
+        let server = Server::start(move |request| match request.path.as_str() {
+            "/v2/version/version" => Reply::ok(found.clone()),
+            // The document names another version than the one that was requested.
+            "/v2/version/other" => Reply::ok(pinned("project", "version")),
+            "/v2/version/moved" => {
+                Reply::status(302).header("Location", "https://evil.example/v2/version/moved")
+            }
+            "/v2/version/gone" => Reply::status(404),
+            "/v2/version/busy" => Reply::status(503),
+            "/v2/version/limited" => Reply::status(429),
+            "/v2/version/huge" => Reply::ok(vec![b' '; MAX_DOCUMENT_BYTES + 1]),
+            _ => Reply::status(500),
+        });
+        let client = ModrinthClient::for_tests(server.base());
+        let artifact = client
+            .pack_artifact("project", "version")
+            .await
+            .unwrap_or_else(|_| panic!("artifact"));
+        assert_eq!(artifact.size, 100);
+        assert_eq!(
+            code(client.pack_artifact("someone-else", "version").await),
+            Some(ErrorCode::InvalidData)
+        );
+        for (pin, expected) in [
+            ("other", ErrorCode::InvalidData),
+            ("moved", ErrorCode::InvalidData),
+            ("gone", ErrorCode::InstanceMissing),
+            ("busy", ErrorCode::ServiceUnavailable),
+            ("limited", ErrorCode::ServiceUnavailable),
+            ("huge", ErrorCode::InvalidData),
+        ] {
+            assert_eq!(
+                code(client.pack_artifact("project", pin).await),
+                Some(expected),
+                "{pin}"
+            );
+        }
+        // A malformed pin never reaches the network.
+        let before = server.requests().len();
+        assert!(client.pack_artifact("project", "../version").await.is_err());
+        assert!(client.pack_artifact("", "version").await.is_err());
+        assert_eq!(server.requests().len(), before);
+        for request in server.requests() {
+            for forbidden in ["authorization", "x-api-key", "cookie"] {
+                assert!(!request.headers.contains(forbidden), "{forbidden}");
+            }
+        }
     }
 }

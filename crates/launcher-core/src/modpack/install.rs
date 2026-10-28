@@ -4,6 +4,7 @@
 //! before it exists a failure removes only what this operation created, and after
 //! it exists recovery rolls forward. Existing player files are never overwritten.
 use std::collections::BTreeSet;
+use std::fs::File;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -11,19 +12,21 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use super::{
-    Environment, Manifest, ManifestFile, Origin,
-    archive::{self, Limits},
+    Environment, Hashes, Manifest, MrpackIndex, Origin,
+    archive::{self, Limits, Opened},
     cache::ManifestClient,
     config::{self, Kind},
-    content::{self, ProgressSink, Request},
+    content::{self, Ensured, ProgressSink, Request},
     gamefs::{Content, GameDir},
     invalid,
     manual::{self, PendingFile, PendingReason, Placement},
+    modrinth::{ModrinthClient, PackArtifact},
+    mrpack,
     state::{ManagedFile, Ownership, PackIdentity, PackState},
     transfer::{Expected, PackDownloader},
 };
 use crate::{
-    catalog::{CatalogClient, CatalogSource},
+    catalog::{CatalogClient, CatalogInstance, CatalogSource},
     error::{CoreError, ErrorCode},
     minecraft::{
         Platform,
@@ -108,12 +111,12 @@ fn expected_for(file: &ManagedFile) -> Expected {
     Expected::file(&file.desired, file.size)
 }
 
-fn created_content(file: &ManifestFile) -> Created {
+fn created_content(item: &Item) -> Created {
     Created {
-        path: file.path.clone(),
-        size: file.size,
-        sha1: file.hashes.sha1.clone(),
-        sha512: file.hashes.sha512.clone(),
+        path: item.path.clone(),
+        size: item.size,
+        sha1: item.hashes.sha1.clone(),
+        sha512: item.hashes.sha512.clone(),
     }
 }
 
@@ -203,6 +206,167 @@ pub(crate) fn recover_locked(paths: &AppPaths, id: Uuid, root: &Path) -> Result<
     Ok(true)
 }
 
+/// One downloadable content file of a pack, whatever format described it.
+#[derive(Clone, Debug)]
+pub(crate) struct Item {
+    path: String,
+    hashes: Hashes,
+    size: u64,
+    url: String,
+    origin: Origin,
+    fallbacks: Vec<(String, Origin)>,
+    /// What the player fetches by hand if the CDN reports the file withdrawn.
+    withdrawn: Option<PendingFile>,
+}
+
+/// A source of configuration files applied once the content is in place.
+#[derive(Clone, Debug)]
+pub(crate) enum Layer {
+    /// An archive the manifest lists; it is downloaded with the content.
+    Archive {
+        kind: Kind,
+        url: String,
+        expected: Expected,
+    },
+    /// The overrides of an mrpack that was already downloaded and verified.
+    Overrides {
+        expected: Expected,
+        index: MrpackIndex,
+        index_sha256: String,
+    },
+}
+
+/// A pack reduced to what installation needs, independent of its format.
+#[derive(Clone, Debug)]
+pub(crate) struct Plan {
+    identity: PackIdentity,
+    minecraft_version: String,
+    loader: String,
+    loader_version: String,
+    items: Vec<Item>,
+    pending: Vec<PendingFile>,
+    layers: Vec<Layer>,
+}
+
+impl Plan {
+    fn custom(manifest: &Manifest) -> Result<Self, CoreError> {
+        let mut items = Vec::new();
+        let mut pending = Vec::new();
+        for file in &manifest.files {
+            if file.env.client == Environment::Unsupported {
+                continue;
+            }
+            if file.manual {
+                pending.push(PendingFile::from_manifest(file, PendingReason::Manual)?);
+                continue;
+            }
+            items.push(Item {
+                path: file.path.clone(),
+                hashes: file.hashes.clone(),
+                size: file.size,
+                url: file.url.clone().ok_or_else(invalid)?,
+                origin: file.source.clone(),
+                fallbacks: Vec::new(),
+                withdrawn: (file.source == Origin::Curseforge)
+                    .then(|| PendingFile::from_manifest(file, PendingReason::Withdrawn))
+                    .transpose()?,
+            });
+        }
+        let mut layers = Vec::new();
+        for (kind, archive) in [
+            (Kind::Defaults, &manifest.archives.defaults),
+            (Kind::Enforced, &manifest.archives.enforced),
+        ] {
+            if let Some(archive) = archive {
+                layers.push(Layer::Archive {
+                    kind,
+                    url: archive.url.clone(),
+                    expected: Expected::archive(&archive.sha256, archive.size),
+                });
+            }
+        }
+        Ok(Self {
+            identity: PackIdentity::Custom {
+                version_id: manifest.version_id,
+                published_at: manifest.published_at.clone(),
+                label: manifest.label.clone(),
+            },
+            minecraft_version: manifest.minecraft_version.clone(),
+            loader: manifest.loader.clone(),
+            loader_version: manifest.loader_version.clone(),
+            items,
+            pending,
+            layers,
+        })
+    }
+
+    /// The index is authoritative for versions: the catalog's informational loader
+    /// and Minecraft version may only agree with it, never override it.
+    fn mrpack(
+        catalog: &CatalogInstance,
+        project: &str,
+        version: &str,
+        artifact: &PackArtifact,
+        expected: Expected,
+        inspected: mrpack::Inspected,
+    ) -> Result<Self, CoreError> {
+        let mrpack::Inspected {
+            index,
+            index_sha256,
+            ..
+        } = inspected;
+        let (Some(minecraft), Some(loader_version), true) = (
+            index.dependencies.get("minecraft"),
+            index.dependencies.get("neoforge"),
+            index.supported_loader(),
+        ) else {
+            return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+        };
+        if catalog
+            .minecraft_version
+            .as_ref()
+            .is_some_and(|catalog| catalog != minecraft)
+        {
+            return Err(invalid());
+        }
+        let mut items = Vec::new();
+        for file in &index.files {
+            if file.env.client == Environment::Unsupported {
+                continue;
+            }
+            let mut sources = file.sources()?.into_iter();
+            let (url, origin) = sources.next().ok_or_else(invalid)?;
+            items.push(Item {
+                path: file.path.clone(),
+                hashes: file.hashes.clone(),
+                size: file.file_size,
+                url,
+                origin,
+                fallbacks: sources.collect(),
+                withdrawn: None,
+            });
+        }
+        Ok(Self {
+            identity: PackIdentity::Modrinth {
+                project_id: project.to_owned(),
+                version_id: version.to_owned(),
+                archive_sha512: artifact.hashes.sha512.clone().ok_or_else(invalid)?,
+                index_sha256: index_sha256.clone(),
+            },
+            minecraft_version: minecraft.clone(),
+            loader: "neoforge".to_owned(),
+            loader_version: loader_version.clone(),
+            items,
+            pending: Vec::new(),
+            layers: vec![Layer::Overrides {
+                expected,
+                index,
+                index_sha256,
+            }],
+        })
+    }
+}
+
 pub struct Publish<'a> {
     pub paths: &'a AppPaths,
     pub id: Uuid,
@@ -210,6 +374,17 @@ pub struct Publish<'a> {
     /// The prepared vanilla and loader installation, not yet published.
     pub base: InstalledLock,
     pub manifest: &'a Manifest,
+    pub downloader: &'a PackDownloader,
+    pub cancel: &'a Cancellation,
+    pub progress: ProgressSink,
+}
+
+pub(crate) struct PlanPublish<'a> {
+    pub paths: &'a AppPaths,
+    pub id: Uuid,
+    pub root: &'a Path,
+    pub base: InstalledLock,
+    pub plan: Plan,
     pub downloader: &'a PackDownloader,
     pub cancel: &'a Cancellation,
     pub progress: ProgressSink,
@@ -223,7 +398,7 @@ fn pending_state(pack: &PackState) -> InstallationState {
     }
 }
 
-/// Install the pack files into the game directory and publish `installed.json`.
+/// Install a custom pack's files into the game directory and publish `installed.json`.
 /// The caller holds `.installation.lock` and has prepared `base`.
 pub async fn publish(request: Publish<'_>) -> Result<Outcome, CoreError> {
     let Publish {
@@ -236,25 +411,40 @@ pub async fn publish(request: Publish<'_>) -> Result<Outcome, CoreError> {
         cancel,
         progress,
     } = request;
+    publish_plan(PlanPublish {
+        paths,
+        id,
+        root,
+        base,
+        plan: Plan::custom(manifest)?,
+        downloader,
+        cancel,
+        progress,
+    })
+    .await
+}
+
+/// Install a pack's files into the game directory and publish `installed.json`.
+/// The caller holds `.installation.lock` and has prepared `base`.
+pub(crate) async fn publish_plan(request: PlanPublish<'_>) -> Result<Outcome, CoreError> {
+    let PlanPublish {
+        paths,
+        id,
+        root,
+        base,
+        plan,
+        downloader,
+        cancel,
+        progress,
+    } = request;
     let game = GameDir::open(&root.join("minecraft"))?;
-    let mut installable: Vec<&ManifestFile> = Vec::new();
-    let mut pending: Vec<PendingFile> = Vec::new();
-    for file in &manifest.files {
-        if file.env.client == Environment::Unsupported {
-            continue;
-        }
-        if file.manual {
-            pending.push(PendingFile::from_manifest(file, PendingReason::Manual)?);
-        } else {
-            installable.push(file);
-        }
-    }
+    let mut pending: Vec<PendingFile> = plan.pending.clone();
     // Existing player content is reported, never adopted or overwritten.
     let mut conflicts = BTreeSet::new();
-    for file in &installable {
+    for item in &plan.items {
         cancel.check()?;
-        if game.entry(&file.path)? != super::gamefs::Entry::Absent {
-            conflicts.insert(file.path.clone());
+        if game.entry(&item.path)? != super::gamefs::Entry::Absent {
+            conflicts.insert(item.path.clone());
         }
     }
     for file in &pending {
@@ -265,63 +455,80 @@ pub async fn publish(request: Publish<'_>) -> Result<Outcome, CoreError> {
             conflicts.insert(file.path.clone());
         }
     }
+    // Layers already in the cache open now, so their collisions are reported
+    // before anything is downloaded.
+    let mut layers: Vec<(Kind, Opened<File>)> = Vec::new();
+    for layer in &plan.layers {
+        if let Layer::Overrides {
+            expected,
+            index,
+            index_sha256,
+        } = layer
+        {
+            let opened = mrpack::layer(paths, expected, index, index_sha256, cancel)?;
+            for entry in &opened.entries {
+                if mrpack::is_content(&entry.path)
+                    && game.entry(&entry.path)? != super::gamefs::Entry::Absent
+                {
+                    conflicts.insert(entry.path.clone());
+                }
+            }
+            layers.push((Kind::Override, opened));
+        }
+    }
     if !conflicts.is_empty() {
         return Ok(Outcome::Conflicts(conflicts.into_iter().collect()));
     }
 
     let mut requests = Vec::new();
-    for file in &installable {
+    for item in &plan.items {
         requests.push(Request {
-            url: file.url.clone().ok_or_else(invalid)?,
-            origin: file.source.clone(),
-            expected: Expected::file(&file.hashes, file.size),
+            url: item.url.clone(),
+            origin: item.origin.clone(),
+            expected: Expected::file(&item.hashes, item.size),
+            fallbacks: item.fallbacks.clone(),
         });
     }
-    let archives = [&manifest.archives.defaults, &manifest.archives.enforced];
-    let mut archive_expected: [Option<Expected>; 2] = [None, None];
-    for (slot, archive) in archive_expected.iter_mut().zip(archives) {
-        if let Some(archive) = archive {
-            let expected = Expected::archive(&archive.sha256, archive.size);
+    let mut archives: Vec<(Kind, Expected)> = Vec::new();
+    for layer in &plan.layers {
+        if let Layer::Archive {
+            kind,
+            url,
+            expected,
+        } = layer
+        {
             requests.push(Request {
-                url: archive.url.clone(),
+                url: url.clone(),
                 origin: Origin::Upload,
                 expected: expected.clone(),
+                fallbacks: Vec::new(),
             });
-            *slot = Some(expected);
+            archives.push((*kind, expected.clone()));
         }
     }
     let ensured = content::ensure_all(paths, downloader, &requests, cancel, progress).await?;
 
-    let mut content_files: Vec<&ManifestFile> = Vec::new();
-    for (file, result) in installable.iter().zip(&ensured) {
+    let mut content_files: Vec<&Item> = Vec::new();
+    for (item, result) in plan.items.iter().zip(&ensured) {
         match result {
-            content::Ensured::Ready { .. } => content_files.push(file),
-            content::Ensured::Withdrawn => {
-                pending.push(PendingFile::from_manifest(file, PendingReason::Withdrawn)?);
+            Ensured::Ready { .. } => content_files.push(item),
+            Ensured::Withdrawn => {
+                pending.push(item.withdrawn.clone().ok_or_else(invalid)?);
             }
         }
     }
 
-    let mut defaults = None;
-    let mut enforced = None;
-    for (kind, expected) in [Kind::Defaults, Kind::Enforced]
-        .into_iter()
-        .zip(&archive_expected)
-    {
-        let Some(expected) = expected else { continue };
+    for (kind, expected) in &archives {
         let file = content::open_verified(paths, expected, cancel)?;
-        let opened = archive::preflight(file, Limits::PACK)?;
-        match kind {
-            Kind::Defaults => defaults = Some(opened),
-            Kind::Enforced => enforced = Some(opened),
-        }
+        layers.push((*kind, archive::preflight(file, Limits::PACK)?));
     }
-    if let (Some(first), Some(second)) = (&defaults, &enforced) {
+    let named = |wanted: Kind| layers.iter().find(|(kind, _)| *kind == wanted);
+    if let (Some((_, first)), Some((_, second))) = (named(Kind::Defaults), named(Kind::Enforced)) {
         config::ensure_disjoint(&first.entries, &second.entries)?;
     }
 
     let mut created: Vec<Created> = content_files.iter().map(|f| created_content(f)).collect();
-    for opened in [&defaults, &enforced].into_iter().flatten() {
+    for (_, opened) in &layers {
         for entry in &opened.entries {
             if game.entry(&entry.path)? == super::gamefs::Entry::Absent {
                 created.push(Created {
@@ -367,14 +574,10 @@ pub async fn publish(request: Publish<'_>) -> Result<Outcome, CoreError> {
             .collect();
         let mut consumed = BTreeSet::new();
         let mut skipped = Vec::new();
-        for (kind, opened) in [
-            (Kind::Defaults, &mut defaults),
-            (Kind::Enforced, &mut enforced),
-        ] {
-            let Some(opened) = opened else { continue };
+        for (kind, opened) in &mut layers {
             let mut budget = opened.budget();
             let outcome =
-                config::apply(opened, kind, &game, &BTreeSet::new(), &mut budget, cancel)?;
+                config::apply(opened, *kind, &game, &BTreeSet::new(), &mut budget, cancel)?;
             files.extend(outcome.files);
             consumed.extend(outcome.consumed_defaults);
             skipped.extend(outcome.skipped);
@@ -382,14 +585,10 @@ pub async fn publish(request: Publish<'_>) -> Result<Outcome, CoreError> {
         let state = PackState {
             schema: 1,
             id,
-            source: PackIdentity::Custom {
-                version_id: manifest.version_id,
-                published_at: manifest.published_at.clone(),
-                label: manifest.label.clone(),
-            },
-            minecraft_version: manifest.minecraft_version.clone(),
-            loader: manifest.loader.clone(),
-            loader_version: manifest.loader_version.clone(),
+            source: plan.identity.clone(),
+            minecraft_version: plan.minecraft_version.clone(),
+            loader: plan.loader.clone(),
+            loader_version: plan.loader_version.clone(),
             files,
             consumed_defaults: consumed,
             skipped_configuration: skipped,
@@ -450,7 +649,7 @@ pub enum Installed {
     Pack(Outcome),
 }
 
-/// Install a catalog instance of any installable source: vanilla, or a custom pack.
+/// Install a catalog instance of any installable source: vanilla, or a pack.
 pub async fn install_any(
     paths: &AppPaths,
     id: Uuid,
@@ -465,7 +664,10 @@ pub async fn install_any(
         _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
         result = client.detail(id) => result?,
     };
-    if matches!(catalog.source, CatalogSource::Custom { .. }) {
+    if matches!(
+        catalog.source,
+        CatalogSource::Custom { .. } | CatalogSource::Modrinth { .. }
+    ) {
         return install(paths, id, platform, cancel, progress, pack_progress, auth)
             .await
             .map(Installed::Pack);
@@ -474,7 +676,80 @@ pub async fn install_any(
     Ok(Installed::Vanilla)
 }
 
-/// Install the current exact catalog pin of a custom pack.
+/// The custom pack's exact manifest for the current catalog pin.
+async fn custom_plan(
+    catalog: &CatalogInstance,
+    id: Uuid,
+    cancel: &Cancellation,
+) -> Result<Plan, CoreError> {
+    let CatalogSource::Custom {
+        current_version_id: Some(version),
+        ..
+    } = &catalog.source
+    else {
+        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    };
+    let manifests = ManifestClient::new()?;
+    let cached = tokio::select! {
+        _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
+        result = manifests.fetch(id, *version, None) => result?,
+    };
+    let manifest = cached.manifest();
+    manifest.bind_current(catalog)?;
+    if !manifest.supported_loader() {
+        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    }
+    Plan::custom(manifest)
+}
+
+/// The pinned Modrinth pack: resolve its exact version, verify the whole archive in
+/// the shared cache, and only then read its index and overrides.
+async fn mrpack_plan(
+    paths: &AppPaths,
+    downloader: &PackDownloader,
+    catalog: &CatalogInstance,
+    cancel: &Cancellation,
+    progress: ProgressSink,
+) -> Result<Plan, CoreError> {
+    let CatalogSource::Modrinth {
+        project_id,
+        pack_version_id,
+        loader,
+    } = &catalog.source
+    else {
+        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    };
+    if loader.as_deref().is_some_and(|loader| loader != "neoforge") {
+        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    }
+    let modrinth = ModrinthClient::new()?;
+    let artifact = tokio::select! {
+        _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
+        result = modrinth.pack_artifact(project_id, pack_version_id) => result?,
+    };
+    let expected = Expected::file(&artifact.hashes, artifact.size);
+    let request = Request {
+        url: artifact.url.clone(),
+        origin: Origin::Modrinth,
+        expected: expected.clone(),
+        fallbacks: Vec::new(),
+    };
+    let ensured = content::ensure_all(paths, downloader, &[request], cancel, progress).await?;
+    if !matches!(ensured.as_slice(), [Ensured::Ready { .. }]) {
+        return Err(invalid());
+    }
+    let inspected = mrpack::inspect(paths, &expected, cancel)?;
+    Plan::mrpack(
+        catalog,
+        project_id,
+        pack_version_id,
+        &artifact,
+        expected,
+        inspected,
+    )
+}
+
+/// Install the current exact catalog pin of a pack.
 pub async fn install(
     paths: &AppPaths,
     id: Uuid,
@@ -499,23 +774,14 @@ pub async fn install(
     {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     }
-    let CatalogSource::Custom {
-        current_version_id: Some(version),
-        ..
-    } = &catalog.source
-    else {
-        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    let downloader = PackDownloader::new()?;
+    let plan = match &catalog.source {
+        CatalogSource::Custom { .. } => custom_plan(&catalog, id, cancel).await?,
+        CatalogSource::Modrinth { .. } => {
+            mrpack_plan(paths, &downloader, &catalog, cancel, pack_progress.clone()).await?
+        }
+        _ => return Err(CoreError::new(ErrorCode::UnsupportedInstance)),
     };
-    let manifests = ManifestClient::new()?;
-    let cached = tokio::select! {
-        _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
-        result = manifests.fetch(id, *version, None) => result?,
-    };
-    let manifest = cached.manifest();
-    manifest.bind_current(&catalog)?;
-    if !manifest.supported_loader() {
-        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
-    }
     cancel.check()?;
     let root = registry.ensure_catalog_instance(&catalog)?;
     let _guard = lock(&root, ".installation.lock", cancel).await?;
@@ -543,19 +809,18 @@ pub async fn install(
             id,
             operation,
             platform,
-            &manifest.minecraft_version,
-            &manifest.loader_version,
+            &plan.minecraft_version,
+            &plan.loader_version,
             cancel,
             progress,
         )
         .await?;
-        let downloader = PackDownloader::new()?;
-        publish(Publish {
+        publish_plan(PlanPublish {
             paths,
             id,
             root: &root,
             base,
-            manifest,
+            plan,
             downloader: &downloader,
             cancel,
             progress: pack_progress,
