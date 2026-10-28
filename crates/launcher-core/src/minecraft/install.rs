@@ -45,6 +45,8 @@ pub struct InstalledLock {
     pub native_files: Vec<NativeFile>,
     /// Missing in older manifests, which retain their original generation path.
     pub native_directory: Option<String>,
+    /// Modpack state; present only for disk schema 5, absent for vanilla installations.
+    pub pack: Option<crate::modpack::state::PackState>,
 }
 
 impl InstalledLock {
@@ -59,14 +61,14 @@ impl InstalledLock {
 
 pub type Progress = Arc<dyn Fn(DownloadProgress) + Send + Sync>;
 
-pub(super) fn metadata_root(paths: &AppPaths, id: Uuid) -> Result<std::path::PathBuf, CoreError> {
+pub(crate) fn metadata_root(paths: &AppPaths, id: Uuid) -> Result<std::path::PathBuf, CoreError> {
     if id.is_nil() {
         return Err(invalid());
     }
     InstanceRegistry::new(paths.clone()).prepare_instance(id)
 }
 
-pub(super) fn read_json<T: serde::de::DeserializeOwned>(
+pub(crate) fn read_json<T: serde::de::DeserializeOwned>(
     root: &std::path::Path,
     name: &str,
 ) -> Result<Option<T>, CoreError> {
@@ -78,7 +80,7 @@ pub(super) fn read_json<T: serde::de::DeserializeOwned>(
     read_json_raw(root, name)
 }
 
-pub(super) fn read_json_raw<T: serde::de::DeserializeOwned>(
+pub(crate) fn read_json_raw<T: serde::de::DeserializeOwned>(
     root: &std::path::Path,
     name: &str,
 ) -> Result<Option<T>, CoreError> {
@@ -100,7 +102,7 @@ pub(super) fn read_json_raw<T: serde::de::DeserializeOwned>(
     }
     Ok(Some(serde_json::from_slice(&bytes).map_err(|_| invalid())?))
 }
-pub(super) fn write_json(
+pub(crate) fn write_json(
     root: &std::path::Path,
     relative: &str,
     value: &impl Serialize,
@@ -114,7 +116,7 @@ pub(super) fn write_json(
     write_json_raw(root, relative, value)
 }
 
-pub(super) fn write_json_raw(
+pub(crate) fn write_json_raw(
     root: &std::path::Path,
     relative: &str,
     value: &impl Serialize,
@@ -136,11 +138,14 @@ pub(super) fn write_json_raw(
 
 /// A pending journal is conservative: files are retained for verified reuse, but
 /// completion must be retried explicitly. No network access or Java execution occurs.
-pub(super) fn recover_locked(
+pub(crate) fn recover_locked(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
 ) -> Result<(), CoreError> {
+    if crate::modpack::install::recover_locked(paths, id, root)? {
+        return Ok(());
+    }
     if super::maintenance::recover_locked(paths, id, root)? {
         return Ok(());
     }
@@ -454,7 +459,7 @@ fn previous_record_requires_installation(paths: &AppPaths, id: Uuid) -> Result<b
         }))
 }
 
-pub(super) async fn prepare_recorded(
+pub(crate) async fn prepare_recorded(
     paths: &AppPaths,
     id: Uuid,
     operation: Uuid,
@@ -514,6 +519,7 @@ pub(super) async fn prepare_recorded(
         plan,
         native_files,
         native_directory: Some(native_directory),
+        pack: None,
     };
     Ok(installed)
 }
@@ -527,7 +533,7 @@ pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, Cor
 }
 
 /// Caller must retain this instance's installation lock for the whole audit.
-pub(super) fn verify_under_lock(
+pub(crate) fn verify_under_lock(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
@@ -539,7 +545,7 @@ pub(super) fn verify_under_lock(
 }
 
 /// Cached Play preflight. Installation, repair and recovery use the full audit above.
-pub(super) fn verify_play_under_lock(
+pub(crate) fn verify_play_under_lock(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
@@ -561,7 +567,9 @@ fn read_installed_under_lock(
     cancel.check()?;
     let journal = read_json::<serde_json::Value>(root, "transaction.json")?;
     if journal.is_some_and(|journal| {
-        if journal["schema_version"] == 3 {
+        if journal["schema_version"] == 4 {
+            !crate::modpack::install::journal_inactive(journal, id)
+        } else if journal["schema_version"] == 3 {
             !super::maintenance::journal_inactive(journal, id)
         } else if journal["schema_version"] == 2 {
             !super::update::journal_inactive(journal, id)
@@ -582,7 +590,7 @@ fn read_installed_under_lock(
     Ok(installed)
 }
 
-pub(super) fn verify_manifest(
+pub(crate) fn verify_manifest(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,

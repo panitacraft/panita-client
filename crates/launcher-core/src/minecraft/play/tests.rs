@@ -325,6 +325,7 @@ pub(crate) fn complete_installation(paths: &AppPaths, id: Uuid) {
         plan,
         native_files: vec![],
         native_directory: None,
+        pack: None,
     };
     paths
         .game_directory(id)
@@ -680,4 +681,131 @@ async fn microsoft_service_outage_blocks_composed_play_without_transport_retry_o
     assert!(LaunchLease::acquire(&paths, id).is_ok());
     drop(accounts);
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+fn pack_catalog(version: Uuid) -> CatalogInstance {
+    CatalogInstance {
+        minecraft_version: Some("1.21.1".into()),
+        source: CatalogSource::Custom {
+            minecraft_version: "1.21.1".into(),
+            loader: "neoforge".into(),
+            current_version_id: Some(version),
+            label: Some("0.2".into()),
+            published_at: Some("2026-10-25T20:54:25Z".into()),
+        },
+        ..local()
+    }
+}
+
+fn pack_detail(version: Uuid) -> String {
+    let mut raw = crate::catalog::tests::record();
+    raw["source_type"] = serde_json::json!("custom");
+    raw["minecraft_version"] = serde_json::json!("1.21.1");
+    raw["loader"] = serde_json::json!("neoforge");
+    raw["current_version_id"] = serde_json::json!(version);
+    raw["current_version_label"] = serde_json::json!("0.2");
+    raw["current_version_published_at"] = serde_json::json!("2026-10-25T20:54:25Z");
+    serde_json::json!({"data": raw}).to_string()
+}
+
+/// Make the fixture's record an installed pack at `installed`, in `state`.
+fn pack_record(paths: &AppPaths, installed: Uuid, state: InstallationState) {
+    let catalog = pack_catalog(installed);
+    InstanceRegistry::new(paths.clone())
+        .save(&InstallationRecord {
+            schema_version: 1,
+            id: catalog.id,
+            directory_name: None,
+            resolved_source: catalog.source.clone(),
+            last_catalog: catalog,
+            state,
+            managed_files: vec![],
+            settings: InstanceSettings::default(),
+        })
+        .unwrap_or_else(|_| panic!("registry"));
+}
+
+async fn pack_play(
+    paths: &AppPaths,
+    accounts: &Arc<AccountController>,
+    id: Uuid,
+    reply: (u16, String),
+) -> Option<ErrorCode> {
+    let (catalog, server) = crate::catalog::tests::server(vec![(reply.0, reply.1, false)]);
+    let result = prepare_with_catalog(
+        paths.clone(),
+        id,
+        accounts.clone(),
+        Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform")),
+        ProcessSessionId::new(),
+        Cancellation::default(),
+        catalog,
+    )
+    .await;
+    assert!(server.join().is_ok());
+    // Every refusal releases the launch reservation.
+    assert!(LaunchLease::acquire(paths, id).is_ok());
+    result.err().map(|error| error.code())
+}
+
+#[tokio::test]
+async fn a_newer_published_pack_version_blocks_play_until_the_player_updates() {
+    let (paths, accounts, id) = fixture();
+    complete_installation(&paths, id);
+    let (installed, newer) = (Uuid::new_v4(), Uuid::new_v4());
+    pack_record(&paths, installed, InstallationState::Installed);
+    // The current response names another published version: update first.
+    assert_eq!(
+        pack_play(&paths, &accounts, id, (200, pack_detail(newer))).await,
+        Some(ErrorCode::UpdateRequired)
+    );
+    // The same version is not blocked by this gate; the installation audit decides
+    // (this fixture has no pack state, so it is refused there instead).
+    assert_eq!(
+        pack_play(&paths, &accounts, id, (200, pack_detail(installed))).await,
+        Some(ErrorCode::UnsupportedInstance)
+    );
+    // When the current version cannot be fetched there is nothing to enforce, so the
+    // launch is not refused for being outdated (the audit still decides).
+    assert_ne!(
+        pack_play(&paths, &accounts, id, (503, "{}".into())).await,
+        Some(ErrorCode::UpdateRequired)
+    );
+    drop(accounts);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
+async fn a_pack_waiting_for_manual_files_never_reaches_the_installation_audit() {
+    let (paths, accounts, id) = fixture();
+    complete_installation(&paths, id);
+    let version = Uuid::new_v4();
+    pack_record(&paths, version, InstallationState::AwaitingFiles);
+    assert_eq!(
+        pack_play(&paths, &accounts, id, (200, pack_detail(version))).await,
+        Some(ErrorCode::ManualFilesRequired)
+    );
+    // Offline, the manual list still blocks: there is no fallback around missing files.
+    assert_eq!(
+        pack_play(&paths, &accounts, id, (503, "{}".into())).await,
+        Some(ErrorCode::ManualFilesRequired)
+    );
+    drop(accounts);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn only_other_published_pack_versions_require_an_update() {
+    let (old, new) = (Uuid::new_v4(), Uuid::new_v4());
+    let pack = |version| pack_catalog(version).source;
+    assert!(require_current_pack(&pack(old), &pack(old)).is_ok());
+    assert_eq!(
+        require_current_pack(&pack(old), &pack(new))
+            .err()
+            .map(|e| e.code()),
+        Some(ErrorCode::UpdateRequired)
+    );
+    // Vanilla never pins a pack version, so its updates stay explicit.
+    let vanilla = local().source;
+    assert!(require_current_pack(&vanilla, &vanilla).is_ok());
 }

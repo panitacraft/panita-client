@@ -20,7 +20,7 @@ pub mod play;
 pub mod process;
 pub mod runtime;
 pub mod support;
-mod transaction;
+pub(crate) mod transaction;
 pub mod update;
 #[cfg(feature = "loader-validation")]
 pub mod validation;

@@ -111,7 +111,7 @@ fn catalog_validation_preserves_text_and_rejects_malformed_records() {
 }
 
 #[test]
-fn custom_catalog_pins_round_trip_without_authorizing_installation() {
+fn custom_catalog_pins_round_trip_and_only_published_neoforge_packs_install() {
     let mut raw = record();
     raw["source_type"] = json!("custom");
     raw["loader"] = json!("neoforge");
@@ -125,13 +125,26 @@ fn custom_catalog_pins_round_trip_without_authorizing_installation() {
         CatalogSource::Custom { label: None, .. }
     ));
     assert!(parsed[0].validate().is_ok());
-    assert_eq!(
+    // A published NeoForge pack is installable; every other loader stays unsupported.
+    assert!(
         parsed[0]
             .installation_allowed(&Version::new(0, 2, 0))
-            .err()
-            .map(|error| error.code()),
-        Some(ErrorCode::UnsupportedInstance)
+            .is_ok()
     );
+    assert!(parsed[0].source.installable());
+    for loader in ["fabric", "forge", "quilt"] {
+        let mut other = raw.clone();
+        other["loader"] = json!(loader);
+        let parsed = parse_list(list(vec![other]).as_bytes()).unwrap_or_else(|_| panic!("loader"));
+        assert_eq!(
+            parsed[0]
+                .installation_allowed(&Version::new(0, 2, 0))
+                .err()
+                .map(|error| error.code()),
+            Some(ErrorCode::UnsupportedInstance),
+            "{loader}"
+        );
+    }
     let encoded = serde_json::to_vec(&parsed[0]).unwrap_or_else(|_| panic!("encode"));
     let restored: CatalogInstance =
         serde_json::from_slice(&encoded).unwrap_or_else(|_| panic!("decode"));

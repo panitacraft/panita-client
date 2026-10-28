@@ -19,7 +19,7 @@ use crate::{
     paths::AppPaths,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PendingReason {
     /// The manifest marks the file as manual: it carries no download URL.

@@ -60,6 +60,69 @@ fn catalog_decision(
     }
 }
 
+/// Modpack updates are mandatory: a current response naming another published
+/// version than the installed one blocks Play until the player updates. A failed
+/// check never reaches here, so an outage keeps the warning-confirmed launch.
+fn require_current_pack(
+    installed: &CatalogSource,
+    current: &CatalogSource,
+) -> Result<(), CoreError> {
+    match (installed, current) {
+        (
+            CatalogSource::Custom {
+                current_version_id: installed,
+                ..
+            },
+            CatalogSource::Custom {
+                current_version_id: current,
+                ..
+            },
+        ) if installed != current => Err(CoreError::new(ErrorCode::UpdateRequired)),
+        _ => Ok(()),
+    }
+}
+
+/// A complete modpack launches only with its manual files supplied and every
+/// managed content file intact; a damaged one needs the explicit repair of Phase 12.
+fn verify_pack(
+    lease: &LaunchLease,
+    installed: &InstalledLock,
+    record: &crate::registry::InstallationRecord,
+    cancel: &Cancellation,
+) -> Result<(), CoreError> {
+    let (
+        CatalogSource::Custom {
+            minecraft_version,
+            loader,
+            ..
+        },
+        Some(pack),
+        Some(_),
+    ) = (
+        &record.resolved_source,
+        &installed.pack,
+        &installed.plan.loader,
+    )
+    else {
+        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    };
+    if loader != "neoforge"
+        || pack.loader != *loader
+        || &pack.minecraft_version != minecraft_version
+        || pack.minecraft_version != installed.plan.version.id
+    {
+        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    }
+    if !pack.pending.is_empty() {
+        return Err(CoreError::new(ErrorCode::ManualFilesRequired));
+    }
+    crate::modpack::install::verify_files(
+        &crate::modpack::gamefs::GameDir::open(lease.game_directory())?,
+        pack,
+        cancel,
+    )
+}
+
 /// Reserve one instance, query its specific API status and verify a complete
 /// existing installation. Never install, repair, download or execute Java here.
 pub async fn prepare_play(
@@ -108,7 +171,11 @@ async fn prepare_with_catalog(
         // Preserve an explicit disabled result even though this attempt fails.
         registry.remember_catalog(std::slice::from_ref(current))?;
     }
+    let current_source = detail.as_ref().ok().map(|current| current.source.clone());
     let warning_required = catalog_decision(&local.last_catalog, detail)?;
+    if let Some(current) = &current_source {
+        require_current_pack(&local.resolved_source, current)?;
+    }
     let root = paths.clone();
     let audit_cancel = cancel.clone();
     let audit = tokio::task::spawn_blocking(move || {
@@ -117,6 +184,9 @@ async fn prepare_with_catalog(
         let record = InstanceRegistry::new(root.clone())
             .get(instance)?
             .ok_or_else(invalid)?;
+        if record.state == InstallationState::AwaitingFiles {
+            return Err(CoreError::new(ErrorCode::ManualFilesRequired));
+        }
         if !matches!(
             record.state,
             InstallationState::Installed | InstallationState::UpdateAvailable
@@ -124,10 +194,15 @@ async fn prepare_with_catalog(
             return Err(invalid());
         }
         let installed = lease.verify_installation_with_cancel(&audit_cancel)?;
-        if installed.plan.loader.is_some()
-            || !matches!(&record.resolved_source, CatalogSource::Vanilla { minecraft_version } if minecraft_version == &installed.plan.version.id)
-        {
-            return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+        match &record.resolved_source {
+            CatalogSource::Vanilla { minecraft_version }
+                if installed.plan.loader.is_none()
+                    && installed.pack.is_none()
+                    && minecraft_version == &installed.plan.version.id => {}
+            CatalogSource::Custom { .. } => {
+                verify_pack(&lease, &installed, &record, &audit_cancel)?
+            }
+            _ => return Err(CoreError::new(ErrorCode::UnsupportedInstance)),
         }
         let global = GlobalSettings::load(&PrivateStore::open(&root)?)?;
         audit_cancel.check()?;

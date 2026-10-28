@@ -13,6 +13,7 @@ use crate::error::{CoreError, ErrorCode};
 use crate::minecraft::{safe_path, valid_hash};
 
 pub mod generation;
+pub mod loader;
 pub mod plan;
 pub mod staging;
 mod transport;

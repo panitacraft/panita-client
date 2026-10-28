@@ -15,6 +15,7 @@ pub mod cache;
 pub mod config;
 pub mod content;
 pub mod gamefs;
+pub mod install;
 pub mod manual;
 pub mod modrinth;
 pub mod state;

@@ -102,6 +102,21 @@ impl GameDir {
         }
     }
 
+    /// Length of the regular file at `relative`, when there is one.
+    pub fn size(&self, relative: &str) -> Result<Option<u64>, CoreError> {
+        let Some((dir, name)) = self.parent(relative, false)? else {
+            return Ok(None);
+        };
+        match dir.symlink_metadata(&name) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
+                Ok(Some(metadata.len()))
+            }
+            Ok(_) => Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(io(error)),
+        }
+    }
+
     /// Hash the existing file at `relative` against `expected` without following links.
     pub fn compare(
         &self,
