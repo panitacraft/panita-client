@@ -913,3 +913,13 @@ fn journals_are_validated_and_inactive_ones_are_recognized() {
     let active = serde_json::to_value(journal(&|_| {})).unwrap_or_default();
     assert!(!journal_inactive(active, id));
 }
+
+#[test]
+fn a_first_install_is_not_a_pack_and_not_missing() {
+    let world = world();
+    // A vanilla installation is not a pack.
+    assert_eq!(is_pack(&world.paths, world.id).ok(), Some(false));
+    // An instance with no directory yet is the state of every first install.
+    assert_eq!(is_pack(&world.paths, Uuid::new_v4()).ok(), Some(false));
+    cleanup(&world);
+}
