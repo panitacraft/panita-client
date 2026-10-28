@@ -9,8 +9,8 @@ use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 use super::download::{
-    Cancellation, DownloadProgress, Downloader, ensure_parent, io, lock, verified_file,
-    verified_planned_file,
+    Cancellation, DownloadProgress, Downloader, MAX_DOWNLOADS, ensure_parent, io, lock, on_disk,
+    planned_size, verified_file, verified_planned_file,
 };
 use super::natives::NativeFile;
 use super::plan::{InstallPlan, PlannedArtifact};
@@ -32,6 +32,8 @@ struct Journal {
     active: bool,
 }
 mod format;
+mod timing;
+use timing::{Stage, Timer};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "format::StoredInstalled", into = "format::StoredInstalled")]
@@ -267,47 +269,102 @@ async fn download_all(
     cancel: &Cancellation,
     progress: Progress,
 ) -> Result<(), CoreError> {
-    let mut missing = 0u64;
+    let required = {
+        let _timer = Timer::new(Stage::Capacity);
+        let paths = paths.clone();
+        let files = plan.artifacts.clone();
+        let cancel = cancel.clone();
+        on_disk(move || {
+            let required = required_cache_space(&paths, &files, &cancel)?;
+            check_capacity(required, fs2::available_space(paths.root()).map_err(io)?)
+        })
+        .await
+    };
+    required?;
+    let _timer = Timer::new(Stage::Cache);
+    // The cache already serializes each parent directory across processes.
+    // Batch those files to amortize private opens, leases and temporary scans.
+    let mut batches = std::collections::BTreeMap::<String, Vec<PlannedArtifact>>::new();
     for file in &plan.artifacts {
         cancel.check()?;
-        let (directory, leaf) = ensure_parent(paths.root(), &file.destination)?;
-        if !verified_planned_file(&directory, &leaf, &file.artifact, file.executable)? {
-            missing = missing
-                .checked_add(file.artifact.size + 4096)
-                .ok_or_else(invalid)?;
-        }
+        let (parent, _) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+        batches
+            .entry(parent.to_owned())
+            .or_default()
+            .push(file.clone());
     }
-    check_capacity(missing, fs2::available_space(paths.root()).map_err(io)?)?;
     let mut workers = tokio::task::JoinSet::new();
-    let mut queue = plan.artifacts.iter();
+    let mut queue = batches.into_values();
+    let worker_cancel = Cancellation::default();
     loop {
-        while workers.len() < 4 {
-            let Some(file) = queue.next().cloned() else {
+        while workers.len() < MAX_DOWNLOADS {
+            let Some(files) = queue.next() else {
                 break;
             };
             let paths = paths.clone();
             let downloader = downloader.clone();
-            let cancel = cancel.clone();
+            let cancel = worker_cancel.clone();
             let progress = progress.clone();
             workers.spawn(async move {
                 downloader
-                    .cache_planned(&paths, &file, &cancel, progress.as_ref())
-                    .await?;
-                executable(&paths, &file)
+                    .cache_batch(&paths, &files, &cancel, progress.as_ref())
+                    .await
             });
         }
-        let Some(result) = workers.join_next().await else {
-            return Ok(());
+        let result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(CoreError::new(ErrorCode::OperationCancelled)),
+            result = workers.join_next() => match result {
+                Some(result) => result
+                    .map_err(|_| CoreError::new(ErrorCode::StorageUnavailable))
+                    .and_then(|result| result),
+                None => return cancel.check(),
+            },
         };
-        let result = result
-            .map_err(|_| CoreError::new(ErrorCode::StorageUnavailable))
-            .and_then(|result| result);
         if let Err(error) = result {
-            workers.abort_all();
+            // Blocking filesystem jobs cannot be aborted. Cancel transport and
+            // drain every worker before releasing the instance operation lease.
+            worker_cancel.cancel();
             while workers.join_next().await.is_some() {}
             return Err(error);
         }
     }
+}
+
+fn required_cache_space(
+    paths: &AppPaths,
+    files: &[PlannedArtifact],
+    cancel: &Cancellation,
+) -> Result<u64, CoreError> {
+    let mut parents = std::collections::BTreeMap::new();
+    let mut missing = 0u64;
+    let mut replacements = Vec::new();
+    for file in files {
+        cancel.check()?;
+        let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+        if !parents.contains_key(parent) {
+            parents.insert(
+                parent.to_owned(),
+                ensure_parent(paths.root(), &file.destination)?.0,
+            );
+        }
+        let directory = parents.get(parent).ok_or_else(invalid)?;
+        let bytes = file.artifact.size.checked_add(4096).ok_or_else(invalid)?;
+        if planned_size(directory, leaf, file.executable)? == Some(file.artifact.size) {
+            // Equal sizes are not integrity evidence. Reserve temporary space
+            // for up to eight same-size corrupt files being replaced at once.
+            replacements.push(bytes);
+        } else {
+            missing = missing.checked_add(bytes).ok_or_else(invalid)?;
+        }
+    }
+    replacements.sort_unstable_by(|a, b| b.cmp(a));
+    replacements
+        .into_iter()
+        .take(MAX_DOWNLOADS)
+        .try_fold(missing, |total, bytes| {
+            total.checked_add(bytes).ok_or_else(invalid)
+        })
 }
 
 pub(crate) fn check_capacity(missing: u64, available: u64) -> Result<(), CoreError> {
@@ -331,10 +388,14 @@ pub async fn install(
     progress: Progress,
     auth: Option<PanitaCredentials>,
 ) -> Result<InstalledLock, CoreError> {
+    let _timer = Timer::new(Stage::Total);
     let catalog_client = CatalogClient::new()?.with_auth(auth);
-    let catalog = tokio::select! {
-        _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
-        result = catalog_client.detail(id) => result?,
+    let catalog = {
+        let _timer = Timer::new(Stage::Catalog);
+        tokio::select! {
+            _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
+            result = catalog_client.detail(id) => result?,
+        }
     };
     let registry = InstanceRegistry::new(paths.clone());
     // Retain explicit availability learned here, including a disabled result.
@@ -441,8 +502,14 @@ pub(super) async fn prepare(
     progress: Progress,
 ) -> Result<InstalledLock, CoreError> {
     let downloader = Downloader::new()?;
-    let mut plan = super::plan::resolve(&downloader, version, platform, cancel).await?;
-    plan.allocate_runtime(paths)?;
+    let mut plan = {
+        let _timer = Timer::new(Stage::Metadata);
+        super::plan::resolve(&downloader, version, platform, cancel).await?
+    };
+    {
+        let _timer = Timer::new(Stage::RuntimeReservation);
+        plan.allocate_runtime(paths)?;
+    }
     prepare_recorded(paths, id, operation, platform, plan, cancel, progress).await
 }
 
@@ -475,9 +542,16 @@ pub(crate) async fn prepare_recorded(
     }
     let downloader = Downloader::new()?;
     download_all(paths, &downloader, &plan, cancel, progress).await?;
-    plan.verify_dependencies(paths)?;
-    verify_java(paths, &plan, platform, cancel).await?;
+    {
+        let _timer = Timer::new(Stage::Dependencies);
+        plan.verify_dependencies(paths)?;
+    }
+    {
+        let _timer = Timer::new(Stage::Java);
+        verify_java(paths, &plan, platform, cancel).await?;
+    }
     if let Some(loader) = &plan.loader {
+        let _timer = Timer::new(Stage::Loader);
         match loader.verify(paths, cancel) {
             Ok(()) => {}
             Err(error) if error.code() == ErrorCode::ArtifactMismatch => {
@@ -486,6 +560,7 @@ pub(crate) async fn prepare_recorded(
             Err(error) => return Err(error),
         }
     }
+    let native_timer = Timer::new(Stage::Natives);
     let native_directory = format!("natives/{operation}");
     let native_root = root.join(&native_directory);
     if !plan.version.natives.is_empty() {
@@ -511,6 +586,7 @@ pub(crate) async fn prepare_recorded(
             cancel,
         )?);
     }
+    drop(native_timer);
     cancel.check()?;
     let installed = InstalledLock {
         schema_version: 2,
@@ -847,6 +923,101 @@ mod tests {
             io(std::io::Error::from(std::io::ErrorKind::StorageFull)).code(),
             ErrorCode::InsufficientSpace
         );
+    }
+
+    #[test]
+    fn capacity_estimate_reserves_missing_files_and_bounded_same_size_replacements() {
+        use sha1::Digest;
+        let paths =
+            AppPaths::new(std::env::temp_dir().join(format!("panita-capacity-{}", Uuid::new_v4())))
+                .unwrap_or_else(|_| panic!("paths"));
+        let mut files = Vec::new();
+        for index in 0..12 {
+            let destination = format!("libraries/capacity/{index}.jar");
+            let (directory, leaf) =
+                ensure_parent(paths.root(), &destination).unwrap_or_else(|_| panic!("directory"));
+            directory
+                .write_atomic_durable(&leaf, b"wrong")
+                .unwrap_or_else(|_| panic!("file"));
+            files.push(PlannedArtifact {
+                destination,
+                executable: false,
+                artifact: Artifact {
+                    url: "https://libraries.minecraft.net/test.jar".into(),
+                    sha1: format!("{:x}", sha1::Sha1::digest(b"right")),
+                    size: 5,
+                    path: None,
+                },
+            });
+        }
+        let cancel = Cancellation::default();
+        assert_eq!(
+            required_cache_space(&paths, &files, &cancel).ok(),
+            Some(8 * (5 + 4096))
+        );
+        let mut absent = files[0].clone();
+        absent.destination = "libraries/capacity/missing.jar".into();
+        files.push(absent);
+        assert_eq!(
+            required_cache_space(&paths, &files, &cancel).ok(),
+            Some(9 * (5 + 4096))
+        );
+        let (directory, leaf) = ensure_parent(paths.root(), &files[0].destination)
+            .unwrap_or_else(|_| panic!("directory"));
+        assert!(
+            !verified_planned_file(&directory, &leaf, &files[0].artifact, false).unwrap_or(true)
+        );
+        cancel.cancel();
+        assert_eq!(
+            required_cache_space(&paths, &files, &cancel)
+                .err()
+                .map(|error| error.code()),
+            Some(ErrorCode::OperationCancelled)
+        );
+        drop(directory);
+        std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+    }
+
+    #[tokio::test]
+    async fn cancelling_cache_workers_drains_disk_work_before_returning() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (paths, accounts, id) = super::super::play::tests::fixture();
+        drop(accounts);
+        super::super::play::tests::complete_installation(&paths, id);
+        let installed = verify_installed(&paths, id).unwrap_or_else(|_| panic!("installed"));
+        let cancel = Cancellation::default();
+        let progress_count = Arc::new(AtomicUsize::new(0));
+        let count = progress_count.clone();
+        let trigger = cancel.clone();
+        let result = download_all(
+            &paths,
+            &Downloader::new().unwrap_or_else(|_| panic!("downloader")),
+            &installed.plan,
+            &cancel,
+            Arc::new(move |_| {
+                count.fetch_add(1, Ordering::SeqCst);
+                trigger.cancel();
+            }),
+        )
+        .await;
+        assert_eq!(
+            result.err().map(|error| error.code()),
+            Some(ErrorCode::OperationCancelled)
+        );
+        let count = progress_count.load(Ordering::SeqCst);
+        assert!(count > 0);
+        tokio::task::yield_now().await;
+        assert_eq!(progress_count.load(Ordering::SeqCst), count);
+        // All directory leases must be reusable immediately after cancellation.
+        download_all(
+            &paths,
+            &Downloader::new().unwrap_or_else(|_| panic!("downloader")),
+            &installed.plan,
+            &Cancellation::default(),
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("retry: {error:?}"));
     }
     fn record(id: Uuid) -> InstallationRecord {
         let catalog = crate::catalog::CatalogInstance {

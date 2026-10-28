@@ -56,6 +56,12 @@ fn open(directory: &PrivateDir, name: &str) -> Result<Option<File>, CoreError> {
     Ok(Some(file))
 }
 
+pub(super) fn size(directory: &PrivateDir, name: &str) -> Result<Option<u64>, CoreError> {
+    open(directory, name)?
+        .map(|file| file.metadata().map(|metadata| metadata.len()).map_err(io))
+        .transpose()
+}
+
 pub(super) fn matches(
     directory: &PrivateDir,
     name: &str,

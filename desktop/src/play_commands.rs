@@ -415,7 +415,7 @@ impl PlayController {
                 entry.received_files += 1;
             }
         }
-        // Progress is per artifact, with up to four concurrent downloads. Do not
+        // Progress is per artifact, with bounded concurrent downloads. Do not
         // sum partial byte counts or describe received files as verified yet.
         let publish = entry.last_progress.elapsed() >= std::time::Duration::from_millis(250);
         if publish {
