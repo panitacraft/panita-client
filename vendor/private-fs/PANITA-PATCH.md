@@ -17,8 +17,8 @@ Missing/inaccessible procfs fails closed. Other link errors are not retried.
 The temporary remains anonymous until linked, private from creation and on the
 same filesystem. Existing temporary/directory validation, linked-inode identity
 and permission checks, file sync, atomic rename, post-publication validation,
-parent sync and uncertain-commit reporting remain in force. Windows code is
-unchanged. No process capabilities or elevated Linux user are required.
+parent sync and uncertain-commit reporting remain in force. No process
+capabilities or elevated Linux user are required.
 
 Regression tests exercise descriptor publication, destination collisions,
 redirected entries, changed permissions and a renamed parent directory. Run
@@ -28,6 +28,34 @@ to inject its alias without privileged capabilities; its rejection assertion is
 unchanged.
 
 Reference: https://man7.org/linux/man-pages/man2/link.2.html
+
+Windows drive-root acquisition resolves the current DOS drive mapping with
+`QueryDosDeviceW` before opening the direct `\Device\<device>\` anchor. The
+reported Windows 10 startup failure was `STATUS_REPARSE_POINT_ENCOUNTERED`
+(`0xC000050B`, Win32 4395) at the original `\??\C:\` drive-root open, before
+profile creation. The normal DOS drive alias must be resolved separately from
+filesystem traversal. Only a single direct device name is accepted; SUBST,
+network paths, chained aliases and directory suffixes fail closed. Historical
+device mappings are never tried. The returned handle pins the selected volume;
+subsequent opens do not resolve the drive letter again.
+
+`OBJ_DONT_REPARSE`, `FILE_OPEN_REPARSE_POINT`, handle kind checks, volume ACL
+checks and component-by-component ancestor traversal remain enabled. There is no
+retry with relaxed flags and no permission repair or elevation. Tests cover fresh
+private-store creation/reopening, invalid mapping shapes, and rejection of a
+junction ancestor without creating files at its destination. Run the dependency
+and launcher storage tests on Windows; an installed candidate still needs a
+normal-user clean Windows 10 VM check before calling this report resolved.
+
+Local verification on 2026-10-28: all 51 dependency unit tests pass on Windows 11
+build 26200 outside the execution sandbox; all six launcher storage tests and
+library Clippy with warnings denied pass as well. The sandbox denies the raw
+drive-root access needed by these tests.
+These results do not qualify Windows 10 or a packaged launcher build.
+
+References:
+- https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-querydosdevicew
+- https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_object_attributes
 
 Remove this patch only after an upstream release includes an equivalent fix and
 passes the same storage, migration, concurrency and Windows regression checks.

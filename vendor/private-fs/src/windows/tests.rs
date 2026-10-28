@@ -17,6 +17,27 @@ fn fixture() -> (tempfile::TempDir, PrivateDir) {
 }
 
 #[test]
+fn drive_root_bootstrap_creates_and_reopens_a_fresh_private_store() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("PanitaClient");
+    assert!(!path.exists());
+    let dir = PrivateDir::ensure(&path).unwrap();
+    dir.create("probe")
+        .unwrap()
+        .write_all(b"synthetic")
+        .unwrap();
+    drop(dir);
+    let reopened = PrivateDir::open(&path).unwrap();
+    let mut content = String::new();
+    reopened
+        .open_file("probe")
+        .unwrap()
+        .read_to_string(&mut content)
+        .unwrap();
+    assert_eq!(content, "synthetic");
+}
+
+#[test]
 fn classic_publication_fallback_is_atomic_handle_relative_and_keeps_identity() {
     let (temp, dir) = fixture();
     dir.create("data").unwrap().write_all(b"old").unwrap();
@@ -289,6 +310,11 @@ fn junctions_are_rejected_in_every_position() {
         PrivateDir::open(_temp.path().join("private/junction")),
         Err(Error::PathRedirect)
     ));
+    assert!(matches!(
+        PrivateDir::ensure(_temp.path().join("private/junction/escape")),
+        Err(Error::PathRedirect)
+    ));
+    assert!(!outside.path().join("escape").exists());
 }
 #[test]
 fn namespace_replacement_after_validation_keeps_the_original_parent() {
