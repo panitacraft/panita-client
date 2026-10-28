@@ -349,7 +349,10 @@ mod tests {
             "/v2/version/gone" => Reply::status(404),
             "/v2/version/busy" => Reply::status(503),
             "/v2/version/limited" => Reply::status(429),
-            "/v2/version/huge" => Reply::ok(vec![b' '; MAX_DOCUMENT_BYTES + 1]),
+            // Only the declared length is oversized. Sending that many bytes would leave
+            // the fixture blocked in a write the early-rejecting client never reads, and
+            // the server joins its connection threads when it is dropped.
+            "/v2/version/huge" => Reply::status(200).declared(MAX_DOCUMENT_BYTES + 1),
             _ => Reply::status(500),
         });
         let client = ModrinthClient::for_tests(server.base());
