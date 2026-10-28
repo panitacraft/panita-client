@@ -53,9 +53,28 @@ library Clippy with warnings denied pass as well. The sandbox denies the raw
 drive-root access needed by these tests.
 These results do not qualify Windows 10 or a packaged launcher build.
 
+The owner's follow-up probe on Windows 10 22H2 build 19045.3803 passes root
+creation/reopening and directory flushing, but both classic rename and initial
+atomic publication fail with Win32 32 (`ERROR_SHARING_VIOLATION`). Newly ensured
+directories previously retained `FILE_ALL_ACCESS`, including data-write and
+DELETE access, which can conflict with the rename operation's internal target
+directory open. All retained directory handles now request metadata, traversal,
+security-read and synchronization access only, including when creating a private
+directory. The protected owner-only DACL is unchanged. File creation retains its
+write/delete access; explicit directory flush and ACL operations acquire brief
+handle-relative writable handles. No sharing error is ignored or retried with
+weaker publication or durability guarantees.
+
+The regression holds newly created and re-ensured parent/child capabilities
+while opening a writer that shares read access only, then performs a durable
+write. All 52 dependency tests and 404 core tests pass on Windows 11 (one core
+test remains ignored); library Clippy also passes. Repeat the updated probe and
+installed-launcher account-save/restart checks on Windows 10 before qualification.
+
 References:
 - https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-querydosdevicew
 - https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_object_attributes
+- https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information
 
 Remove this patch only after an upstream release includes an equivalent fix and
 passes the same storage, migration, concurrency and Windows regression checks.

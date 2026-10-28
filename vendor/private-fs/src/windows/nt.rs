@@ -139,7 +139,13 @@ fn open_access(
         SecurityQualityOfService: ptr::null_mut(),
     };
     let creating = disposition != FILE_OPEN as u32;
-    let desired = if creating {
+    let desired = if directory {
+        // Retained directory handles must not hold data or DELETE access:
+        // Windows 10's internal rename-target open can conflict with it even
+        // when our handles share read/write/delete. Creation still supplies the
+        // protected owner-only DACL; mutations acquire short-lived handles.
+        (FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE) as u32 | 0x20 // FILE_TRAVERSE
+    } else if creating {
         FILE_ALL_ACCESS as u32
     } else {
         (FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE) as u32
