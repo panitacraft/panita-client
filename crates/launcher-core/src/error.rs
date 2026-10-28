@@ -63,6 +63,12 @@ pub enum ErrorCode {
     SessionRejected,
     /// The API refused the launcher key (for example, after a key rotation).
     ApiKeyRejected,
+    /// Required pack files must be downloaded by the player before this can finish.
+    ManualFilesRequired,
+    /// A pack file would replace or sit inside player-owned content; nothing was changed.
+    PackConflict,
+    /// The installed modpack is older than the published one and must be updated.
+    UpdateRequired,
 }
 
 #[derive(Debug)]

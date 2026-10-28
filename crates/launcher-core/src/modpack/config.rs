@@ -1,0 +1,100 @@
+//! First-install policy for the `defaults` and `enforced` configuration archives.
+//! Nothing here overwrites: a path that already exists is kept whole and reported
+//! as skipped, and a default is applied only to a path that was never offered before.
+use std::collections::BTreeSet;
+use std::io::{Read, Seek};
+
+use super::{
+    archive::{ArchiveEntry, Opened},
+    gamefs::{Entry, GameDir},
+    invalid,
+    state::{ManagedFile, Ownership, SkippedConfiguration},
+};
+use crate::{error::CoreError, minecraft::download::Cancellation};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Defaults,
+    Enforced,
+}
+
+/// What applying one archive changed and what it left alone.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Outcome {
+    pub files: Vec<ManagedFile>,
+    /// Every default offered, applied or not, so a deleted default never returns.
+    pub consumed_defaults: BTreeSet<String>,
+    /// Existing paths kept whole instead of being replaced.
+    pub skipped: Vec<SkippedConfiguration>,
+    /// Paths this call created; the install journal uses them to roll back.
+    pub written: Vec<String>,
+}
+
+/// A path may not be offered by both archives.
+pub fn ensure_disjoint(first: &[ArchiveEntry], second: &[ArchiveEntry]) -> Result<(), CoreError> {
+    let names: BTreeSet<_> = first.iter().map(|e| e.path.to_ascii_lowercase()).collect();
+    if second
+        .iter()
+        .any(|entry| names.contains(&entry.path.to_ascii_lowercase()))
+    {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+pub fn apply<R: Read + Seek>(
+    opened: &mut Opened<R>,
+    kind: Kind,
+    game: &GameDir,
+    already_consumed: &BTreeSet<String>,
+    budget: &mut u64,
+    cancel: &Cancellation,
+) -> Result<Outcome, CoreError> {
+    let ownership = match kind {
+        Kind::Defaults => Ownership::Defaults,
+        Kind::Enforced => Ownership::Enforced,
+    };
+    let consumed: BTreeSet<_> = already_consumed
+        .iter()
+        .map(|path| path.to_ascii_lowercase())
+        .collect();
+    let mut outcome = Outcome::default();
+    for entry in opened.entries.clone() {
+        cancel.check()?;
+        if kind == Kind::Defaults {
+            if consumed.contains(&entry.path.to_ascii_lowercase()) {
+                continue;
+            }
+            outcome.consumed_defaults.insert(entry.path.clone());
+        }
+        let absent = game.entry(&entry.path)? == Entry::Absent;
+        let digest = if absent {
+            let mut digest = None;
+            game.write_new(&entry.path, |output| {
+                digest = Some(opened.stream(&entry, budget, cancel, Some(output))?);
+                Ok(())
+            })?;
+            outcome.written.push(entry.path.clone());
+            digest.ok_or_else(invalid)?
+        } else {
+            opened.stream(&entry, budget, cancel, None)?
+        };
+        outcome.files.push(ManagedFile {
+            path: entry.path.clone(),
+            ownership: ownership.clone(),
+            desired: digest.hashes.clone(),
+            size: digest.size,
+            baseline: absent.then(|| digest.hashes.clone()),
+        });
+        if !absent {
+            outcome.skipped.push(SkippedConfiguration {
+                path: entry.path,
+                desired: digest.hashes,
+            });
+        }
+    }
+    Ok(outcome)
+}
+
+#[cfg(test)]
+mod tests;

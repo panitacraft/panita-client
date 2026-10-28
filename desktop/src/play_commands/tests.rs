@@ -469,6 +469,10 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
             "reusedFiles",
             "retainedFiles",
             "nativeCleanup",
+            "packProgress",
+            "packAwaiting",
+            "packSkipped",
+            "packConflicts",
         ];
         expected.sort_unstable();
         assert_eq!(keys, expected);

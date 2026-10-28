@@ -268,7 +268,7 @@ pub(crate) fn verified_planned_file(
     verified_file(directory, name, artifact)
 }
 
-fn cleanup_partials(directory: &PrivateDir, path: &Path) -> Result<(), CoreError> {
+pub(crate) fn cleanup_partials(directory: &PrivateDir, path: &Path) -> Result<(), CoreError> {
     for entry in std::fs::read_dir(path).map_err(io)? {
         let entry = entry.map_err(io)?;
         let name = entry.file_name();

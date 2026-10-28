@@ -12,6 +12,7 @@ import { installationRefreshKey } from './play-state';
 import { canInstall, canRepair, canUninstall, updateTarget } from './library-state';
 import { PreferencesProvider, SettingsPanel, usePreferences } from './settings';
 import { DiagnosticsPanel } from './diagnostics';
+import { CachePanel, PackPanel } from './pack';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { isTauri } from '@tauri-apps/api/core';
 import { CrashNotifications, GameLogWindow } from './game-output';
@@ -25,6 +26,7 @@ type CatalogState =
 
 const localStateText: Record<CatalogInstance['localState'], string> = {
   not_installed: 'Sin instalar', installing: 'Instalando', installed: 'Instalada',
+  awaiting_files: 'Faltan archivos por descargar',
   update_available: 'Actualización disponible', needs_repair: 'Necesita reparación',
   running: 'En ejecución', failed: 'La operación falló', cancelled: 'Operación cancelada',
 };
@@ -106,6 +108,7 @@ function Launcher() {
                 <p>{instance.description}</p>
                 <button type="button" aria-pressed={instance.id === preferences?.id} disabled={!preferences || preferences.busy || instance.id === preferences.id} onClick={() => void preferences?.select(instance.id)}>{instance.id === preferences?.id ? 'Instancia seleccionada' : 'Seleccionar instancia'}</button>
                 {instance.minecraftVersion && <p className="version">Minecraft {instance.minecraftVersion}</p>}
+                {instance.source?.type === 'custom' && <p className="version">Modpack{instance.source.label ? ` ${instance.source.label}` : ''}{instance.source.loader ? ` · ${instance.source.loader === 'neoforge' ? 'NeoForge' : instance.source.loader}` : ''}</p>}
                 <p>{localStateText[instance.localState]}</p>
                 {instance.installedVersion && <p>{['installed', 'update_available', 'running'].includes(instance.localState) ? 'Versión instalada' : 'Versión de la instalación'}: {instance.installedVersion}</p>}
                 {instance.availability === 'missing' && <p>Esta instancia ya no está en el catálogo. Conservamos tus datos locales.</p>}
@@ -119,12 +122,14 @@ function Launcher() {
                   uninstallAllowed={canUninstall(instance)}
                   cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'}
                   allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
+                <PackPanel instanceId={instance.id} awaiting={instance.localState === 'awaiting_files'} onChanged={() => setCatalogAttempt(previous => previous + 1)} />
               </article>
             ))}
           </div>
         )}
       </section>
       <SettingsPanel instanceId={preferences?.id ?? null} name={selectedInstance?.name ?? null} local={selectedInstance?.installedVersion != null} />
+      <CachePanel />
       <DiagnosticsPanel />
     </main>
   );

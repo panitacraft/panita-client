@@ -6,6 +6,7 @@ mod account_commands;
 mod activation_commands;
 #[cfg(any(target_os = "linux", test))]
 mod linux_activation;
+mod pack_commands;
 mod play_commands;
 mod protocol;
 mod settings_commands;
@@ -194,6 +195,8 @@ pub fn run() {
             play_commands::restore_window(app, cwd);
         }))
         .plugin(tauri_plugin_opener::init())
+        // Used only from Rust commands; no frontend permission is granted to it.
+        .plugin(tauri_plugin_dialog::init())
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 match event {
@@ -247,6 +250,13 @@ pub fn run() {
             play_commands::begin_repair,
             play_commands::begin_uninstall,
             play_commands::clean_native_cache,
+            pack_commands::pack_files,
+            pack_commands::verify_pack_files,
+            pack_commands::open_pack_source,
+            pack_commands::open_pack_folder,
+            pack_commands::import_pack_file,
+            pack_commands::content_cache_size,
+            pack_commands::clear_content_cache,
             play_commands::begin_play,
             play_commands::confirm_play,
             play_commands::cancel_play,

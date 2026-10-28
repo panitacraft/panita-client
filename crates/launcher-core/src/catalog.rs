@@ -66,6 +66,21 @@ pub enum CatalogSource {
     },
 }
 
+impl CatalogSource {
+    /// The sources this launcher can install: vanilla, and published NeoForge custom packs.
+    pub fn installable(&self) -> bool {
+        match self {
+            Self::Vanilla { .. } => true,
+            Self::Custom {
+                loader,
+                current_version_id: Some(_),
+                ..
+            } => loader == "neoforge",
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogInstance {
@@ -335,7 +350,7 @@ impl CatalogInstance {
             return Err(CoreError::new(ErrorCode::InstanceDisabled));
         }
         // A restricted entry only reaches a member the API allows; it needs no extra gate here.
-        if !self.compatible_with(client) || !matches!(self.source, CatalogSource::Vanilla { .. }) {
+        if !self.compatible_with(client) || !self.source.installable() {
             return Err(CoreError::new(ErrorCode::UnsupportedInstance));
         }
         Ok(())

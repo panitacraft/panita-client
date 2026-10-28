@@ -20,12 +20,13 @@ pub mod play;
 pub mod process;
 pub mod runtime;
 pub mod support;
-mod transaction;
+pub(crate) mod transaction;
 pub mod update;
 #[cfg(feature = "loader-validation")]
 pub mod validation;
 mod verification_cache;
 mod world_backup;
+pub(crate) use world_backup::capability as directory_capability;
 
 pub const VERSION_MANIFEST: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";

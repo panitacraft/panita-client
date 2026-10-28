@@ -24,6 +24,8 @@ pub enum InstallationState {
     NotInstalled,
     Installing,
     Installed,
+    /// A modpack is installed except for manual files the player still has to supply.
+    AwaitingFiles,
     UpdateAvailable,
     NeedsRepair,
     Running,
@@ -733,7 +735,7 @@ fn view(
     client: &Version,
 ) -> InstanceView {
     let compatible = catalog.compatible_with(client);
-    let supported = matches!(catalog.source, CatalogSource::Vanilla { .. });
+    let supported = catalog.source.installable();
     let local_state = installed.map_or(InstallationState::NotInstalled, |record| {
         if matches!(
             record.state,
