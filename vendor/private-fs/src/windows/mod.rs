@@ -96,9 +96,8 @@ impl PrivateDir {
             }
         }
         let leaf = names.pop().ok_or(Error::InvalidRelativePath)?;
-        let anchor = format!(r"\??\{}:\", drive as char);
         let user = Sid::process_user()?;
-        let mut parent = nt::open(None, OsStr::new(&anchor), true, FILE_OPEN as u32, None)?;
+        let mut parent = nt::open_drive_root(drive)?;
         nt::volume(&parent)?;
         for name in names {
             parent = nt::open(Some(&parent), name, true, FILE_OPEN as u32, None)?;

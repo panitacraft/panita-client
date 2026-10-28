@@ -17,8 +17,8 @@ Missing/inaccessible procfs fails closed. Other link errors are not retried.
 The temporary remains anonymous until linked, private from creation and on the
 same filesystem. Existing temporary/directory validation, linked-inode identity
 and permission checks, file sync, atomic rename, post-publication validation,
-parent sync and uncertain-commit reporting remain in force. Windows code is
-unchanged. No process capabilities or elevated Linux user are required.
+parent sync and uncertain-commit reporting remain in force. No process
+capabilities or elevated Linux user are required.
 
 Regression tests exercise descriptor publication, destination collisions,
 redirected entries, changed permissions and a renamed parent directory. Run
@@ -28,6 +28,61 @@ to inject its alias without privileged capabilities; its rejection assertion is
 unchanged.
 
 Reference: https://man7.org/linux/man-pages/man2/link.2.html
+
+Windows drive-root acquisition resolves the current DOS drive mapping with
+`QueryDosDeviceW` before opening the direct `\Device\<device>\` anchor. The
+reported Windows 10 startup failure was `STATUS_REPARSE_POINT_ENCOUNTERED`
+(`0xC000050B`, Win32 4395) at the original `\??\C:\` drive-root open, before
+profile creation. The normal DOS drive alias must be resolved separately from
+filesystem traversal. Only a single direct device name is accepted; SUBST,
+network paths, chained aliases and directory suffixes fail closed. Historical
+device mappings are never tried. The returned handle pins the selected volume;
+subsequent opens do not resolve the drive letter again.
+
+`OBJ_DONT_REPARSE`, `FILE_OPEN_REPARSE_POINT`, handle kind checks, volume ACL
+checks and component-by-component ancestor traversal remain enabled. There is no
+retry with relaxed flags and no permission repair or elevation. Tests cover fresh
+private-store creation/reopening, invalid mapping shapes, and rejection of a
+junction ancestor without creating files at its destination. Run the dependency
+and launcher storage tests on Windows; an installed candidate still needs a
+normal-user clean Windows 10 VM check before calling this report resolved.
+
+Local verification on 2026-10-28: all 51 dependency unit tests pass on Windows 11
+build 26200 outside the execution sandbox; all six launcher storage tests and
+library Clippy with warnings denied pass as well. The sandbox denies the raw
+drive-root access needed by these tests.
+These results do not qualify Windows 10 or a packaged launcher build.
+
+The owner's follow-up probe on Windows 10 22H2 build 19045.3803 passes root
+creation/reopening and directory flushing, but both classic rename and initial
+atomic publication fail with Win32 32 (`ERROR_SHARING_VIOLATION`). Newly ensured
+directories previously retained `FILE_ALL_ACCESS`, including data-write and
+DELETE access, which can conflict with the rename operation's internal target
+directory open. All retained directory handles now request metadata, traversal,
+security-read and synchronization access only, including when creating a private
+directory. The protected owner-only DACL is unchanged. File creation retains its
+write/delete access; explicit directory flush and ACL operations acquire brief
+handle-relative writable handles. No sharing error is ignored or retried with
+weaker publication or durability guarantees.
+
+The regression holds newly created and re-ensured parent/child capabilities
+while opening a writer that shares read access only, then performs a durable
+write. All 52 dependency tests and 404 core tests pass on Windows 11 (one core
+test remains ignored); library Clippy also passes.
+
+On 2026-10-28 the owner returned the updated probe results for commit `bbfbfff`
+on Windows 10 22H2 build 19045.3803. All five checks pass: fresh private-store
+creation/reopening, retained-directory sharing compatibility, classic atomic
+rename, atomic publication/replacement with durable writes, and directory flush.
+This resolves both failures from the previous synthetic probe on that VM.
+Installed-launcher Panita session and Minecraft account save/restart checks
+remain pending; the probe does not establish end-to-end authentication or game
+launch qualification.
+
+References:
+- https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-querydosdevicew
+- https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_object_attributes
+- https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information
 
 Remove this patch only after an upstream release includes an equivalent fix and
 passes the same storage, migration, concurrency and Windows regression checks.

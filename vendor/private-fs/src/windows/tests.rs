@@ -17,6 +17,52 @@ fn fixture() -> (tempfile::TempDir, PrivateDir) {
 }
 
 #[test]
+fn drive_root_bootstrap_creates_and_reopens_a_fresh_private_store() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("PanitaClient");
+    assert!(!path.exists());
+    let dir = PrivateDir::ensure(&path).unwrap();
+    dir.create("probe")
+        .unwrap()
+        .write_all(b"synthetic")
+        .unwrap();
+    drop(dir);
+    let reopened = PrivateDir::open(&path).unwrap();
+    let mut content = String::new();
+    reopened
+        .open_file("probe")
+        .unwrap()
+        .read_to_string(&mut content)
+        .unwrap();
+    assert_eq!(content, "synthetic");
+}
+
+#[test]
+fn retained_directory_handles_allow_internal_rename_target_open() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (temp, dir) = fixture();
+    let ensured = PrivateDir::ensure(temp.path().join("private")).unwrap();
+    let child = dir.create_dir("child").unwrap();
+    let ensured_child = dir.ensure_dir("child").unwrap();
+    // Model the rename target open while all caller capabilities remain alive.
+    // Allow traversal/read access, but not retained data-write or DELETE access.
+    for path in [
+        temp.path().join("private"),
+        temp.path().join("private/child"),
+    ] {
+        let writer = std::fs::OpenOptions::new()
+            .access_mode((FILE_WRITE_DATA | SYNCHRONIZE) as u32)
+            .share_mode(FILE_SHARE_READ as u32)
+            .custom_flags(0x02000000 | 0x00200000) // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+            .open(path)
+            .unwrap();
+        drop(writer);
+    }
+    drop((ensured, child, ensured_child));
+    dir.write_atomic_durable("data", b"complete").unwrap();
+}
+
+#[test]
 fn classic_publication_fallback_is_atomic_handle_relative_and_keeps_identity() {
     let (temp, dir) = fixture();
     dir.create("data").unwrap().write_all(b"old").unwrap();
@@ -72,6 +118,7 @@ fn world() -> Sid {
     unsafe { Sid::copy_from(storage.as_mut_ptr().cast()) }.unwrap()
 }
 fn set_acl(handle: impl AsHandle, entries: &[(&Sid, u32, u32)], protected: bool) {
+    let handle = nt::security_handle(handle).unwrap();
     let mut acl = vec![0u32; 256];
     let raw = acl.as_mut_ptr().cast::<ACL>();
     // SAFETY: aligned ACL allocation covers all small test ACEs and SIDs stay live.
@@ -112,6 +159,8 @@ fn set_acl(handle: impl AsHandle, entries: &[(&Sid, u32, u32)], protected: bool)
     }
 }
 fn junction(handle: impl AsHandle, target: &Path) {
+    let retained = handle.as_handle().try_clone_to_owned().unwrap();
+    let handle = nt::directory_for_sync(&retained).unwrap();
     let substitute: Vec<u16> = OsStr::new(r"\??\")
         .encode_wide()
         .chain(target.as_os_str().encode_wide())
@@ -289,6 +338,11 @@ fn junctions_are_rejected_in_every_position() {
         PrivateDir::open(_temp.path().join("private/junction")),
         Err(Error::PathRedirect)
     ));
+    assert!(matches!(
+        PrivateDir::ensure(_temp.path().join("private/junction/escape")),
+        Err(Error::PathRedirect)
+    ));
+    assert!(!outside.path().join("escape").exists());
 }
 #[test]
 fn namespace_replacement_after_validation_keeps_the_original_parent() {
@@ -476,7 +530,9 @@ fn unpaired_utf16_names_are_not_lossily_converted() {
 #[test]
 fn parent_directory_flush_is_available() {
     let (_temp, dir) = fixture();
-    nt::flush(&dir).unwrap();
+    let writable = nt::directory_for_sync(&dir.handle).unwrap();
+    nt::flush(&writable).unwrap();
+    drop(writable);
     let read_only = PrivateDir::open(_temp.path().join("private")).unwrap();
     let reopened = nt::directory_for_sync(&read_only.handle).unwrap();
     assert_eq!(nt::metadata(&reopened, true, None).unwrap(), dir.id);
