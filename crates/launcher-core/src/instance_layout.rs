@@ -98,10 +98,12 @@ fn names_with_privacy(root: &Path, protected: bool) -> Result<Vec<String>, CoreE
         if protected && metadata.is_dir() {
             private_fs::PrivateDir::open(entry.path()).map_err(map_private_error)?;
         } else if protected {
-            private_fs::PrivateDir::open(root)
-                .map_err(map_private_error)?
-                .open_file(&name)
-                .map_err(map_private_error)?;
+            let directory = private_fs::PrivateDir::open(root).map_err(map_private_error)?;
+            if matches!(name.as_str(), ".installation.lock" | ".mutation.lock") {
+                directory.open_data_file(&name).map_err(map_private_error)?;
+            } else {
+                directory.open_file(&name).map_err(map_private_error)?;
+            }
         }
         names.push(name);
     }
@@ -255,7 +257,9 @@ fn prepare_intent(root: &Path, mut record: InstallationRecord) -> Result<Intent,
                                 intent.discard_files.push(format!("{relative}/{item}"));
                             }
                             "natives" => {
-                                if names(&root.join(&relative).join(&item))?.is_empty() {
+                                if names_with_privacy(&root.join(&relative).join(&item), false)?
+                                    .is_empty()
+                                {
                                     intent.discard_dirs.push(format!("{relative}/natives"));
                                 } else {
                                     intent.native_moves.push(MoveEntry {

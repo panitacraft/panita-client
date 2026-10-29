@@ -45,6 +45,101 @@ fn directory_creation_descriptor_sets_user_owner_without_overriding_inheritance(
 }
 
 #[test]
+fn ordinary_data_uses_access_instead_of_owner_but_keeps_link_and_identity_checks() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = PrivateDir::ensure_data(temp.path().join("data")).unwrap();
+    let mut file = root.create("cache.jar").unwrap();
+    file.write_all(b"verified content").unwrap();
+    file.verify().unwrap();
+    assert!(crate::verify(&file.file).is_err()); // Ordinary inherited ACL, not private.
+    crate::verify_data(&file.file).unwrap();
+    let before = acl_bytes(&root);
+    // Supply a deliberately different expected owner. Ordinary access must not
+    // depend on that SID; private files must still enforce their actual owner.
+    let different_user = world();
+    nt::validate(&root, true, Some(root.id), &different_user).unwrap();
+    security::migrate_directory(&root, &different_user).unwrap();
+    assert_eq!(acl_bytes(&root), before);
+    let mut ordinary = PrivateDir::open_data(temp.path().join("data")).unwrap();
+    ordinary.user = different_user;
+    ordinary.open_file("cache.jar").unwrap().verify().unwrap();
+    ordinary
+        .create("new.txt")
+        .unwrap()
+        .write_all(b"new data")
+        .unwrap();
+    ordinary.private_files = true;
+    assert!(matches!(
+        ordinary.open_file("cache.jar"),
+        Err(Error::OwnerMismatch)
+    ));
+    let alias = temp.path().join("alias.jar");
+    std::fs::hard_link(temp.path().join("data/cache.jar"), &alias).unwrap();
+    assert!(matches!(
+        root.open_file("cache.jar"),
+        Err(Error::MultipleHardLinks { .. })
+    ));
+    assert!(matches!(
+        file.verify(),
+        Err(Error::MultipleHardLinks { .. })
+    ));
+    std::fs::remove_file(alias).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let link = root.create_dir("redirect").unwrap();
+    junction(&link, outside.path());
+    assert!(matches!(
+        root.create("redirect/escape"),
+        Err(Error::PathRedirect)
+    ));
+    assert!(!outside.path().join("escape").exists());
+    assert!(matches!(
+        root.open_file("../escape"),
+        Err(Error::InvalidRelativePath)
+    ));
+}
+
+#[test]
+fn credential_namespace_rejects_ordinary_writers_without_rewriting_custom_permissions() {
+    let (_temp, root) = fixture();
+    set_acl(
+        &root,
+        &[(
+            &root.user,
+            FILE_ALL_ACCESS as u32,
+            (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u32,
+        )],
+        true,
+    );
+    root.verify_private_namespace().unwrap();
+    let other = world();
+    root.create("ordinary").unwrap();
+    set_acl(
+        &root,
+        &[
+            (&root.user, FILE_ALL_ACCESS as u32, 0),
+            (&other, FILE_READ_ATTRIBUTES as u32, 0),
+        ],
+        true,
+    );
+    root.verify_private_namespace().unwrap();
+    for mask in [FILE_WRITE_DATA as u32, 0x40, WRITE_DAC as u32, 0x4000_0000] {
+        set_acl(
+            &root,
+            &[(&root.user, FILE_ALL_ACCESS as u32, 0), (&other, mask, 0)],
+            true,
+        );
+        let before = acl_bytes(&root);
+        assert!(matches!(
+            root.verify_private_namespace(),
+            Err(Error::InsecureAcl)
+        ));
+        assert_eq!(acl_bytes(&root), before);
+        // Ordinary access is still permitted on the exact same directory.
+        root.open_data_file("ordinary").unwrap().verify().unwrap();
+    }
+}
+
+#[test]
 fn drive_root_bootstrap_creates_and_reopens_a_fresh_private_store() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("PanitaClient");

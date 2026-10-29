@@ -316,7 +316,7 @@ impl GenerationRef {
     pub(crate) fn verify_marker(&self, paths: &AppPaths) -> Result<(), CoreError> {
         self.validate(self.minecraft())?;
         let directory =
-            PrivateDir::open(paths.root().join(self.directory())).map_err(read_error)?;
+            PrivateDir::open_data(paths.root().join(self.directory())).map_err(read_error)?;
         let mut file = directory.open_file(MARKER).map_err(read_error)?;
         let mut bytes = Vec::new();
         file.by_ref()
@@ -344,8 +344,8 @@ impl GenerationRef {
     /// Full audit for install, repair and recovery. Never downloads or executes.
     pub fn verify(&self, paths: &AppPaths, cancel: &Cancellation) -> Result<(), CoreError> {
         self.verify_marker(paths)?;
-        let directory =
-            PrivateDir::open(paths.root().join(self.directory())).map_err(map_private_error)?;
+        let directory = PrivateDir::open_data(paths.root().join(self.directory()))
+            .map_err(map_private_error)?;
         for expected in &self.files {
             cancel.check()?;
             let actual = fingerprint(&directory, &expected.path, cancel)?;
@@ -376,7 +376,7 @@ pub fn publish(
     {
         return Err(invalid());
     }
-    let directory = PrivateDir::open(&staged.root).map_err(map_private_error)?;
+    let directory = PrivateDir::open_data(&staged.root).map_err(map_private_error)?;
     match directory.open_file(MARKER) {
         Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
         _ => return Err(invalid()),

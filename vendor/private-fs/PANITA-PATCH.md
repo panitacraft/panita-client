@@ -155,3 +155,56 @@ ignored; all 57 dependency tests pass on the complete rerun. An initial dependen
 run hit an access-denied error in the stress fixture's directory-rename restore;
 that test passed in isolation and on the complete rerun. Core all-target Clippy,
 workspace formatting and focused dependency formatting checks pass.
+
+## Access-based Windows data handling (2026-10-29 owner decision)
+
+Existing Windows game/cache directories no longer require their owner SID to
+equal TokenUser. Ordinary file capabilities explicitly use access-based handling:
+Windows grants the requested read/write/delete access, new files inherit parent
+permissions, and the library does not harden their ACLs. Existing foreign-owned
+directories are preserved; legacy directory migration applies only to the exact
+current-user-owned ACL written by older Panita builds. New directory ownership
+is still assigned consistently, without making that an admission requirement.
+
+Data capabilities retain handle-relative traversal, reparse rejection, object
+kind, identity and single-link checks. Atomic publication and interprocess locks
+remain in use. Panita's artifact readers retain exact hash/size verification and
+manifest-bound verification receipts. Public cache files, loader generations and
+processor outputs use data access; client-owned private metadata retains strict
+file validation. Windows processor outputs no longer require WRITE_DAC merely
+to read and update ordinary files. Unix behavior is unchanged.
+
+Credential files and their atomic temporaries retain protected owner-only ACLs.
+The store additionally validates the parent namespace before reading, writing,
+hiding or removing `accounts.json` or `panita-session.json`. Current-user, SYSTEM
+and administrator owners are trusted, while effective grants allowing other
+principals to mutate the directory are rejected. Read-only grants are permitted.
+Custom ACLs are never silently rewritten by that check. Administrator bypass
+and processes running as the same user remain outside the isolation boundary.
+
+Regression coverage distinguishes an accessible owner mismatch from private-file
+validation, retains redirected-path and hard-link rejection, and verifies that
+credential operations reject a writable-by-others parent without replacing the
+existing credential bytes while ordinary data access remains available.
+
+Local credential tests use a controlled ignored temporary root granting access
+to the current user, SYSTEM and Administrators. The host temporary directory has
+additional sandbox-specific writable principals; accepting those merely to make
+tests pass would weaken the namespace check. The override is limited to the test
+process and does not change the real launcher profile or Windows profile ACLs.
+Windows CI prepares an equivalent private test directory before running Rust
+tests, avoiding dependence on the runner's default temporary-directory ACLs.
+
+This section supersedes earlier requirements in this patch note that every
+Windows directory have exactly the current user as its owner. It does not relax
+credential file privacy, schemas, preservation, atomicity or recovery guarantees.
+Older builds that require protected cache-file ACLs can reject new ordinary
+cache entries; use an updated build after this change. No instance paths or disk
+JSON schemas are changed by the access policy.
+
+Local Windows validation: the full workspace passes 414 core tests, two
+cross-process tests and 26 desktop tests, with one existing live-network test
+ignored. All 59 filesystem dependency tests and 70 frontend tests pass. Workspace
+all-target Clippy, workspace formatting, focused dependency formatting and diff
+checks pass. Hosted CI, Linux compilation and installed-product qualification of
+this access-policy change remain pending.

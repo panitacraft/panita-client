@@ -15,12 +15,27 @@ Do not give an untrusted same-principal actor write access to a private tree.
   permissions and require a trusted user-profile namespace. Unix modes are exactly `0600` / `0700`, including rejection
   of special bits. The library never changes process umask. A narrower creation
   mode may be normalized through the newly held descriptor.
-- Unix ownership is the effective UID. Windows ownership is the process TokenUser.
+- Unix ownership is the effective UID. Windows private-file ownership is TokenUser.
   Windows private files have a protected DACL containing exactly one
   noninheritable full-access user ACE; no extra SYSTEM or administrator grant is
-  inserted into private files. Directories retain ordinary inherited/custom ACLs.
+  inserted into private files. Existing Windows directories do not require an
+  exact owner match. Ordinary data capabilities (`open_data` / `ensure_data`)
+  accept accessible files without private owner/ACL requirements and create
+  files with ordinary inherited permissions. Directories retain ordinary
+  inherited/custom ACLs.
   Opening a directory retires only the exact legacy Panita protected directory
   ACL, restoring inheritance. See `PANITA-PATCH.md` for migration guarantees.
+- Callers handling credentials must validate the containing namespace with
+  `verify_private_namespace`. On Windows, its owner must be the current user,
+  SYSTEM or Administrators; applicable allow ACEs must not grant mutation
+  rights to other principals. The check conservatively rejects such grants even
+  if separate deny ACEs could restrict them. Read-only grants are allowed. Unknown effective
+  ACE formats and null DACLs fail closed. This check never rewrites custom ACLs.
+  Panita applies it before account/session reads, writes and removal. Private
+  files and their atomic temporaries still require strict owner-only protection.
+  Ordinary data access retains path, object-kind, hard-link and identity checks;
+  callers retain responsibility for hashes, schemas and writer coordination.
+  Unix data aliases retain the existing Unix owner/mode policy.
 - Relative paths reject roots, prefixes, traversal, interior dots, NULs, and colons
   (including Windows alternate streams). Unix also rejects backslashes. Native
   names are passed without lossy Unicode conversion; filesystem encoding rules

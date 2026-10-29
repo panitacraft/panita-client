@@ -29,10 +29,12 @@ pub struct StoreTransaction<'a> {
 
 impl StoreTransaction<'_> {
     pub fn read(&self, name: &'static str) -> Result<Option<Vec<u8>>, CoreError> {
+        self.store.check_secret_namespace(name)?;
         read_file(&self.store.root, Path::new(name))
     }
 
     pub fn write(&self, name: &'static str, bytes: &[u8]) -> Result<(), CoreError> {
+        self.store.check_secret_namespace(name)?;
         if bytes.len() as u64 > MAX_DOCUMENT_BYTES {
             return Err(CoreError::new(ErrorCode::InvalidData));
         }
@@ -46,6 +48,7 @@ impl StoreTransaction<'_> {
     /// An atomic replacement publishes a new file, so callers repeat this after writing.
     #[cfg(windows)]
     pub(crate) fn hide(&self, name: &'static str) -> Result<(), CoreError> {
+        self.store.check_secret_namespace(name)?;
         self.store
             .root
             .open_file(name)
@@ -56,6 +59,7 @@ impl StoreTransaction<'_> {
     /// Caller holds the writer lock and validates that this document is retired.
     /// Resolve from the retained private root, rejecting redirects and hard links.
     pub(crate) fn remove_verified_file(&self, name: &'static str) -> Result<(), CoreError> {
+        self.store.check_secret_namespace(name)?;
         if name.is_empty() || name.contains(['/', '\\']) {
             return Err(CoreError::new(ErrorCode::InvalidData));
         }
@@ -109,7 +113,7 @@ impl PrivateStore {
 
     pub fn open(paths: &AppPaths) -> Result<Self, CoreError> {
         let root = PrivateDir::ensure(paths.root()).map_err(map_private_error)?;
-        match root.open_file(LOCK_NAME) {
+        match root.open_data_file(LOCK_NAME) {
             Ok(_) => (),
             Err(PrivateFsError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 match root.create(LOCK_NAME) {
@@ -117,7 +121,7 @@ impl PrivateStore {
                     Err(PrivateFsError::Io(error))
                         if error.kind() == std::io::ErrorKind::AlreadyExists =>
                     {
-                        root.open_file(LOCK_NAME).map_err(map_private_error)?;
+                        root.open_data_file(LOCK_NAME).map_err(map_private_error)?;
                     }
                     Err(error) => return Err(map_private_error(error)),
                 }
@@ -125,12 +129,12 @@ impl PrivateStore {
             Err(error) => return Err(map_private_error(error)),
         }
         #[cfg(windows)]
-        root.open_file(LOCK_NAME)
+        root.open_data_file(LOCK_NAME)
             .and_then(|file| file.set_hidden())
             .map_err(map_private_error)?;
         #[cfg(windows)]
         {
-            match root.open_file(".installation.lock") {
+            match root.open_data_file(".installation.lock") {
                 Ok(file) => file.set_hidden().map_err(map_private_error)?,
                 Err(PrivateFsError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(map_private_error(error)),
@@ -151,7 +155,19 @@ impl PrivateStore {
     }
 
     pub fn read(&self, name: &'static str) -> Result<Option<Vec<u8>>, CoreError> {
+        self.check_secret_namespace(name)?;
         read_file(&self.root, Path::new(name))
+    }
+
+    fn check_secret_namespace(&self, name: &str) -> Result<(), CoreError> {
+        if name.eq_ignore_ascii_case("accounts.json")
+            || name.eq_ignore_ascii_case("panita-session.json")
+        {
+            self.root
+                .verify_private_namespace()
+                .map_err(map_private_error)?;
+        }
+        Ok(())
     }
 
     /// The closure sees the latest durable bytes while the interprocess lock
@@ -183,9 +199,9 @@ impl PrivateStore {
             .write(true)
             .open(&self.lock_path)
             .map_err(map_io_error)?;
-        private_fs::verify(&file).map_err(map_private_error)?;
+        private_fs::verify_data(&file).map_err(map_private_error)?;
         file.lock().map_err(map_io_error)?;
-        private_fs::verify(&file).map_err(map_private_error)?;
+        private_fs::verify_data(&file).map_err(map_private_error)?;
         Ok(file)
     }
 

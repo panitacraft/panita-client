@@ -252,7 +252,7 @@ fn verify_runtime(
         return Err(invalid());
     }
     let directory =
-        PrivateDir::open(paths.root().join(&base.runtime_root)).map_err(map_private_error)?;
+        PrivateDir::open_data(paths.root().join(&base.runtime_root)).map_err(map_private_error)?;
     let mut file = directory
         .open_file(".runtime-manifest.json")
         .map_err(map_private_error)?;
@@ -299,7 +299,7 @@ struct Workspace {
 }
 impl Workspace {
     fn create(paths: &AppPaths) -> Result<Self, CoreError> {
-        let root = PrivateDir::ensure(paths.root()).map_err(map_private_error)?;
+        let root = PrivateDir::ensure_data(paths.root()).map_err(map_private_error)?;
         let libraries = root.ensure_dir("libraries").map_err(map_private_error)?;
         let container = libraries
             .ensure_dir("neoforge")
@@ -333,8 +333,8 @@ impl Workspace {
         expected: &Artifact,
         cancel: &Cancellation,
     ) -> Result<(), CoreError> {
-        let source_dir =
-            PrivateDir::open(source.parent().ok_or_else(invalid)?).map_err(map_private_error)?;
+        let source_dir = PrivateDir::open_data(source.parent().ok_or_else(invalid)?)
+            .map_err(map_private_error)?;
         let source_name = source.file_name().ok_or_else(invalid)?;
         if !verified_file(
             &source_dir,
@@ -430,7 +430,7 @@ impl Workspace {
             hash.update(&buffer[..size]);
             legacy.update(&buffer[..size]);
         }
-        private_fs::verify(&reader).map_err(map_private_error)?;
+        private_fs::verify_data(&reader).map_err(map_private_error)?;
         if count != size
             || sha1.is_some_and(|expected| expected != format!("{:x}", legacy.finalize()))
         {
@@ -457,16 +457,13 @@ impl Workspace {
                 }
                 let mut options = cap_std::fs::OpenOptions::new();
                 options.read(true).write(true).follow(FollowSymlinks::No);
-                #[cfg(windows)]
-                {
-                    use cap_std::fs::OpenOptionsExt;
-                    // GENERIC_READ | GENERIC_WRITE | READ_CONTROL | WRITE_DAC.
-                    options.access_mode(0xc0060000);
-                }
                 let file = directory.open_with(part, &options).map_err(io)?.into_std();
-                // Files replaced by Java inherit creation defaults; harden only
-                // the no-follow single-link handle within this fresh workspace.
+                // Windows outputs use ordinary access rights. Unix retains its
+                // owner-only executable/data policy inside this fresh workspace.
+                #[cfg(not(windows))]
                 private_fs::harden(&file).map_err(map_private_error)?;
+                #[cfg(windows)]
+                private_fs::verify_data(&file).map_err(map_private_error)?;
                 return Ok(file);
             }
         }

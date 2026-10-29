@@ -131,7 +131,7 @@ pub(crate) fn write_json_raw(
     // Installation locks are larger than account documents, with a separate 32 MiB bound.
     let store = crate::storage::PrivateStore::open(&AppPaths::new(root)?)?;
     store.with_lock(|_| {
-        let (directory, leaf) = ensure_parent(root, relative)?;
+        let (directory, leaf) = super::download::ensure_private_parent(root, relative)?;
         directory
             .write_atomic_durable(leaf, &bytes)
             .map_err(map_private_error)
@@ -807,8 +807,9 @@ fn verify_manifest_inner(
         match cache {
             None => loader.verify(paths, cancel)?,
             Some(cache) => {
-                let directory = private_fs::PrivateDir::open(paths.root().join(loader.directory()))
-                    .map_err(map_private_error)?;
+                let directory =
+                    private_fs::PrivateDir::open_data(paths.root().join(loader.directory()))
+                        .map_err(map_private_error)?;
                 for file in loader.files() {
                     cancel.check()?;
                     let (parent, leaf) = file

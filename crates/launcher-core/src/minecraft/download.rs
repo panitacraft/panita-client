@@ -126,8 +126,28 @@ pub(crate) fn ensure_parent(
     root: &Path,
     relative: &str,
 ) -> Result<(PrivateDir, String), CoreError> {
+    ensure_parent_policy(root, relative, false)
+}
+
+pub(crate) fn ensure_private_parent(
+    root: &Path,
+    relative: &str,
+) -> Result<(PrivateDir, String), CoreError> {
+    ensure_parent_policy(root, relative, true)
+}
+
+fn ensure_parent_policy(
+    root: &Path,
+    relative: &str,
+    private: bool,
+) -> Result<(PrivateDir, String), CoreError> {
     safe_path(relative)?;
-    let mut directory = PrivateDir::ensure(root).map_err(map_private_error)?;
+    let mut directory = if private {
+        PrivateDir::ensure(root)
+    } else {
+        PrivateDir::ensure_data(root)
+    }
+    .map_err(map_private_error)?;
     let mut parts = relative.split('/').peekable();
     while let Some(part) = parts.next() {
         if parts.peek().is_none() {
@@ -153,7 +173,7 @@ pub(crate) fn existing_parent(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(invalid)?;
-    match PrivateDir::open(root.join(path.parent().ok_or_else(invalid)?)) {
+    match PrivateDir::open_data(root.join(path.parent().ok_or_else(invalid)?)) {
         Ok(directory) => Ok(Some((directory, leaf.into()))),
         Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(None)
@@ -192,7 +212,7 @@ pub(crate) fn try_lock(root: &Path, relative: &str) -> Result<Option<ArtifactLoc
     let file = native_file(&source)?;
     match file.try_lock() {
         Ok(()) => {
-            private_fs::verify(&file).map_err(map_private_error)?;
+            private_fs::verify_data(&file).map_err(map_private_error)?;
             Ok(Some(ArtifactLock {
                 _file: file,
                 _source: source,
@@ -232,7 +252,7 @@ pub(crate) async fn lock(
         cancel.check()?;
         match file.try_lock() {
             Ok(()) => {
-                private_fs::verify(&file).map_err(map_private_error)?;
+                private_fs::verify_data(&file).map_err(map_private_error)?;
                 return Ok(ArtifactLock {
                     _file: file,
                     _source: source,
@@ -1200,7 +1220,7 @@ mod tests {
                     0
                 );
             }
-            assert!(private_fs::verify(&guard._file).is_ok());
+            assert!(private_fs::verify_data(&guard._file).is_ok());
         }
         assert!(try_lock(paths.root(), relative).ok().flatten().is_some());
     }

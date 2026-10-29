@@ -105,6 +105,19 @@ pub(super) fn open(
 ) -> Result<OwnedHandle> {
     open_access(parent, name, directory, disposition, user, None)
 }
+pub(super) fn open_data_file(
+    parent: &OwnedHandle,
+    name: &OsStr,
+    disposition: u32,
+) -> Result<OwnedHandle> {
+    let access = (FILE_READ_ATTRIBUTES | FILE_READ_DATA | SYNCHRONIZE) as u32
+        | if disposition == FILE_OPEN as u32 {
+            0
+        } else {
+            FILE_WRITE_DATA as u32 | 0x0001_0000 // DELETE
+        };
+    open_access(Some(parent), name, false, disposition, None, Some(access))
+}
 fn open_access(
     parent: Option<&OwnedHandle>,
     name: &OsStr,
@@ -299,9 +312,7 @@ pub(super) fn validate(
     user: &Sid,
 ) -> Result<Identity> {
     let id = metadata(handle.as_handle(), directory, expected)?;
-    if directory {
-        security::verify_owner(handle, user)?;
-    } else {
+    if !directory {
         security::verify(handle, user)?;
     }
     Ok(id)
@@ -436,11 +447,16 @@ pub(super) fn security_handle(handle: impl AsHandle) -> Result<OwnedHandle> {
 }
 
 /// Change visibility through the retained object, never through its pathname.
-pub(super) fn hide(handle: impl AsHandle, directory: bool, id: Identity, user: &Sid) -> Result<()> {
+pub(super) fn hide(
+    handle: impl AsHandle,
+    directory: bool,
+    id: Identity,
+    _user: &Sid,
+) -> Result<()> {
     const WRITE_ATTRIBUTES: u32 = 0x100;
     const HIDDEN: u32 = 2;
     const BASIC_INFO: FILE_INFO_BY_HANDLE_CLASS = 0;
-    validate(handle.as_handle(), directory, Some(id), user)?;
+    metadata(handle.as_handle(), directory, Some(id))?;
     let owned = handle.as_handle().try_clone_to_owned()?;
     let writable = open_access(
         Some(&owned),
@@ -448,9 +464,9 @@ pub(super) fn hide(handle: impl AsHandle, directory: bool, id: Identity, user: &
         directory,
         FILE_OPEN as u32,
         None,
-        Some((FILE_READ_ATTRIBUTES | READ_CONTROL) as u32 | WRITE_ATTRIBUTES),
+        Some(FILE_READ_ATTRIBUTES as u32 | WRITE_ATTRIBUTES),
     )?;
-    validate(&writable, directory, Some(id), user)?;
+    metadata(&writable, directory, Some(id))?;
     #[repr(C)]
     #[derive(Default)]
     struct BasicInfo {
@@ -477,5 +493,5 @@ pub(super) fn hide(handle: impl AsHandle, directory: bool, id: Identity, user: &
             )
         })?;
     }
-    validate(&writable, directory, Some(id), user).map(|_| ())
+    metadata(&writable, directory, Some(id)).map(|_| ())
 }
