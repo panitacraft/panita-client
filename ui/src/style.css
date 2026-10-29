@@ -1,3 +1,24 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: #141414;
+  --color-foreground: #F9FFF8;
+  --color-primary: #54A636;
+  --color-primary-foreground: #141414;
+  --color-secondary: #1B1B1B;
+  --color-secondary-foreground: #F9FFF8;
+  --color-muted: #1B1B1B;
+  --color-muted-foreground: #BABABA;
+  --color-accent: #E4FFDA;
+  --color-accent-foreground: #141414;
+  --color-border: #515151;
+  --color-input: #515151;
+  --color-ring: #E4FFDA;
+  --color-destructive: #FCA5A5;
+  --color-destructive-foreground: #141414;
+}
+
+@layer base {
 :root {
   font-family: system-ui, sans-serif;
   color: #efece5;
@@ -90,3 +111,5 @@ dialog::backdrop { background: #000a; }
 .activation-panel { padding-bottom: 0; }
 .activation-panel h2 { margin-top: 0; }
 .activation-panel > p span { color: #bdc9bd; font-size: .85rem; margin-left: 8px; }
+
+}
