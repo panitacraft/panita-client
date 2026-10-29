@@ -126,11 +126,16 @@ fn open_access(
         MaximumLength: bytes,
         Buffer: name.as_mut_ptr(),
     };
-    // Player-created descendants need ordinary Windows inheritance. Only private
-    // files receive an explicit protected descriptor at creation.
+    // Pin the owner even when the token defaults to Administrators. Directories
+    // inherit their DACL normally; only private files get a protected DACL.
     let mut security = user
-        .filter(|_| !directory)
-        .map(Descriptor::new)
+        .map(|user| {
+            if directory {
+                Descriptor::inheriting_directory(user)
+            } else {
+                Descriptor::new(user)
+            }
+        })
         .transpose()?;
     let attributes = OBJECT_ATTRIBUTES {
         Length: size_of::<OBJECT_ATTRIBUTES>() as u32,

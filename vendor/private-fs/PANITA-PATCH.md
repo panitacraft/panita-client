@@ -130,3 +130,28 @@ matrix. These results do not qualify an installed build on Windows 10 or Linux;
 Unix permission behavior has not changed.
 Older launcher builds that enforce the former Windows directory ACL contract can
 reject a migrated profile; continue using an updated build after migration.
+
+### Explicit directory ownership with inherited permissions
+
+The initial inheritance change omitted the entire creation security descriptor
+for Windows directories. That also stopped assigning TokenUser as the owner.
+An elevated process can default the owner to Administrators, causing the existing
+owner check to reject newly created directories as unsafe. Windows CI reported
+271 core test failures during storage/registry initialization at that checkpoint.
+
+Directory creation now supplies a descriptor with the owner explicitly set to
+TokenUser, but with no DACL and no DACL-protection flag. Windows still calculates
+ordinary parent inheritance. Private-file descriptors and existing-object owner
+checks remain unchanged; existing foreign-owned directories are never adopted.
+
+Regression coverage checks the owner-only creation descriptor, absence of a DACL
+override, new root/child ownership, ordinary player-file access and private-file
+protection. The existing token-owner comparison test also exercises environments
+where TokenOwner differs from TokenUser. Hosted Windows CI must confirm the fix
+in that environment; local standard-user results alone do not establish it.
+
+Local verification on 2026-10-29: 413 core tests pass with one existing live test
+ignored; all 57 dependency tests pass on the complete rerun. An initial dependency
+run hit an access-denied error in the stress fixture's directory-rename restore;
+that test passed in isolation and on the complete rerun. Core all-target Clippy,
+workspace formatting and focused dependency formatting checks pass.

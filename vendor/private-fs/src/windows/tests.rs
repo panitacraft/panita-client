@@ -17,6 +17,34 @@ fn fixture() -> (tempfile::TempDir, PrivateDir) {
 }
 
 #[test]
+fn directory_creation_descriptor_sets_user_owner_without_overriding_inheritance() {
+    let user = Sid::process_user().unwrap();
+    let mut descriptor = security::Descriptor::inheriting_directory(&user).unwrap();
+    // SAFETY: the absolute descriptor and its owner SID remain live throughout
+    // inspection. A missing DACL lets Windows calculate ordinary inheritance.
+    unsafe {
+        let raw = &*descriptor.as_ptr().cast::<SECURITY_DESCRIPTOR>();
+        assert_eq!(EqualSid(raw.Owner, user.as_ptr()), 1);
+        assert_eq!(
+            raw.Control & (SE_DACL_PRESENT | SE_DACL_PROTECTED) as u16,
+            0
+        );
+        assert!(raw.Dacl.is_null());
+    }
+    // Existing integration coverage checks TokenUser ownership and private
+    // files on both ordinary tokens and CI tokens with a different TokenOwner.
+    let (temp, root) = fixture();
+    let child = root.create_dir("child").unwrap();
+    security::verify_owner(&root, &user).unwrap();
+    security::verify_owner(&child, &user).unwrap();
+    let player_file = temp.path().join("private/child/player.txt");
+    std::fs::write(&player_file, b"player data").unwrap();
+    assert_eq!(std::fs::read(&player_file).unwrap(), b"player data");
+    std::fs::remove_file(player_file).unwrap();
+    child.create("private-metadata").unwrap().verify().unwrap();
+}
+
+#[test]
 fn drive_root_bootstrap_creates_and_reopens_a_fresh_private_store() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("PanitaClient");

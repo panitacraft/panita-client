@@ -86,6 +86,27 @@ pub(super) struct Descriptor<'a> {
     descriptor: SECURITY_DESCRIPTOR,
 }
 impl<'a> Descriptor<'a> {
+    /// Pin ownership to TokenUser while allowing Windows to inherit the DACL.
+    /// An elevated token can otherwise default new objects to Administrators.
+    pub(super) fn inheriting_directory(user: &'a Sid) -> Result<Self> {
+        let mut descriptor = SECURITY_DESCRIPTOR::default();
+        let sd = (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast();
+        // SAFETY: the descriptor is writable and user retains a valid SID. Leave
+        // the DACL absent and unprotected so the parent supplies inherited ACEs.
+        unsafe {
+            bool_result(InitializeSecurityDescriptor(
+                sd,
+                SECURITY_DESCRIPTOR_REVISION as u32,
+            ))?;
+            bool_result(SetSecurityDescriptorOwner(sd, user.as_ptr(), 0))?;
+        }
+        Ok(Self {
+            _sid: user,
+            _acl: Vec::new(),
+            descriptor,
+        })
+    }
+
     pub(super) fn new(user: &'a Sid) -> Result<Self> {
         // SAFETY: user owns a valid SID copied from TokenUser.
         let bytes = size_of::<ACL>() + size_of::<ACCESS_ALLOWED_ACE>() - size_of::<u32>()
