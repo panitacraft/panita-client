@@ -405,6 +405,15 @@ mod pack_tests {
         assert_eq!(cache.hashed, 2);
         // A touched but identical file is hashed once more, then accepted again.
         assert!(std::fs::write(&path, &body).is_ok());
+        // Fast Linux writes can share the original timestamp; make the intended
+        // metadata change explicit rather than depending on filesystem clock ticks.
+        assert!(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .and_then(|file| file.set_modified(later + std::time::Duration::from_secs(5)))
+                .is_ok()
+        );
         assert_eq!(cache.verify_pack(&game, &state, &cancel).ok(), Some(true));
         assert_eq!(cache.hashed, 3);
         // A receipt never covers a file that is gone.

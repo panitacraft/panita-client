@@ -86,6 +86,27 @@ pub(super) struct Descriptor<'a> {
     descriptor: SECURITY_DESCRIPTOR,
 }
 impl<'a> Descriptor<'a> {
+    /// Pin ownership to TokenUser while allowing Windows to inherit the DACL.
+    /// An elevated token can otherwise default new objects to Administrators.
+    pub(super) fn inheriting_directory(user: &'a Sid) -> Result<Self> {
+        let mut descriptor = SECURITY_DESCRIPTOR::default();
+        let sd = (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast();
+        // SAFETY: the descriptor is writable and user retains a valid SID. Leave
+        // the DACL absent and unprotected so the parent supplies inherited ACEs.
+        unsafe {
+            bool_result(InitializeSecurityDescriptor(
+                sd,
+                SECURITY_DESCRIPTOR_REVISION as u32,
+            ))?;
+            bool_result(SetSecurityDescriptorOwner(sd, user.as_ptr(), 0))?;
+        }
+        Ok(Self {
+            _sid: user,
+            _acl: Vec::new(),
+            descriptor,
+        })
+    }
+
     pub(super) fn new(user: &'a Sid) -> Result<Self> {
         // SAFETY: user owns a valid SID copied from TokenUser.
         let bytes = size_of::<ACL>() + size_of::<ACCESS_ALLOWED_ACE>() - size_of::<u32>()
@@ -143,13 +164,93 @@ pub(super) fn verify_owner(handle: impl AsHandle, user: &Sid) -> Result<()> {
     inspect(handle, user, false)
 }
 
+fn trusted(sid: PSID, user: &Sid) -> bool {
+    // SAFETY: callers validate SID storage before reaching this helper. Local
+    // administrators and SYSTEM are already outside the isolation boundary.
+    unsafe {
+        EqualSid(sid, user.as_ptr()) != 0
+            || IsWellKnownSid(sid, 22) != 0 // WinLocalSystemSid
+            || IsWellKnownSid(sid, 26) != 0 // WinBuiltinAdministratorsSid
+    }
+}
+
+/// A credential's parent must not let another ordinary principal replace it.
+/// Permit normal profile ACLs, including privileged owners and read-only grants.
+pub(super) fn verify_namespace(handle: impl AsHandle, user: &Sid) -> Result<()> {
+    let mut owner = ptr::null_mut();
+    let mut acl = ptr::null_mut();
+    let mut raw = ptr::null_mut();
+    // SAFETY: live handle and correctly typed writable security outputs.
+    let error = unsafe {
+        GetSecurityInfo(
+            handle.as_handle().as_raw_handle(),
+            SE_FILE_OBJECT,
+            (OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION) as u32,
+            &mut owner,
+            ptr::null_mut(),
+            &mut acl,
+            ptr::null_mut(),
+            &mut raw,
+        )
+    };
+    if error != 0 {
+        return Err(io::Error::from_raw_os_error(error as i32).into());
+    }
+    let _info = SecurityInfo(raw);
+    // SAFETY: Windows owns the queried descriptor and all its ACL/SID storage
+    // until _info is dropped. Validate bounds before dereferencing variable SIDs.
+    unsafe {
+        if raw.is_null()
+            || owner.is_null()
+            || IsValidSid(owner) == 0
+            || !trusted(owner, user)
+            || acl.is_null()
+            || IsValidAcl(acl) == 0
+        {
+            return Err(Error::InsecureAcl);
+        }
+        for index in 0..u32::from((*acl).AceCount) {
+            let mut entry: *mut c_void = ptr::null_mut();
+            bool_result(GetAce(acl, index, &mut entry))?;
+            let header = &*entry.cast::<ACE_HEADER>();
+            if header.AceFlags & 0x08 != 0 {
+                continue;
+            } // INHERIT_ONLY_ACE
+            if header.AceType == 1 {
+                continue;
+            } // ACCESS_DENIED_ACE
+            let offset = size_of::<ACCESS_ALLOWED_ACE>() - size_of::<u32>();
+            if header.AceType != ACCESS_ALLOWED_ACE_TYPE as u8
+                || usize::from(header.AceSize) < offset + 8
+            {
+                return Err(Error::InsecureAcl);
+            }
+            let ace = &*entry.cast::<ACCESS_ALLOWED_ACE>();
+            let bytes = entry.cast::<u8>().add(offset);
+            if 8 + usize::from(*bytes.add(1)) * 4 != usize::from(header.AceSize) - offset {
+                return Err(Error::InsecureAcl);
+            }
+            let sid = (&ace.SidStart as *const u32).cast_mut().cast();
+            if IsValidSid(sid) == 0 {
+                return Err(Error::InsecureAcl);
+            }
+            // Data/subdirectory creation, child deletion, metadata writes,
+            // deletion, ACL/owner changes, GENERIC_WRITE and GENERIC_ALL.
+            const MUTATION: u32 = 0x000d_0156 | 0x5000_0000;
+            if ace.Mask & MUTATION != 0 && !trusted(sid, user) {
+                return Err(Error::InsecureAcl);
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Retire only the exact protected directory ACL written by older Panita builds.
 /// Existing ordinary/custom ACLs are left alone. Never apply this to files.
 pub(super) fn migrate_directory(handle: impl AsHandle, user: &Sid) -> Result<()> {
-    verify_owner(handle.as_handle(), user)?;
     match verify(handle.as_handle(), user) {
         Ok(()) => (),
-        Err(Error::InsecureAcl) => return Ok(()),
+        Err(Error::InsecureAcl | Error::OwnerMismatch) => return Ok(()),
         Err(error) => return Err(error),
     }
     let writable = super::nt::security_handle(handle.as_handle())?;
@@ -158,7 +259,7 @@ pub(super) fn migrate_directory(handle: impl AsHandle, user: &Sid) -> Result<()>
     match verify(&writable, user) {
         Ok(()) => (),
         // Another process may have completed the same idempotent migration.
-        Err(Error::InsecureAcl) => return Ok(()),
+        Err(Error::InsecureAcl | Error::OwnerMismatch) => return Ok(()),
         Err(error) => return Err(error),
     }
     let mut acl = ACL::default();

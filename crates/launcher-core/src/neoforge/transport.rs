@@ -32,7 +32,7 @@ impl Transport {
             size: identity.size,
         };
         let cached = self.library(paths, &source, cancel).await?;
-        let directory = private_fs::PrivateDir::open(cached.parent().ok_or_else(invalid)?)
+        let directory = private_fs::PrivateDir::open_data(cached.parent().ok_or_else(invalid)?)
             .map_err(map_private_error)?;
         let mut file = directory
             .open_file(cached.file_name().ok_or_else(invalid)?)

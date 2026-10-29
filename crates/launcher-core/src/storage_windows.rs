@@ -58,6 +58,51 @@ mod tests {
     use crate::paths::AppPaths;
 
     #[test]
+    fn credentials_are_blocked_when_their_parent_allows_other_users_to_replace_files() {
+        let path = std::env::temp_dir().join(format!("panita-namespace-{}", uuid::Uuid::new_v4()));
+        let paths = AppPaths::new(&path).unwrap_or_else(|_| panic!("test path"));
+        let store = PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store"));
+        for name in ["accounts.json", "panita-session.json"] {
+            store
+                .transaction(name, |_| Ok((b"synthetic-secret".to_vec(), ())))
+                .unwrap_or_else(|_| panic!("synthetic credential"));
+        }
+        let changed = std::process::Command::new("icacls.exe")
+            .arg(&path)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap_or_else(|_| panic!("synthetic ACL change"));
+        assert!(changed.status.success());
+        for name in [
+            "accounts.json",
+            "panita-session.json",
+            "ACCOUNTS.JSON",
+            "PANITA-SESSION.JSON",
+        ] {
+            assert_eq!(
+                store.read(name).err().map(|error| error.code()),
+                Some(ErrorCode::UnsafePermissions)
+            );
+            assert!(
+                store
+                    .transaction(name, |_| Ok((b"replacement".to_vec(), ())))
+                    .is_err()
+            );
+            assert_eq!(
+                std::fs::read(path.join(name)).ok().as_deref(),
+                Some(b"synthetic-secret".as_slice())
+            );
+        }
+        let ordinary = PrivateDir::open_data(&path).unwrap_or_else(|_| panic!("ordinary data"));
+        ordinary
+            .write_atomic_durable("ordinary.txt", b"player data")
+            .unwrap_or_else(|_| panic!("ordinary write"));
+        drop(ordinary);
+        drop(store);
+        std::fs::remove_dir_all(path).unwrap_or_else(|_| panic!("test cleanup"));
+    }
+
+    #[test]
     fn unknown_or_corrupt_migration_marker_is_preserved() {
         for bytes in [b"{\"schema\":2}".as_slice(), b"invalid".as_slice()] {
             let path = std::env::temp_dir().join(format!("panita-acl-{}", uuid::Uuid::new_v4()));

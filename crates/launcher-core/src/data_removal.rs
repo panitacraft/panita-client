@@ -151,7 +151,7 @@ fn remove_profile(root: &Path) -> Result<(), CoreError> {
     )
     .map_err(io)?;
     let name = root.file_name().ok_or_else(invalid)?;
-    let private_lock = match private.open_file(".mutation.lock") {
+    let private_lock = match private.open_data_file(".mutation.lock") {
         Ok(file) => file,
         Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
             private

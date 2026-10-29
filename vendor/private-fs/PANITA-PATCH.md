@@ -130,3 +130,128 @@ matrix. These results do not qualify an installed build on Windows 10 or Linux;
 Unix permission behavior has not changed.
 Older launcher builds that enforce the former Windows directory ACL contract can
 reject a migrated profile; continue using an updated build after migration.
+
+### Explicit directory ownership with inherited permissions
+
+The initial inheritance change omitted the entire creation security descriptor
+for Windows directories. That also stopped assigning TokenUser as the owner.
+An elevated process can default the owner to Administrators, causing the existing
+owner check to reject newly created directories as unsafe. Windows CI reported
+271 core test failures during storage/registry initialization at that checkpoint.
+
+Directory creation now supplies a descriptor with the owner explicitly set to
+TokenUser, but with no DACL and no DACL-protection flag. Windows still calculates
+ordinary parent inheritance. Private-file descriptors and existing-object owner
+checks remain unchanged; existing foreign-owned directories are never adopted.
+
+Regression coverage checks the owner-only creation descriptor, absence of a DACL
+override, new root/child ownership, ordinary player-file access and private-file
+protection. The existing token-owner comparison test also exercises environments
+where TokenOwner differs from TokenUser. Hosted Windows CI must confirm the fix
+in that environment; local standard-user results alone do not establish it.
+
+Local verification on 2026-10-29: 413 core tests pass with one existing live test
+ignored; all 57 dependency tests pass on the complete rerun. An initial dependency
+run hit an access-denied error in the stress fixture's directory-rename restore;
+that test passed in isolation and on the complete rerun. Core all-target Clippy,
+workspace formatting and focused dependency formatting checks pass.
+
+## Access-based Windows data handling (2026-10-29 owner decision)
+
+Existing Windows game/cache directories no longer require their owner SID to
+equal TokenUser. Ordinary file capabilities explicitly use access-based handling:
+Windows grants the requested read/write/delete access, new files inherit parent
+permissions, and the library does not harden their ACLs. Existing foreign-owned
+directories are preserved; legacy directory migration applies only to the exact
+current-user-owned ACL written by older Panita builds. New directory ownership
+is still assigned consistently, without making that an admission requirement.
+
+Data capabilities retain handle-relative traversal, reparse rejection, object
+kind, identity and single-link checks. Atomic publication and interprocess locks
+remain in use. Panita's artifact readers retain exact hash/size verification and
+manifest-bound verification receipts. Public cache files, loader generations and
+processor outputs use data access; client-owned private metadata retains strict
+file validation. Windows processor outputs no longer require WRITE_DAC merely
+to read and update ordinary files. Unix behavior is unchanged.
+
+Credential files and their atomic temporaries retain protected owner-only ACLs.
+The store additionally validates the parent namespace before reading, writing,
+hiding or removing `accounts.json` or `panita-session.json`. Current-user, SYSTEM
+and administrator owners are trusted, while effective grants allowing other
+principals to mutate the directory are rejected. Read-only grants are permitted.
+Custom ACLs are never silently rewritten by that check. Administrator bypass
+and processes running as the same user remain outside the isolation boundary.
+
+Regression coverage distinguishes an accessible owner mismatch from private-file
+validation, retains redirected-path and hard-link rejection, and verifies that
+credential operations reject a writable-by-others parent without replacing the
+existing credential bytes while ordinary data access remains available.
+
+Local credential tests use a controlled ignored temporary root granting access
+to the current user, SYSTEM and Administrators. The host temporary directory has
+additional sandbox-specific writable principals; accepting those merely to make
+tests pass would weaken the namespace check. The override is limited to the test
+process and does not change the real launcher profile or Windows profile ACLs.
+Windows CI prepares an equivalent private test directory before running Rust
+tests, avoiding dependence on the runner's default temporary-directory ACLs.
+
+This section supersedes earlier requirements in this patch note that every
+Windows directory have exactly the current user as its owner. It does not relax
+credential file privacy, schemas, preservation, atomicity or recovery guarantees.
+Older builds that require protected cache-file ACLs can reject new ordinary
+cache entries; use an updated build after this change. No instance paths or disk
+JSON schemas are changed by the access policy.
+
+Local Windows validation: the full workspace passes 414 core tests, two
+cross-process tests and 26 desktop tests, with one existing live-network test
+ignored. All 59 filesystem dependency tests and 70 frontend tests pass. Workspace
+all-target Clippy, workspace formatting, focused dependency formatting and diff
+checks pass. Hosted CI, Linux compilation and installed-product qualification of
+this access-policy change remain pending.
+
+## Access-based Linux data handling (2026-10-29 owner decision)
+
+The owner extends the access-based policy to Linux. Existing Linux directories
+are checked for kind, identity and safe resolution without an exact owner or
+`0700` requirement. Ordinary data capabilities accept accessible regular files
+without exact ownership or `0600` modes; new data files/directories request
+`0666`/`0777` subject to the existing umask and filesystem ACLs. Existing modes
+and ownership are not rewritten. Directory hardening validates rather than
+changing Linux directory modes. macOS behavior remains unchanged.
+
+Private files and atomic temporaries retain effective-UID ownership and exact
+`0600` permissions. Before account/session access, the store validates that the
+containing directory belongs to the effective UID or root and grants no
+group/other write permissions. Named POSIX ACL writers are constrained by the
+group-class permission mask as well. A readable `0755` parent is acceptable;
+a shared writable credential namespace is rejected without changing its ACLs,
+ownership, modes or existing credential bytes.
+
+Normal and anonymous data staging retain inode/device identity, regular-file
+kind and link-count checks, no-follow traversal, atomic publication and writer
+coordination. Credential staging remains private from creation. The Linux
+proc-descriptor publication fallback is retained. Source data access is not a
+license to follow symlinks, adopt hard-linked files or bypass content verification.
+
+Linux Java uses actual read/execute access rather than exact ownership or `0700`.
+The kernel checks effective-user execute permission. Newly downloaded artifacts
+gain owner-execute while preserving their other creation-mode bits; already
+executable accessible files are not chmodded. Set-user-ID/set-group-ID runtimes,
+redirects and hard links remain rejected. Download hashes and installed plans
+remain authoritative. Processor outputs use ordinary access on Linux/Windows;
+macOS retains its prior policy.
+
+Regression tests cover readable ordinary modes, foreign-owner metadata, normal
+and forced-walk resolution, private-file isolation, unsafe credential namespaces,
+runtime execute rights, privilege bits, repair and failed-download preservation.
+The receipt test explicitly changes timestamps when asserting a rehash, avoiding
+dependence on Linux filesystem clock ticks. This section supersedes previous
+statements in this patch note that Linux data access still requires private modes.
+
+Validation on 2026-10-29: normal-user Debian WSL passes all 55 filesystem tests
+under default and force-walk configurations, 409 core unit tests with one existing
+live test ignored, two cross-process tests, and core all-target Clippy with
+warnings denied. Workspace/dependency formatting and diff checks pass. Windows
+workspace compilation and the shared receipt regression also pass. These are
+source-level results in a separate build environment; BOX was not used for
+development, and installed-product/game-launch qualification remains pending.
