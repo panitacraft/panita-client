@@ -12,7 +12,7 @@ import type { AccountsView } from './account-state';
 import { ActivationPanel, useActivation } from './activation';
 import { PlayControls, PlayNotice, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
-import { canInstall, canRepair, canUninstall, isPack, updateTarget } from './library-state';
+import { canInstall, canOpenInstanceOptions, canRepair, canUninstall, isPack, updateTarget } from './library-state';
 import { SettingsPanel, usePreferences } from './settings';
 import { DiagnosticsPanel } from './diagnostics';
 import { CachePanel, PackPanel } from './pack';
@@ -23,9 +23,9 @@ import { Button } from './components/ui/button';
 import { AccountAvatar } from './components/account-avatar';
 import { Hint } from './components/hint';
 import { TooltipProvider } from './components/ui/tooltip';
+import { InstanceBadges } from './components/instance-badges';
 
 type CatalogState = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'blocked' } | ({ kind: 'ready' } & CatalogOverview);
-const loaderNames: Record<string, string> = { neoforge: 'NeoForge', fabric: 'Fabric', quilt: 'Quilt' };
 
 export function Launcher() {
   const [catalog, setCatalog] = useState<CatalogState>({ kind: 'loading' });
@@ -155,9 +155,8 @@ export function Launcher() {
                 <h1>{instance.name}</h1>
                 <p>{instance.description}</p>
                 <div className="instance-tags">
-                  {instance.minecraftVersion && <span><Gamepad2 aria-hidden="true" />Minecraft {instance.minecraftVersion}</span>}
-                  {isPack(instance) && <span><Blocks aria-hidden="true" />{instance.source?.loader ? loaderNames[instance.source.loader] ?? instance.source.loader : 'Modpack'}{instance.source?.label ? ` · ${instance.source.label}` : ''}</span>}
-                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
+                  <InstanceBadges instance={instance} />
+                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : instanceStatus(instance, liveEntry(instance.id)) !== 'Sin instalar' && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
                 </div>
               </div>
             </div>
@@ -167,7 +166,7 @@ export function Launcher() {
               {!instance.compatible && <p role="status">Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
               {!instance.supported && <p role="status">Este tipo de instancia todavía no es compatible.</p>}
               {instance.installedVersion && <p className="installed-version">Versión instalada: Minecraft {instance.installedVersion}</p>}
-              <PlayControls instanceId={instance.id} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
+              <PlayControls instanceId={instance.id} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
               <PackPanel instanceId={instance.id} awaiting={instance.localState === 'awaiting_files'} onChanged={() => setCatalogAttempt(previous => previous + 1)} />
             </div>
           </article>)}

@@ -79,7 +79,7 @@ export function usePlaySnapshot() {
   return useContext(PlayContext)?.snapshot ?? null;
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void }) {
+export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, optionsAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; optionsAllowed?: boolean }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -93,6 +93,9 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   const [cleanupError, setCleanupError] = useState<string | null>(null);
   const [cleanupDetails, setCleanupDetails] = useState<NativeCleanupReport['details']>([]);
   const entry = play?.snapshot?.instances.find(entry => entry.instanceId === instanceId);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const optionsEnabled = optionsAllowed && entry?.phase !== 'uninstalled';
+  useEffect(() => { if (!optionsEnabled) setOptionsOpen(false); }, [optionsEnabled]);
   const active = entry && playActive(entry.phase);
   const running = entry && (entry.phase === 'running' || entry.phase === 'stopping');
 
@@ -239,8 +242,8 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     {!active && !installAllowed && !updateTarget?.pack && <Button className="primary-play h-12 rounded-r-none" size="lg" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}><Play aria-hidden="true" />{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</Button>}
     {!active && updateTarget?.pack && <Button className="primary-play h-12 rounded-r-none" size="lg" disabled={busy || !isTauri() || !play?.snapshot} onClick={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</Button>}
     {active && <Button className="primary-play h-12 rounded-r-none" size="lg" disabled><Gamepad2 aria-hidden="true" />{running ? 'En ejecución' : 'Preparando…'}</Button>}
-    <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild><Button className="split-trigger h-12 w-12 rounded-l-none p-0" aria-label="Opciones de instancia" title="Opciones de instancia"><ChevronDown aria-hidden="true" /></Button></DropdownMenuTrigger>
+    <DropdownMenu modal={false} open={optionsEnabled && optionsOpen} onOpenChange={open => setOptionsOpen(optionsEnabled && open)}>
+      <DropdownMenuTrigger asChild><Button className="split-trigger h-12 w-12 rounded-l-none p-0" disabled={!optionsEnabled} aria-label="Opciones de instancia" title={optionsEnabled ? 'Opciones de instancia' : 'Instala esta instancia para acceder a sus opciones'}><ChevronDown aria-hidden="true" /></Button></DropdownMenuTrigger>
       <DropdownMenuContent className="instance-menu" align="end" sideOffset={8}>
         {onSettings && <DropdownMenuItem onSelect={onSettings}><Settings2 aria-hidden="true" />Ajustes de la instancia</DropdownMenuItem>}
         {!active && updateTarget && !updateTarget.pack && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</DropdownMenuItem>}

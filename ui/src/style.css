@@ -108,6 +108,8 @@
   .instance-tags { display: flex; flex-wrap: wrap; gap: 8px; }
   .instance-tags > span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500; border: 1px solid #515151; border-radius: 5px; padding: 5px 9px; background: #1B1B1Be6; }
   .instance-tags svg { width: 13px; height: 13px; }
+  .instance-tags img { width: 16px; height: 16px; object-fit: contain; }
+  .game-icon { image-rendering: pixelated; }
   .instance-tags .instance-status { border-color: #54A63670; color: #E4FFDA; background: #21351c; }
   .instance-tags .status-warning { border-color: #BABABA; color: #BABABA; background: #252525; }
   .instance-workspace { padding: 0 40px 30px; max-width: 1300px; margin: 0 auto; }

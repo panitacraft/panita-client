@@ -54,7 +54,7 @@ const previewInstances: CatalogInstance[] = [
     enabled: false,
     availability: 'disabled',
   },
-  { ...defaults, id: '7fd3f5a0-876d-4ca6-98a2-c4e4bedbbec2', name: 'Modpack de ejemplo', description: 'Vista previa de un tipo de instancia aún no compatible.', minecraftVersion: '1.21.1', enabled: true, supported: false },
+  { ...defaults, id: '7fd3f5a0-876d-4ca6-98a2-c4e4bedbbec2', name: 'Modpack de ejemplo', description: 'Una aventura con mods para jugar con tus amigos.', minecraftVersion: '1.21.1', enabled: true, source: { type: 'custom', loader: 'neoforge', label: '1.0', current_version_id: 'preview-pack' } },
 ];
 
 export async function loadPreviewCatalog(): Promise<CatalogOverview> {

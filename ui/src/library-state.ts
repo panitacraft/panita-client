@@ -42,6 +42,13 @@ function installedPack(instance: CatalogInstance): boolean {
   return isPack(instance) && packPin(instance.installedSource) !== null;
 }
 
+/** Keep maintenance reachable for an existing installation that needs repair. */
+export function canOpenInstanceOptions(instance: CatalogInstance): boolean {
+  return instance.hasInstallationManifest
+    && (instance.installedVersion !== null || installedPack(instance))
+    && ['installed', 'update_available', 'needs_repair', 'running', 'failed', 'cancelled'].includes(instance.localState);
+}
+
 export function canRepair(instance: CatalogInstance, stale: boolean): boolean {
   return instance.hasInstallationManifest && !stale && instance.availability === 'enabled' && instance.compatible && instance.supported
     && (instance.installedVersion !== null || installedPack(instance))

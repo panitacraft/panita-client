@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canInstall, canRepair, canUninstall, updateTarget } from '../src/library-state.ts';
+import { canInstall, canOpenInstanceOptions, canRepair, canUninstall, updateTarget } from '../src/library-state.ts';
 
 const instance = { availability: 'enabled', compatible: true, supported: true, localState: 'not_installed', installedVersion: null, hasInstallationManifest: false, minecraftVersion: '1.21.1' };
 
@@ -73,6 +73,15 @@ test('installation cannot bypass catalog restrictions, offline mode or explicit 
 const custom = (pin, extra = {}) => ({ type: 'custom', current_version_id: pin, label: '0.2', loader: 'neoforge', ...extra });
 const modrinth = (version) => ({ type: 'modrinth', project_id: 'project', pack_version_id: version, loader: null });
 const pack = { ...instance, source: custom('v2'), installedSource: custom('v1'), localState: 'update_available', hasInstallationManifest: true };
+
+test('instance options require an installed plan while keeping damaged and running installations manageable', () => {
+  const installed = { ...instance, hasInstallationManifest: true, installedVersion: '1.21.1' };
+  for (const localState of ['not_installed', 'installing', 'awaiting_files']) assert.equal(canOpenInstanceOptions({ ...installed, localState }), false);
+  for (const localState of ['installed', 'update_available', 'needs_repair', 'running', 'failed', 'cancelled']) assert.equal(canOpenInstanceOptions({ ...installed, localState }), true);
+  assert.equal(canOpenInstanceOptions({ ...installed, localState: 'installed', hasInstallationManifest: false }), false);
+  assert.equal(canOpenInstanceOptions({ ...pack, installedSource: null }), false);
+  assert.equal(canOpenInstanceOptions({ ...pack, availability: 'disabled' }), true);
+});
 
 test('a newer published pack version offers Update between exact pins and never installs implicitly', () => {
   assert.deepEqual(updateTarget(pack, false), { fromVersion: 'v1', toVersion: 'v2', pack: true });

@@ -6,6 +6,7 @@ import { PlayProvider } from '../src/play';
 import { PreferencesProvider } from '../src/settings';
 import { CatalogArtwork } from '../src/components/catalog-artwork';
 import { AccountAvatar, avatarUrl } from '../src/components/account-avatar';
+import { InstanceBadges } from '../src/components/instance-badges';
 import type { CatalogOverview } from '../src/preview-catalog';
 import type { PlayEntry, PlaySnapshot } from '../src/play-state';
 
@@ -213,4 +214,52 @@ test('real artwork replaces the decorative fallback, and a failed banner restore
   expect(container.querySelector('.hero-brand')).toBeNull();
   fireEvent.error(container.querySelector('.banner-image')!);
   expect(container.querySelector('.hero-brand')).not.toBeNull();
+});
+
+test('fresh instances omit the redundant installation badge and unlock options only after installation', async () => {
+  catalog.instances[0] = { ...first, localState: 'not_installed', installedSource: null, hasInstallationManifest: false };
+  const user = userEvent.setup(); mount();
+  const article = await screen.findByRole('article', { name: 'Aventura' });
+  const options = within(article).getByRole('button', { name: 'Opciones de instancia' }) as HTMLButtonElement;
+  expect(options.disabled).toBe(true);
+  expect(within(article).queryByText('Sin instalar')).toBeNull();
+  expect(article.querySelector('.game-icon')).not.toBeNull();
+  expect(within(article).getByText('NeoForge')).toBeTruthy();
+  expect(article.querySelector('.loader-icon')).not.toBeNull();
+  expect(within(article).getByRole('button', { name: 'Instalar', exact: true })).toBeTruthy();
+  await user.click(options);
+  expect(screen.queryByRole('menu')).toBeNull();
+  await emit(entry({ operation: 'install', phase: 'installing' }));
+  expect(options.disabled).toBe(true);
+  catalog.instances[0] = { ...first };
+  await emit(entry({ operation: 'install', phase: 'installed' }));
+  await waitFor(() => expect((within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.queryByRole('menu')).toBeNull();
+  await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
+  expect(await screen.findByRole('menuitem', { name: 'Ajustes de la instancia' })).toBeTruthy();
+});
+
+test('uninstall closes an open options menu before a stale catalog refresh can re-enable it', async () => {
+  const user = userEvent.setup(); mount();
+  const article = await screen.findByRole('article', { name: 'Aventura' });
+  const options = within(article).getByRole('button', { name: 'Opciones de instancia' }) as HTMLButtonElement;
+  await user.click(options);
+  expect(screen.getByRole('menu')).toBeTruthy();
+  await emit(entry({ operation: 'uninstall', phase: 'uninstalled' }));
+  await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+  expect(options.disabled).toBe(true);
+});
+
+test('loader badges use known icons and do not guess a missing loader', () => {
+  const { container, rerender } = render(<InstanceBadges instance={first} />);
+  for (const [id, name] of [['neoforge', 'NeoForge'], ['fabric', 'Fabric'], ['quilt', 'Quilt']]) {
+    rerender(<InstanceBadges instance={{ ...first, source: { ...first.source, loader: id } }} />);
+    expect(screen.getByText(name)).toBeTruthy();
+    expect(container.querySelector('.loader-icon')).not.toBeNull();
+  }
+  rerender(<InstanceBadges instance={{ ...first, source: { type: 'modrinth' }, installedSource: null }} />);
+  expect(screen.getByText('Modpack')).toBeTruthy();
+  expect(container.querySelector('.loader-icon')).toBeNull();
+  rerender(<InstanceBadges instance={{ ...first, source: { type: 'vanilla' } }} />);
+  expect(screen.queryByText('Modpack')).toBeNull();
 });
