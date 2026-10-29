@@ -139,6 +139,52 @@ impl Drop for SecurityInfo {
 pub(super) fn verify(handle: impl AsHandle, user: &Sid) -> Result<()> {
     inspect(handle, user, true)
 }
+pub(super) fn verify_owner(handle: impl AsHandle, user: &Sid) -> Result<()> {
+    inspect(handle, user, false)
+}
+
+/// Retire only the exact protected directory ACL written by older Panita builds.
+/// Existing ordinary/custom ACLs are left alone. Never apply this to files.
+pub(super) fn migrate_directory(handle: impl AsHandle, user: &Sid) -> Result<()> {
+    verify_owner(handle.as_handle(), user)?;
+    match verify(handle.as_handle(), user) {
+        Ok(()) => (),
+        Err(Error::InsecureAcl) => return Ok(()),
+        Err(error) => return Err(error),
+    }
+    let writable = super::nt::security_handle(handle.as_handle())?;
+    // Revalidate the held object immediately before changing its ACL.
+    super::nt::metadata(handle.as_handle(), true, None)?;
+    match verify(&writable, user) {
+        Ok(()) => (),
+        // Another process may have completed the same idempotent migration.
+        Err(Error::InsecureAcl) => return Ok(()),
+        Err(error) => return Err(error),
+    }
+    let mut acl = ACL::default();
+    // SAFETY: an initialized empty ACL removes the legacy explicit grant;
+    // UNPROTECTED adds the parent's inheritable entries. A null DACL is never used.
+    unsafe {
+        bool_result(InitializeAcl(
+            &mut acl,
+            size_of::<ACL>() as u32,
+            ACL_REVISION as u32,
+        ))?;
+        let error = SetSecurityInfo(
+            writable.as_raw_handle(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION as u32 | UNPROTECTED_DACL_SECURITY_INFORMATION as u32,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &acl,
+            ptr::null(),
+        );
+        if error != 0 {
+            return Err(io::Error::from_raw_os_error(error as i32).into());
+        }
+    }
+    verify_owner(writable, user)
+}
 fn inspect(handle: impl AsHandle, user: &Sid, check_acl: bool) -> Result<()> {
     let mut owner = ptr::null_mut();
     let mut acl = ptr::null_mut();

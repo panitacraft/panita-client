@@ -44,6 +44,9 @@ jobs:
         run: cargo check --workspace --locked
       - name: Test Rust
         run: cargo test --workspace --locked
+      - name: Test patched Windows filesystem dependency
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path vendor/private-fs/Cargo.toml --lib --locked
       - name: Test patched Linux filesystem dependency
         if: runner.os == 'Linux'
         run: |

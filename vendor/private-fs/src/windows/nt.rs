@@ -126,7 +126,12 @@ fn open_access(
         MaximumLength: bytes,
         Buffer: name.as_mut_ptr(),
     };
-    let mut security = user.map(Descriptor::new).transpose()?;
+    // Player-created descendants need ordinary Windows inheritance. Only private
+    // files receive an explicit protected descriptor at creation.
+    let mut security = user
+        .filter(|_| !directory)
+        .map(Descriptor::new)
+        .transpose()?;
     let attributes = OBJECT_ATTRIBUTES {
         Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
         RootDirectory: parent.map_or(ptr::null_mut(), |p| p.as_raw_handle()),
@@ -142,8 +147,8 @@ fn open_access(
     let desired = if directory {
         // Retained directory handles must not hold data or DELETE access:
         // Windows 10's internal rename-target open can conflict with it even
-        // when our handles share read/write/delete. Creation still supplies the
-        // protected owner-only DACL; mutations acquire short-lived handles.
+        // when our handles share read/write/delete. Directories use normal
+        // inherited ACLs; mutations acquire short-lived handles.
         (FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE) as u32 | 0x20 // FILE_TRAVERSE
     } else if creating {
         FILE_ALL_ACCESS as u32
@@ -289,7 +294,11 @@ pub(super) fn validate(
     user: &Sid,
 ) -> Result<Identity> {
     let id = metadata(handle.as_handle(), directory, expected)?;
-    security::verify(handle, user)?;
+    if directory {
+        security::verify_owner(handle, user)?;
+    } else {
+        security::verify(handle, user)?;
+    }
     Ok(id)
 }
 

@@ -10,13 +10,17 @@ Do not give an untrusted same-principal actor write access to a private tree.
 
 ## Guarantees
 
-- Files are created exclusively and privately in the creation syscall; directories
-  are private from birth. Unix modes are exactly `0600` / `0700`, including rejection
+- Files are created exclusively and privately in the creation syscall. Unix
+  directories are private from birth; Windows directories inherit normal parent
+  permissions and require a trusted user-profile namespace. Unix modes are exactly `0600` / `0700`, including rejection
   of special bits. The library never changes process umask. A narrower creation
   mode may be normalized through the newly held descriptor.
-- Unix ownership is the effective UID. Windows ownership is the process TokenUser,
-  with a protected DACL containing exactly one noninheritable full-access user ACE.
-  No extra SYSTEM or administrator grant is inserted.
+- Unix ownership is the effective UID. Windows ownership is the process TokenUser.
+  Windows private files have a protected DACL containing exactly one
+  noninheritable full-access user ACE; no extra SYSTEM or administrator grant is
+  inserted into private files. Directories retain ordinary inherited/custom ACLs.
+  Opening a directory retires only the exact legacy Panita protected directory
+  ACL, restoring inheritance. See `PANITA-PATCH.md` for migration guarantees.
 - Relative paths reject roots, prefixes, traversal, interior dots, NULs, and colons
   (including Windows alternate streams). Unix also rejects backslashes. Native
   names are passed without lossy Unicode conversion; filesystem encoding rules
@@ -32,7 +36,8 @@ Do not give an untrusted same-principal actor write access to a private tree.
   a trusted parent owner (effective UID or root) and no group/other namespace write,
   unless sticky protection applies. macOS additionally requires a current-user
   parent with empty extended ACL and enforced ownership.
-- Actual objects are checked for kind, ownership, permissions/ACL, identity, and
+- Actual objects are checked for kind, ownership, identity, and private-file ACLs
+  (Unix also checks directory permissions), as well as
   regular-file hard-link count. Public regular files must have exactly one link.
   Internal anonymous Linux staging is validated separately with zero links.
   Mutable metadata is checked again before/after I/O and at publication boundaries.

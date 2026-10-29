@@ -10,6 +10,10 @@ use crate::paths::AppPaths;
 const MAX_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const LOCK_NAME: &str = ".mutation.lock";
 
+#[cfg(windows)]
+#[path = "storage_windows.rs"]
+mod windows;
+
 /// A private application-data root. All writers must use `transaction` so
 /// separate launcher processes serialize read-modify-write operations.
 pub struct PrivateStore {
@@ -94,6 +98,15 @@ impl StoreTransaction<'_> {
 }
 
 impl PrivateStore {
+    /// Open the whole application profile and migrate legacy Windows directory
+    /// permissions. Instance metadata stores must use `open` instead.
+    pub fn open_application(paths: &AppPaths) -> Result<Self, CoreError> {
+        let store = Self::open(paths)?;
+        #[cfg(windows)]
+        windows::migrate(&store)?;
+        Ok(store)
+    }
+
     pub fn open(paths: &AppPaths) -> Result<Self, CoreError> {
         let root = PrivateDir::ensure(paths.root()).map_err(map_private_error)?;
         match root.open_file(LOCK_NAME) {
