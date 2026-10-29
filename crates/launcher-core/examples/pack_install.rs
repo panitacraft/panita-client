@@ -145,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             });
             let started = std::time::Instant::now();
-            match install_catalog(&paths, catalog, &platform, &cancel, base, pack).await? {
+            match install_catalog(&paths, catalog, &platform, &cancel, base, pack, None).await? {
                 Outcome::Installed(report) => println!(
                     "{}",
                     serde_json::json!({"result": "installed", "files": report.files,
@@ -176,7 +176,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let started = std::time::Instant::now();
             if args[0] == "repair-modrinth" {
                 let report =
-                    repair_catalog(&paths, id, &platform, &cancel, base, pack, catalog).await?;
+                    repair_catalog(&paths, id, &platform, &cancel, base, pack, catalog, None)
+                        .await?;
                 println!(
                     "{}",
                     serde_json::json!({"result": "repaired", "restored": report.restored,
@@ -206,8 +207,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     backup_worlds: false,
                     move_aside: args.get(5).is_some_and(|flag| flag == "move-aside"),
                 };
-                match update_catalog(&paths, id, &platform, request, &cancel, base, pack, catalog)
-                    .await?
+                match update_catalog(
+                    &paths, id, &platform, request, &cancel, base, pack, catalog, None,
+                )
+                .await?
                 {
                     UpdateOutcome::Updated(report) => println!(
                         "{}",

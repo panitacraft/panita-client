@@ -724,6 +724,7 @@ pub async fn update(
     pack_progress: ProgressSink,
     auth: Option<PanitaCredentials>,
 ) -> Result<UpdateOutcome, CoreError> {
+    let credentials = auth.clone();
     let client = CatalogClient::new()?.with_auth(auth);
     cancel.check()?;
     let catalog = tokio::select! {
@@ -739,6 +740,7 @@ pub async fn update(
         progress,
         pack_progress,
         catalog,
+        credentials,
     )
     .await
 }
@@ -755,6 +757,7 @@ pub async fn update_with_catalog(
     progress: Progress,
     pack_progress: ProgressSink,
     catalog: CatalogInstance,
+    auth: Option<PanitaCredentials>,
 ) -> Result<UpdateOutcome, CoreError> {
     if id.is_nil() || request.from_version == request.to_version {
         return Err(invalid());
@@ -780,7 +783,7 @@ pub async fn update_with_catalog(
     let downloader = PackDownloader::new()?;
     // Everything below the lock needs the plan, so resolve it first, as install does.
     let plan = match &catalog.source {
-        CatalogSource::Custom { .. } => custom_plan(&catalog, id, cancel).await?,
+        CatalogSource::Custom { .. } => custom_plan(&catalog, id, cancel, auth).await?,
         _ => mrpack_plan(paths, &downloader, &catalog, cancel, pack_progress.clone()).await?,
     };
     run_update(
@@ -1036,6 +1039,7 @@ pub async fn repair(
     pack_progress: ProgressSink,
     auth: Option<PanitaCredentials>,
 ) -> Result<RepairReport, CoreError> {
+    let credentials = auth.clone();
     let client = CatalogClient::new()?.with_auth(auth);
     cancel.check()?;
     let catalog = tokio::select! {
@@ -1050,10 +1054,12 @@ pub async fn repair(
         progress,
         pack_progress,
         catalog,
+        credentials,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Repair with an already fetched catalog entry, for development harnesses.
 pub async fn repair_with_catalog(
     paths: &AppPaths,
@@ -1063,6 +1069,7 @@ pub async fn repair_with_catalog(
     progress: Progress,
     pack_progress: ProgressSink,
     catalog: CatalogInstance,
+    auth: Option<PanitaCredentials>,
 ) -> Result<RepairReport, CoreError> {
     let registry = InstanceRegistry::new(paths.clone());
     registry.remember_catalog(std::slice::from_ref(&catalog))?;
@@ -1076,7 +1083,7 @@ pub async fn repair_with_catalog(
     // The recorded pin, exactly: never the catalog's current one.
     let plan = match &old.source {
         PackIdentity::Custom { version_id, .. } => {
-            custom_plan_pinned(*version_id, None, id, cancel).await?
+            custom_plan_pinned(*version_id, None, id, cancel, auth).await?
         }
         PackIdentity::Modrinth {
             project_id,

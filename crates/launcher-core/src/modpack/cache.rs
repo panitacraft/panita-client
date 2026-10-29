@@ -1,6 +1,7 @@
 //! Identity-bound public manifest revalidation. A cache hit is content reuse,
 //! never proof of current enabled status, visibility, or Play availability.
 use super::*;
+use crate::panita_api::PanitaCredentials;
 use reqwest::{Client, StatusCode, header};
 use std::time::Duration;
 
@@ -66,6 +67,9 @@ impl CachedManifest {
 pub struct ManifestClient {
     client: Client,
     base: String,
+    /// A restricted instance's manifest is only served to a request that carries
+    /// the launcher key and the member session; public ones ignore both.
+    auth: Option<PanitaCredentials>,
 }
 impl ManifestClient {
     pub fn new() -> Result<Self, CoreError> {
@@ -79,9 +83,17 @@ impl ManifestClient {
         Ok(Self {
             client,
             base: BASE.to_owned(),
+            auth: None,
         })
     }
-    /// No credentials, transport retry, or fallback on explicit missing responses.
+
+    pub fn with_auth(mut self, auth: impl Into<Option<PanitaCredentials>>) -> Self {
+        self.auth = auth.into();
+        self
+    }
+
+    /// Credentials only reach the Panita API. No transport retry, or fallback on
+    /// explicit missing responses.
     pub async fn fetch(
         &self,
         id: Uuid,
@@ -102,6 +114,9 @@ impl ManifestClient {
             ))
             .header(header::ACCEPT, "application/json")
             .header(header::CACHE_CONTROL, "no-cache");
+        if let Some(auth) = &self.auth {
+            request = auth.apply(request);
+        }
         let validator = cached.and_then(|c| c.etag.as_deref());
         if let Some(etag) = validator {
             request = request.header(header::IF_NONE_MATCH, etag);
@@ -185,7 +200,11 @@ mod tests {
             (503, String::new(), false),
         ]);
         let (client, base) = catalog.test_transport();
-        let client = ManifestClient { client, base };
+        let client = ManifestClient {
+            client,
+            base,
+            auth: None,
+        };
         assert!(client.fetch(id, version, None).await.is_err());
         assert_eq!(
             client
@@ -238,7 +257,11 @@ mod tests {
             (404, String::new(), true),
         ]);
         let (client, base) = catalog.test_transport();
-        let client = ManifestClient { client, base };
+        let client = ManifestClient {
+            client,
+            base,
+            auth: None,
+        };
         let cached = client
             .fetch(id, version, None)
             .await
@@ -260,5 +283,48 @@ mod tests {
                 .is_err()
         );
         task.join().unwrap_or_else(|_| panic!("server"));
+    }
+
+    #[tokio::test]
+    async fn a_restricted_manifest_is_fetched_only_with_the_key_and_the_session() {
+        use crate::test_http::{Reply, Server};
+        let (id, version, document) = super::super::tests::fixture();
+        let body = document.to_string();
+        // Like the API: a restricted manifest answers 404 to a request without both.
+        let server = Server::start(move |request| {
+            if request.headers.contains("x-api-key") && request.headers.contains("authorization") {
+                Reply::ok(body.clone())
+            } else {
+                Reply::status(404)
+            }
+        });
+        let client = || {
+            let client = Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap_or_else(|_| panic!("client"));
+            ManifestClient {
+                client,
+                base: server.base().to_owned(),
+                auth: None,
+            }
+        };
+        assert_eq!(
+            client()
+                .fetch(id, version, None)
+                .await
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::InstanceMissing)
+        );
+        let credentials = crate::panita_api::tests::credentials()
+            .with_session(&crate::panita_api::tests::session("ps_member"));
+        assert!(
+            client()
+                .with_auth(credentials)
+                .fetch(id, version, None)
+                .await
+                .is_ok()
+        );
     }
 }

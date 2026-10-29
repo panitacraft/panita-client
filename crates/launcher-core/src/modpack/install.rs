@@ -712,6 +712,7 @@ async fn custom_plan(
     catalog: &CatalogInstance,
     id: Uuid,
     cancel: &Cancellation,
+    auth: Option<PanitaCredentials>,
 ) -> Result<Plan, CoreError> {
     let CatalogSource::Custom {
         current_version_id: Some(version),
@@ -720,7 +721,7 @@ async fn custom_plan(
     else {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     };
-    custom_plan_pinned(*version, Some(catalog), id, cancel).await
+    custom_plan_pinned(*version, Some(catalog), id, cancel, auth).await
 }
 
 /// The manifest of one exact published version. Only the current pin is bound to
@@ -730,8 +731,9 @@ async fn custom_plan_pinned(
     bind: Option<&CatalogInstance>,
     id: Uuid,
     cancel: &Cancellation,
+    auth: Option<PanitaCredentials>,
 ) -> Result<Plan, CoreError> {
-    let manifests = ManifestClient::new()?;
+    let manifests = ManifestClient::new()?.with_auth(auth);
     let cached = tokio::select! {
         _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
         result = manifests.fetch(id, version, None) => result?,
@@ -828,12 +830,22 @@ pub async fn install(
     pack_progress: ProgressSink,
     auth: Option<PanitaCredentials>,
 ) -> Result<Outcome, CoreError> {
+    let credentials = auth.clone();
     let catalog_client = CatalogClient::new()?.with_auth(auth);
     let catalog = tokio::select! {
         _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
         result = catalog_client.detail(id) => result?,
     };
-    install_catalog(paths, catalog, platform, cancel, progress, pack_progress).await
+    install_catalog(
+        paths,
+        catalog,
+        platform,
+        cancel,
+        progress,
+        pack_progress,
+        credentials,
+    )
+    .await
 }
 
 /// Install the pack a catalog entry that was already fetched pins. The entry must be
@@ -845,6 +857,7 @@ pub async fn install_catalog(
     cancel: &Cancellation,
     progress: Progress,
     pack_progress: ProgressSink,
+    auth: Option<PanitaCredentials>,
 ) -> Result<Outcome, CoreError> {
     let id = catalog.id;
     let registry = InstanceRegistry::new(paths.clone());
@@ -859,7 +872,7 @@ pub async fn install_catalog(
     }
     let downloader = PackDownloader::new()?;
     let plan = match &catalog.source {
-        CatalogSource::Custom { .. } => custom_plan(&catalog, id, cancel).await?,
+        CatalogSource::Custom { .. } => custom_plan(&catalog, id, cancel, auth).await?,
         CatalogSource::Modrinth { .. } => {
             mrpack_plan(paths, &downloader, &catalog, cancel, pack_progress.clone()).await?
         }
