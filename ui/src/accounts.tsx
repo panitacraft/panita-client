@@ -12,7 +12,7 @@ const statusText: Record<AccountStatus, string> = {
 };
 
 // `suggestedName` only pre-fills the offline name during onboarding; it is never a requirement.
-export function Accounts({ suggestedName = '' }: { suggestedName?: string }) {
+export function Accounts({ suggestedName = '', onSelectionChange }: { suggestedName?: string; onSelectionChange?: (name: string | null) => void }) {
   const [{ view, error, notice, busy, blocked, cleanupWarning }, dispatch] = useReducer(accountFeedback, initialAccountFeedback);
   const [attempt, setAttempt] = useState(0);
   const [username, setUsername] = useState(suggestedName);
@@ -21,6 +21,9 @@ export function Accounts({ suggestedName = '' }: { suggestedName?: string }) {
   const inFlight = useRef(new Set<string>());
   const sequence = useRef(0);
   const desktop = isTauri();
+
+  const selectedName = view?.accounts.find(account => account.metadata.account_id === view.selected_account_id)?.metadata.username ?? null;
+  useEffect(() => { onSelectionChange?.(selectedName); }, [selectedName, onSelectionChange]);
 
   function accept(next: AccountsView) {
     dispatch({ type: 'snapshot', view: next });

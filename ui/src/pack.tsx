@@ -118,7 +118,7 @@ export function CachePanel() {
 
   return <section className="settings-section" aria-labelledby="cache-heading">
     <h2 id="cache-heading">Caché de archivos de modpacks</h2>
-    <p>{cacheSummary(size)}</p>
+    <p>{isTauri() ? cacheSummary(size) : 'Disponible en la aplicación de escritorio.'}</p>
     <p>Guarda los archivos ya verificados de los modpacks para no descargarlos de nuevo. Puedes borrarla sin riesgo: tus instancias, mundos y ajustes no dependen de ella.</p>
     <button type="button" disabled={busy || !isTauri() || size === 0} onClick={() => setQuestion(true)}>Limpiar caché…</button>
     {question && <fieldset className="catalog-notice">

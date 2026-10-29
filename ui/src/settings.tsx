@@ -35,7 +35,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   async function select(next: string) {
     if (selecting.current || busy) return;
     selecting.current = true; setBusy(true); setError(null);
-    try { await settingsApi.select(next); setId(next); }
+    try { if (isTauri()) await settingsApi.select(next); setId(next); }
     catch (cause) { setError(messageForError(cause)); }
     finally { selecting.current = false; setBusy(false); }
   }
@@ -44,18 +44,19 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
 
 export function usePreferences() { return useContext(SelectionContext); }
 
-export function SettingsPanel({ instanceId, name, local }: { instanceId: string | null; name: string | null; local: boolean }) {
-  const [mode, setMode] = useState<'global' | 'instance'>('global');
+export function SettingsPanel({ instanceId, name, local, scope }: { instanceId: string | null; name: string | null; local: boolean; scope?: 'global' | 'instance' }) {
+  const [chosenMode, setMode] = useState<'global' | 'instance'>('global');
+  const mode = scope ?? chosenMode;
   const preferences = usePreferences();
   return <section className="settings-section" aria-labelledby="settings-heading">
     <h2 id="settings-heading">Ajustes</h2>
     <p>Los cambios se aplican al próximo inicio de Minecraft. La cuenta y la instancia seleccionadas se recuerdan. El tamaño de Panita se guarda al cerrar su ventana.</p>
     {preferences?.error && <div role="alert"><p>No pudimos cargar o guardar tu selección. {preferences.error}</p><button type="button" disabled={preferences.busy} onClick={preferences.retry}>Reintentar preferencias</button></div>}
     {preferences?.warning && <p role="alert">No pudimos restaurar o guardar el tamaño de Panita. {preferences.warning}</p>}
-    <div className="account-buttons" role="group" aria-label="Ámbito de los ajustes">
+    {!scope && <div className="account-buttons" role="group" aria-label="Ámbito de los ajustes">
       <button type="button" aria-pressed={mode === 'global'} onClick={() => setMode('global')}>Ajustes globales</button>
       <button type="button" aria-pressed={mode === 'instance'} disabled={!instanceId} onClick={() => setMode('instance')}>Ajustes de la instancia seleccionada</button>
-    </div>
+    </div>}
     {mode === 'instance' && <p>{name ? `Instancia: ${name}` : 'La instancia seleccionada no está disponible en esta lista.'}</p>}
     {mode === 'instance' && !local ? <p>Instala o reintenta instalar esta instancia para poder guardar sus ajustes propios. Puedes configurar los valores globales mientras tanto.</p>
       : <SettingsEditor key={mode === 'global' ? 'global' : instanceId} instanceId={mode === 'global' ? null : instanceId} />}

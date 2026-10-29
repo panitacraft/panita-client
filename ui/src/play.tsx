@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { ChevronDown, Download, Play, RefreshCw, Settings2, Trash2, Wrench } from 'lucide-react';
+import { Button } from './components/ui/button';
 import { messageForError } from './errors';
 import { acceptPlaySnapshot, playActive, type PlayPhase, type PlaySnapshot } from './play-state';
 import type { UpdateTarget } from './library-state';
@@ -76,7 +78,7 @@ export function usePlaySnapshot() {
   return useContext(PlayContext)?.snapshot ?? null;
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean }) {
+export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -220,24 +222,29 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         </div>
       </div>}
     </>}
-    {!active && installAllowed && entry?.phase !== 'installed' && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}>{entry?.operation === 'install' ? 'Reintentar instalación' : 'Instalar'}</button>}
-    {!active && !installAllowed && !updateTarget?.pack && <button type="button" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}>{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</button>}
+    <div className="instance-actions">
+    {!active && installAllowed && entry?.phase !== 'installed' && <Button className="primary-play" size="lg" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.operation === 'install' ? 'Reintentar instalación' : 'Instalar'}</Button>}
+    {!active && !installAllowed && !updateTarget?.pack && <Button className="primary-play" size="lg" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}><Play aria-hidden="true" />{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</Button>}
     {!active && updateTarget?.pack && <p role="status">Hay una versión nueva de este modpack. Debes actualizarla antes de jugar.</p>}
-    {!active && updateTarget && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {
+    {!active && updateTarget && <Button className={updateTarget.pack ? 'primary-play' : undefined} variant={updateTarget.pack ? 'default' : 'secondary'} size="lg" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {
       setUpdateQuestion({ ...updateTarget, backupWorlds: true });
       if (updateTarget.pack) {
         setNames(null);
         void invoke<VersionNames>('pack_version_names', { instanceId }).then(setNames).catch(() => setNames(null));
       }
-    }}>Actualizar…</button>}
-    {!active && repairAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_repair', { requestId: crypto.randomUUID() })}>Reparar archivos</button>}
-    {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void cleanNatives()}>Limpiar nativos antiguos</button>}
+    }}><RefreshCw aria-hidden="true" />Actualizar…</Button>}
+    <details className="instance-options"><summary><Settings2 aria-hidden="true" />Opciones de instancia<ChevronDown aria-hidden="true" /></summary><div className="options-list">
+      {onSettings && <Button variant="ghost" onClick={onSettings}><Settings2 aria-hidden="true" />Ajustes de la instancia</Button>}
+      {!active && repairAllowed && <Button variant="ghost" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_repair', { requestId: crypto.randomUUID() })}><Wrench aria-hidden="true" />Reparar archivos</Button>}
+      {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <Button variant="ghost" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void cleanNatives()}><RefreshCw aria-hidden="true" />Limpiar nativos antiguos</Button>}
+      {!active && uninstallAllowed && <Button variant="ghost" className="text-destructive" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUninstallQuestion(true)}><Trash2 aria-hidden="true" />Desinstalar…</Button>}
+    </div></details>
+    </div>
     {cleanupText && <p role="status">{cleanupText}</p>}
     {cleanupDetails.length > 0 && <details><summary>Por qué se conservaron estas carpetas</summary>
       <ul>{cleanupDetails.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
     </details>}
     {cleanupError && <p role="alert">{cleanupError}</p>}
-    {!active && uninstallAllowed && <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUninstallQuestion(true)}>Desinstalar…</button>}
     {!active && uninstallQuestion && <fieldset className="catalog-notice">
       <legend>Desinstalar conservando mis datos</legend>
       {pack
