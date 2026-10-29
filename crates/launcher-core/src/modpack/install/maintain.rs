@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::*;
+use crate::modpack::path_key;
 use crate::{
     catalog::CatalogSource,
     minecraft::{
@@ -536,12 +537,12 @@ async fn fetch_needed(
         .steps
         .iter()
         .filter(|step| step.op != Op::Remove)
-        .map(|step| step.path.to_ascii_lowercase())
+        .map(|step| path_key(&step.path))
         .collect();
     let items: Vec<&Item> = plan
         .items
         .iter()
-        .filter(|item| wanted.contains(&item.path.to_ascii_lowercase()))
+        .filter(|item| wanted.contains(&path_key(&item.path)))
         .collect();
     let requests: Vec<Request> = items
         .iter()
@@ -1208,7 +1209,7 @@ pub(crate) async fn run_repair(
     {
         if incoming
             .iter()
-            .any(|new| new.path.eq_ignore_ascii_case(&file.path))
+            .any(|new| path_key(&new.path) == path_key(&file.path))
         {
             continue;
         }

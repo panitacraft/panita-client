@@ -9,12 +9,13 @@ use sha2::{Digest, Sha512};
 
 use super::{
     Hashes, MAX_ARCHIVE_BYTES, MAX_FILES, game_path, invalid, modrinth::directory_entry_count,
+    path_key,
 };
 use crate::{
     error::CoreError,
     minecraft::{
         download::{Cancellation, io},
-        safe_path,
+        safe_unicode_path,
     },
 };
 
@@ -57,14 +58,7 @@ pub type Rule<'a> = &'a dyn Fn(&str, bool) -> Result<Option<String>, CoreError>;
 /// executable or pack-managed may appear.
 fn configuration_rule(path: &str, directory: bool) -> Result<Option<String>, CoreError> {
     game_path(path)?;
-    if MANAGED_ROOTS.contains(
-        &path
-            .split('/')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-    ) {
+    if MANAGED_ROOTS.contains(&path_key(path.split('/').next().unwrap_or_default()).as_str()) {
         return Err(invalid());
     }
     if !directory && forbidden_extension(path, &FORBIDDEN_EXTENSIONS) {
@@ -75,7 +69,7 @@ fn configuration_rule(path: &str, directory: bool) -> Result<Option<String>, Cor
 
 /// True when the file name ends in one of the listed extensions, ignoring case.
 pub(crate) fn forbidden_extension(path: &str, list: &[&str]) -> bool {
-    path.to_ascii_lowercase()
+    path_key(path)
         .rsplit_once('.')
         .is_some_and(|(_, extension)| list.contains(&extension))
 }
@@ -161,8 +155,8 @@ pub fn preflight_with<R: Read + Seek>(
         let raw = entry.name().to_owned();
         let directory = entry.is_dir();
         let path = raw.trim_end_matches('/');
-        safe_path(path)?;
-        let lower = path.to_ascii_lowercase();
+        safe_unicode_path(path)?;
+        let lower = path_key(path);
         if !names.insert(lower.clone()) {
             return Err(invalid());
         }

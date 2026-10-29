@@ -1,6 +1,7 @@
 //! Pinned public version resolution and verified index inspection. Overrides are
 //! not extracted here; their publication and ownership belong to installation.
 use super::*;
+use crate::minecraft::safe_path;
 use reqwest::{Client, StatusCode, header};
 use sha1::Sha1;
 use sha2::{Digest, Sha512};
