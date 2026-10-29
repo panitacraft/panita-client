@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::*;
+use crate::modpack::path_key;
 use crate::{
     catalog::CatalogSource,
     minecraft::{
@@ -536,12 +537,12 @@ async fn fetch_needed(
         .steps
         .iter()
         .filter(|step| step.op != Op::Remove)
-        .map(|step| step.path.to_ascii_lowercase())
+        .map(|step| path_key(&step.path))
         .collect();
     let items: Vec<&Item> = plan
         .items
         .iter()
-        .filter(|item| wanted.contains(&item.path.to_ascii_lowercase()))
+        .filter(|item| wanted.contains(&path_key(&item.path)))
         .collect();
     let requests: Vec<Request> = items
         .iter()
@@ -723,6 +724,7 @@ pub async fn update(
     pack_progress: ProgressSink,
     auth: Option<PanitaCredentials>,
 ) -> Result<UpdateOutcome, CoreError> {
+    let credentials = auth.clone();
     let client = CatalogClient::new()?.with_auth(auth);
     cancel.check()?;
     let catalog = tokio::select! {
@@ -738,6 +740,7 @@ pub async fn update(
         progress,
         pack_progress,
         catalog,
+        credentials,
     )
     .await
 }
@@ -754,6 +757,7 @@ pub async fn update_with_catalog(
     progress: Progress,
     pack_progress: ProgressSink,
     catalog: CatalogInstance,
+    auth: Option<PanitaCredentials>,
 ) -> Result<UpdateOutcome, CoreError> {
     if id.is_nil() || request.from_version == request.to_version {
         return Err(invalid());
@@ -779,7 +783,7 @@ pub async fn update_with_catalog(
     let downloader = PackDownloader::new()?;
     // Everything below the lock needs the plan, so resolve it first, as install does.
     let plan = match &catalog.source {
-        CatalogSource::Custom { .. } => custom_plan(&catalog, id, cancel).await?,
+        CatalogSource::Custom { .. } => custom_plan(&catalog, id, cancel, auth).await?,
         _ => mrpack_plan(paths, &downloader, &catalog, cancel, pack_progress.clone()).await?,
     };
     run_update(
@@ -1035,6 +1039,7 @@ pub async fn repair(
     pack_progress: ProgressSink,
     auth: Option<PanitaCredentials>,
 ) -> Result<RepairReport, CoreError> {
+    let credentials = auth.clone();
     let client = CatalogClient::new()?.with_auth(auth);
     cancel.check()?;
     let catalog = tokio::select! {
@@ -1049,10 +1054,12 @@ pub async fn repair(
         progress,
         pack_progress,
         catalog,
+        credentials,
     )
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Repair with an already fetched catalog entry, for development harnesses.
 pub async fn repair_with_catalog(
     paths: &AppPaths,
@@ -1062,6 +1069,7 @@ pub async fn repair_with_catalog(
     progress: Progress,
     pack_progress: ProgressSink,
     catalog: CatalogInstance,
+    auth: Option<PanitaCredentials>,
 ) -> Result<RepairReport, CoreError> {
     let registry = InstanceRegistry::new(paths.clone());
     registry.remember_catalog(std::slice::from_ref(&catalog))?;
@@ -1075,7 +1083,7 @@ pub async fn repair_with_catalog(
     // The recorded pin, exactly: never the catalog's current one.
     let plan = match &old.source {
         PackIdentity::Custom { version_id, .. } => {
-            custom_plan_pinned(*version_id, None, id, cancel).await?
+            custom_plan_pinned(*version_id, None, id, cancel, auth).await?
         }
         PackIdentity::Modrinth {
             project_id,
@@ -1208,7 +1216,7 @@ pub(crate) async fn run_repair(
     {
         if incoming
             .iter()
-            .any(|new| new.path.eq_ignore_ascii_case(&file.path))
+            .any(|new| path_key(&new.path) == path_key(&file.path))
         {
             continue;
         }

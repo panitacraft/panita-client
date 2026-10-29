@@ -8,7 +8,7 @@ use std::io::{Read, Seek};
 use super::{
     archive::{ArchiveEntry, Opened},
     gamefs::{Entry, GameDir},
-    invalid,
+    invalid, path_key,
     state::{ManagedFile, Ownership, SkippedConfiguration},
 };
 use crate::{
@@ -39,10 +39,10 @@ pub struct Outcome {
 
 /// A path may not be offered by both archives.
 pub fn ensure_disjoint(first: &[ArchiveEntry], second: &[ArchiveEntry]) -> Result<(), CoreError> {
-    let names: BTreeSet<_> = first.iter().map(|e| e.path.to_ascii_lowercase()).collect();
+    let names: BTreeSet<_> = first.iter().map(|e| path_key(&e.path)).collect();
     if second
         .iter()
-        .any(|entry| names.contains(&entry.path.to_ascii_lowercase()))
+        .any(|entry| names.contains(&path_key(&entry.path)))
     {
         return Err(invalid());
     }
@@ -57,15 +57,12 @@ pub fn apply<R: Read + Seek>(
     budget: &mut u64,
     cancel: &Cancellation,
 ) -> Result<Outcome, CoreError> {
-    let consumed: BTreeSet<_> = already_consumed
-        .iter()
-        .map(|path| path.to_ascii_lowercase())
-        .collect();
+    let consumed: BTreeSet<_> = already_consumed.iter().map(|path| path_key(path)).collect();
     let mut outcome = Outcome::default();
     for entry in opened.entries.clone() {
         cancel.check()?;
         if kind == Kind::Defaults {
-            if consumed.contains(&entry.path.to_ascii_lowercase()) {
+            if consumed.contains(&path_key(&entry.path)) {
                 continue;
             }
             outcome.consumed_defaults.insert(entry.path.clone());
@@ -82,10 +79,7 @@ pub fn apply<R: Read + Seek>(
             }
         };
         let absent = game.entry(&entry.path)? == Entry::Absent;
-        if kind == Kind::Override
-            && !content
-            && absent
-            && consumed.contains(&entry.path.to_ascii_lowercase())
+        if kind == Kind::Override && !content && absent && consumed.contains(&path_key(&entry.path))
         {
             // Offered before and deleted since: the player's choice stands.
             continue;

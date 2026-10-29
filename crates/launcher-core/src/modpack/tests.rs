@@ -292,3 +292,57 @@ fn mrpack_mirrors_are_classified_by_host_and_only_the_known_hosts_pass() {
         Some(vec![Origin::Modrinth, Origin::Mirror])
     );
 }
+
+#[test]
+fn unicode_pack_names_are_accepted_but_not_disguised() {
+    for name in [
+        "resourcepacks/§3Fresh §bFlower Pots.zip",
+        "resourcepacks/§3§lC418 Songs Only.zip",
+        "config/ünicode.txt",
+        "shaderpacks/日本語.zip",
+    ] {
+        assert!(game_path(name).is_ok(), "{name}");
+    }
+    for name in [
+        "config/evil\u{202E}txt.exe",
+        "config/zero\u{200B}width.txt",
+        "config/bell\u{0007}.txt",
+        "config/line\u{2028}break.txt",
+        "config/CON.txt",
+        "config/trailing.",
+        "../escape.txt",
+        "config/back\\slash.txt",
+        "saves/world/level.dat",
+    ] {
+        assert!(game_path(name).is_err(), "{name:?}");
+    }
+    assert_eq!(path_key("Config/É.txt"), path_key("config/é.txt"));
+    assert_eq!(path_key("MODS"), path_key("mods"));
+    assert_ne!(path_key("config/a.txt"), path_key("config/b.txt"));
+}
+
+#[test]
+fn an_index_with_color_coded_resource_pack_names_parses() {
+    let file = |path: &str, name: &str| {
+        json!({"path": path, "hashes": {"sha1": "a".repeat(40), "sha512": "b".repeat(128)},
+            "downloads": [format!("https://cdn.modrinth.com/data/p/versions/v/{name}")], "fileSize": 10})
+    };
+    let parse = |value: &Value| MrpackIndex::parse(value.to_string().as_bytes());
+    let mut value = index();
+    let files = value["files"]
+        .as_array_mut()
+        .unwrap_or_else(|| panic!("files"));
+    files.push(file("resourcepacks/§3Fresh §bFlower Pots.zip", "a.zip"));
+    files.push(file(
+        "resourcepacks/§4Drodi's Blazes FA [V1.2].zip",
+        "b.zip",
+    ));
+    assert!(parse(&value).is_ok());
+    // Two spellings of one name would overwrite each other on Windows.
+    let files = value["files"]
+        .as_array_mut()
+        .unwrap_or_else(|| panic!("files"));
+    files.push(file("resourcepacks/É.zip", "c.zip"));
+    files.push(file("resourcepacks/é.zip", "d.zip"));
+    assert!(parse(&value).is_err());
+}

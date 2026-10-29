@@ -126,7 +126,7 @@ impl PackState {
                 baseline.validate()?;
             }
             if file.size > MAX_FILE_BYTES
-                || paths.insert(file.path.to_ascii_lowercase(), file).is_some()
+                || paths.insert(path_key(&file.path), file).is_some()
                 || (file.ownership == Ownership::Content
                     && file.baseline.as_ref() != Some(&file.desired))
             {
@@ -147,7 +147,7 @@ impl PackState {
         let mut waiting = BTreeSet::new();
         for file in &self.pending {
             file.validate()?;
-            let key = file.path.to_ascii_lowercase();
+            let key = path_key(&file.path);
             if paths.contains_key(&key) || !waiting.insert(key) {
                 return Err(invalid());
             }
@@ -155,14 +155,14 @@ impl PackState {
         let mut consumed = BTreeSet::new();
         for path in &self.consumed_defaults {
             game_path(path)?;
-            if !consumed.insert(path.to_ascii_lowercase()) {
+            if !consumed.insert(path_key(path)) {
                 return Err(invalid());
             }
         }
         let mut skipped = BTreeSet::new();
         for skip in &self.skipped_configuration {
             skip.desired.validate()?;
-            let key = skip.path.to_ascii_lowercase();
+            let key = path_key(&skip.path);
             let file = paths.get(&key).ok_or_else(invalid)?;
             if skip.path != file.path
                 || file.ownership == Ownership::Content
@@ -173,14 +173,12 @@ impl PackState {
             }
         }
         for file in &self.files {
-            if file.ownership == Ownership::Defaults
-                && !consumed.contains(&file.path.to_ascii_lowercase())
-            {
+            if file.ownership == Ownership::Defaults && !consumed.contains(&path_key(&file.path)) {
                 return Err(invalid());
             }
             if file.ownership != Ownership::Content
                 && file.baseline.as_ref() != Some(&file.desired)
-                && !skipped.contains(&file.path.to_ascii_lowercase())
+                && !skipped.contains(&path_key(&file.path))
             {
                 return Err(invalid());
             }
