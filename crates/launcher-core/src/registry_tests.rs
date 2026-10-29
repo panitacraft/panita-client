@@ -1,6 +1,39 @@
 use super::*;
 use crate::settings::GlobalSettings;
 
+#[test]
+fn installed_loader_hint_reports_the_recorded_version_and_omits_tombstones() {
+    use crate::minecraft::{install, maintenance, play::tests};
+    let (paths, accounts, id) = tests::fixture();
+    drop(accounts);
+    tests::complete_installation(&paths, id);
+    let mut manifest = maintenance::installation_manifest(&paths, id)
+        .unwrap_or_else(|_| panic!("manifest"))
+        .unwrap_or_else(|| panic!("installed"));
+    assert!(InstalledLoader::from_manifest(&manifest).is_none());
+    let reference = crate::neoforge::generation::tests::published_for(
+        &paths,
+        &manifest.plan.version.id,
+        &manifest.plan.version.java,
+    )
+    .unwrap_or_else(|_| panic!("loader"));
+    manifest.plan.loader = Some(reference.into());
+    manifest.plan.schema_version = 2;
+    let root = paths.instance(id).unwrap_or_else(|_| panic!("root"));
+    install::write_json(&root, "installed.json", &manifest).unwrap_or_else(|_| panic!("save"));
+    let validated = maintenance::installation_manifest(&paths, id)
+        .unwrap_or_else(|_| panic!("validated"))
+        .unwrap_or_else(|| panic!("installed"));
+    let hint = InstalledLoader::from_manifest(&validated).unwrap_or_else(|| panic!("hint"));
+    assert_eq!(
+        serde_json::to_value(hint).unwrap_or_else(|_| panic!("serialize")),
+        serde_json::json!({"name":"neoforge","version":"21.1.264"})
+    );
+    manifest.schema_version = 3;
+    assert!(InstalledLoader::from_manifest(&manifest).is_none());
+    std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+}
+
 fn entry(id: Uuid) -> CatalogInstance {
     CatalogInstance {
         id,

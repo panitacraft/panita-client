@@ -582,6 +582,26 @@ pub enum Availability {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InstalledLoader {
+    pub name: String,
+    pub version: String,
+}
+
+impl InstalledLoader {
+    /// The caller reads and validates the manifest once before exposing hints.
+    fn from_manifest(installed: &crate::minecraft::install::InstalledLock) -> Option<Self> {
+        if installed.schema_version != 2 {
+            return None;
+        }
+        installed.plan.loader.as_ref().map(|loader| Self {
+            name: loader.kind().to_owned(),
+            version: loader.version().to_owned(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InstanceView {
     #[serde(flatten)]
     pub catalog: CatalogInstance,
@@ -591,6 +611,8 @@ pub struct InstanceView {
     /// What the installation was made from; for a pack, its pin and label.
     pub installed_source: Option<CatalogSource>,
     pub has_installation_manifest: bool,
+    /// Presentation metadata only; no paths, arguments or session data.
+    pub installed_loader: Option<InstalledLoader>,
     pub compatible: bool,
     pub supported: bool,
 }
@@ -668,11 +690,13 @@ pub async fn load_catalog(
     if migration_warning.is_none() {
         for view in &mut overview.instances {
             if local.iter().any(|record| record.id == view.catalog.id) {
-                match crate::minecraft::maintenance::has_installation_manifest(
-                    &paths,
-                    view.catalog.id,
-                ) {
-                    Ok(has_manifest) => view.has_installation_manifest = has_manifest,
+                match crate::minecraft::maintenance::installation_manifest(&paths, view.catalog.id)
+                {
+                    Ok(manifest) => {
+                        view.has_installation_manifest = manifest.is_some();
+                        view.installed_loader =
+                            manifest.as_ref().and_then(InstalledLoader::from_manifest);
+                    }
                     Err(error) => {
                         overview.registry_warning.get_or_insert(error.code());
                     }
@@ -762,6 +786,7 @@ fn view(
         installed_version,
         installed_source: installed.map(|record| record.resolved_source.clone()),
         has_installation_manifest: false,
+        installed_loader: None,
         compatible,
         supported,
     }

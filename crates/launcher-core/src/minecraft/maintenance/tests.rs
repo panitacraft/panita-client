@@ -7,9 +7,17 @@ fn maintenance_hint_requires_an_owned_manifest_but_not_healthy_cache_files() {
     let (paths, accounts, id) = fixture();
     drop(accounts);
     let root = install::metadata_root(&paths, id).expect("root");
-    assert!(!has_installation_manifest(&paths, id).expect("incomplete"));
+    assert!(
+        installation_manifest(&paths, id)
+            .expect("incomplete")
+            .is_none()
+    );
     complete_installation(&paths, id);
-    assert!(has_installation_manifest(&paths, id).expect("installed"));
+    assert!(
+        installation_manifest(&paths, id)
+            .expect("installed")
+            .is_some()
+    );
     let installed: InstalledLock = read_json(&root, "installed.json")
         .expect("read")
         .expect("manifest");
@@ -18,13 +26,21 @@ fn maintenance_hint_requires_an_owned_manifest_but_not_healthy_cache_files() {
         b"corrupt",
     )
     .expect("corrupt cache");
-    assert!(has_installation_manifest(&paths, id).expect("repairable"));
+    assert!(
+        installation_manifest(&paths, id)
+            .expect("repairable")
+            .is_some()
+    );
     uninstall(&paths, id, &Cancellation::default()).expect("uninstall");
-    assert!(has_installation_manifest(&paths, id).expect("tombstone"));
+    assert!(
+        installation_manifest(&paths, id)
+            .expect("tombstone")
+            .is_some()
+    );
     let mut foreign = installed;
     foreign.instance_id = Uuid::new_v4();
     write_json(&root, "installed.json", &foreign).expect("foreign manifest");
-    assert!(has_installation_manifest(&paths, id).is_err());
+    assert!(installation_manifest(&paths, id).is_err());
     std::fs::remove_dir_all(paths.root()).expect("cleanup");
 }
 use crate::minecraft::{

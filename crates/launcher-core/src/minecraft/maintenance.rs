@@ -26,13 +26,16 @@ pub struct MaintenanceOutcome {
 
 /// Presentation hint only: a recognized owned plan may still need artifact repair.
 /// Tombstones allow native cleanup; repair/uninstall also check installation state.
-pub(crate) fn has_installation_manifest(paths: &AppPaths, id: Uuid) -> Result<bool, CoreError> {
+pub(crate) fn installation_manifest(
+    paths: &AppPaths,
+    id: Uuid,
+) -> Result<Option<InstalledLock>, CoreError> {
     let root = paths.instance(id)?;
     let Some(installed) = read_json::<InstalledLock>(&root, "installed.json")? else {
-        return Ok(false);
+        return Ok(None);
     };
     validate_manifest(&installed, id)?;
-    Ok(true)
+    Ok(Some(installed))
 }
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
