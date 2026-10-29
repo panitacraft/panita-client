@@ -208,3 +208,50 @@ ignored. All 59 filesystem dependency tests and 70 frontend tests pass. Workspac
 all-target Clippy, workspace formatting, focused dependency formatting and diff
 checks pass. Hosted CI, Linux compilation and installed-product qualification of
 this access-policy change remain pending.
+
+## Access-based Linux data handling (2026-10-29 owner decision)
+
+The owner extends the access-based policy to Linux. Existing Linux directories
+are checked for kind, identity and safe resolution without an exact owner or
+`0700` requirement. Ordinary data capabilities accept accessible regular files
+without exact ownership or `0600` modes; new data files/directories request
+`0666`/`0777` subject to the existing umask and filesystem ACLs. Existing modes
+and ownership are not rewritten. Directory hardening validates rather than
+changing Linux directory modes. macOS behavior remains unchanged.
+
+Private files and atomic temporaries retain effective-UID ownership and exact
+`0600` permissions. Before account/session access, the store validates that the
+containing directory belongs to the effective UID or root and grants no
+group/other write permissions. Named POSIX ACL writers are constrained by the
+group-class permission mask as well. A readable `0755` parent is acceptable;
+a shared writable credential namespace is rejected without changing its ACLs,
+ownership, modes or existing credential bytes.
+
+Normal and anonymous data staging retain inode/device identity, regular-file
+kind and link-count checks, no-follow traversal, atomic publication and writer
+coordination. Credential staging remains private from creation. The Linux
+proc-descriptor publication fallback is retained. Source data access is not a
+license to follow symlinks, adopt hard-linked files or bypass content verification.
+
+Linux Java uses actual read/execute access rather than exact ownership or `0700`.
+The kernel checks effective-user execute permission. Newly downloaded artifacts
+gain owner-execute while preserving their other creation-mode bits; already
+executable accessible files are not chmodded. Set-user-ID/set-group-ID runtimes,
+redirects and hard links remain rejected. Download hashes and installed plans
+remain authoritative. Processor outputs use ordinary access on Linux/Windows;
+macOS retains its prior policy.
+
+Regression tests cover readable ordinary modes, foreign-owner metadata, normal
+and forced-walk resolution, private-file isolation, unsafe credential namespaces,
+runtime execute rights, privilege bits, repair and failed-download preservation.
+The receipt test explicitly changes timestamps when asserting a rehash, avoiding
+dependence on Linux filesystem clock ticks. This section supersedes previous
+statements in this patch note that Linux data access still requires private modes.
+
+Validation on 2026-10-29: normal-user Debian WSL passes all 55 filesystem tests
+under default and force-walk configurations, 409 core unit tests with one existing
+live test ignored, two cross-process tests, and core all-target Clippy with
+warnings denied. Workspace/dependency formatting and diff checks pass. Windows
+workspace compilation and the shared receipt regression also pass. These are
+source-level results in a separate build environment; BOX was not used for
+development, and installed-product/game-launch qualification remains pending.

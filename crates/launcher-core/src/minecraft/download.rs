@@ -974,7 +974,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn executable_runtime_download_reuse_and_repair_preserve_protection() {
+    async fn executable_runtime_download_reuse_and_repair_preserve_umask_and_execute_access() {
         use std::os::unix::fs::PermissionsExt;
         let bytes = b"verified runtime executable";
         let server = Server::new(bytes.to_vec(), bytes.len(), Duration::ZERO);
@@ -987,6 +987,15 @@ mod tests {
         };
         let cancel = Cancellation::default();
         let local = paths.root().join(&file.destination);
+        PrivateDir::ensure_data(paths.root()).unwrap_or_else(|_| panic!("data root"));
+        let probe = paths.root().join("mode-probe");
+        std::fs::write(&probe, b"ordinary permissions").unwrap_or_else(|_| panic!("mode probe"));
+        let expected_mode = (std::fs::metadata(&probe)
+            .unwrap_or_else(|_| panic!("probe metadata"))
+            .permissions()
+            .mode()
+            & 0o7777)
+            | 0o100;
         for _ in 0..2 {
             downloader
                 .cache_planned(&paths, &file, &cancel, &|_| {})
@@ -998,7 +1007,7 @@ mod tests {
                     .permissions()
                     .mode()
                     & 0o7777,
-                0o700
+                expected_mode
             );
             let (directory, leaf) =
                 ensure_parent(paths.root(), &file.destination).unwrap_or_else(|_| panic!("parent"));
@@ -1006,7 +1015,10 @@ mod tests {
                 verified_planned_file(&directory, &leaf, &file.artifact, true).unwrap_or(false)
             );
             assert!(
-                directory.open_file(&leaf).is_err(),
+                PrivateDir::open(local.parent().unwrap_or_else(|| panic!("runtime parent")))
+                    .unwrap_or_else(|_| panic!("private metadata view"))
+                    .open_file(&leaf)
+                    .is_err(),
                 "metadata policy must remain 0600"
             );
         }
@@ -1040,7 +1052,7 @@ mod tests {
                 .permissions()
                 .mode()
                 & 0o7777,
-            0o700
+            expected_mode
         );
         std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
     }

@@ -458,11 +458,11 @@ impl Workspace {
                 let mut options = cap_std::fs::OpenOptions::new();
                 options.read(true).write(true).follow(FollowSymlinks::No);
                 let file = directory.open_with(part, &options).map_err(io)?.into_std();
-                // Windows outputs use ordinary access rights. Unix retains its
-                // owner-only executable/data policy inside this fresh workspace.
-                #[cfg(not(windows))]
+                // Windows/Linux outputs use ordinary access rights. macOS retains
+                // its private-file policy inside this fresh workspace.
+                #[cfg(target_os = "macos")]
                 private_fs::harden(&file).map_err(map_private_error)?;
-                #[cfg(windows)]
+                #[cfg(not(target_os = "macos"))]
                 private_fs::verify_data(&file).map_err(map_private_error)?;
                 return Ok(file);
             }

@@ -26,13 +26,24 @@ fn chmod(p: &Path, mode: u32) {
 fn relative_directory_open_preserves_missing_insecure_and_redirected_entries() {
     each(|dir, root| {
         let child = dir.create_dir("child").unwrap();
-        child.create("proof").unwrap().write_all(b"retained").unwrap();
+        child
+            .create("proof")
+            .unwrap()
+            .write_all(b"retained")
+            .unwrap();
         dir.open_dir("child").unwrap().open_file("proof").unwrap();
         assert!(dir.open_dir("missing").is_err());
         assert!(!root.join("missing").exists());
         chmod(&root.join("child"), 0o755);
-        assert!(matches!(dir.open_dir("child"), Err(Error::InsecurePermissions { .. })));
-        assert_eq!(std::fs::metadata(root.join("child")).unwrap().permissions().mode() & 0o7777, 0o755);
+        dir.open_dir("child").unwrap();
+        assert_eq!(
+            std::fs::metadata(root.join("child"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777,
+            0o755
+        );
         chmod(&root.join("child"), 0o700);
         symlink(root.join("child"), root.join("redirect")).unwrap();
         assert!(dir.open_dir("redirect").is_err());
@@ -100,7 +111,7 @@ fn proc_publication_preserves_existing_file_and_redirected_destination() {
 }
 
 #[test]
-fn proc_publication_rejects_loosened_temp_or_parent_permissions() {
+fn proc_publication_rejects_loosened_private_temp_but_accepts_readonly_public_parent() {
     each(|dir, root| {
         let temp = dir
             .anonymous_temp()
@@ -114,11 +125,16 @@ fn proc_publication_rejects_loosened_temp_or_parent_permissions() {
         assert!(!root.join("unsafe-temp").exists());
         fs::fchmod(&temp.file, Mode::from_raw_mode(0o600)).unwrap();
         chmod(root, 0o755);
-        assert!(matches!(
-            dir.link_temp_via_proc(&temp, OsStr::new("unsafe-parent")),
-            Err(Error::InsecurePermissions { .. })
-        ));
-        assert!(!root.join("unsafe-parent").exists());
+        dir.verify_private_namespace().unwrap();
+        dir.link_temp_via_proc(&temp, OsStr::new("safe-private-file"))
+            .unwrap();
+        // The synthetic publication added a link to the still-anonymous handle.
+        let mut temp = temp;
+        temp.links = 1;
+        dir.open_file("safe-private-file")
+            .unwrap()
+            .verify()
+            .unwrap();
         chmod(root, 0o700);
         temp.verify().unwrap();
     });
@@ -146,15 +162,17 @@ fn symlink_and_directory_replacement_stress() {
 }
 
 #[test]
-fn directory_creation_rejects_replaceable_parents_without_mutating_them() {
+fn data_directory_creation_accepts_accessible_parents_while_namespace_checks_stay_strict() {
     let temp = tempfile::tempdir().unwrap();
     chmod(temp.path(), 0o777);
     let root = temp.path().join("private");
-    assert!(matches!(
-        PrivateDir::ensure(&root),
-        Err(Error::UntrustedCreationParent)
-    ));
-    assert!(!root.exists());
+    PrivateDir::ensure_data(&root).unwrap();
+    let parent = PrivateDir::open_data(temp.path()).unwrap();
+    assert!(parent.verify_private_namespace().is_err());
+    assert_eq!(
+        std::fs::metadata(temp.path()).unwrap().permissions().mode() & 0o7777,
+        0o777
+    );
     chmod(temp.path(), 0o1777);
     PrivateDir::ensure(&root).unwrap();
     chmod(temp.path(), 0o777);
@@ -223,27 +241,17 @@ fn strict_modes_and_no_implicit_repair() {
                 mode
             );
         }
-        dir.create_dir("nested").unwrap();
+        let nested = dir.create_dir("nested").unwrap();
+        nested.create("key").unwrap();
         for mode in [0o755, 0o4700, 0o2700, 0o1700] {
             chmod(&root.join("nested"), mode);
-            assert!(matches!(
-                dir.ensure_dir("nested"),
-                Err(Error::InsecurePermissions { .. })
-            ));
-            assert!(matches!(
-                dir.create("nested/key"),
-                Err(Error::InsecurePermissions { .. })
-            ));
+            dir.ensure_dir("nested").unwrap();
+            dir.open_file("nested/key").unwrap().verify().unwrap();
         }
         chmod(root, 0o755);
-        assert!(matches!(
-            PrivateDir::ensure(root),
-            Err(Error::InsecurePermissions { .. })
-        ));
-        assert!(matches!(
-            dir.create("other"),
-            Err(Error::InsecurePermissions { .. })
-        ));
+        PrivateDir::ensure(root).unwrap();
+        dir.verify_private_namespace().unwrap();
+        dir.create("other").unwrap().verify().unwrap();
     });
 }
 #[test]
@@ -442,11 +450,12 @@ fn hardening_is_explicit_and_does_not_repair_hard_links() {
         file.harden().unwrap();
         file.verify().unwrap();
         chmod(root, 0o755);
-        assert!(matches!(
-            dir.create("blocked"),
-            Err(Error::InsecurePermissions { .. })
-        ));
+        dir.create("ordinary-parent").unwrap();
         dir.harden().unwrap();
+        assert_eq!(
+            std::fs::metadata(root).unwrap().permissions().mode() & 0o7777,
+            0o755
+        );
         dir.create("allowed").unwrap();
         std::fs::hard_link(root.join("key"), root.join("alias")).unwrap();
         chmod(&root.join("key"), 0o644);
@@ -462,5 +471,48 @@ fn hardening_is_explicit_and_does_not_repair_hard_links() {
                 & 0o7777,
             0o644
         );
+    });
+}
+
+#[test]
+fn ordinary_data_preserves_modes_and_accepts_foreign_owner_metadata_without_losing_guards() {
+    each(|dir, root| {
+        chmod(root, 0o755);
+        std::fs::write(root.join("pack.zip"), b"pack data").unwrap();
+        chmod(&root.join("pack.zip"), 0o644);
+        let data = PrivateDir::open_data(root).unwrap();
+        data.open_file("pack.zip").unwrap().verify().unwrap();
+        assert!(dir.open_file("pack.zip").is_err());
+        data.write_atomic_durable("new.dat", b"ordinary bytes")
+            .unwrap();
+        data.open_file("new.dat").unwrap().verify().unwrap();
+        assert_eq!(
+            std::fs::metadata(root.join("pack.zip"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777,
+            0o644
+        );
+        let file = data.open_file("pack.zip").unwrap();
+        let mut stat = fs::fstat(&file).unwrap();
+        stat.st_uid = stat.st_uid.wrapping_add(1);
+        validate_data_stat(&stat, false, None, 1).unwrap();
+        assert!(matches!(
+            validate_stat(&stat, false, None),
+            Err(Error::WrongOwner { .. })
+        ));
+        std::fs::hard_link(root.join("pack.zip"), root.join("alias")).unwrap();
+        assert!(matches!(
+            file.verify(),
+            Err(Error::MultipleHardLinks { .. })
+        ));
+        assert!(data.open_file("pack.zip").is_err());
+        symlink("new.dat", root.join("redirect")).unwrap();
+        assert!(data.open_file("redirect").is_err());
+        assert!(data.open_file("../escape").is_err());
+        chmod(root, 0o777);
+        assert!(data.verify_private_namespace().is_err());
+        data.create("allowed-data").unwrap();
     });
 }

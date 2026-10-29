@@ -63,22 +63,26 @@ pub fn verify(file: &std::fs::File) -> Result<()> {
     }
 }
 
-/// Verify an ordinary file's kind, identity metadata and link count. Windows
+/// Verify an ordinary file's kind, identity metadata and link count. Windows/Linux
 /// enforces actual handle access without requiring private ownership or ACLs.
 pub fn verify_data(file: &std::fs::File) -> Result<()> {
     #[cfg(windows)]
     {
         windows::verify_data(file)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        unix::verify_data(file)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     {
         verify(file)
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 impl PrivateDir {
-    /// Unix retains the existing owner-only storage policy.
+    /// macOS retains the existing owner-only storage policy.
     pub fn open_data(path: impl AsRef<std::path::Path>) -> Result<Self> {
         Self::open(path)
     }

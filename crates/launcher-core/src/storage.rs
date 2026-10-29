@@ -275,6 +275,7 @@ pub(crate) fn map_private_error(error: PrivateFsError) -> CoreError {
         PrivateFsError::InsecureAcl
         | PrivateFsError::InsecurePermissions { .. }
         | PrivateFsError::OwnerMismatch
+        | PrivateFsError::UntrustedCreationParent
         | PrivateFsError::WrongOwner { .. } => CoreError::new(ErrorCode::UnsafePermissions),
         _ => CoreError::new(ErrorCode::StorageUnavailable),
     }
@@ -288,6 +289,58 @@ mod tests {
     fn test_paths() -> AppPaths {
         let path = std::env::temp_dir().join(format!("panita-storage-{}", Uuid::new_v4()));
         AppPaths::new(path).unwrap_or_else(|_| panic!("absolute test path"))
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn credential_namespace_allows_readonly_public_modes_but_blocks_other_writers() {
+        use std::os::unix::fs::PermissionsExt;
+        let paths = test_paths();
+        let store = PrivateStore::open(&paths).unwrap_or_else(|_| panic!("private store"));
+        for name in ["accounts.json", "panita-session.json"] {
+            store
+                .transaction(name, |_| Ok((b"synthetic-private-data".to_vec(), ())))
+                .unwrap_or_else(|_| panic!("private fixture"));
+        }
+        std::fs::set_permissions(paths.root(), std::fs::Permissions::from_mode(0o755))
+            .unwrap_or_else(|_| panic!("read-only public parent"));
+        for name in ["accounts.json", "panita-session.json"] {
+            assert_eq!(
+                store.read(name).ok().flatten().as_deref(),
+                Some(b"synthetic-private-data".as_slice())
+            );
+            assert_eq!(
+                std::fs::metadata(paths.root().join(name))
+                    .unwrap_or_else(|_| panic!("file metadata"))
+                    .permissions()
+                    .mode()
+                    & 0o7777,
+                0o600
+            );
+        }
+        std::fs::set_permissions(paths.root(), std::fs::Permissions::from_mode(0o777))
+            .unwrap_or_else(|_| panic!("unsafe parent"));
+        for name in ["accounts.json", "panita-session.json"] {
+            assert_eq!(
+                store.read(name).err().map(|error| error.code()),
+                Some(ErrorCode::UnsafePermissions)
+            );
+            assert!(
+                store
+                    .transaction(name, |_| Ok((b"replacement".to_vec(), ())))
+                    .is_err()
+            );
+            assert_eq!(
+                std::fs::read(paths.root().join(name)).ok().as_deref(),
+                Some(b"synthetic-private-data".as_slice())
+            );
+        }
+        let data = PrivateDir::open_data(paths.root()).unwrap_or_else(|_| panic!("data access"));
+        data.write_atomic_durable("ordinary.dat", b"ordinary bytes")
+            .unwrap_or_else(|_| panic!("ordinary write"));
+        drop(data);
+        drop(store);
+        std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
     }
 
     #[test]
