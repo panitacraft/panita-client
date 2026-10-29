@@ -185,9 +185,9 @@ test('sidebar account faces select an account without opening management', async
 test('offline avatars stay local and Microsoft avatar failures use the same local default', () => {
   const metadata = accounts.accounts[0].metadata;
   expect(avatarUrl(metadata)).toBeNull();
-  expect(avatarUrl({ ...metadata, kind: 'microsoft', profile_id: 'unsafe' })).toBeNull();
+  expect(avatarUrl({ ...metadata, kind: 'microsoft', username: '../unsafe' })).toBeNull();
   const online = { ...metadata, kind: 'microsoft' as const, profile_id: '12345678-1234-1234-1234-123456789abc' };
-  expect(avatarUrl(online)).toBe('https://crafatar.com/avatars/12345678123412341234123456789abc?size=48&overlay');
+  expect(avatarUrl(online)).toBe('https://render.crafty.gg/2d/head/Jugador?cors=true');
   const { container, rerender } = render(<AccountAvatar metadata={metadata} />);
   const fallback = container.querySelector('img')!.getAttribute('src');
   expect(fallback).not.toMatch(/^https?:/);
@@ -262,4 +262,22 @@ test('loader badges use known icons and do not guess a missing loader', () => {
   expect(container.querySelector('.loader-icon')).toBeNull();
   rerender(<InstanceBadges instance={{ ...first, source: { type: 'vanilla' } }} />);
   expect(screen.queryByText('Modpack')).toBeNull();
+});
+
+test('instance tooltips reuse game and loader badges with exact installed loader versions', async () => {
+  catalog.instances[0] = { ...first, installedLoader: { name: 'neoforge', version: '21.1.264' }, source: { ...first.source, label: 'v1.2.3' } };
+  mount();
+  const article = await screen.findByRole('article', { name: 'Aventura' });
+  expect(within(article).getByText('NeoForge 21.1.264')).toBeTruthy();
+  expect(within(article).getByText('v1.2.3')).toBeTruthy();
+  expect(within(article).queryByText('vv1.2.3')).toBeNull();
+  const rail = screen.getByRole('button', { name: 'Aventura: Lista para jugar' });
+  fireEvent.focus(rail);
+  const tooltip = await screen.findByRole('tooltip');
+  expect(within(tooltip).getByText('Aventura')).toBeTruthy();
+  expect(within(tooltip).getByText(first.description)).toBeTruthy();
+  expect(within(tooltip).getByText('Minecraft 1.21.1')).toBeTruthy();
+  expect(within(tooltip).getByText('NeoForge 21.1.264')).toBeTruthy();
+  expect(within(tooltip).getByText('v1.2.3')).toBeTruthy();
+  expect(tooltip.querySelector('.game-icon')).not.toBeNull();
 });

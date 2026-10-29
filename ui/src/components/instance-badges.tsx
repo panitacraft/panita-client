@@ -1,7 +1,7 @@
 import { Blocks } from 'lucide-react';
 import type { CatalogInstance } from '../preview-catalog';
 import { isPack } from '../library-state';
-import minecraft from '../assets/brands/minecraft.png';
+import minecraft from '../assets/brands/minecraft.webp';
 import neoforge from '../assets/brands/neoforge.png';
 import fabric from '../assets/brands/fabric.png';
 import quilt from '../assets/brands/quilt.svg';
@@ -14,11 +14,15 @@ const loaders: Record<string, { name: string; icon: string }> = {
 
 export function InstanceBadges({ instance }: { instance: CatalogInstance }) {
   const pack = isPack(instance);
-  const loaderId = instance.source?.loader ?? instance.installedSource?.loader;
+  const loaderId = instance.installedLoader?.name ?? instance.source?.loader ?? instance.installedSource?.loader;
   const loader = loaderId ? loaders[loaderId] : undefined;
+  const loaderVersion = instance.installedLoader?.version;
+  const label = instance.source?.label?.trim();
+  const versionLabel = label ? `v${label.replace(/^v(?=\d)/i, '')}` : null;
   return <>
     {instance.minecraftVersion && <span><img className="game-icon" src={minecraft} alt="" aria-hidden="true" />Minecraft {instance.minecraftVersion}</span>}
-    {pack && loaderId && <span>{loader ? <img className="loader-icon" src={loader.icon} alt="" aria-hidden="true" /> : <Blocks aria-hidden="true" />}{loader?.name ?? loaderId}</span>}
-    {pack && (!loaderId || instance.source?.label) && <span>Modpack{instance.source?.label ? ` ${instance.source.label}` : ''}</span>}
+    {pack && loaderId && <span title={loaderVersion ? 'Loader de la instalación local' : undefined}>{loader ? <img className="loader-icon" src={loader.icon} alt="" aria-hidden="true" /> : <Blocks aria-hidden="true" />}{loader?.name ?? loaderId}{loaderVersion ? ` ${loaderVersion}` : ''}</span>}
+    {pack && versionLabel && <span className="pack-version">{versionLabel}</span>}
+    {pack && !loaderId && !versionLabel && <span>Modpack</span>}
   </>;
 }

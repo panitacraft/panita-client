@@ -2,10 +2,10 @@
 
 These local assets identify Minecraft and the supported loaders. They are not
 Panita branding, and their trademarks remain with their respective owners.
-Downloaded on 2026-10-29 without modifying the supplied artwork.
+Added on 2026-10-29 without modifying the supplied artwork.
 
-- Minecraft: Mojang/Microsoft,
-  https://www.minecraft.net/etc.clientlibs/minecraftnet/clientlibs/clientlib-site/resources/favicon-32x32.png
+- Minecraft: Mojang/Microsoft grass-block artwork supplied by the owner as
+  `minecraft_logo.webp`; copied as `minecraft.webp` without altering the image.
 - NeoForge: the NeoForged project,
   https://neoforged.net/img/authors/neoforged.png
 - Fabric: FabricMC, https://fabricmc.net/assets/logo.png

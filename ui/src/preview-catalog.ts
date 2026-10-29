@@ -16,6 +16,8 @@ export interface CatalogInstance {
   source?: PackSource;
   /** What the installation was made from; for a pack, its recorded pin. */
   installedSource?: PackSource | null;
+  /** Exact loader from the validated local installation, never inferred from a catalog pin. */
+  installedLoader?: { name: string; version: string } | null;
 }
 
 export interface PackSource {
@@ -54,7 +56,11 @@ const previewInstances: CatalogInstance[] = [
     enabled: false,
     availability: 'disabled',
   },
-  { ...defaults, id: '7fd3f5a0-876d-4ca6-98a2-c4e4bedbbec2', name: 'Modpack de ejemplo', description: 'Una aventura con mods para jugar con tus amigos.', minecraftVersion: '1.21.1', enabled: true, source: { type: 'custom', loader: 'neoforge', label: '1.0', current_version_id: 'preview-pack' } },
+  { ...defaults, id: '7fd3f5a0-876d-4ca6-98a2-c4e4bedbbec2', name: 'Modpack de ejemplo', description: 'Una aventura con mods para jugar con tus amigos.', minecraftVersion: '1.21.1', enabled: true,
+    localState: 'installed', hasInstallationManifest: true,
+    source: { type: 'custom', loader: 'neoforge', label: '1.0', current_version_id: 'preview-pack' },
+    installedSource: { type: 'custom', loader: 'neoforge', label: '1.0', current_version_id: 'preview-pack' },
+    installedLoader: { name: 'neoforge', version: '21.1.264' } },
 ];
 
 export async function loadPreviewCatalog(): Promise<CatalogOverview> {

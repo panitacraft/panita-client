@@ -5,8 +5,8 @@ import defaultSkin from '../assets/default-skin.svg';
 /** Offline accounts never request a skin from an online service. */
 export function avatarUrl(metadata: AccountView['metadata'] | null): string | null {
   if (metadata?.kind !== 'microsoft') return null;
-  const id = metadata.profile_id.replaceAll('-', '');
-  return /^[a-f0-9]{32}$/i.test(id) ? `https://crafatar.com/avatars/${id}?size=48&overlay` : null;
+  const name = metadata.username;
+  return /^[A-Za-z0-9_]{3,16}$/.test(name) ? `https://render.crafty.gg/2d/head/${encodeURIComponent(name)}?cors=true` : null;
 }
 
 export function AccountAvatar({ metadata }: { metadata: AccountView['metadata'] | null }) {

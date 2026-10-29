@@ -94,16 +94,22 @@ export function Launcher() {
       </Button>
       <div className="rail-divider" />
       <nav className="rail-instances" aria-label="Instancias">
-        {instances.map(instance => <Button key={instance.id} variant="ghost"
+        {instances.map(instance => <Hint key={instance.id} side="right" sideOffset={20} text={<div className="instance-hint">
+          <strong>{instance.name}</strong>
+          <p>{instance.description}</p>
+          <div className="instance-tags"><InstanceBadges instance={instance} />
+            {instanceStatus(instance, liveEntry(instance.id)) !== 'Sin instalar' && <span className={`instance-status ${instance.availability === 'disabled' ? 'status-warning' : ''}`}>{instance.availability === 'disabled' && <LockKeyhole aria-hidden="true" />}{instanceStatus(instance, liveEntry(instance.id))}</span>}
+          </div>
+        </div>}><Button variant="ghost"
           className={`rail-instance size-13 p-0 ${instance.id === selectedId && page === 'library' ? 'is-selected' : ''} ${instance.availability === 'disabled' ? 'is-disabled' : ''}`}
           aria-label={`${instance.name}: ${instanceStatus(instance, liveEntry(instance.id))}`}
           aria-current={instance.id === selectedId && page === 'library' ? 'page' : undefined}
-          title={instance.name} disabled={!preferences || preferences.busy}
+          disabled={!preferences || preferences.busy}
           onClick={() => { setPage('library'); if (instance.id !== preferences?.id) void preferences?.select(instance.id); }}>
           <CatalogArtwork url={instance.iconUrl} />
           {liveEntry(instance.id)?.phase === 'running' && <Gamepad2 className="rail-lock" aria-hidden="true" />}
           {instance.availability === 'disabled' && <LockKeyhole className="rail-lock" aria-hidden="true" />}
-        </Button>)}
+        </Button></Hint>)}
         {catalog.kind === 'loading' && <span className="rail-placeholder"><Blocks aria-hidden="true" /></span>}
       </nav>
       <div className="rail-bottom">
