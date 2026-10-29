@@ -86,3 +86,47 @@ References:
 
 Remove this patch only after an upstream release includes an equivalent fix and
 passes the same storage, migration, concurrency and Windows regression checks.
+
+## Windows directory inheritance (2026-10-28 owner decision)
+
+Windows directories now use normal OS permission inheritance, as in Prism's
+ordinary directory-creation approach. Directory capabilities still verify the
+current user's ownership, object identity, filesystem capability and absence of
+reparse points. They no longer require or write a protected owner-only directory
+ACL. Explicit directory hardening validates the object without replacing its ACL.
+Unix behavior is unchanged.
+
+Private files, including account/session documents, coordination files and atomic
+temporaries, retain their explicit protected owner-only descriptors and strict
+validation. Broad inherited directory permissions cannot enter those files.
+
+On opening an existing directory, retire only the exact protected single-user,
+full-control, non-inheritable ACL written by older builds. A handle-relative
+security open enables inheritance and removes that legacy explicit ACL. Windows
+propagates inherited permissions to unprotected descendants, including existing
+player files with empty ACLs. Preserve all other custom directory ACLs. No file
+contents are read, replaced or deleted by migration, and no elevation is used.
+
+Application-profile initialization walks existing directories once under its
+store writer lock (ordinary instance metadata stores never publish the marker), opens each
+child relative to a retained parent, rejects redirected entries and bounds depth
+and directory count. Only a completed walk publishes the protected schema-1
+`directory-permissions.json` marker. Failed walks remain retryable; unknown or
+corrupt markers are preserved and reported. Protected child directories are
+migrated parent first. Root acquisition can retire its own legacy ACL before
+the writer lock is acquired; this operation is idempotent across processes.
+
+Regression coverage includes manually created resource-pack files, recovery of
+an existing empty-ACL JAR, preservation of private synthetic account metadata,
+custom directory ACLs, unchanged junction targets, restart and marker validation.
+Existing historical paragraphs above describe earlier implementations and test
+results; this section supersedes their Windows directory-ACL policy.
+
+Local Windows verification: all 56 dependency tests and 413 core unit tests pass
+(one existing live-catalog integration test is intentionally ignored). The tests
+use synthetic temporary profiles, not real account/session documents. The new
+Windows dependency-test CI step keeps the inheritance regressions in the Windows
+matrix. These results do not qualify an installed build on Windows 10 or Linux;
+Unix permission behavior has not changed.
+Older launcher builds that enforce the former Windows directory ACL contract can
+reject a migrated profile; continue using an updated build after migration.

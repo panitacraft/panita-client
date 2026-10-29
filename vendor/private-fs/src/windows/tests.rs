@@ -38,6 +38,123 @@ fn drive_root_bootstrap_creates_and_reopens_a_fresh_private_store() {
 }
 
 #[test]
+fn ordinary_player_files_inherit_access_and_private_files_remain_protected() {
+    let (temp, dir) = fixture();
+    let game = dir.create_dir("minecraft").unwrap();
+    let root = temp.path().join("private/minecraft");
+    std::fs::create_dir(root.join("resourcepacks")).unwrap();
+    let pack = root.join("resourcepacks/test.zip");
+    std::fs::write(&pack, b"player pack").unwrap();
+    assert_eq!(std::fs::read(&pack).unwrap(), b"player pack");
+    std::fs::write(&pack, b"edited pack").unwrap();
+    std::fs::remove_file(&pack).unwrap();
+    dir.create("synthetic-account").unwrap().verify().unwrap();
+    game.create("metadata").unwrap().verify().unwrap();
+}
+
+#[test]
+fn legacy_directory_migration_restores_empty_acl_files_without_changing_private_metadata() {
+    let (temp, dir) = fixture();
+    let game = dir.create_dir("minecraft").unwrap();
+    let mods = game.create_dir("mods").unwrap();
+    let account = dir.create("synthetic-account").unwrap();
+    let mut file = mods.create("player.jar").unwrap();
+    file.write_all(b"preserved player bytes").unwrap();
+    // Reproduce an old private game root, an ordinary non-inheritable mods
+    // folder and the empty unprotected ACL observed on the reported JAR.
+    for directory in [&dir, &game] {
+        set_acl(directory, &[(&dir.user, FILE_ALL_ACCESS as u32, 0)], true);
+    }
+    set_acl(&mods, &[(&dir.user, FILE_ALL_ACCESS as u32, 0)], false);
+    set_acl(&file, &[], false);
+    let jar = temp.path().join("private/minecraft/mods/player.jar");
+    assert!(std::fs::read(&jar).is_err());
+    let reopened = PrivateDir::open(temp.path().join("private")).unwrap();
+    reopened.open_dir("minecraft").unwrap();
+    assert_eq!(std::fs::read(&jar).unwrap(), b"preserved player bytes");
+    std::fs::write(&jar, b"edited").unwrap();
+    std::fs::remove_file(jar).unwrap();
+    account.verify().unwrap();
+    // Reopening is idempotent and new ordinary files stay writable.
+    let game = reopened.open_dir("minecraft").unwrap();
+    let pack = temp.path().join("private/minecraft/new-pack.zip");
+    std::fs::write(&pack, b"new pack").unwrap();
+    std::fs::remove_file(pack).unwrap();
+    game.create("metadata").unwrap().verify().unwrap();
+}
+
+#[test]
+fn legacy_acl_migration_does_not_change_a_junction_target() {
+    let (_temp, dir) = fixture();
+    let (outside_temp, outside) = fixture();
+    let other = world();
+    // An unprotected target must not inherit through the junction either.
+    set_acl(
+        &outside,
+        &[
+            (&outside.user, FILE_ALL_ACCESS as u32, 0),
+            (&other, FILE_READ_ATTRIBUTES as u32, 0),
+        ],
+        false,
+    );
+    let link = dir.create_dir("redirect").unwrap();
+    junction(&link, &outside_temp.path().join("private"));
+    let before = acl_bytes(&outside);
+    set_acl(&dir, &[(&dir.user, FILE_ALL_ACCESS as u32, 0)], true);
+    security::migrate_directory(&dir, &dir.user).unwrap();
+    assert_eq!(acl_bytes(&outside), before);
+    assert!(matches!(
+        security::verify(&outside, &outside.user),
+        Err(Error::InsecureAcl)
+    ));
+    assert!(matches!(dir.open_dir("redirect"), Err(Error::PathRedirect)));
+}
+
+fn acl_bytes(handle: impl AsHandle) -> Vec<u8> {
+    let mut acl = ptr::null_mut();
+    let mut descriptor = ptr::null_mut();
+    // SAFETY: live handle and writable outputs. Copy the valid ACL before freeing
+    // the self-relative security descriptor allocated by Windows.
+    unsafe {
+        assert_eq!(
+            GetSecurityInfo(
+                handle.as_handle().as_raw_handle(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION as u32,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                &mut acl,
+                ptr::null_mut(),
+                &mut descriptor
+            ),
+            0
+        );
+        assert!(!acl.is_null());
+        let bytes = std::slice::from_raw_parts(acl.cast::<u8>(), (*acl).AclSize as usize).to_vec();
+        LocalFree(descriptor);
+        bytes
+    }
+}
+
+#[test]
+fn custom_directory_acl_is_not_replaced() {
+    let (_temp, dir) = fixture();
+    let other = world();
+    set_acl(
+        &dir,
+        &[
+            (&dir.user, FILE_ALL_ACCESS as u32, 0),
+            (&other, FILE_READ_ATTRIBUTES as u32, 0),
+        ],
+        true,
+    );
+    let before = acl_bytes(&dir);
+    security::migrate_directory(&dir, &dir.user).unwrap();
+    dir.harden().unwrap();
+    assert_eq!(acl_bytes(&dir), before);
+}
+
+#[test]
 fn retained_directory_handles_allow_internal_rename_target_open() {
     use std::os::windows::fs::OpenOptionsExt;
     let (temp, dir) = fixture();
@@ -205,8 +322,8 @@ fn round_trip_private_creation_and_noninheritance() {
     file.read_to_string(&mut contents).unwrap();
     assert_eq!(contents, "secret");
     file.verify().unwrap();
-    security::verify(&dir, &dir.user).unwrap();
-    security::verify(&nested, &dir.user).unwrap();
+    security::verify_owner(&dir, &dir.user).unwrap();
+    security::verify_owner(&nested, &dir.user).unwrap();
     assert_eq!(
         std::fs::read(temp.path().join(r"private\nested\key")).unwrap(),
         b"secret"
@@ -262,11 +379,11 @@ fn inherited_permissive_parent_cannot_broaden_new_objects() {
         ],
         true,
     );
-    assert!(matches!(dir.create("blocked"), Err(Error::InsecureAcl)));
-    // Root acquisition permits public ancestors, but supplies its own protected
-    // DACL in the creation syscall. The parent's inheritable grants cannot enter it.
+    dir.create("protected-file").unwrap().verify().unwrap();
+    // Directories retain ordinary Windows ACLs; sensitive files are protected
+    // at creation even when an ancestor has broader inheritable grants.
     let private = PrivateDir::ensure(_temp.path().join("private/child")).unwrap();
-    security::verify(&private, &private.user).unwrap();
+    security::verify_owner(&private, &private.user).unwrap();
     private.create("key").unwrap().verify().unwrap();
 }
 #[test]
@@ -470,7 +587,7 @@ fn hardening_is_explicit_descriptor_bound_and_revalidated() {
     replacement.verify().unwrap();
     assert_eq!(std::fs::read(root.join("old")).unwrap(), b"original");
     set_acl(&dir, &[(&other, FILE_ALL_ACCESS as u32, 0)], false);
-    assert!(matches!(dir.create("blocked"), Err(Error::InsecureAcl)));
+    dir.create("protected-file").unwrap().verify().unwrap();
     dir.harden().unwrap();
     dir.create("ok").unwrap();
     std::fs::hard_link(root.join("old"), root.join("alias")).unwrap();
@@ -510,13 +627,20 @@ fn empty_and_null_dacls_and_inheritable_aces_are_rejected() {
     file.harden().unwrap();
     file.verify().unwrap();
     set_acl(
+        &file,
+        &[(&dir.user, FILE_ALL_ACCESS as u32, OBJECT_INHERIT_ACE as u32)],
+        true,
+    );
+    assert!(matches!(file.verify(), Err(Error::InsecureAcl)));
+    file.harden().unwrap();
+    set_acl(
         &dir,
         &[(&dir.user, FILE_ALL_ACCESS as u32, OBJECT_INHERIT_ACE as u32)],
         true,
     );
-    assert!(matches!(dir.create("new-key"), Err(Error::InsecureAcl)));
+    dir.create("new-key").unwrap().verify().unwrap();
     dir.harden().unwrap();
-    dir.create("new-key").unwrap();
+    dir.create("another-key").unwrap();
 }
 #[test]
 fn unpaired_utf16_names_are_not_lossily_converted() {

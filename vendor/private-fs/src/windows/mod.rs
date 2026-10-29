@@ -23,7 +23,7 @@ use std::{
 };
 
 #[derive(Debug)]
-/// A verified private directory retained as a capability, independent of its name.
+/// An owner-verified directory with normal Windows permission inheritance.
 pub struct PrivateDir {
     handle: OwnedHandle,
     id: nt::Identity,
@@ -54,9 +54,9 @@ impl PrivateDir {
     pub fn set_hidden(&self) -> Result<()> {
         nt::hide(&self.handle, true, self.id, &self.user)
     }
-    /// Explicitly restore owner-only access through this retained handle.
+    /// Verify this directory without replacing its ordinary Windows permissions.
     pub fn harden(&self) -> Result<()> {
-        harden(&self.handle, true, self.id, &self.user)
+        self.check_private()
     }
     /// Open and verify a root without following ancestor reparse points.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -130,6 +130,7 @@ impl PrivateDir {
             },
         )?;
         let id = nt::validate(&handle, true, None, user)?;
+        security::migrate_directory(&handle, user)?;
         Ok(Self {
             handle,
             id,
