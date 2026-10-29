@@ -5,6 +5,7 @@ import { Launcher } from '../src/launcher';
 import { PlayProvider } from '../src/play';
 import { PreferencesProvider } from '../src/settings';
 import { CatalogArtwork } from '../src/components/catalog-artwork';
+import { AccountAvatar, avatarUrl } from '../src/components/account-avatar';
 import type { CatalogOverview } from '../src/preview-catalog';
 import type { PlayEntry, PlaySnapshot } from '../src/play-state';
 
@@ -19,6 +20,7 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: async (name: string, callback:
 
 let catalog: CatalogOverview;
 let play: PlaySnapshot;
+let accounts: { revision: number; selected_account_id: string; login_pending: boolean; login_error: null; accounts: { metadata: { account_id: string; kind: 'offline' | 'microsoft'; username: string; profile_id: string; oauth_client_id: null }; status: string; error: null; persisted: boolean }[] };
 const first = {
   id: 'pack-a', name: 'Aventura', description: 'Un mundo para tus amigos.', minecraftVersion: '1.21.1',
   enabled: true, availability: 'enabled' as const, localState: 'installed' as const,
@@ -40,13 +42,15 @@ beforeEach(() => {
   catalog = { instances: [{ ...first }, { ...first, id: 'pack-b', name: 'Otra aventura' }], stale: false, cacheWarning: null, registryWarning: null };
   play = { revision: 0, processSessionId: 'test', closeBlocked: false, gracefulStopSupported: true, instances: [] };
   backend.listeners.clear();
+  accounts = { revision: 1, selected_account_id: 'account', login_pending: false, login_error: null, accounts: [{ metadata: { account_id: 'account', kind: 'offline', username: 'Jugador', profile_id: 'profile', oauth_client_id: null }, status: 'offline', error: null, persisted: true }] };
   backend.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     switch (command) {
       case 'initialize': return;
       case 'catalog_snapshot': return catalog;
       case 'play_snapshot': return play;
       case 'settings_snapshot': return { instanceId: args?.instanceId ?? null, instance: null, windowWarning: null, global: { schema_version: 2, ram_mib: 4096, extra_jvm_args: [], java_path_override: null, show_console_on_start: false, window_size: { width: 1280, height: 720 }, launcher: { selected_instance_id: 'pack-a', window: null } } };
-      case 'account_snapshot': return { revision: 1, selected_account_id: 'account', login_pending: false, login_error: null, accounts: [{ metadata: { account_id: 'account', kind: 'offline', username: 'Jugador', profile_id: 'profile', oauth_client_id: null }, status: 'offline', error: null, persisted: true }] };
+      case 'account_snapshot': return accounts;
+      case 'select_account': accounts = { ...accounts, revision: accounts.revision + 1, selected_account_id: String(args?.accountId) }; return;
       case 'content_cache_size': return 0;
       case 'pack_version_names': return { installed: 'Uno', available: 'Dos' };
       case 'pack_files': return { files: [manualFile], complete: false };
@@ -61,8 +65,8 @@ afterEach(cleanup);
 test('navigation preserves account input and settings drafts, and instance settings are separate', async () => {
   const user = userEvent.setup(); mount();
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
-  await user.click(await screen.findByRole('button', { name: 'Cuentas: Jugador', exact: true }));
-  await user.type(screen.getByLabelText('Nombre para jugar sin conexión'), 'OtroJugador');
+  await user.click(await screen.findByRole('button', { name: 'Gestionar cuentas', exact: true }));
+  await user.type(await screen.findByLabelText('Nombre para jugar sin conexión'), 'OtroJugador');
   await user.click(screen.getByRole('button', { name: 'Inicio: tus instancias' }));
   await user.click(screen.getByRole('button', { name: 'Ajustes del launcher' }));
   const ram = await screen.findByLabelText('RAM para Minecraft (MiB)');
@@ -70,12 +74,12 @@ test('navigation preserves account input and settings drafts, and instance setti
   await user.click(screen.getByRole('button', { name: 'Inicio: tus instancias' }));
   await user.click(screen.getByRole('button', { name: 'Ajustes del launcher' }));
   expect((screen.getByLabelText('RAM para Minecraft (MiB)') as HTMLInputElement).value).toBe('8192');
-  await user.click(screen.getByRole('button', { name: 'Cuentas: Jugador', exact: true }));
+  await user.click(screen.getByRole('button', { name: 'Gestionar cuentas', exact: true }));
   expect((screen.getByLabelText('Nombre para jugar sin conexión') as HTMLInputElement).value).toBe('OtroJugador');
   await user.click(screen.getByRole('button', { name: 'Otra aventura: Lista para jugar' }));
   await screen.findByRole('heading', { name: 'Otra aventura', exact: true });
-  await user.click(within(screen.getByRole('article', { name: 'Otra aventura' })).getByText('Opciones de instancia', { selector: 'summary' }));
-  await user.click(screen.getByRole('button', { name: 'Ajustes de la instancia', exact: true }));
+  await user.click(within(screen.getByRole('article', { name: 'Otra aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
   expect(screen.getByRole('heading', { name: 'Otra aventura', exact: true })).toBeTruthy();
   expect(screen.queryByRole('heading', { name: 'Caché de archivos de modpacks' })).toBeNull();
 });
@@ -163,4 +167,50 @@ test('missing and failed artwork use a local fallback without removing controls'
   expect(container.querySelector('img')).toBeNull();
   rerender(<CatalogArtwork url="https://cdn.example.com/new.png" />);
   expect(container.querySelector('img')?.getAttribute('referrerpolicy')).toBe('no-referrer');
+});
+
+test('sidebar account faces select an account without opening management', async () => {
+  accounts.accounts.push({ ...accounts.accounts[0], metadata: { ...accounts.accounts[0].metadata, account_id: 'second', username: 'Otro' } });
+  const user = userEvent.setup(); mount();
+  const second = await screen.findByRole('button', { name: 'Seleccionar cuenta: Otro' });
+  await user.click(second);
+  expect(backend.invoke).toHaveBeenCalledWith('select_account', { accountId: 'second' });
+  await waitFor(() => expect(second.getAttribute('aria-pressed')).toBe('true'));
+  expect(screen.getByRole('heading', { name: 'Aventura', exact: true })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Acerca de Panita Client' })).toBeNull();
+  expect(screen.getByText('v0.2.0-alpha')).toBeTruthy();
+});
+
+test('offline avatars stay local and Microsoft avatar failures use the same local default', () => {
+  const metadata = accounts.accounts[0].metadata;
+  expect(avatarUrl(metadata)).toBeNull();
+  expect(avatarUrl({ ...metadata, kind: 'microsoft', profile_id: 'unsafe' })).toBeNull();
+  const online = { ...metadata, kind: 'microsoft' as const, profile_id: '12345678-1234-1234-1234-123456789abc' };
+  expect(avatarUrl(online)).toBe('https://crafatar.com/avatars/12345678123412341234123456789abc?size=48&overlay');
+  const { container, rerender } = render(<AccountAvatar metadata={metadata} />);
+  const fallback = container.querySelector('img')!.getAttribute('src');
+  expect(fallback).not.toMatch(/^https?:/);
+  expect(fallback).toBeTruthy();
+  rerender(<AccountAvatar metadata={online} />);
+  fireEvent.error(container.querySelector('img')!);
+  expect(container.querySelector('img')!.getAttribute('src')).toBe(fallback);
+});
+
+test('disabled status provides its explanation on keyboard focus while its options remain usable', async () => {
+  catalog.instances[0] = { ...first, availability: 'disabled', enabled: false };
+  const user = userEvent.setup(); mount();
+  const card = await screen.findByRole('article', { name: 'Aventura' });
+  const status = within(card).getByText('Deshabilitada');
+  fireEvent.focus(status);
+  await screen.findByRole('tooltip', { name: 'Esta instancia está deshabilitada. Tus mundos y archivos se conservan.' });
+  expect((screen.getByRole('button', { name: 'No disponible para jugar' }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(within(card).getByRole('button', { name: 'Opciones de instancia' }));
+  expect(screen.getByRole('menuitem', { name: 'Ajustes de la instancia' })).toBeTruthy();
+});
+
+test('real artwork replaces the decorative fallback, and a failed banner restores it', () => {
+  const { container } = render(<CatalogArtwork banner url="https://cdn.example.com/banner.png" />);
+  expect(container.querySelector('.hero-brand')).toBeNull();
+  fireEvent.error(container.querySelector('.banner-image')!);
+  expect(container.querySelector('.hero-brand')).not.toBeNull();
 });

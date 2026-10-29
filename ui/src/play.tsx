@@ -1,8 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronDown, Download, Play, RefreshCw, Settings2, Trash2, Wrench } from 'lucide-react';
+import { ChevronDown, Download, Gamepad2, Play, RefreshCw, Settings2, Trash2, Wrench } from 'lucide-react';
 import { Button } from './components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { messageForError } from './errors';
 import { acceptPlaySnapshot, playActive, type PlayPhase, type PlaySnapshot } from './play-state';
 import type { UpdateTarget } from './library-state';
@@ -123,6 +124,15 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     }
   }
 
+  function askUpdate() {
+    if (!updateTarget) return;
+    setUpdateQuestion({ ...updateTarget, backupWorlds: true });
+    if (updateTarget.pack) {
+      setNames(null);
+      void invoke<VersionNames>('pack_version_names', { instanceId }).then(setNames).catch(() => setNames(null));
+    }
+  }
+
   return <div className="play-controls">
     {entry?.operation === 'play' && (running || entry.phase === 'exited') && <button type="button" disabled={busy || !isTauri()} onClick={() => {
       setLogError(null);
@@ -222,23 +232,25 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         </div>
       </div>}
     </>}
-    <div className="instance-actions">
-    {!active && installAllowed && entry?.phase !== 'installed' && <Button className="primary-play" size="lg" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.operation === 'install' ? 'Reintentar instalación' : 'Instalar'}</Button>}
-    {!active && !installAllowed && !updateTarget?.pack && <Button className="primary-play" size="lg" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}><Play aria-hidden="true" />{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</Button>}
     {!active && updateTarget?.pack && <p role="status">Hay una versión nueva de este modpack. Debes actualizarla antes de jugar.</p>}
-    {!active && updateTarget && <Button className={updateTarget.pack ? 'primary-play' : undefined} variant={updateTarget.pack ? 'default' : 'secondary'} size="lg" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {
-      setUpdateQuestion({ ...updateTarget, backupWorlds: true });
-      if (updateTarget.pack) {
-        setNames(null);
-        void invoke<VersionNames>('pack_version_names', { instanceId }).then(setNames).catch(() => setNames(null));
-      }
-    }}><RefreshCw aria-hidden="true" />Actualizar…</Button>}
-    <details className="instance-options"><summary><Settings2 aria-hidden="true" />Opciones de instancia<ChevronDown aria-hidden="true" /></summary><div className="options-list">
-      {onSettings && <Button variant="ghost" onClick={onSettings}><Settings2 aria-hidden="true" />Ajustes de la instancia</Button>}
-      {!active && repairAllowed && <Button variant="ghost" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_repair', { requestId: crypto.randomUUID() })}><Wrench aria-hidden="true" />Reparar archivos</Button>}
-      {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <Button variant="ghost" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void cleanNatives()}><RefreshCw aria-hidden="true" />Limpiar nativos antiguos</Button>}
-      {!active && uninstallAllowed && <Button variant="ghost" className="text-destructive" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => setUninstallQuestion(true)}><Trash2 aria-hidden="true" />Desinstalar…</Button>}
-    </div></details>
+    <div className="instance-actions">
+    <div className="split-button" role="group" aria-label="Controles de la instancia">
+    {!active && installAllowed && entry?.phase !== 'installed' && <Button className="primary-play h-12 rounded-r-none" size="lg" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.operation === 'install' ? 'Reintentar instalación' : 'Instalar'}</Button>}
+    {!active && !installAllowed && !updateTarget?.pack && <Button className="primary-play h-12 rounded-r-none" size="lg" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}><Play aria-hidden="true" />{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</Button>}
+    {!active && updateTarget?.pack && <Button className="primary-play h-12 rounded-r-none" size="lg" disabled={busy || !isTauri() || !play?.snapshot} onClick={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</Button>}
+    {active && <Button className="primary-play h-12 rounded-r-none" size="lg" disabled><Gamepad2 aria-hidden="true" />{running ? 'En ejecución' : 'Preparando…'}</Button>}
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild><Button className="split-trigger h-12 w-12 rounded-l-none p-0" aria-label="Opciones de instancia" title="Opciones de instancia"><ChevronDown aria-hidden="true" /></Button></DropdownMenuTrigger>
+      <DropdownMenuContent className="instance-menu" align="end" sideOffset={8}>
+        {onSettings && <DropdownMenuItem onSelect={onSettings}><Settings2 aria-hidden="true" />Ajustes de la instancia</DropdownMenuItem>}
+        {!active && updateTarget && !updateTarget.pack && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</DropdownMenuItem>}
+        {!active && repairAllowed && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => void act('begin_repair', { requestId: crypto.randomUUID() })}><Wrench aria-hidden="true" />Reparar archivos</DropdownMenuItem>}
+        {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => void cleanNatives()}><RefreshCw aria-hidden="true" />Limpiar nativos antiguos</DropdownMenuItem>}
+        {!active && uninstallAllowed && <><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => setUninstallQuestion(true)}><Trash2 aria-hidden="true" />Desinstalar…</DropdownMenuItem></>}
+        {!onSettings && !repairAllowed && !cleanupAllowed && !uninstallAllowed && !updateTarget && <DropdownMenuItem disabled>No hay opciones disponibles</DropdownMenuItem>}
+      </DropdownMenuContent>
+    </DropdownMenu>
+    </div>
     </div>
     {cleanupText && <p role="status">{cleanupText}</p>}
     {cleanupDetails.length > 0 && <details><summary>Por qué se conservaron estas carpetas</summary>

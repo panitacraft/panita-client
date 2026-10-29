@@ -9,6 +9,8 @@
   --color-secondary-foreground: #F9FFF8;
   --color-muted: #1B1B1B;
   --color-muted-foreground: #BABABA;
+  --color-popover: #252525;
+  --color-popover-foreground: #F9FFF8;
   --color-accent: #E4FFDA;
   --color-accent-foreground: #141414;
   --color-border: #515151;
@@ -63,8 +65,8 @@
   .skip-link { position: fixed; z-index: 100; top: 10px; left: 100px; transform: translateY(-180%); background: #E4FFDA; color: #141414; padding: 10px 18px; border-radius: 6px; }
   .skip-link:focus { transform: none; }
   .instance-rail { display: flex; flex-direction: column; align-items: center; width: 88px; flex-shrink: 0; background: #1B1B1B; border-right: 1px solid #303030; padding: 20px 10px 12px; gap: 18px; }
-  .rail-logo { width: 58px; height: 58px; padding: 0; border: 0; border-radius: 14px; overflow: hidden; flex-shrink: 0; }
-  .rail-logo img { width: 100%; height: 100%; object-fit: contain; }
+  .rail-logo { width: 58px; height: 58px; padding: 0; border: 0; border-radius: 10px; overflow: hidden; flex-shrink: 0; background: transparent; }
+  .rail-logo img { width: 44px; height: 44px; object-fit: contain; }
   .rail-divider { width: 30px; height: 1px; flex-shrink: 0; background: #515151; }
   .rail-instances { display: flex; flex-direction: column; gap: 14px; width: 100%; min-height: 0; overflow: auto; padding: 5px; }
   .rail-instance { position: relative; width: 52px; height: 52px; padding: 0; flex-shrink: 0; border: 1px solid #515151; border-radius: 12px; background: #252525; color: #BABABA; }
@@ -72,31 +74,35 @@
   .rail-instance.is-disabled { opacity: .6; }
   .instance-icon { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
   .rail-lock { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; background: #1B1B1B; border-radius: 4px; padding: 2px; color: #F9FFF8; }
-  .rail-bottom { margin-top: auto; display: flex; align-items: center; flex-direction: column; gap: 12px; }
+  .rail-bottom { margin-top: auto; display: flex; align-items: center; flex-direction: column; gap: 12px; min-height: 0; flex-shrink: 0; }
   .rail-bottom button { border: 0; color: #BABABA; }
   .rail-bottom .is-selected { color: #E4FFDA; background: #303b2b; }
   .rail-version { color: #BABABA; font-size: 10px; max-width: 66px; overflow-wrap: anywhere; text-align: center; }
+  .rail-accounts { display: flex; align-items: center; flex-direction: column; gap: 10px; padding: 4px; max-height: 145px; overflow: auto; }
+  .rail-account { overflow: hidden; border-radius: 8px; flex-shrink: 0; }
+  .rail-account[aria-pressed='true'] { box-shadow: 0 0 0 2px #54A636; }
+  .account-avatar { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; border-radius: inherit; }
   .rail-placeholder { padding: 14px; color: #BABABA; }
   .launcher-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
   .launcher-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 28px; height: 66px; flex-shrink: 0; background: #141414; border-bottom: 1px solid #303030; }
   .launcher-toolbar button { border: 0; }
-  .toolbar-brand { font-size: 13px; letter-spacing: .16em; font-weight: 750; white-space: nowrap; }
-  .toolbar-brand > span { color: #BABABA; font-size: 10px; font-weight: 500; }
-  .toolbar-separator { height: 18px; width: 1px; background: #515151; }
-  .connection-label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #BABABA; }
-  .connection-label svg { width: 14px; height: 14px; color: #A4D58E; }
+  .toolbar-brand { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; letter-spacing: .12em; font-weight: 750; white-space: nowrap; }
+  .toolbar-brand > span { color: #BABABA; font-size: inherit; font-weight: 400; }
+  .connection-indicator { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; color: #A4D58E; border-radius: 6px; }
+  .connection-indicator svg { width: 16px; height: 16px; }
+  .icon-control { display: inline-flex; }
+  .hint-content { max-width: min(310px, calc(100vw - 24px)); font-size: 12px; line-height: 1.5; padding: 9px 12px; box-shadow: 0 8px 24px #0005; }
   .launcher-content { flex: 1; min-height: 0; overflow: auto; outline: none; }
   .launcher-notices:empty { display: none; }
   .launcher-notices { padding: 0 28px; }
   .launcher-notices > [role] { margin: 16px 0; }
   .instance-detail { min-height: 100%; }
-  .instance-hero { position: relative; isolation: isolate; display: flex; align-items: end; min-height: 260px; height: clamp(260px, calc(100dvh - 300px), 560px); overflow: hidden; padding: 40px; background: radial-gradient(ellipse at 80% 20%, #54A63626, transparent 58%), linear-gradient(125deg, #1B1B1B, #192016 60%, #141414); }
+  .instance-hero { position: relative; isolation: isolate; display: flex; align-items: end; min-height: 260px; height: clamp(260px, calc(100dvh - 190px), 650px); overflow: hidden; padding: 40px; background: radial-gradient(ellipse at 80% 20%, #54A63626, transparent 58%), linear-gradient(125deg, #1B1B1B, #192016 60%, #141414); }
   .banner-image { position: absolute; z-index: -3; inset: 0; width: 100%; height: 100%; object-fit: cover; }
   .instance-hero::after { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(0deg, #141414 0%, #141414d9 28%, #14141433 100%); }
   .hero-grid { position: absolute; z-index: -2; inset: 0; opacity: .18; background-image: linear-gradient(#BABABA15 1px, transparent 1px), linear-gradient(90deg, #BABABA15 1px, transparent 1px); background-size: 52px 52px; mask-image: linear-gradient(90deg, transparent 20%, #000); }
   .hero-brand { position: absolute; z-index: -2; top: 10%; right: 10%; height: 68%; max-width: 48%; opacity: .085; transform: rotate(-10deg); }
   .hero-heading { width: 100%; max-width: 760px; }
-  .eyebrow { display: block; color: #A4D58E; font-size: 10px; font-weight: 700; letter-spacing: .24em; margin-bottom: 14px; }
   .hero-heading h1 { font-size: clamp(30px, 4.5vw, 54px); line-height: 1.08; margin-bottom: 14px; overflow-wrap: anywhere; }
   .hero-heading > p { color: #BABABA; max-width: 570px; margin: 0 0 22px; }
   .instance-tags { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -105,25 +111,17 @@
   .instance-tags .instance-status { border-color: #54A63670; color: #E4FFDA; background: #21351c; }
   .instance-tags .status-warning { border-color: #BABABA; color: #BABABA; background: #252525; }
   .instance-workspace { padding: 0 40px 30px; max-width: 1300px; margin: 0 auto; }
-  .instance-info { display: flex; gap: 10px; align-items: start; color: #BABABA; border-top: 1px solid #303030; padding-top: 14px; }
-  .instance-info svg { width: 16px; height: 16px; margin-top: 12px; flex-shrink: 0; }
-  .instance-info p { font-size: 12px; }
   .installed-version { color: #BABABA; font-size: 12px; }
   .instance-actions { display: flex; align-items: start; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
   .instance-actions > [role='status'] { flex-basis: 100%; margin: 0; color: #E4FFDA; }
   .primary-play { min-width: 230px; height: 48px; border: 1px solid transparent; border-radius: 7px; font-size: 15px; font-weight: 750; letter-spacing: .015em; }
   .primary-play:disabled { opacity: .65; }
-  .instance-options { min-width: 210px; max-width: 100%; }
-  .instance-options > summary { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 10px 15px; border: 1px solid #515151; border-radius: 7px; color: #BABABA; list-style: none; }
-  .instance-options > summary::-webkit-details-marker { display: none; }
-  .instance-options[open] > summary, .instance-options > summary:hover { background: #252525; color: #F9FFF8; }
-  .options-list { display: flex; flex-direction: column; gap: 4px; border: 1px solid #515151; border-radius: 8px; padding: 6px; margin-top: 8px; background: #1B1B1B; }
-  .options-list button { justify-content: start; border: 0; font-size: 12px; }
-  .launcher-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 60px; flex-shrink: 0; padding: 0 28px; border-top: 1px solid #303030; background: #1B1B1B; }
-  .launcher-footer button { border: 0; font-size: 12px; color: #BABABA; }
-  .footer-account { min-width: 0; padding-left: 0; background: transparent; }
-  .footer-account span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .footer-account svg { width: 15px; height: 15px; }
+  .split-button { display: inline-flex; align-items: stretch; border-radius: 7px; max-width: 100%; }
+  .split-button > .primary-play { border-radius: 7px 0 0 7px; min-width: 230px; }
+  .split-button > .split-trigger { border-radius: 0 7px 7px 0; border: 0; border-left: 1px solid #14141466; flex-shrink: 0; }
+  .instance-menu { min-width: 240px; max-width: calc(100vw - 24px); }
+  .instance-menu [role='menuitem'] { padding: 10px 12px; gap: 10px; font-size: 13px; }
+  .instance-menu [role='menuitem']:focus { outline: 2px solid #E4FFDA; outline-offset: -2px; }
   .utility-page { max-width: 1000px; margin: 0 auto; padding: 32px; }
   .page-heading { margin-bottom: 28px; }
   .page-heading > button { margin-bottom: 24px; padding-left: 0; border: 0; color: #BABABA; }
@@ -132,9 +130,6 @@
   .empty-state { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; min-height: 340px; text-align: center; padding: 40px; }
   .empty-state > svg { width: 40px; height: 40px; color: #A4D58E; margin-bottom: 12px; }
   .empty-state > p { color: #BABABA; max-width: 500px; }
-  .about-dialog { width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow: auto; border-radius: 12px; }
-  .about-logo { width: 80px; height: 80px; border-radius: 16px; margin: 12px auto; }
-  .about-dialog p { color: #BABABA; }
   .catalog-notice { margin: 16px 0; padding: 16px 18px; border: 1px solid #727d4a; border-radius: 8px; color: #E4FFDA; background: #25291e; }
   .catalog-notice > svg { width: 18px; height: 18px; float: left; margin-right: 10px; margin-top: 3px; }
   .catalog-notice > span { font-size: 13px; }
@@ -180,20 +175,17 @@
   .serial code { font-size: inherit; }
   .activation-panel > p span { color: #BABABA; font-size: 12px; margin-left: 8px; }
   @media (max-width: 900px) {
-    .launcher-toolbar, .launcher-footer { padding-inline: 20px; }
+    .launcher-toolbar { padding-inline: 20px; }
     .instance-hero { padding: 28px; }
     .instance-workspace { padding-inline: 28px; }
-    .connection-label { display: none; }
     .utility-page { padding: 24px; }
   }
   @media (max-height: 600px) {
     .instance-rail { gap: 12px; padding-top: 12px; }
     .launcher-toolbar { height: 54px; }
-    .launcher-footer { height: 52px; }
-    .instance-hero { min-height: 220px; height: 220px; padding-top: 24px; padding-bottom: 24px; }
+    .instance-hero { min-height: 220px; height: calc(100dvh - 210px); padding-top: 24px; padding-bottom: 24px; }
     .hero-heading h1 { font-size: 32px; }
     .hero-heading > p { margin-bottom: 12px; }
-    .eyebrow { margin-bottom: 10px; }
     .instance-actions { margin-top: 16px; }
   }
   @media (prefers-reduced-motion: reduce) {
