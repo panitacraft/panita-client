@@ -12,13 +12,14 @@ test('fresh and interrupted installations can install or resume the same recorde
   }
 });
 
-test('update offers a specific installed-to-catalog transition without replacing Play or permitting implicit installation', () => {
+test('update offers a specific installed-to-catalog transition and never permits implicit installation', () => {
   const updating = { ...instance, localState: 'update_available', installedVersion: '1.20.1', minecraftVersion: '1.21.1' };
   assert.deepEqual(updateTarget(updating, false), { fromVersion: '1.20.1', toVersion: '1.21.1' });
   assert.equal(canInstall(updating, false), false);
+  assert.deepEqual(updateTarget({ ...updating, localState: 'installed' }, false), { fromVersion: '1.20.1', toVersion: '1.21.1' });
   assert.equal(updateTarget(updating, true), null);
   for (const availability of ['disabled', 'missing', 'unverified']) assert.equal(updateTarget({ ...updating, availability }, false), null);
-  for (const patch of [{ compatible: false }, { supported: false }, { installedVersion: null }, { minecraftVersion: null }, { installedVersion: '1.21.1' }, { localState: 'installed' }]) {
+  for (const patch of [{ compatible: false }, { supported: false }, { installedVersion: null }, { minecraftVersion: null }, { installedVersion: '1.21.1' }]) {
     assert.equal(updateTarget({ ...updating, ...patch }, false), null);
   }
 });
@@ -92,7 +93,7 @@ test('a newer published pack version offers Update between exact pins and never 
   // An outage, a disabled entry or a matching pin never offers it.
   assert.equal(updateTarget(pack, true), null);
   for (const availability of ['disabled', 'missing', 'unverified']) assert.equal(updateTarget({ ...pack, availability }, false), null);
-  for (const patch of [{ compatible: false }, { supported: false }, { localState: 'installed' }, { installedSource: custom('v2') }, { installedSource: null }]) {
+  for (const patch of [{ compatible: false }, { supported: false }, { installedSource: custom('v2') }, { installedSource: null }]) {
     assert.equal(updateTarget({ ...pack, ...patch }, false), null);
   }
 });

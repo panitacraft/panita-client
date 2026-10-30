@@ -150,6 +150,7 @@ struct Entry {
     backup_operation: Option<Uuid>,
     received_files: u64,
     reused_files: u64,
+    artifact_progress: Option<launcher_core::minecraft::download::DownloadProgress>,
     retained_files: u32,
     native_cleanup: Option<launcher_core::minecraft::native_cache::CleanupReport>,
     pack_progress: Option<launcher_core::modpack::content::PackProgress>,
@@ -369,6 +370,7 @@ impl PlayController {
                 backup_operation: None,
                 received_files: 0,
                 reused_files: 0,
+                artifact_progress: None,
                 retained_files: 0,
                 native_cleanup: None,
                 pack_progress: None,
@@ -424,6 +426,9 @@ impl PlayController {
         else {
             return false;
         };
+        if !progress.reused {
+            entry.artifact_progress = Some(progress);
+        }
         if progress.bytes == progress.total {
             if progress.reused {
                 entry.reused_files += 1;
@@ -496,6 +501,7 @@ impl PlayController {
                     "operation": entry.kind.text(),
                     "backupRequested": entry.backup_requested, "eraseRequested": entry.erase_requested, "backupOperation": entry.backup_operation,
                     "receivedFiles": entry.received_files, "reusedFiles": entry.reused_files,
+                    "artifactProgress": entry.artifact_progress.map(|p| json!({"bytes": p.bytes, "total": p.total})),
                     "retainedFiles": entry.retained_files,
                     "nativeCleanup": entry.native_cleanup,
                     "packProgress": entry.pack_progress.map(|p| json!({"filesDone": p.files_done, "filesTotal": p.files_total, "bytesDone": p.bytes_done, "bytesTotal": p.bytes_total, "reusedFiles": p.reused_files})),

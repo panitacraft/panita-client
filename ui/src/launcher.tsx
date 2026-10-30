@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
-import { ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, ShieldCheck, Users, WifiOff } from 'lucide-react';
+import { ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, Users, WifiOff } from 'lucide-react';
 import { loadCatalog } from './catalog-api';
 import type { CatalogOverview } from './preview-catalog';
 import { messageForError } from './errors';
@@ -39,6 +39,7 @@ export function Launcher() {
   const [page, setPage] = useState<LauncherPage>('library');
   const [cacheRequest, setCacheRequest] = useState(0);
   const [settingsScope, setSettingsScope] = useState<'global' | 'instance'>('global');
+  const [settingsTab, setSettingsTab] = useState<'game' | 'storage' | 'diagnostics'>('game');
   const [accountView, setAccountView] = useState<AccountsView | null>(null);
   const [instancePage, setInstancePage] = useState(0);
   const [version, setVersion] = useState(__APP_VERSION__);
@@ -83,7 +84,7 @@ export function Launcher() {
   }, [installationChanges, catalogAttempt]);
 
   function openSettings(scope: 'global' | 'instance') {
-    setSettingsScope(scope); setPage('settings');
+    setSettingsScope(scope); setSettingsTab('game'); setPage('settings');
   }
 
   return <TooltipProvider delayDuration={250}><main className="launcher-shell">
@@ -131,7 +132,6 @@ export function Launcher() {
       <header className="launcher-toolbar">
         <WindowDragRegion><span className="toolbar-brand">PANITA <span>CLIENT</span></span></WindowDragRegion>
         <div className="flex shrink-0 items-center gap-2">
-          <Hint text={unverified || (catalog.kind === 'ready' && catalog.stale) ? 'Sin verificar: no pudimos conectar con Panitacraft.' : isTauri() ? 'Sesión de Panitacraft' : 'Vista previa del navegador'}><span className="connection-indicator" tabIndex={0} aria-label={unverified || (catalog.kind === 'ready' && catalog.stale) ? 'Sin verificar' : isTauri() ? 'Panitacraft' : 'Vista previa'}>{unverified || (catalog.kind === 'ready' && catalog.stale) ? <WifiOff aria-hidden="true" /> : <ShieldCheck aria-hidden="true" />}</span></Hint>
           <Hint text="Actualizar catálogo"><span className="icon-control"><Button variant="ghost" size="icon" disabled={refreshing} aria-label="Actualizar catálogo" onClick={() => setCatalogAttempt(previous => previous + 1)}><RefreshCw aria-hidden="true" /></Button></span></Hint>
           <Hint text="Ajustes del launcher"><Button variant="ghost" size="icon" aria-label="Ajustes del launcher" onClick={() => openSettings('global')} aria-current={page === 'settings' && settingsScope === 'global' ? 'page' : undefined}><Settings2 aria-hidden="true" /></Button></Hint>
           <WindowControls />
@@ -140,7 +140,7 @@ export function Launcher() {
 
       <div id="launcher-content" tabIndex={-1} className="launcher-content">
         <div className="launcher-notices">
-          <PlayNotice />
+          <PlayNotice names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} />
           {preferences?.error && <div role="alert" className="catalog-notice"><p>{preferences.error}</p><Button variant="secondary" disabled={preferences.busy} onClick={preferences.retry}>Reintentar preferencias</Button></div>}
           {preferences?.warning && <p role="alert">{preferences.warning}</p>}
           {refreshError && catalog.kind === 'ready' && <p role="alert">No pudimos actualizar las instancias. {refreshError}</p>}
@@ -175,8 +175,7 @@ export function Launcher() {
               {instance.availability === 'unverified' && <p role="status">No pudimos verificar el estado de esta instancia.</p>}
               {!instance.compatible && <p role="status">Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
               {!instance.supported && <p role="status">Este tipo de instancia todavía no es compatible.</p>}
-              {instance.installedVersion && <p className="installed-version">Versión instalada: Minecraft {instance.installedVersion}</p>}
-              <PlayControls onPackCache={() => { openSettings('global'); setCacheRequest(value => value + 1); }} instanceId={instance.id} removalPending={instance.removalPending} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
+              <PlayControls onPackCache={() => { openSettings('global'); setSettingsTab('storage'); setCacheRequest(value => value + 1); }} instanceId={instance.id} removalPending={instance.removalPending} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available' || liveEntry(instance.id)?.phase === 'installed')} />
               <PackPanel instanceId={instance.id} awaiting={instance.localState === 'awaiting_files'} onChanged={() => setCatalogAttempt(previous => previous + 1)} />
             </div>
           </article>)}
@@ -186,10 +185,14 @@ export function Launcher() {
           <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>Tus cuentas</h1></div>
           <ActivationPanel /><Accounts onSnapshot={acceptAccounts} />
         </div>
-        <div hidden={page !== 'settings'} className="utility-page">
-          <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? selected?.name ?? 'Ajustes de instancia' : 'Ajustes del launcher'}</h1><p>{settingsScope === 'instance' ? 'Personaliza esta instancia sin cambiar las demás.' : 'Configura Minecraft y administra los recursos de Panita.'}</p></div>
-          <SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} />
-          <div hidden={settingsScope !== 'global'}><CachePanel openRequest={cacheRequest} /><DiagnosticsPanel /></div>
+        <div hidden={page !== 'settings'} className="utility-page settings-page">
+          <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? selected?.name ?? 'Ajustes de instancia' : 'Ajustes del launcher'}</h1></div>
+          {settingsScope === 'global' && <div className="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
+            {([['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['diagnostics', 'Diagnóstico']] as const).map(([value, label]) => <Button key={value} variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
+          </div>}
+          <div hidden={settingsTab !== 'game'}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
+          <div hidden={settingsScope !== 'global' || settingsTab !== 'storage'}><CachePanel openRequest={cacheRequest} /></div>
+          <div hidden={settingsScope !== 'global' || settingsTab !== 'diagnostics'}><DiagnosticsPanel /></div>
         </div>
       </div>
     </div>

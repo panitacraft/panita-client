@@ -6,7 +6,7 @@ import { playActive } from './play-state';
 import { usePlaySnapshot } from './play';
 import {
   cacheRetainedReason, cacheSummary, clearSummary, conflictReasonText, conflictSummary, folderHint, importErrorText, manualHeading,
-  packProgressFraction, packProgressText, reasonText, skippedSummary, formatBytes, type CacheReport, type PackFile, type PackList,
+  reasonText, skippedSummary, formatBytes, type CacheReport, type PackFile, type PackList,
 } from './pack-state';
 
 const packImportError = (cause: unknown) => importErrorText(cause) ?? messageForError(cause);
@@ -47,17 +47,12 @@ export function PackPanel({ instanceId, awaiting, onChanged }: { instanceId: str
     }
   }
 
-  const progress = entry?.packProgress ?? null;
   const skipped = entry?.packSkipped ?? [];
   // An update that stopped on conflicts explains them in the update controls.
   const conflicts = entry?.operation === 'update' ? [] : entry?.packConflicts ?? [];
   if (!installing && !awaiting && skipped.length === 0 && conflicts.length === 0) return null;
 
   return <div className="pack-panel">
-    {installing && <div>
-      <progress aria-label="Descarga de los archivos del modpack" max={1} value={progress ? packProgressFraction(progress) : undefined} />
-      <p role="status">{packProgressText(progress)}</p>
-    </div>}
     {!installing && conflicts.length > 0 && <div className="catalog-notice" role="alert">
       <p>{conflictSummary(conflicts.map(conflict => conflict.path))}</p>
       <details><summary>Archivos en conflicto</summary><ul>{conflicts.map(conflict => <li key={conflict.path}><code>{conflict.path}</code>: {conflictReasonText(conflict.reason)}</li>)}</ul></details>

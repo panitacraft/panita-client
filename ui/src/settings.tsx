@@ -1,7 +1,9 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Save } from 'lucide-react';
+import { Save, MemoryStick, Monitor, Terminal, SlidersHorizontal } from 'lucide-react';
+import { Button } from './components/ui/button';
+import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { settingsApi } from './settings-api';
 import { globalSettingsPayload, instanceSettingsPayload, settingsDraft, updateSettingsDraft, type SettingsDraft, type SettingsSnapshot } from './settings-state';
 import { messageForError } from './errors';
@@ -50,8 +52,8 @@ export function SettingsPanel({ instanceId, name, local, scope }: { instanceId: 
   const mode = scope ?? chosenMode;
   const preferences = usePreferences();
   return <section className="settings-section" aria-labelledby="settings-heading">
-    <h2 id="settings-heading">Ajustes</h2>
-    <p>Los cambios se aplican al próximo inicio de Minecraft. La cuenta y la instancia seleccionadas se recuerdan. El tamaño de Panita se guarda al cerrar su ventana.</p>
+    <h2 id="settings-heading" className="sr-only">Ajustes</h2>
+    <p>Se aplican al próximo inicio de Minecraft.</p>
     {preferences?.error && <div role="alert"><p>No pudimos cargar o guardar tu selección. {preferences.error}</p><button type="button" disabled={preferences.busy} onClick={preferences.retry}>Reintentar preferencias</button></div>}
     {preferences?.warning && <p role="alert">No pudimos restaurar o guardar el tamaño de Panita. {preferences.warning}</p>}
     {!scope && <div className="account-buttons" role="group" aria-label="Ámbito de los ajustes">
@@ -68,7 +70,7 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
   const [snapshot, setSnapshot] = useState<SettingsSnapshot | null>(null);
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const toast = useTransientNotice();
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const mounted = useRef(false);
@@ -89,10 +91,10 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
     return () => { active = false; mounted.current = false; };
   }, [instanceId, desktop, attempt]);
 
-  function change(patch: Partial<SettingsDraft>) { setDraft(previous => previous && snapshot && updateSettingsDraft(previous, patch, snapshot)); setNotice(null); setError(null); }
+  function change(patch: Partial<SettingsDraft>) { setDraft(previous => previous && snapshot && updateSettingsDraft(previous, patch, snapshot)); toast.clear(); setError(null); }
   async function save() {
     if (!snapshot || !draft || saving.current) return;
-    saving.current = true; setBusy(true); setError(null); setNotice(null);
+    saving.current = true; setBusy(true); setError(null); toast.clear();
     try {
       let saved: SettingsSnapshot;
       if (instanceId) {
@@ -104,7 +106,7 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
         await settingsApi.saveGlobal(settings);
         saved = { ...snapshot, global: { ...snapshot.global, ...settings } };
       }
-      if (mounted.current) { setSnapshot(saved); setDraft(settingsDraft(saved)); setNotice('Los ajustes se guardaron. Se aplicarán al próximo inicio de Minecraft.'); }
+      if (mounted.current) { setSnapshot(saved); setDraft(settingsDraft(saved)); toast.show('Ajustes guardados.'); }
     } catch (cause) {
       const code = cause instanceof Error ? cause.message : cause;
       if (mounted.current) setError(code === 'invalid_data'
@@ -118,25 +120,31 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
     {!desktop && <p>Los ajustes están disponibles en la aplicación de escritorio.</p>}
     {desktop && !draft && !error && <p role="status">Cargando ajustes…</p>}
     {error && <div role="alert"><p>No pudimos cargar o guardar los ajustes. {error}</p>{!draft && <button type="button" onClick={() => setAttempt(previous => previous + 1)}>Reintentar ajustes</button>}</div>}
-    {notice && <p role="status">{notice}</p>}
-    {snapshot && draft && <form className="settings-form" onSubmit={event => { event.preventDefault(); void save(); }}>
+    <TransientNotice notice={toast.notice} />
+    {snapshot && draft && <form className="settings-form compact-settings" onSubmit={event => { event.preventDefault(); void save(); }}>
       <fieldset disabled={busy}>
-        <legend>{instance ? 'Valores propios de esta instancia' : 'Valores predeterminados de Minecraft'}</legend>
-        {instance && <label><input type="checkbox" checked={draft.inheritConsole} onChange={event => change({ inheritConsole: event.target.checked })} /> Usar la opción global de consola ({snapshot.global.show_console_on_start ? 'activada' : 'desactivada'})</label>}
-        <label><input type="checkbox" checked={draft.showConsole} disabled={instance && draft.inheritConsole} onChange={event => change({ showConsole: event.target.checked })} /> Mostrar la consola cuando se inicie Minecraft</label>
-        <p>Abre el registro del juego en una ventana separada. Los cambios se aplican al próximo inicio.</p>
-        {instance && <label><input type="checkbox" checked={draft.inheritRam} onChange={event => change({ inheritRam: event.target.checked })} /> Usar RAM global ({snapshot.global.ram_mib} MiB)</label>}
-        <label htmlFor={`${prefix}-ram`}>RAM para Minecraft (MiB)</label>
-        <input aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={Math.min(262144, Math.max(32768, Number(draft.ram) || 0))} step="1" disabled={instance && draft.inheritRam} value={/^\d+$/.test(draft.ram) ? draft.ram : '512'} onChange={event => change({ ram: event.target.value })} />
-        <input id={`${prefix}-ram`} type="number" min="512" max="262144" step="1" required disabled={instance && draft.inheritRam} value={draft.ram} onChange={event => change({ ram: event.target.value })} />
-        <output htmlFor={`${prefix}-ram`}>{Number(draft.ram) / 1024 || 0} GiB</output>
-        {instance && <label><input type="checkbox" checked={draft.inheritWindow} onChange={event => change({ inheritWindow: event.target.checked })} /> Usar tamaño de Minecraft global ({snapshot.global.window_size.width} × {snapshot.global.window_size.height})</label>}
-        <label htmlFor={`${prefix}-width`}>Ancho de Minecraft (píxeles)</label>
-        <input id={`${prefix}-width`} type="number" min="320" max="16384" step="1" required disabled={instance && draft.inheritWindow} value={draft.width} onChange={event => change({ width: event.target.value })} />
-        <label htmlFor={`${prefix}-height`}>Alto de Minecraft (píxeles)</label>
-        <input id={`${prefix}-height`} type="number" min="240" max="16384" step="1" required disabled={instance && draft.inheritWindow} value={draft.height} onChange={event => change({ height: event.target.value })} />
-        <details>
-          <summary>Opciones avanzadas de Java</summary>
+        <legend className="sr-only">{instance ? 'Ajustes de la instancia' : 'Valores predeterminados de Minecraft'}</legend>
+        <div className="settings-grid">
+          <div className="settings-card memory-card">
+            <h3><MemoryStick aria-hidden="true" />Memoria</h3>
+            {instance && <label><input type="checkbox" checked={draft.inheritRam} onChange={event => change({ inheritRam: event.target.checked })} />Usar RAM global ({snapshot.global.ram_mib} MiB)</label>}
+            <div className="memory-value"><label htmlFor={prefix + '-ram'}>RAM para Minecraft (MiB)</label><input id={prefix + '-ram'} type="number" min="512" max="262144" step="1" required disabled={instance && draft.inheritRam} value={draft.ram} onChange={event => change({ ram: event.target.value })} /><output>{Number(draft.ram) / 1024 || 0} GiB</output></div>
+            <input className="memory-slider" aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={Math.min(262144, Math.max(32768, Number(draft.ram) || 0))} step="1" disabled={instance && draft.inheritRam} value={/^\d+$/.test(draft.ram) ? draft.ram : '512'} onChange={event => change({ ram: event.target.value })} />
+            <div className="memory-ticks" aria-hidden="true"><span>512 MiB</span><span>{Math.round(Math.min(262144, Math.max(32768, Number(draft.ram) || 0)) / 2048)} GiB</span><span>{Math.min(262144, Math.max(32768, Number(draft.ram) || 0)) / 1024} GiB</span></div>
+          </div>
+          <div className="settings-card">
+            <h3><Monitor aria-hidden="true" />Ventana del juego</h3>
+            {instance && <label><input type="checkbox" checked={draft.inheritWindow} onChange={event => change({ inheritWindow: event.target.checked })} />Usar tamaño global</label>}
+            <div className="window-dimensions"><div><label htmlFor={prefix + '-width'}>Ancho (px)</label><input aria-label="Ancho de Minecraft (píxeles)" id={prefix + '-width'} type="number" min="320" max="16384" required disabled={instance && draft.inheritWindow} value={draft.width} onChange={event => change({ width: event.target.value })} /></div><span aria-hidden="true">×</span><div><label htmlFor={prefix + '-height'}>Alto (px)</label><input aria-label="Alto de Minecraft (píxeles)" id={prefix + '-height'} type="number" min="240" max="16384" required disabled={instance && draft.inheritWindow} value={draft.height} onChange={event => change({ height: event.target.value })} /></div></div>
+          </div>
+          <div className="settings-card console-card">
+            <h3><Terminal aria-hidden="true" />Registro del juego</h3>
+            {instance && <label><input type="checkbox" checked={draft.inheritConsole} onChange={event => change({ inheritConsole: event.target.checked })} />Usar opción global</label>}
+            <label><input type="checkbox" checked={draft.showConsole} disabled={instance && draft.inheritConsole} onChange={event => change({ showConsole: event.target.checked })} />Abrir el registro al iniciar Minecraft</label>
+          </div>
+        </div>
+        <details className="settings-advanced">
+          <summary><SlidersHorizontal aria-hidden="true" />Java y argumentos avanzados</summary>
           <p>Panita descarga y verifica el Java necesario. Las rutas de Java personalizadas todavía no son compatibles.</p>
           {customJava && <div role="alert"><p>Hay una ruta personalizada guardada. Minecraft no puede iniciarse con ella.</p>
             {(!instance || snapshot.instance?.java_path_override) ? <label><input type="checkbox" checked={draft.clearJava} onChange={event => change({ clearJava: event.target.checked })} /> Quitar la ruta personalizada al guardar</label>
@@ -147,7 +155,7 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
           <textarea id={`${prefix}-jvm`} rows={5} aria-describedby={`${prefix}-jvm-help`} value={draft.jvm} onChange={event => change({ jvm: event.target.value })} />
           <p id={`${prefix}-jvm-help`}>-Xmx se sincroniza con la RAM. Puedes usar M o G, por ejemplo -Xmx4G. Editar un valor heredado crea un ajuste propio. Para opciones adicionales, usa -D o -XX:. No se muestra el comando completo de inicio.</p>
         </details>
-        <button type="submit"><Save aria-hidden="true" />{busy ? 'Guardando ajustes…' : 'Guardar ajustes'}</button>
+        <div className="settings-save"><Button type="submit"><Save aria-hidden="true" />{busy ? 'Guardando…' : 'Guardar ajustes'}</Button></div>
       </fieldset>
     </form>}
   </>;

@@ -29,11 +29,11 @@ export function updateTarget(instance: CatalogInstance, stale: boolean): UpdateT
     const from = packPin(instance.installedSource);
     const to = packPin(instance.source);
     if (stale || instance.availability !== 'enabled' || !instance.compatible || !instance.supported
-      || instance.localState !== 'update_available' || !from || !to || from === to) return null;
+      || !['installed', 'update_available', 'needs_repair', 'failed', 'cancelled'].includes(instance.localState) || !from || !to || from === to) return null;
     return { fromVersion: from, toVersion: to, pack: true };
   }
   if (stale || instance.availability !== 'enabled' || !instance.compatible || !instance.supported
-    || !['update_available', 'not_installed', 'failed', 'cancelled', 'needs_repair'].includes(instance.localState) || !instance.installedVersion || !instance.minecraftVersion
+    || !['installed', 'update_available', 'not_installed', 'failed', 'cancelled', 'needs_repair'].includes(instance.localState) || !instance.installedVersion || !instance.minecraftVersion
     || instance.installedVersion === instance.minecraftVersion) return null;
   return { fromVersion: instance.installedVersion, toVersion: instance.minecraftVersion };
 }

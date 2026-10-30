@@ -20,6 +20,7 @@
   --color-destructive-foreground: #141414;
 }
 
+
 @layer base {
   :root { font-family: 'Segoe UI', system-ui, sans-serif; color: #F9FFF8; background: #141414; color-scheme: dark; font-synthesis: none; }
   * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: #515151 #1B1B1B; }
@@ -275,4 +276,95 @@
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
+}
+
+@layer components {
+  .launcher-content:has(> .library-page:not([hidden])) { display: flex; flex-direction: column; overflow: hidden; }
+  .launcher-notices { flex-shrink: 0; }
+  .library-page { flex: 1; min-height: 0; }
+  .instance-detail { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+  .instance-hero { flex: 1; height: auto; min-height: 190px; padding: 28px 40px 24px; }
+  .instance-workspace { flex-shrink: 0; max-height: 48%; overflow: auto; padding: 0 40px 28px; }
+  .hero-heading h1 { font-size: clamp(30px, 4vw, 50px); }
+  .hero-heading > p { margin-bottom: 16px; }
+  .instance-actions { margin-top: 16px; }
+  .split-button > .primary-play:only-child { border-radius: 7px; }
+  .primary-play.running-play { opacity: 1; background: #54A636; color: #141414; }
+  .primary-play.busy-play { opacity: 1; background: #253b1c; color: #E4FFDA; cursor: progress; }
+  .spin { animation: panita-spin 1s linear infinite; }
+  @keyframes panita-spin { to { transform: rotate(360deg); } }
+  .operation-card { width: min(100%, 520px); margin-top: 4px; border: 1px solid #383838; border-radius: 9px; padding: 12px 16px; background: #1B1B1B; }
+  .operation-heading { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+  .operation-heading > svg { width: 19px; height: 19px; color: #A9E58C; }
+  .operation-heading > button { margin-left: auto; }
+  .operation-card p { margin: 6px 0 0; color: #BABABA; font-size: 12px; }
+  .operation-metrics { display: flex; justify-content: space-between; gap: 12px; margin: 10px 0 6px; color: #BABABA; font-size: 12px; }
+  .operation-metrics > strong { color: #E4FFDA; }
+  .window-controls button svg { transition: transform 140ms ease, color 140ms ease; }
+  .window-controls button:hover svg { transform: scale(1.15); color: #A9E58C; }
+  .window-controls button.window-close:hover svg { color: #FCA5A5; }
+  .settings-tabs { display: flex; gap: 8px; margin: -8px 0 16px; }
+  .settings-page { padding: 24px; }
+  .settings-page .page-heading { margin-bottom: 16px; }
+  .settings-page .page-heading > .page-back { margin-bottom: 14px; }
+  .settings-page .page-heading > h1 { margin: 0; }
+  .settings-page .settings-tabs { margin-top: 0; }
+  .settings-page .settings-section { padding: 20px; margin-bottom: 0; }
+  .settings-tabs [role='tab'][aria-selected='true'] { color: #E4FFDA; border-color: #54A636; background: #253b1c; }
+  .split-button:has(> .split-trigger) > .primary-play { border-radius: 7px 0 0 7px !important; }
+  .settings-section > p { margin: 0 0 12px; line-height: 1.4; font-size: 12px; }
+  .compact-settings { margin-top: 16px; }
+  .compact-settings > fieldset { display: block; padding: 0; border: 0; }
+  .settings-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  .settings-card { padding: 16px; border: 1px solid #383838; border-radius: 8px; background: #141414; min-width: 0; }
+  .settings-card h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 14px; font-size: 15px; }
+  .settings-card h3 svg, .settings-advanced summary svg { width: 18px; height: 18px; color: #A9E58C; }
+  .settings-card label { margin-bottom: 8px; font-size: 13px; }
+  .settings-card input:not([type='checkbox']) { max-width: 100%; }
+  .memory-value { display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; align-items: center; }
+  .memory-value > label { grid-column: 1 / -1; }
+  .memory-value > input { width: 110px; }
+  .memory-value > output { color: #BABABA; font-size: 13px; }
+  .settings-card .memory-slider { appearance: none; -webkit-appearance: none; width: 100%; height: 10px; margin: 18px 0 6px; padding: 0; border: 0; border-radius: 0; background: linear-gradient(90deg, #54A63699 0 60%, #D2AF4D99 60% 85%, #C66B6B99 85% 100%); }
+  .memory-slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 22px; background: #E4FFDA; clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); cursor: ew-resize; }
+  .memory-slider::-moz-range-thumb { width: 14px; height: 22px; border: 0; border-radius: 2px; background: #E4FFDA; cursor: ew-resize; }
+  .memory-ticks { display: flex; justify-content: space-between; padding-top: 9px; background: repeating-linear-gradient(90deg, #515151 0 1px, transparent 1px 6.25%) top / 100% 5px no-repeat; color: #BABABA; font-size: 10px; }
+  .window-dimensions { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: end; }
+  .window-dimensions input { width: 100%; }
+  .window-dimensions > span { padding-bottom: 12px; color: #BABABA; }
+  .memory-card { grid-row: span 2; }
+  .console-card { grid-column: 2; }
+  .settings-advanced { margin-top: 16px; padding: 4px 16px; border: 1px solid #383838; border-radius: 8px; }
+  .settings-advanced summary { display: flex; align-items: center; gap: 8px; }
+  .settings-save { margin-top: 16px; }
+  .game-log-window { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: #202020; }
+  .game-log-window > .log-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: 20px; padding: 12px 16px; background: #1B1B1B; border: 0; }
+  .log-filter { flex: 1; min-width: 220px; max-width: 480px; }
+  .log-filter > label, .log-levels legend { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; color: #BABABA; font-size: 11px; text-transform: uppercase; font-weight: 600; }
+  .log-filter > label svg { width: 14px; height: 14px; }
+  .log-search-input { display: flex; align-items: center; gap: 4px; }
+  .log-search-input input { flex: 1; min-width: 0; width: 100%; }
+  .log-levels { display: flex; gap: 10px; border: 0; padding: 0; margin: 0 0 8px; }
+  .log-levels label { display: flex; align-items: center; gap: 4px; font-size: 11px; }
+  .log-levels input { margin: 0; }
+  .log-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .log-options { display: flex; align-items: center; gap: 16px; padding: 4px 16px; color: #BABABA; background: #1B1B1B; border-bottom: 1px solid #383838; }
+  .log-options label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+  .log-options > span { margin-left: auto; font-size: 11px; }
+  .game-log-window .game-log-lines { flex: 1; min-height: 0; height: auto; border: 0; border-radius: 0; background: #252525; padding: 8px 14px; }
+  .log-row { display: grid; grid-template-columns: 100px 170px 120px minmax(0, 1fr); gap: 12px; min-height: 28px; padding: 5px 0; font-family: 'Cascadia Code', Consolas, monospace; font-size: 11px; line-height: 1.5; align-items: start; }
+  .log-row > pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: inherit; margin: 0; color: inherit; }
+  .log-time small { display: block; font-size: 9px; opacity: .7; }
+  .log-logger, .log-thread { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log-nowrap .log-row { grid-template-columns: 100px 170px 120px minmax(max-content, 1fr); }
+  .log-nowrap .log-row > pre { white-space: pre; }
+  .log-feedback { padding: 8px 16px; font-size: 12px; }
+  .log-empty { color: #BABABA; }
+  .crash-dialog { width: min(620px, calc(100vw - 40px)); text-align: left; }
+  .crash-dialog h2 { display: flex; align-items: center; gap: 12px; }
+  .crash-dialog h2 > svg { color: #FCA5A5; flex-shrink: 0; width: 24px; height: 24px; }
+  .crash-details { border: 1px solid #383838; border-radius: 8px; background: #141414; padding: 10px 14px; margin: 18px 0; }
+  .crash-summary { max-height: 180px; font-weight: 400; font-size: 11px; line-height: 1.6; text-align: left; }
+  .crash-dialog .account-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+  @media (max-width: 900px) { .instance-workspace, .instance-hero { padding-inline: 28px; } .log-row { grid-template-columns: 90px 130px 90px minmax(0, 1fr); gap: 8px; } .log-toolbar { gap: 12px; } }
 }
