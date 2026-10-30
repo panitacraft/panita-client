@@ -64,10 +64,12 @@
   .launcher-shell { --chrome-height: 66px; display: flex; height: 100dvh; min-height: 0; overflow: hidden; background: #141414; }
   .skip-link { position: fixed; z-index: 100; top: 10px; left: 100px; transform: translateY(-180%); background: #E4FFDA; color: #141414; padding: 10px 18px; border-radius: 6px; }
   .skip-link:focus { transform: none; }
-  .instance-rail { display: flex; flex-direction: column; align-items: center; width: 88px; flex-shrink: 0; background: #1B1B1B; border-right: 1px solid #303030; padding: 0; gap: 0; }
+  .instance-rail { position: relative; display: flex; flex-direction: column; align-items: center; width: 88px; flex-shrink: 0; background: #1B1B1B; padding: 0; gap: 0; }
+  .instance-rail::after { content: ''; position: absolute; right: 0; top: var(--chrome-height); bottom: 0; border-right: 1px solid #303030; pointer-events: none; }
   .rail-logo { width: 58px; height: 58px; padding: 0; border: 0; border-radius: 10px; overflow: hidden; flex-shrink: 0; background: transparent; }
   .rail-logo img { width: 44px; height: 44px; object-fit: contain; }
-  .rail-header { display: flex; align-items: center; justify-content: center; height: var(--chrome-height); width: 100%; flex-shrink: 0; border-bottom: 1px solid #303030; }
+  .rail-header { position: relative; display: flex; align-items: center; justify-content: center; height: var(--chrome-height); width: 100%; flex-shrink: 0; }
+  .rail-header::after { content: ''; position: absolute; bottom: 0; width: 30px; height: 1px; background: #515151; }
   .rail-instances { display: flex; flex-direction: column; gap: 14px; width: 100%; min-height: 0; overflow: auto; padding: 24px 17px; }
   .rail-instance { position: relative; width: 52px; height: 52px; padding: 0; flex-shrink: 0; border: 1px solid #515151; border-radius: 12px; background: #252525; color: #BABABA; }
   .rail-instance.is-selected { border-color: #54A636; box-shadow: 0 0 0 3px #54A63640; color: #E4FFDA; background: #21351c; }
@@ -84,7 +86,7 @@
   .account-avatar { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; border-radius: inherit; }
   .rail-placeholder { padding: 14px; color: #BABABA; }
   .launcher-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-  .launcher-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 28px; height: var(--chrome-height); flex-shrink: 0; background: #1B1B1B; border-bottom: 1px solid #303030; }
+  .launcher-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 28px 0 8px; height: var(--chrome-height); flex-shrink: 0; background: #1B1B1B; border-bottom: 1px solid #303030; }
   .launcher-toolbar button { border: 0; }
   .toolbar-brand { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; letter-spacing: .12em; font-weight: 750; white-space: nowrap; }
   .toolbar-brand > span { color: #BABABA; font-size: inherit; font-weight: 400; }
@@ -92,6 +94,8 @@
   .connection-indicator svg { width: 16px; height: 16px; }
   .icon-control { display: inline-flex; }
   .hint-content { max-width: min(310px, calc(100vw - 24px)); font-size: 12px; line-height: 1.5; padding: 9px 12px; box-shadow: 0 8px 24px #0005; }
+  .tooltip-arrow { overflow: visible; transform: translateY(-1px); stroke: #515151; stroke-width: 1px; stroke-linejoin: round; }
+  .tooltip-arrow-seam { stroke: #252525; stroke-width: 2px; }
   .instance-hint { width: 280px; max-width: 100%; padding: 4px; }
   .instance-hint > strong { display: block; color: #F9FFF8; font-size: 14px; }
   .instance-hint > p { margin: 8px 0 12px; font-size: 12px; color: #BABABA; }
@@ -112,10 +116,8 @@
   .instance-tags > span, .instance-tags > button { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500; border: 1px solid #515151; border-radius: 5px; padding: 5px 9px; background: #1B1B1Be6; }
   .instance-tags svg { width: 13px; height: 13px; }
   .instance-tags img { width: 16px; height: 16px; object-fit: contain; }
-  .instance-tags > .update-badge { border-color: #54A636; color: #E4FFDA; cursor: pointer; }
-  .instance-tags > .update-badge:hover { background: #21351c; }
+  .instance-tags > .update-badge { border-color: #54A636; color: #E4FFDA; }
   .instance-menu svg { width: 16px; height: 16px; flex-shrink: 0; }
-  .preview-play-note { margin: 12px 0; font-size: 12px; color: #BABABA; }
   .game-icon { image-rendering: pixelated; }
   .instance-tags .instance-status { border-color: #54A63670; color: #E4FFDA; background: #21351c; }
   .instance-tags .status-warning { border-color: #BABABA; color: #BABABA; background: #252525; }
@@ -134,6 +136,11 @@
   .utility-page { max-width: 1000px; margin: 0 auto; padding: 32px; }
   .page-heading { margin-bottom: 28px; }
   .page-heading > button { margin-bottom: 24px; padding-left: 0; border: 0; color: #BABABA; }
+  .page-heading > .page-back { height: auto; padding: 0; gap: 8px; font-size: 14px; font-weight: 500; background: transparent; box-shadow: none; }
+  .update-dialog { width: min(620px, calc(100vw - 40px)); }
+  .backup-choice { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; line-height: 1.5; }
+  .backup-choice input { margin: 4px 0 0; }
+  .update-dialog .account-buttons { margin-top: 24px; }
   .page-heading > p { color: #BABABA; }
   .utility-page > section, .utility-page > div > section { background: #1B1B1B; border: 1px solid #383838; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
   .empty-state { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; min-height: 340px; text-align: center; padding: 40px; }
@@ -184,7 +191,7 @@
   .serial code { font-size: inherit; }
   .activation-panel > p span { color: #BABABA; font-size: 12px; margin-left: 8px; }
   @media (max-width: 900px) {
-    .launcher-toolbar { padding-inline: 20px; }
+    .launcher-toolbar { padding-inline: 8px 20px; }
     .instance-hero { padding: 28px; }
     .instance-workspace { padding-inline: 28px; }
     .utility-page { padding: 24px; }

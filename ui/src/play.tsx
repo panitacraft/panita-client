@@ -79,7 +79,7 @@ export function usePlaySnapshot() {
   return useContext(PlayContext)?.snapshot ?? null;
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, updateRequest = 0, optionsAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; updateRequest?: number; optionsAllowed?: boolean }) {
+export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, optionsAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; optionsAllowed?: boolean }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -127,13 +127,14 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     }
   }
 
-  const handledUpdateRequest = useRef(0);
+  const updateDialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (updateRequest > handledUpdateRequest.current) {
-      handledUpdateRequest.current = updateRequest;
-      if (!active) askUpdate();
-    }
-  }, [updateRequest]);
+    const dialog = updateDialog.current;
+    if (!dialog) return;
+    if (updateQuestion && !active) {
+      if (!dialog.open) dialog.showModal();
+    } else if (dialog.open) dialog.close();
+  }, [updateQuestion, active]);
 
   function askUpdate() {
     if (!updateTarget) return;
@@ -243,13 +244,11 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         </div>
       </div>}
     </>}
-    {!active && updateTarget?.pack && <p role="status">Hay una versión nueva de este modpack. Debes actualizarla antes de jugar.</p>}
-    {!isTauri() && <p className="preview-play-note">Vista previa: instala y juega desde la aplicación de escritorio.</p>}
     <div className="instance-actions">
     <div className="split-button" role="group" aria-label="Controles de la instancia">
     {!active && installAllowed && entry?.phase !== 'installed' && <Button className="primary-play h-12 rounded-r-none text-xl" size="lg" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.operation === 'install' ? 'Reintentar instalación' : 'Instalar'}</Button>}
     {!active && !installAllowed && !updateTarget?.pack && <Button className="primary-play h-12 rounded-r-none text-xl" size="lg" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}>{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</Button>}
-    {!active && updateTarget?.pack && <Button className="primary-play h-12 rounded-r-none text-xl" size="lg" disabled={busy || !isTauri() || !play?.snapshot} onClick={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</Button>}
+    {!active && updateTarget?.pack && <Button className="primary-play h-12 rounded-r-none text-xl" size="lg" disabled={busy} onClick={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</Button>}
     {active && <Button className="primary-play h-12 rounded-r-none text-xl" size="lg" disabled><Gamepad2 aria-hidden="true" />{running ? 'En ejecución' : 'Preparando…'}</Button>}
     <DropdownMenu modal={false} open={optionsEnabled && optionsOpen} onOpenChange={open => setOptionsOpen(optionsEnabled && open)}>
       <DropdownMenuTrigger asChild><Button className="split-trigger h-12 w-12 rounded-l-none p-0" disabled={!optionsEnabled} aria-label="Opciones de instancia" title={optionsEnabled ? 'Opciones de instancia' : 'Instala esta instancia para acceder a sus opciones'}><ChevronDown aria-hidden="true" /></Button></DropdownMenuTrigger>
@@ -258,7 +257,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         <DropdownMenuItem disabled={busy || !isTauri()} onSelect={() => void invoke('open_instance_folder', { instanceId, folder: 'instance' }).catch(cause => setLogError(messageForError(cause)))}><FolderOpen aria-hidden="true" />Abrir carpeta</DropdownMenuItem>
         <DropdownMenuItem disabled={busy || !isTauri() || entry?.operation !== 'play' || !(running || entry?.phase === 'exited')} onSelect={() => { if (entry) void invoke('open_game_log', { instanceId, requestId: entry.requestId }).catch(cause => setLogError(messageForError(cause))); }}><FileText aria-hidden="true" />Ver registro</DropdownMenuItem>
         {pack && onPackCache && <DropdownMenuItem onSelect={onPackCache}><Database aria-hidden="true" />Limpiar caché de modpacks…</DropdownMenuItem>}
-        {!active && updateTarget && !updateTarget.pack && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</DropdownMenuItem>}
+        {!active && updateTarget && !updateTarget.pack && <DropdownMenuItem disabled={busy} onSelect={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</DropdownMenuItem>}
         {!active && repairAllowed && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => void act('begin_repair', { requestId: crypto.randomUUID() })}><Wrench aria-hidden="true" />Reparar archivos</DropdownMenuItem>}
         {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => void cleanNatives()}><RefreshCw aria-hidden="true" />Limpiar nativos antiguos</DropdownMenuItem>}
         {!active && uninstallAllowed && <><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => setUninstallQuestion(true)}><Trash2 aria-hidden="true" />Desinstalar…</DropdownMenuItem></>}
@@ -283,12 +282,13 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         <button type="button" disabled={busy} onClick={() => setUninstallQuestion(false)}>Volver</button>
       </div>
     </fieldset>}
-    {!active && updateQuestion && <fieldset className="catalog-notice">
-      <legend>{updateQuestion.pack ? versionTitle(names, updateQuestion.fromVersion, updateQuestion.toVersion) : `Actualizar de Minecraft ${updateQuestion.fromVersion} a ${updateQuestion.toVersion}`}</legend>
+    <dialog ref={updateDialog} className="update-dialog" aria-labelledby={instanceId + '-update-title'} aria-describedby={instanceId + '-update-warning'} onCancel={() => setUpdateQuestion(null)} onClose={() => { if (!updateDialog.current?.open) setUpdateQuestion(null); }}>
+    {updateQuestion && <>
+      <h2 id={instanceId + '-update-title'}>{updateQuestion.pack ? versionTitle(names, updateQuestion.fromVersion, updateQuestion.toVersion) : `Actualizar de Minecraft ${updateQuestion.fromVersion} a ${updateQuestion.toVersion}`}</h2>
       {updateQuestion.pack && <p>Cambiaremos solo los archivos del modpack que no hayas modificado. Conservamos los mods que añadiste, tu configuración editada y tus mundos. Si algún archivo tuyo estorba, te lo mostraremos antes de cambiar nada.</p>}
-      <p>Una versión nueva puede modificar tus mundos cuando los abras. Volver a los archivos de una versión anterior no recupera los cambios en tus mundos.</p>
-      <label><input type="radio" name={`${instanceId}-backup`} checked={updateQuestion.backupWorlds} onChange={() => setUpdateQuestion({ ...updateQuestion, backupWorlds: true })} /> Crear una copia de mis mundos antes de actualizar (recomendado)</label>
-      <label><input type="radio" name={`${instanceId}-backup`} checked={!updateQuestion.backupWorlds} onChange={() => setUpdateQuestion({ ...updateQuestion, backupWorlds: false })} /> Actualizar sin copia de mundos</label>
+      <p id={instanceId + '-update-warning'}>Una versión nueva puede modificar tus mundos cuando los abras. Volver a los archivos de una versión anterior no recupera los cambios en tus mundos.</p>
+      <label className="backup-choice"><input type="radio" name={`${instanceId}-backup`} checked={updateQuestion.backupWorlds} onChange={() => setUpdateQuestion({ ...updateQuestion, backupWorlds: true })} /><span>Crear una copia de mis mundos antes de actualizar (recomendado)</span></label>
+      <label className="backup-choice"><input type="radio" name={`${instanceId}-backup`} checked={!updateQuestion.backupWorlds} onChange={() => setUpdateQuestion({ ...updateQuestion, backupWorlds: false })} /><span>Actualizar sin copia de mundos</span></label>
       <div className="account-buttons">
         <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {
           const choice = updateQuestion;
@@ -298,6 +298,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         }}>Confirmar actualización</button>
         <button type="button" disabled={busy} onClick={() => setUpdateQuestion(null)}>Conservar versión instalada</button>
       </div>
-    </fieldset>}
+    </>}
+    </dialog>
   </div>;
 }

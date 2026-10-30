@@ -35,7 +35,6 @@ export function Launcher() {
   const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState<LauncherPage>('library');
-  const [updateRequests, setUpdateRequests] = useState<Record<string, number>>({});
   const [cacheRequest, setCacheRequest] = useState(0);
   const [settingsScope, setSettingsScope] = useState<'global' | 'instance'>('global');
   const [accountView, setAccountView] = useState<AccountsView | null>(null);
@@ -162,7 +161,7 @@ export function Launcher() {
                 <h1>{instance.name}</h1>
                 <p>{instance.description}</p>
                 <div className="instance-tags">
-                  <InstanceBadges instance={instance} updateAvailable={!!updateTarget(instance, catalog.stale || unverified)} onUpdate={() => setUpdateRequests(previous => ({ ...previous, [instance.id]: (previous[instance.id] ?? 0) + 1 }))} />
+                  <InstanceBadges instance={instance} updateAvailable={!!updateTarget(instance, catalog.stale || unverified)} showLoaderHint />
                   {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
                 </div>
               </div>
@@ -173,18 +172,18 @@ export function Launcher() {
               {!instance.compatible && <p role="status">Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
               {!instance.supported && <p role="status">Este tipo de instancia todavía no es compatible.</p>}
               {instance.installedVersion && <p className="installed-version">Versión instalada: Minecraft {instance.installedVersion}</p>}
-              <PlayControls updateRequest={updateRequests[instance.id] ?? 0} onPackCache={() => { openSettings('global'); setCacheRequest(value => value + 1); }} instanceId={instance.id} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
+              <PlayControls onPackCache={() => { openSettings('global'); setCacheRequest(value => value + 1); }} instanceId={instance.id} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
               <PackPanel instanceId={instance.id} awaiting={instance.localState === 'awaiting_files'} onChanged={() => setCatalogAttempt(previous => previous + 1)} />
             </div>
           </article>)}
         </div>
 
         <div hidden={page !== 'accounts'} className="utility-page">
-          <div className="page-heading"><Button variant="ghost" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Volver a la lista</Button><h1>Tus cuentas</h1><p>Tu acceso a Panitacraft y tu perfil de Minecraft.</p></div>
+          <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>Tus cuentas</h1><p>Tu acceso a Panitacraft y tu perfil de Minecraft.</p></div>
           <ActivationPanel /><Accounts onSnapshot={acceptAccounts} />
         </div>
         <div hidden={page !== 'settings'} className="utility-page">
-          <div className="page-heading"><Button variant="ghost" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Volver a la lista</Button><h1>{settingsScope === 'instance' ? selected?.name ?? 'Ajustes de instancia' : 'Ajustes del launcher'}</h1><p>{settingsScope === 'instance' ? 'Personaliza esta instancia sin cambiar las demás.' : 'Configura Minecraft y administra los recursos de Panita.'}</p></div>
+          <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? selected?.name ?? 'Ajustes de instancia' : 'Ajustes del launcher'}</h1><p>{settingsScope === 'instance' ? 'Personaliza esta instancia sin cambiar las demás.' : 'Configura Minecraft y administra los recursos de Panita.'}</p></div>
           <SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} />
           <div hidden={settingsScope !== 'global'}><CachePanel openRequest={cacheRequest} /><DiagnosticsPanel /></div>
         </div>

@@ -69,7 +69,7 @@ test('navigation preserves account input and settings drafts, and instance setti
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
   await user.click(await screen.findByRole('button', { name: 'Gestionar cuentas', exact: true }));
   await user.type(await screen.findByLabelText('Nombre para jugar sin conexión'), 'OtroJugador');
-  await user.click(screen.getByRole('button', { name: 'Inicio: tus instancias' }));
+  await user.click(screen.getByRole('button', { name: 'Instancias', exact: true }));
   await user.click(screen.getByRole('button', { name: 'Ajustes del launcher' }));
   const ram = await screen.findByLabelText('RAM para Minecraft (MiB)');
   await user.clear(ram); await user.type(ram, '8192');
@@ -86,15 +86,14 @@ test('navigation preserves account input and settings drafts, and instance setti
   expect(screen.queryByRole('heading', { name: 'Caché de archivos de modpacks' })).toBeNull();
 });
 
-test('mandatory pack updates replace Play and keep explicit world-backup consent across navigation', async () => {
+test('mandatory pack updates open a modal and require explicit world-backup consent', async () => {
   catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
   const user = userEvent.setup(); mount();
   const update = await screen.findByRole('button', { name: 'Actualizar…' });
   expect(screen.queryByRole('button', { name: 'Jugar', exact: true })).toBeNull();
   await user.click(update);
   await screen.findByText('Actualizar el modpack de Uno a Dos');
-  await user.click(screen.getByRole('button', { name: 'Ajustes del launcher' }));
-  await user.click(screen.getByRole('button', { name: 'Inicio: tus instancias' }));
+  expect(screen.getByRole('dialog', { name: 'Actualizar el modpack de Uno a Dos' })).toBeTruthy();
   expect((screen.getByLabelText('Crear una copia de mis mundos antes de actualizar (recomendado)') as HTMLInputElement).checked).toBe(true);
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(screen.getByRole('button', { name: 'Confirmar actualización' }));
@@ -288,15 +287,16 @@ test('instance tooltips reuse game and loader badges with exact installed loader
 });
 
 
-test('the version update badge opens consent without starting an update', async () => {
+test('update status stays noninteractive and preserves the modpack version', async () => {
   catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
   const user = userEvent.setup(); mount();
   const article = await screen.findByRole('article', { name: 'Aventura' });
-  await user.click(within(article).getByRole('button', { name: 'Actualizar', exact: true }));
-  await screen.findByText('Actualizar el modpack de Uno a Dos');
-  expect((screen.getByLabelText('Crear una copia de mis mundos antes de actualizar (recomendado)') as HTMLInputElement).checked).toBe(true);
+  expect(within(article).queryByRole('button', { name: 'Actualizar', exact: true })).toBeNull();
+  expect(within(article).getByText('Actualización disponible')).toBeTruthy();
+  expect(within(article).getByText('Actualización disponible').querySelector('svg')).not.toBeNull();
+  expect(within(article).getByText('vDos')).toBeTruthy();
+  expect(screen.queryByRole('dialog')).toBeNull();
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
-  expect(within(article).queryByText('vDos')).toBeNull();
 });
 
 test('instance menu opens fixed folders and existing logs, and routes shared cache to confirmation', async () => {
@@ -322,11 +322,28 @@ test('browser update preview permits inspection while desktop actions stay disab
   backend.native = false;
   const user = userEvent.setup(); mount();
   await user.click(await screen.findByRole('button', { name: 'Modpack con actualización: Actualización disponible' }));
-  await user.click(screen.getByRole('button', { name: 'Actualizar', exact: true }));
+  await user.click(screen.getByRole('button', { name: 'Actualizar…', exact: true }));
   expect((screen.getByRole('button', { name: 'Confirmar actualización' }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByLabelText('Crear una copia de mis mundos antes de actualizar (recomendado)') as HTMLInputElement).checked).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'Conservar versión instalada' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Opciones de instancia' }));
   expect(screen.getByRole('menuitem', { name: 'Abrir carpeta' }).getAttribute('aria-disabled')).toBe('true');
   expect(screen.getByRole('menuitem', { name: 'Ver registro' }).getAttribute('aria-disabled')).toBe('true');
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
+});
+
+
+test('cancelling the update modal never starts an update and restores the default backup on reopening', async () => {
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  const trigger = await screen.findByRole('button', { name: 'Actualizar…', exact: true });
+  await user.click(trigger);
+  await user.click(screen.getByLabelText('Actualizar sin copia de mundos'));
+  const dialog = screen.getByRole('dialog');
+  fireEvent(dialog, new Event('cancel', { bubbles: false, cancelable: true }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
+  await user.click(trigger);
+  expect((screen.getByLabelText('Crear una copia de mis mundos antes de actualizar (recomendado)') as HTMLInputElement).checked).toBe(true);
 });

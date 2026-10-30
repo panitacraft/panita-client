@@ -1,5 +1,5 @@
 import { Hint } from './hint';
-import { Blocks } from 'lucide-react';
+import { Blocks, RefreshCw } from 'lucide-react';
 import type { CatalogInstance } from '../preview-catalog';
 import { isPack } from '../library-state';
 import minecraft from '../assets/brands/minecraft.svg';
@@ -15,7 +15,7 @@ const loaders: Record<string, { name: string; icon: string }> = {
   quilt: { name: 'Quilt', icon: quilt },
 };
 
-export function InstanceBadges({ instance, updateAvailable = false, onUpdate }: { instance: CatalogInstance; updateAvailable?: boolean; onUpdate?: () => void }) {
+export function InstanceBadges({ instance, updateAvailable = false, showLoaderHint = false }: { instance: CatalogInstance; updateAvailable?: boolean; showLoaderHint?: boolean }) {
   const pack = isPack(instance);
   const loaderId = instance.installedLoader?.name ?? instance.source?.loader ?? instance.installedSource?.loader;
   const loader = loaderId ? loaders[loaderId] : undefined;
@@ -23,14 +23,15 @@ export function InstanceBadges({ instance, updateAvailable = false, onUpdate }: 
   const label = instance.source?.label?.trim();
   const versionLabel = label ? `v${label.replace(/^v(?=\d)/i, '')}` : null;
   const loaderText = pack && loaderId ? (loader?.name ?? loaderId) + (loaderVersion ? ' ' + loaderVersion : '') : null;
-  const gameBadge = <span tabIndex={loaderText && onUpdate ? 0 : undefined} aria-label={loaderText ? 'Minecraft ' + instance.minecraftVersion + ' · ' + loaderText : undefined}>
+  const gameBadge = <span tabIndex={loaderText && showLoaderHint ? 0 : undefined} aria-label={loaderText ? 'Minecraft ' + instance.minecraftVersion + ' · ' + loaderText : undefined}>
     <img className="game-icon" src={minecraft} alt="" aria-hidden="true" />
     {loaderText && (loader ? <img className="loader-icon" src={loader.icon} alt={loaderText} /> : <Blocks aria-label={loaderText} />)}
     Minecraft {instance.minecraftVersion}
   </span>;
   return <>
-    {instance.minecraftVersion && (loaderText && onUpdate ? <Hint text={loaderText}>{gameBadge}</Hint> : gameBadge)}
-    {updateAvailable ? onUpdate ? <button type="button" className="update-badge" onClick={onUpdate}>Actualizar</button> : <span className="update-badge">Actualización disponible</span> : pack && versionLabel && <span className="pack-version">{versionLabel}</span>}
+    {instance.minecraftVersion && (loaderText && showLoaderHint ? <Hint text={loaderText}>{gameBadge}</Hint> : gameBadge)}
+    {pack && versionLabel && <span className="pack-version">{versionLabel}</span>}
+    {updateAvailable && <span className="update-badge"><RefreshCw aria-hidden="true" />Actualización disponible</span>}
     {pack && !loaderId && !versionLabel && <span>Modpack</span>}
   </>;
 }

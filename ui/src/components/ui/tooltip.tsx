@@ -26,7 +26,12 @@ const TooltipContent = React.forwardRef<
       {...props}
     >
       {children}
-      <TooltipPrimitive.Arrow className="fill-secondary" width={12} height={6} />
+      <TooltipPrimitive.Arrow asChild width={20} height={10}>
+        <svg className="tooltip-arrow fill-secondary" viewBox="0 0 20 10" aria-hidden="true">
+          <path d="M0 0 L10 10 L20 0" />
+          <path className="tooltip-arrow-seam" d="M0 0 H20" />
+        </svg>
+      </TooltipPrimitive.Arrow>
     </TooltipPrimitive.Content>
   </TooltipPrimitive.Portal>
 ))
