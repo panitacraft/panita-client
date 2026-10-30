@@ -72,8 +72,8 @@
   .danger { background: #FCA5A5; border-color: #FCA5A5; color: #2E1010; }
   .danger:hover { background: #FECACA; border-color: #FECACA; }
   .secondary { background: transparent; }
-  .window-footer { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid #303030; padding: 13px 22px; color: #BABABA; background: #1B1B1B; font-size: 11px; }
-  .minimized main, .minimized .window-footer { display: none; }
+  .version { margin-right: auto; align-self: center; color: #BABABA; font-size: 11px; white-space: nowrap; }
+  .minimized main { display: none; }
   .restore { display: flex; justify-content: center; margin-top: 16px; }
   dialog { width: min(480px, calc(100% - 32px)); color: #F9FFF8; background: #1B1B1B; border: 1px solid #515151; border-radius: 12px; padding: 26px; box-shadow: 0 20px 80px #0008; }
   dialog::backdrop { background: #000B; }
@@ -118,9 +118,8 @@
     <div class="options" id="uninstall-options" hidden><label class="check-row"><input type="checkbox" id="erase">Eliminar también mis datos</label><p class="option-help">Incluye cuentas, instancias, mundos y descargas. No se puede deshacer.</p></div>
     <div class="operation-card" id="operation" hidden role="status" aria-live="polite"><div class="operation-heading"><svg class="spin" aria-hidden="true"><use href="#i-loader"/></svg><span id="operation-title"></span></div><div class="operation-metrics"><span id="status"></span><strong id="percentage">0 %</strong></div><progress id="progress" value="0" max="100" aria-label="Progreso"></progress><p class="operation-caption" id="progress-caption"></p></div>
     <details id="details" hidden><summary>Ver detalles</summary><pre id="output"></pre></details>
-    <div class="actions"><button class="secondary" id="cancel" type="button"><svg aria-hidden="true"><use href="#i-x"/></svg><span>Cancelar</span></button><button class="primary" id="primary" type="button"><svg aria-hidden="true"><use id="action-symbol" href="#i-download"/></svg><span id="action-text">Instalar</span></button></div>
+    <div class="actions"><span class="version">v0.1.1-beta.9</span><button class="secondary" id="cancel" type="button"><svg aria-hidden="true"><use href="#i-x"/></svg><span>Cancelar</span></button><button class="primary" id="primary" type="button"><svg aria-hidden="true"><use id="action-symbol" href="#i-download"/></svg><span id="action-text">Instalar</span></button></div>
   </main>
-  <footer class="window-footer"><span>v0.1.1-beta.9</span><span>Panitacraft</span></footer>
 </section>
 <div class="restore" id="restore-region" hidden><button id="restore" type="button">Restaurar vista previa</button></div>
 <dialog id="erase-dialog" aria-labelledby="erase-heading"><h2 id="erase-heading">Eliminar todos tus datos</h2><p>Esta carpeta y todo su contenido se eliminarán permanentemente:</p><code>C:\Users\Jugador\AppData\Roaming\PanitaClient</code><p>Perderás cuentas y sesiones, ajustes, instancias con sus mundos, capturas y copias de seguridad, descargas de Minecraft y Java, cachés y registros.</p><label class="check-row"><input id="acknowledge" type="checkbox">Entiendo que perderé todos estos datos</label><div class="actions"><button class="secondary" id="erase-cancel" type="button"><svg aria-hidden="true"><use href="#i-x"/></svg>Cancelar</button><button class="danger" id="erase-confirm" type="button" disabled><svg aria-hidden="true"><use href="#i-trash"/></svg>Eliminar y desinstalar</button></div></dialog>
