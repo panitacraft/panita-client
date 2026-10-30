@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronDown, Download, Gamepad2, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench } from 'lucide-react';
+import { ChevronDown, Download, Gamepad2, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { messageForError } from './errors';
@@ -306,8 +306,8 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         <label className="backup-choice"><input type="checkbox" checked={eraseConfirmed} onChange={event => setEraseConfirmed(event.target.checked)} /><span>Entiendo que perderé todos los datos de esta instancia</span></label>
       </div>}
       <div className="account-buttons">
-        <Button variant="destructive" disabled={busy || !isTauri() || !play?.snapshot || (removalPending && !deleteInstance) || (deleteInstance && (!eraseConfirmed || !instanceFolder))} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID(), deleteInstance }); }}>{deleteInstance ? 'Eliminar instancia' : 'Desinstalar'}</Button>
-        <Button variant="secondary" disabled={busy} onClick={() => setUninstallQuestion(false)}>Cancelar</Button>
+        <Button variant="destructive" disabled={busy || !isTauri() || !play?.snapshot || (removalPending && !deleteInstance) || (deleteInstance && (!eraseConfirmed || !instanceFolder))} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID(), deleteInstance }); }}><Trash2 aria-hidden="true" />{deleteInstance ? 'Eliminar instancia' : 'Desinstalar'}</Button>
+        <Button variant="secondary" disabled={busy} onClick={() => setUninstallQuestion(false)}><X aria-hidden="true" />Cancelar</Button>
       </div>
     </>}
     </dialog>
@@ -323,8 +323,8 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
           setUpdateQuestion(null);
           setLastBackup(choice.backupWorlds);
           void act('begin_update', { requestId: crypto.randomUUID(), update: { from_version: choice.fromVersion, to_version: choice.toVersion, backup_worlds: choice.backupWorlds } });
-        }}>Actualizar</Button>
-        <Button variant="secondary" disabled={busy} onClick={() => setUpdateQuestion(null)}>Cancelar</Button>
+        }}><RefreshCw aria-hidden="true" />Actualizar</Button>
+        <Button variant="secondary" disabled={busy} onClick={() => setUpdateQuestion(null)}><X aria-hidden="true" />Cancelar</Button>
       </div>
     </>}
     </dialog>

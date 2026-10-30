@@ -4,6 +4,14 @@ import { listen } from '@tauri-apps/api/event';
 import { WindowControls } from './components/window-controls';
 import { WindowDragRegion } from './components/window-drag-region';
 import { TooltipProvider } from './components/ui/tooltip';
+import { ArrowRight, Check, Copy, Info, LogOut, Ellipsis, RefreshCw, X } from 'lucide-react';
+import { TransientNotice, useTransientNotice } from './components/transient-notice';
+import logoBackground from './assets/logo_background.svg';
+import { Button } from './components/ui/button';
+import { Hint } from './components/hint';
+import { AccountDialog } from './components/account-dialog';
+import { ProfileArtwork } from './components/profile-artwork';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from './components/ui/dropdown-menu';
 import logoWhite from './assets/logo-white.svg';
 import { Accounts } from './accounts';
 import { invokeAccount } from './account-api';
@@ -160,7 +168,7 @@ function RunningGames() {
 function Shell({ children }: { children: ReactNode }) {
   return <TooltipProvider><main className="launcher-shell setup-shell">
     <header className="launcher-toolbar">
-      <WindowDragRegion><span className="setup-brand"><img src={logoWhite} alt="" aria-hidden="true" draggable={false} /><span className="toolbar-brand">PANITA <span>CLIENT</span></span></span></WindowDragRegion>
+      <WindowDragRegion><span className="setup-brand"><img src={logoBackground} alt="" aria-hidden="true" draggable={false} /><span className="toolbar-brand">PANITA <span>CLIENT</span></span></span></WindowDragRegion>
       <WindowControls separator={false} />
     </header>
     <div className="setup-content">{children}<RunningGames /><CrashNotifications names={{}} /></div>
@@ -186,13 +194,15 @@ export function ActivationGate({ children }: { children: ReactNode }) {
 function ActivationScreen() {
   const activation = useActivation();
   const [identifier, setIdentifier] = useState('');
-  const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const toast = useTransientNotice();
+  useEffect(() => { if (activation?.notice) toast.show(activation.notice); }, [activation?.notice, toast.show]);
   const view = activation?.view ?? null;
   const pending = view?.state === 'pending';
   const now = useNow(pending);
+  const [lastSerial, setLastSerial] = useState<string | null>(null);
+  useEffect(() => { if (view?.serial) { setLastSerial(view.serial); toast.clear(); } }, [view?.serial, toast.clear]);
   if (!activation) return null;
-
-  const serial = view?.serial ?? null;
+  const serial = view?.serial ?? lastSerial;
   const starting = activation.busy === 'start_activation' || view?.state === 'creating';
   const code = view?.error ?? activation.error;
   const shown = code ? `${messageForError(code)}${code === 'activation_rate_limited' ? retryAfterText(view?.retry_after ?? null) : ''}` : null;
@@ -203,40 +213,37 @@ function ActivationScreen() {
 
   async function copySerial() {
     if (!serial) return;
-    try { await navigator.clipboard.writeText(serial); setCopy('copied'); }
-    catch { setCopy('failed'); }
+    try { await navigator.clipboard.writeText(serial); toast.show('Código copiado.'); }
+    catch { toast.show('No pudimos copiar el código. Selecciónalo y cópialo a mano.', 'error'); }
   }
 
+  const expired = !pending && !!lastSerial && code === 'activation_expired';
+  const help = 'Te damos un código que confirmas desde Discord: envíaselo a Panita Bot por mensaje directo o usa /confirm en el servidor. No necesitas contraseña.';
   return <Shell>
-    <section className="activation-section" aria-labelledby="activation-title">
-      <h1 id="activation-title">Activa Panita Client</h1>
-      <p>Necesitas una cuenta de Panitacraft activada para usar el cliente. Es independiente de tu cuenta de Minecraft.</p>
-      {activation.notice && <p role="status">{activation.notice}</p>}
-      {activation.initializationError && <div role="alert">
-        <p>{messageForError(activation.initializationError)}</p>
-        <button type="button" onClick={activation.retryInitialization}>Reintentar</button>
-      </div>}
+    <section className="activation-section login-card" aria-labelledby="activation-title">
+      <h1 id="activation-title" className="account-title"><img src={logoWhite} alt="" />Acceder a Panita Client</h1>
+      <p className="login-subtitle">{pending || expired ? 'Introduce este código' : 'Vincula tu cuenta de Panitacraft'} <Hint text={help}><button className="info-button" aria-label="Cómo vincular tu cuenta"><Info aria-hidden="true" /></button></Hint></p>
+      <TransientNotice notice={toast.notice} />
+      {activation.initializationError && <div role="alert"><p>{messageForError(activation.initializationError)}</p><Button onClick={activation.retryInitialization}><RefreshCw aria-hidden="true" />Reintentar</Button></div>}
       {!activation.initializationError && !view && <p role="status">Cargando…</p>}
-      {shown && !waitingOffline && !needsConnection && <p role="alert" className="account-error">{shown}</p>}
-      {needsConnection && <p role="alert" className="account-error">No pudimos conectar con Panitacraft. Activar el cliente necesita conexión: revisa tu red e inténtalo de nuevo. Cuando ya estés activado, podrás jugar sin conexión las instancias que tengas instaladas.</p>}
+      {shown && !expired && !waitingOffline && !needsConnection && <p role="alert" className="account-error">{shown}</p>}
+      {needsConnection && <p role="alert">No pudimos conectar con Panitacraft. Revisa tu conexión e inténtalo de nuevo.</p>}
       {waitingOffline && <p role="status">No pudimos conectar con el servicio. Seguimos esperando tu confirmación mientras el código siga vigente.</p>}
-      {view && !pending && <form className="activation-form" noValidate onSubmit={event => { event.preventDefault(); void activation.start(identifier); }}>
-        <label htmlFor="member-identifier">Tu nombre de Minecraft o de Discord</label>
-        <input id="member-identifier" value={identifier} onChange={event => setIdentifier(event.target.value)} maxLength={100} required autoComplete="off" />
-        <button type="submit" disabled={starting || identifier.trim().length === 0}>{starting ? 'Pidiendo tu código…' : 'Obtener código'}</button>
+      {view && !pending && !expired && <form className="activation-form" noValidate onSubmit={event => { event.preventDefault(); void activation.start(identifier); }}>
+        <label htmlFor="member-identifier">IGN o usuario de Discord</label>
+        <div className="identifier-input"><ProfileArtwork username={identifier.trim()} /><input id="member-identifier" placeholder="Ej. Aerosmith_" value={identifier} onChange={event => setIdentifier(event.target.value)} maxLength={100} required autoComplete="off" /></div>
+        <Button type="submit" disabled={starting || identifier.trim().length === 0}>{starting ? 'Pidiendo tu código…' : 'Continuar'}<ArrowRight aria-hidden="true" /></Button>
       </form>}
-      {pending && serial && <div className="serial-box" role="status">
-        <p>Tu código de activación:</p>
-        <p className="serial"><code aria-label={`Código ${serial.split('').join(' ')}`}>{serial}</code></p>
-        <div className="account-buttons">
-          <button type="button" onClick={() => void copySerial()}>Copiar código</button>
-          {copy === 'copied' && <span role="status">Código copiado.</span>}
-          {copy === 'failed' && <span role="alert">No pudimos copiarlo. Selecciónalo y cópialo a mano.</span>}
-        </div>
-        <p>Escribe <code>/confirm {serial}</code> en el servidor de Discord de Panitacraft, o envía el código al bot por mensaje directo.</p>
-        <p><strong>Confirma solo un código que generaste aquí.</strong> Si alguien más te pide confirmar un código, no lo hagas.</p>
-        <p>El código vence en {countdownText(remainingSeconds(view?.expires_at ?? null, now))}.</p>
-        <button type="button" disabled={activation.busy === 'cancel_activation'} onClick={() => void activation.cancel()}>Cancelar</button>
+      {(pending || expired) && serial && <div className={`serial-box ${expired ? 'is-expired' : ''}`}>
+        <p className="member-greeting">Hola, <ProfileArtwork username={identifier.trim()} /><strong>{identifier}</strong></p>
+        <div className="serial-groups" role="status" aria-label={`Código ${serial}`}><code>{serial}</code></div>
+        <Button variant="outline" disabled={expired} onClick={() => void copySerial()}><Copy aria-hidden="true" />Copiar código</Button>
+        {pending && <>
+          <p className="serial-instructions">Envía el código a <strong>Panita Bot</strong> por mensaje directo.<br />En el servidor, usa <code>/confirm {serial}</code></p>
+          <p className="serial-expiry">Vence en {countdownText(remainingSeconds(view?.expires_at ?? null, now))}.</p>
+        </>}
+        <p>¿No eres tú? <button className="text-action" disabled={!!activation.busy} onClick={() => { void activation.cancel().then(() => setLastSerial(null)); }}>Cambiar</button></p>
+        {expired && <><p role="alert">El código venció. Genera otro y vuelve a intentarlo.</p><Button disabled={starting} onClick={() => void activation.start(identifier)}>Generar otro código<RefreshCw aria-hidden="true" /></Button></>}
       </div>}
     </section>
   </Shell>;
@@ -245,43 +252,39 @@ function ActivationScreen() {
 function Onboarding() {
   const activation = useActivation();
   const user = activation?.view?.user ?? null;
-  return <Shell>
-    <section aria-labelledby="onboarding-title">
-      <h1 id="onboarding-title">Elige cómo jugar</h1>
-      <p>Tu cuenta de Panitacraft está activada. Ahora añade la cuenta de Minecraft con la que vas a jugar: inicia sesión con Microsoft si tienes Minecraft Java original, o usa un nombre sin conexión si no lo tienes.</p>
-    </section>
-    <Accounts suggestedName={user ? offlineNameSuggestion(user) : ''} />
-  </Shell>;
+  return <Shell><Accounts onboarding suggestedName={user ? offlineNameSuggestion(user) : ''} /></Shell>;
 }
 
 /** The member's Panitacraft account inside the launcher, with the session controls. */
 export function ActivationPanel() {
   const activation = useActivation();
+  const toast = useTransientNotice();
+  useEffect(() => { if (activation?.notice) toast.show(activation.notice); }, [activation?.notice, toast.show]);
   const [confirming, setConfirming] = useState(false);
   const view = activation?.view;
   if (!activation || !view?.user) return null;
   const user = view.user;
   const hint = registrationHint(user);
   return <section className="activation-panel" aria-labelledby="activation-panel-heading">
-    <h2 id="activation-panel-heading">Tu cuenta de Panitacraft</h2>
+    <h2 id="activation-panel-heading" className="account-title"><img src={logoWhite} alt="" />Cuenta de Panitacraft</h2>
     {view.state === 'active_offline' && <div className="catalog-notice" role="status">
       <p>No pudimos verificar tu sesión de Panitacraft. Puedes jugar las instancias que ya tienes instaladas; instalar, actualizar o reparar necesita conexión.</p>
-      <button type="button" disabled={activation.busy === 'refresh_activation'} onClick={() => void activation.refresh()}>Reintentar</button>
+      <Button disabled={activation.busy === 'refresh_activation'} onClick={() => void activation.refresh()}><RefreshCw aria-hidden="true" />Reintentar</Button>
     </div>}
     {!view.persisted && <div role="alert" className="account-error">
       <p>Tu sesión de Panitacraft no se ha guardado. Reintenta guardarla antes de cerrar el cliente.</p>
-      <button type="button" onClick={() => void activation.retrySave()}>Reintentar guardado</button>
+      <Button onClick={() => void activation.retrySave()}><RefreshCw aria-hidden="true" />Reintentar guardado</Button>
     </div>}
     {(activation.error ?? (view.error === 'api_key_rejected' ? view.error : null)) && <p role="alert" className="account-error">{messageForError(activation.error ?? view.error)}</p>}
-    {activation.notice && <p role="status">{activation.notice}</p>}
-    <p><strong>{memberName(user)}</strong> <span>{user.discord_name}</span></p>
-    {hint && <p>{hint}</p>}
-    {confirming
-      ? <span role="group" aria-label="Confirmar cierre de sesión">
-          <span>¿Cerrar la sesión de Panitacraft en este equipo? Tus cuentas de Minecraft se conservan.</span>
-          <button type="button" disabled={activation.busy === 'sign_out_activation'} onClick={() => { setConfirming(false); void activation.signOut(); }}>Cerrar sesión</button>
-          <button type="button" onClick={() => setConfirming(false)}>Conservar</button>
-        </span>
-      : <button type="button" onClick={() => setConfirming(true)}>Cerrar sesión de Panitacraft</button>}
+    <TransientNotice notice={toast.notice} />
+    <div className="profile-row panita-profile">
+      <img className="panita-profile-logo" src={logoWhite} alt="" />
+      <div className="profile-info"><div className="profile-name"><strong>{memberName(user)}</strong><span className="active-badge"><Check aria-hidden="true" />Activa</span></div><span className="profile-type">{user.discord_name}</span>{hint && <p>{hint}</p>}</div>
+      <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Opciones de Panitacraft"><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => setConfirming(true)}><LogOut />Cerrar sesión</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+    </div>
+    {confirming && <AccountDialog title="Cerrar sesión de Panitacraft" onCancel={() => setConfirming(false)}>
+      <p>¿Cerrar la sesión de Panitacraft en este equipo? Tus perfiles de Minecraft se conservan.</p>
+      <div className="account-buttons"><Button variant="destructive" disabled={activation.busy === 'sign_out_activation'} onClick={() => { setConfirming(false); void activation.signOut(); }}><LogOut aria-hidden="true" />Cerrar sesión</Button><Button variant="outline" onClick={() => setConfirming(false)}><X aria-hidden="true" />Cancelar</Button></div>
+    </AccountDialog>}
   </section>;
 }

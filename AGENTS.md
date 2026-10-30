@@ -513,8 +513,9 @@ and individual measurements are evidence, not product guarantees.
   `docs/`. On 2026-10-30 the owner extends frameless styling to the main launcher:
   provide visible accessible window controls and a draggable header on loading,
   activation, onboarding and library screens. Keep the existing close supervision
-  and preparation guards. The four-instance rail uses a 560-pixel minimum window
-  height and one selected account avatar; preserve legacy smaller saved sizes by
+  and preparation guards. The owner expands the rail on 2026-10-30 to at least
+  six visible instances, using additional vertical space before paging. Use a
+  700-pixel minimum window height and one selected account avatar; preserve legacy smaller saved sizes by
   clamping their restored height. A busy-launcher uninstall
   warning must leave its confirmation screen available for retry, with a final
   idle check before deletion. Do not force-close the supervising launcher.
@@ -613,8 +614,9 @@ and individual measurements are evidence, not product guarantees.
 - Use the annotated launcher layout reference and supplied palette for the
   interim facelift: dark `#141414`, `#1B1B1B`, `#515151`; light `#F9FFF8`,
   `#E4FFDA`, `#BABABA`; primary `#54A636`, `#047500`. Theme switching is not
-  implied. Use `ui/src/assets/logo_background.svg` as the authoritative
-  background-bearing logo and icon source; preserve its embedded artwork/colors.
+  implied. Use the owner-updated `desktop/icons/source.svg` as the application
+  icon source (2026-10-30); preserve its artwork and colors. Use the
+  background-bearing logo in navigation headers (owner decision, 2026-10-30).
   Keep Spanish player-facing text, keyboard access, contrast and accessible custom
   main-window controls and dragging. Final design remains a later plan.
 - Qualify the new installed-product scope on Windows 11 x64 and Ubuntu x64;

@@ -58,6 +58,59 @@
 }
 
 @layer components {
+  .account-title { display: flex; align-items: center; justify-content: flex-start; gap: 12px; }
+  .account-title img { width: 32px; height: 32px; object-fit: contain; flex-shrink: 0; }
+  .account-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .account-section-heading h2 { margin: 0; }
+  .login-card { width: min(480px, 100%); padding: 32px; }
+  .login-card .account-title { justify-content: center; font-size: clamp(22px, 3vw, 30px); }
+  .login-card .account-title img { width: 36px; height: 42px; }
+  .login-subtitle { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 14px 0 18px; }
+  .info-button { display: inline-flex; background: transparent; border: 0; padding: 2px; color: #BABABA; }
+  .info-button svg { width: 16px; height: 16px; }
+  .identifier-input { display: flex; align-items: center; gap: 10px; background: #141414; border: 1px solid #515151; border-radius: 6px; padding: 0 12px; }
+  .identifier-input:focus-within { outline: 2px solid #E4FFDA; outline-offset: 2px; }
+  .identifier-input input { border: 0; width: 100%; outline: none; padding-inline: 0; background: transparent; }
+  .profile-head { width: 24px; height: 24px; object-fit: contain; image-rendering: pixelated; flex-shrink: 0; }
+  .activation-form > button { width: 100%; margin-top: 14px; }
+  .login-card .activation-form { display: flex; flex-direction: column; gap: 8px; }
+  .login-card .serial-box { text-align: center; margin-top: 0; padding: 0; border: 0; background: transparent; }
+  .member-greeting { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 8px 0; }
+  .serial-groups { display: flex; justify-content: center; margin: 14px 0 10px; }
+  .serial-groups code { background: #141414; border: 1px solid #333; border-radius: 5px; padding: 12px 14px; font-size: clamp(16px, 2vw, 22px); font-weight: 700; letter-spacing: .08em; user-select: text; white-space: nowrap; }
+  .serial-instructions { margin: 14px 0 8px; line-height: 1.5; }
+  .serial-instructions code { display: inline-block; white-space: nowrap; font-weight: 600; }
+  .serial-box .serial-expiry { color: #BABABA; font-size: 12px; margin: 8px 0; }
+  .is-expired .serial-groups { opacity: .4; }
+  .text-action { padding: 0; border: 0; border-radius: 0; background: transparent; color: #A9E58C; font-size: inherit; }
+  .text-action:not(:disabled):hover { background: transparent; text-decoration: underline; }
+  .login-safety { font-size: 12px; color: #BABABA; }
+  .account-onboarding { width: min(580px, 100%); text-align: center; }
+  .account-onboarding .account-title { justify-content: center; }
+  .account-choices { display: grid; gap: 12px; margin-top: 28px; }
+  .account-choices button { width: 100%; min-height: 48px; }
+  .brand-icon { width: 18px; height: 18px; }
+  .account-dialog { width: min(480px, calc(100vw - 40px)); text-align: left; }
+  .account-dialog label { display: block; margin: 22px 0 8px; }
+  .account-dialog input { width: 100%; }
+  .account-dialog .account-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+  .account-dialog .account-buttons button { min-width: 100px; }
+  .accounts-section .profile-list { list-style: none; padding: 0; margin-top: 16px; gap: 0; }
+  .profile-list .profile-row, .panita-profile { display: flex; align-items: center; gap: 16px; padding: 12px 0; border: 0; border-bottom: 1px solid #333; border-radius: 0; background: transparent; }
+  .profile-list .profile-row:last-child, .panita-profile { border-bottom: 0; padding-bottom: 0; }
+  .profile-bust { width: 64px; height: 72px; object-fit: contain; flex-shrink: 0; }
+  .profile-info { flex: 1; min-width: 0; }
+  .profile-name { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+  .profile-type { display: flex; align-items: center; gap: 6px; color: #BABABA; font-size: 13px; margin-top: 4px; }
+  .profile-type > svg { width: 13px; height: 13px; flex-shrink: 0; }
+  .profile-info .profile-status { color: #BABABA; font-size: 12px; margin: 4px 0 0; }
+  .active-badge { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #54A636; border-radius: 4px; padding: 2px 6px; color: #E4FFDA; background: #21351c; font-size: 11px; }
+  .active-badge svg { width: 12px; height: 12px; }
+  .panita-profile-logo { width: 48px; height: 64px; object-fit: contain; }
+  .transient-notice-region { position: fixed; right: 24px; bottom: 24px; z-index: 100; max-width: min(420px, calc(100vw - 48px)); pointer-events: none; text-align: left; }
+  .transient-notice { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid #54A636; border-radius: 8px; background: #21351c; color: #E4FFDA; box-shadow: 0 8px 30px #0008; font-size: 13px; }
+  .transient-notice > svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .transient-notice.notice-error { border-color: #FCA5A5; background: #3c2323; color: #FCA5A5; }
   .wordmark { display: inline-flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 650; }
   .wordmark img { width: 36px; height: 36px; }
   main:not(.launcher-shell) > header { display: flex; align-items: center; padding: 24px 32px; border-bottom: 1px solid #333; }
@@ -96,6 +149,8 @@
   .setup-shell { flex-direction: column; }
   .setup-content { flex: 1; min-height: 0; overflow: auto; padding: 24px; }
   .setup-content > section { max-width: 680px; margin: 0 auto 20px; background: #1B1B1B; border: 1px solid #383838; border-radius: 12px; }
+  .setup-content > .login-card { max-width: 480px; margin-top: clamp(0px, 7vh, 70px); padding: 32px; }
+  .profile-list .active-badge { color: #E4FFDA; font-size: 11px; }
   .setup-brand { display: flex; align-items: center; gap: 16px; }
   .setup-brand img { width: 36px; height: 36px; }
   .window-controls { display: flex; align-items: center; gap: 4px; }

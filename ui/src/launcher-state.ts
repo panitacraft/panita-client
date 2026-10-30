@@ -3,6 +3,13 @@ import type { PlayEntry } from './play-state';
 
 export type LauncherPage = 'library' | 'accounts' | 'settings';
 
+/** Match 52px cards, 14px gaps and 8px list padding; paged rails reserve 64px for arrows. */
+export function instanceRailCapacity(availableHeight: number, count: number): number {
+  const slots = (height: number) => Math.max(6, Math.floor((height - 8 + 14) / 66));
+  const unpaged = slots(availableHeight);
+  return count <= unpaged ? unpaged : slots(availableHeight - 64);
+}
+
 /** A cached selection may name a catalog entry no longer visible to the member. */
 export function visibleSelection(instances: CatalogInstance[], selected: string | null): string | null {
   return instances.find(instance => instance.id === selected)?.id ?? instances[0]?.id ?? null;

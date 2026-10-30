@@ -68,11 +68,14 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-test('navigation preserves account input and settings drafts, and instance settings are separate', async () => {
+test('navigation preserves settings drafts and account creation remains an explicit modal', async () => {
   const user = userEvent.setup(); mount();
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
   await user.click(await screen.findByRole('button', { name: 'Gestionar cuentas', exact: true }));
-  await user.type(await screen.findByLabelText('Nombre para jugar sin conexión'), 'OtroJugador');
+  await user.click(await screen.findByRole('button', { name: 'Añadir', exact: true }));
+  await user.click(screen.getByRole('menuitem', { name: 'Añadir cuenta No premium' }));
+  await user.type(await screen.findByLabelText('Nombre de usuario'), 'OtroJugador');
+  await user.click(screen.getByRole('button', { name: 'Cancelar' }));
   await user.click(screen.getByRole('button', { name: 'Instancias', exact: true }));
   await user.click(screen.getByRole('button', { name: 'Ajustes del launcher' }));
   const ram = await screen.findByLabelText('RAM para Minecraft (MiB)');
@@ -81,7 +84,8 @@ test('navigation preserves account input and settings drafts, and instance setti
   await user.click(screen.getByRole('button', { name: 'Ajustes del launcher' }));
   expect((screen.getByLabelText('RAM para Minecraft (MiB)') as HTMLInputElement).value).toBe('8192');
   await user.click(screen.getByRole('button', { name: 'Gestionar cuentas', exact: true }));
-  expect((screen.getByLabelText('Nombre para jugar sin conexión') as HTMLInputElement).value).toBe('OtroJugador');
+  expect(screen.getByRole('heading', { name: 'Perfiles de Minecraft' })).toBeTruthy();
+  expect(screen.queryByRole('dialog')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Otra aventura: Lista para jugar' }));
   await screen.findByRole('heading', { name: 'Otra aventura', exact: true });
   await user.click(within(screen.getByRole('article', { name: 'Otra aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
@@ -182,7 +186,8 @@ test('the rail shows only the selected account and opens management to change it
   expect(screen.queryByRole('button', { name: 'Gestionar cuenta: Otro' })).toBeNull();
   await user.click(current);
   const row = screen.getByText('Otro').closest('li')!;
-  await user.click(within(row).getByRole('button', { name: 'Seleccionar', exact: true }));
+  await user.click(within(row).getByRole('button', { name: 'Opciones de Otro' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Seleccionar', exact: true }));
   expect(backend.invoke).toHaveBeenCalledWith('select_account', { accountId: 'second' });
   expect(await screen.findByRole('button', { name: 'Gestionar cuenta: Otro' })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Instancias', exact: true }));
@@ -395,14 +400,14 @@ test('permanent erasure requires its folder and a separate acknowledgement, and 
   expect(backend.invoke).toHaveBeenCalledWith('begin_uninstall', expect.objectContaining({ instanceId: 'pack-a', deleteInstance: true }));
 });
 
-test('instance navigation shows at most four cards and pages without a scrolling rail', async () => {
+test('instance navigation starts with six cards and pages without a scrolling rail', async () => {
   catalog.instances = Array.from({ length: 7 }, (_, index) => ({ ...first, id: index === 0 ? first.id : 'extra-' + index, name: 'Instancia ' + (index + 1) }));
   const user = userEvent.setup(); const { container } = mount();
   await screen.findByRole('heading', { name: 'Instancia 1', exact: true });
-  expect(container.querySelectorAll('.rail-instance')).toHaveLength(4);
+  expect(container.querySelectorAll('.rail-instance')).toHaveLength(6);
   expect((screen.getByRole('button', { name: 'Instancias anteriores' }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(screen.getByRole('button', { name: 'Más instancias' }));
-  expect(container.querySelectorAll('.rail-instance')).toHaveLength(3);
+  expect(container.querySelectorAll('.rail-instance')).toHaveLength(1);
   expect(screen.getByRole('button', { name: 'Instancia 7: Lista para jugar' })).toBeTruthy();
   expect((screen.getByRole('button', { name: 'Más instancias' }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(screen.getByRole('button', { name: 'Instancia 7: Lista para jugar' }));
@@ -412,4 +417,25 @@ test('instance navigation shows at most four cards and pages without a scrolling
   await screen.findByRole('heading', { name: 'Instancia 1', exact: true });
   expect(container.querySelectorAll('.rail-instance')).toHaveLength(2);
   expect(screen.queryByRole('button', { name: 'Más instancias' })).toBeNull();
+});
+
+test('resizing uses additional rail space and restores paging when complete cards no longer fit', async () => {
+  let height = 600;
+  const size = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('rail-browser') ? height : 0;
+  });
+  try {
+    catalog.instances = Array.from({ length: 10 }, (_, index) => ({ ...first, id: index === 0 ? first.id : 'extra-' + index, name: 'Instancia ' + (index + 1) }));
+    const { container } = mount();
+    await screen.findByRole('heading', { name: 'Instancia 1', exact: true });
+    await waitFor(() => expect(container.querySelectorAll('.rail-instance')).toHaveLength(8));
+    height = 800;
+    fireEvent(window, new Event('resize'));
+    await waitFor(() => expect(container.querySelectorAll('.rail-instance')).toHaveLength(10));
+    expect(screen.queryByRole('button', { name: 'Más instancias' })).toBeNull();
+    height = 455;
+    fireEvent(window, new Event('resize'));
+    await waitFor(() => expect(container.querySelectorAll('.rail-instance')).toHaveLength(6));
+    expect(screen.getByRole('button', { name: 'Más instancias' })).toBeTruthy();
+  } finally { size.mockRestore(); }
 });

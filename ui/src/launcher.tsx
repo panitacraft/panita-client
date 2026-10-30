@@ -5,7 +5,8 @@ import { ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, Refre
 import { loadCatalog } from './catalog-api';
 import type { CatalogOverview } from './preview-catalog';
 import { messageForError } from './errors';
-import logoWhite from './assets/logo-white.svg';
+import logoBackground from './assets/logo_background.svg';
+import { useInstanceRail } from './use-instance-rail';
 import { Accounts } from './accounts';
 import type { AccountsView } from './account-state';
 import { ActivationPanel, useActivation } from './activation';
@@ -52,14 +53,15 @@ export function Launcher() {
   const selectedId = visibleSelection(instances, preferences?.id ?? null);
   const selected = instances.find(instance => instance.id === selectedId);
   const selectedAccount = accountView?.accounts.find(account => account.metadata.account_id === accountView.selected_account_id);
-  const pageCount = Math.ceil(instances.length / 4);
+  const { rail, capacity } = useInstanceRail(instances.length);
+  const pageCount = Math.ceil(instances.length / capacity);
   const visiblePage = Math.min(instancePage, Math.max(0, pageCount - 1));
-  const visibleInstances = instances.slice(visiblePage * 4, visiblePage * 4 + 4);
+  const visibleInstances = instances.slice(visiblePage * capacity, visiblePage * capacity + capacity);
   const instanceOrder = instances.map(instance => instance.id).join(',');
   useEffect(() => {
     const index = instances.findIndex(instance => instance.id === selectedId);
-    setInstancePage(Math.max(0, Math.floor(index / 4)));
-  }, [selectedId, instanceOrder]);
+    setInstancePage(Math.max(0, Math.floor(index / capacity)));
+  }, [selectedId, instanceOrder, capacity]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -88,9 +90,9 @@ export function Launcher() {
     <a className="skip-link" href="#launcher-content">Saltar al contenido</a>
     <aside className="instance-rail" aria-label="Navegación de Panita">
       <div className="rail-header"><Button variant="ghost" className="rail-logo size-14 p-0 hover:bg-transparent hover:text-foreground" aria-label="Inicio: tus instancias" onClick={() => setPage('library')}>
-        <img src={logoWhite} alt="" aria-hidden="true" />
+        <img src={logoBackground} alt="" aria-hidden="true" />
       </Button></div>
-      <nav className="rail-browser" aria-label="Instancias">
+      <nav ref={rail} className="rail-browser" aria-label="Instancias">
         {pageCount > 1 && <Hint text="Instancias anteriores" side="right"><Button variant="ghost" className="rail-nav-control size-6 bg-transparent p-0" aria-label="Instancias anteriores" disabled={visiblePage === 0} onClick={() => setInstancePage(visiblePage - 1)}><ChevronUp aria-hidden="true" /></Button></Hint>}
         <div className="rail-instances">
         {visibleInstances.map(instance => <Hint key={instance.id} side="right" sideOffset={20} text={<div className="instance-hint">
@@ -116,7 +118,7 @@ export function Launcher() {
       <div className="rail-bottom">
         <Hint text="Gestionar cuentas" side="right"><Button variant="ghost" size="icon" className={`size-10 [&_svg]:size-5 ${page === 'accounts' ? 'is-selected' : ''}`} aria-label="Gestionar cuentas" aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}><Users aria-hidden="true" /></Button></Hint>
         <div className="rail-accounts" role="group" aria-label="Cuentas de Minecraft">
-          {selectedAccount && <Hint side="right" text={selectedAccount.metadata.username + ' · ' + (selectedAccount.metadata.kind === 'offline' ? 'Sin conexión' : 'Microsoft')}>
+          {selectedAccount && <Hint side="right" text={selectedAccount.metadata.username + ' | ' + (selectedAccount.metadata.kind === 'offline' ? 'No premium' : 'Microsoft')}>
             <Button variant="ghost" className="rail-account current-account size-10 p-0" aria-label={'Gestionar cuenta: ' + selectedAccount.metadata.username} onClick={() => setPage('accounts')}><AccountAvatar metadata={selectedAccount.metadata} /></Button>
           </Hint>}
           {!selectedAccount && <Hint text={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} side="right"><Button variant="ghost" className="rail-account size-10 p-0" aria-label={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} onClick={() => setPage('accounts')}><AccountAvatar metadata={null} /></Button></Hint>}
@@ -181,7 +183,7 @@ export function Launcher() {
         </div>
 
         <div hidden={page !== 'accounts'} className="utility-page">
-          <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>Tus cuentas</h1><p>Tu acceso a Panitacraft y tu perfil de Minecraft.</p></div>
+          <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>Tus cuentas</h1></div>
           <ActivationPanel /><Accounts onSnapshot={acceptAccounts} />
         </div>
         <div hidden={page !== 'settings'} className="utility-page">

@@ -20,7 +20,7 @@
         "width": 1100,
         "height": 700,
         "minWidth": 780,
-        "minHeight": 560,
+        "minHeight": 700,
         "decorations": false,
         "backgroundColor": "#141414"
       }

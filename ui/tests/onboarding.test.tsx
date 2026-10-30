@@ -1,5 +1,5 @@
 import startupHtml from '../index.html?raw';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { ActivationGate, ActivationProvider } from '../src/activation';
@@ -51,17 +51,18 @@ test('startup module failures retain a readable retry screen before React loads'
 
 test('activation loads before Minecraft account onboarding', async () => {
   mount();
-  expect(await screen.findByRole('heading', { name: 'Activa Panita Client' })).toBeTruthy();
-  expect(screen.getByLabelText('Tu nombre de Minecraft o de Discord')).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: 'Elige cómo jugar' })).toBeNull();
+  expect(await screen.findByRole('heading', { name: 'Acceder a Panita Client' })).toBeTruthy();
+  expect(screen.getByLabelText('IGN o usuario de Discord')).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Acceder a Minecraft' })).toBeNull();
 });
 
 test('an activated member without Minecraft accounts can complete offline onboarding', async () => {
   activate(); const user = userEvent.setup(); mount();
-  expect(await screen.findByRole('heading', { name: 'Elige cómo jugar' })).toBeTruthy();
-  expect(await screen.findByRole('button', { name: 'Iniciar sesión con Microsoft', exact: true })).toBeTruthy();
-  expect((await screen.findByLabelText('Nombre para jugar sin conexión') as HTMLInputElement).value).toBe('Fixture_Player');
-  await user.click(screen.getByRole('button', { name: 'Añadir cuenta sin conexión' }));
+  expect(await screen.findByRole('heading', { name: 'Acceder a Minecraft' })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: 'Añadir cuenta Microsoft', exact: true })).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Añadir cuenta No premium' }));
+  expect((await screen.findByLabelText('Nombre de usuario') as HTMLInputElement).value).toBe('Fixture_Player');
+  await user.click(screen.getByRole('button', { name: 'Confirmar' }));
   expect(await screen.findByRole('heading', { name: 'Biblioteca de prueba' })).toBeTruthy();
 });
 
@@ -75,5 +76,31 @@ test('initialization failure offers a visible retry instead of an empty window',
   mount();
   expect(await screen.findByRole('button', { name: 'Reintentar', exact: true })).toBeTruthy();
   const user = userEvent.setup(); await user.click(screen.getByRole('button', { name: 'Reintentar', exact: true }));
-  expect(await screen.findByLabelText('Tu nombre de Minecraft o de Discord')).toBeTruthy();
+  expect(await screen.findByLabelText('IGN o usuario de Discord')).toBeTruthy();
+});
+
+test('activation preserves the full serial, supports copy, and regenerates expired codes', async () => {
+  const original = native.invoke.getMockImplementation()!;
+  native.invoke.mockImplementation(async (command: string, ...args: unknown[]) => {
+    if (command === 'start_activation') {
+      activation = { ...activation, revision: activation.revision + 1, state: 'pending', serial: 'ABCD-EFGH-IJKL', expires_at: Math.floor(Date.now() / 1000) + 180, error: null };
+      return;
+    }
+    return original(command, ...args);
+  });
+  const user = userEvent.setup(); mount();
+  await user.type(await screen.findByLabelText('IGN o usuario de Discord'), 'Fixture_Player');
+  await user.click(screen.getByRole('button', { name: 'Continuar' }));
+  expect(await screen.findByLabelText('Código ABCD-EFGH-IJKL')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Acceder a Panita Client' })).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Copiar código' }));
+  expect(await navigator.clipboard.readText()).toBe('ABCD-EFGH-IJKL');
+  await act(async () => {
+    activation = { ...activation, revision: activation.revision + 1, state: 'no_session', serial: null, expires_at: null, error: 'activation_expired' };
+    native.listeners.get('activation-changed')?.forEach(callback => callback({ payload: activation }));
+  });
+  expect((screen.getByRole('button', { name: 'Copiar código' }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'Generar otro código' }));
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Copiar código' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(native.invoke).toHaveBeenLastCalledWith('activation_snapshot', undefined);
 });

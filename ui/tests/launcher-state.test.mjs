@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { instanceStatus, visibleSelection, safeArtwork } from '../src/launcher-state.ts';
+import { instanceStatus, visibleSelection, safeArtwork, instanceRailCapacity } from '../src/launcher-state.ts';
+
+test('the rail fits complete cards and only reserves arrows when the catalog overflows', () => {
+  assert.equal(instanceRailCapacity(455, 7), 6);
+  assert.equal(instanceRailCapacity(456, 7), 7);
+  assert.equal(instanceRailCapacity(456, 8), 6);
+  assert.equal(instanceRailCapacity(586, 8), 8);
+  assert.equal(instanceRailCapacity(652, 10), 9);
+  assert.equal(instanceRailCapacity(100, 20), 6);
+});
 
 test('selection survives a reordered catalog and falls back only when the saved entry disappears', () => {
   assert.equal(visibleSelection([{ id: 'b' }, { id: 'a' }], 'a'), 'a');

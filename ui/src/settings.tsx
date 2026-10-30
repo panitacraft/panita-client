@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { Save } from 'lucide-react';
 import { settingsApi } from './settings-api';
 import { globalSettingsPayload, instanceSettingsPayload, settingsDraft, updateSettingsDraft, type SettingsDraft, type SettingsSnapshot } from './settings-state';
 import { messageForError } from './errors';
@@ -146,7 +147,7 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
           <textarea id={`${prefix}-jvm`} rows={5} aria-describedby={`${prefix}-jvm-help`} value={draft.jvm} onChange={event => change({ jvm: event.target.value })} />
           <p id={`${prefix}-jvm-help`}>-Xmx se sincroniza con la RAM. Puedes usar M o G, por ejemplo -Xmx4G. Editar un valor heredado crea un ajuste propio. Para opciones adicionales, usa -D o -XX:. No se muestra el comando completo de inicio.</p>
         </details>
-        <button type="submit">{busy ? 'Guardando ajustes…' : 'Guardar ajustes'}</button>
+        <button type="submit"><Save aria-hidden="true" />{busy ? 'Guardando ajustes…' : 'Guardar ajustes'}</button>
       </fieldset>
     </form>}
   </>;
