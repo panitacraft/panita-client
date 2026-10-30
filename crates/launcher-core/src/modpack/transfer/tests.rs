@@ -205,7 +205,85 @@ async fn github_redirects_stay_on_content_hosts_and_are_bounded() {
 }
 
 #[tokio::test]
-async fn only_github_may_redirect() {
+async fn curseforge_redirects_stay_on_its_file_hosts_and_are_bounded() {
+    let body = b"curseforge file".to_vec();
+    let served = body.clone();
+    let server = Server::start(move |request| match request.path.as_str() {
+        "/files/1234/5678/file.jar" => Reply::status(302).header(
+            "Location",
+            "https://mediafilez.forgecdn.net/files/1234/5678/file.jar/final",
+        ),
+        "/files/1234/5678/file.jar/final" => Reply::ok(served.clone()),
+        _ => Reply::status(302).header("Location", "https://mediafilez.forgecdn.net/files/a/b/c"),
+    });
+    let downloader = PackDownloader::for_tests(server.base());
+    let cancel = Cancellation::default();
+    let sha1_only = Expected {
+        sha512: None,
+        ..expected(&body)
+    };
+    assert_eq!(
+        fetch(
+            &downloader,
+            CURSEFORGE,
+            Origin::Curseforge,
+            &sha1_only,
+            &cancel
+        )
+        .await
+        .unwrap_or_default(),
+        Some(body.clone())
+    );
+    for location in [
+        "https://evil.test/files/1/2/f.jar",
+        "http://mediafilez.forgecdn.net/files/1/2/f.jar",
+        "https://user@mediafilez.forgecdn.net/files/1/2/f.jar",
+        "https://mediafilez.forgecdn.net/other/1/2/f.jar",
+        "https://objects.githubusercontent.com/blob",
+        "/relative",
+    ] {
+        let escape = location.to_owned();
+        let hostile = Server::start(move |_| Reply::status(302).header("Location", &escape));
+        let downloader = PackDownloader::for_tests(hostile.base());
+        assert_eq!(
+            code(
+                fetch(
+                    &downloader,
+                    CURSEFORGE,
+                    Origin::Curseforge,
+                    &sha1_only,
+                    &cancel
+                )
+                .await
+            ),
+            Some(ErrorCode::InvalidData),
+            "{location}"
+        );
+        assert_eq!(hostile.requests().len(), 1, "{location}");
+    }
+    // An endless redirect loop on the allowed host stops at the hop limit.
+    let looping = Server::start(|_| {
+        Reply::status(302).header("Location", "https://mediafilez.forgecdn.net/files/1/2/loop")
+    });
+    let downloader = PackDownloader::for_tests(looping.base());
+    assert_eq!(
+        code(
+            fetch(
+                &downloader,
+                CURSEFORGE,
+                Origin::Curseforge,
+                &sha1_only,
+                &cancel
+            )
+            .await
+        ),
+        Some(ErrorCode::InvalidData)
+    );
+    assert_eq!(looping.requests().len(), MAX_REDIRECTS + 1);
+}
+
+#[tokio::test]
+async fn only_github_and_curseforge_may_redirect() {
     let server = Server::start(|_| {
         Reply::status(302).header("Location", "https://objects.githubusercontent.com/blob")
     });
