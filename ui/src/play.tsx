@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronDown, Download, Gamepad2, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench } from 'lucide-react';
+import { ChevronDown, Download, Gamepad2, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { messageForError } from './errors';
@@ -79,13 +79,26 @@ export function usePlaySnapshot() {
   return useContext(PlayContext)?.snapshot ?? null;
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, optionsAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; optionsAllowed?: boolean }) {
+export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, removalPending = false, optionsAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; removalPending?: boolean; optionsAllowed?: boolean }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [forceQuestion, setForceQuestion] = useState<string | null>(null);
   const [updateQuestion, setUpdateQuestion] = useState<(UpdateTarget & { backupWorlds: boolean }) | null>(null);
   const [uninstallQuestion, setUninstallQuestion] = useState(false);
+  const [deleteInstance, setDeleteInstance] = useState(false);
+  const [eraseConfirmed, setEraseConfirmed] = useState(false);
+  const [instanceFolder, setInstanceFolder] = useState<string | null>(null);
+  const uninstallDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    let current = true;
+    if (uninstallQuestion) {
+      if (!uninstallDialog.current?.open) uninstallDialog.current?.showModal();
+      if (isTauri()) void invoke<string>('instance_folder_path', { instanceId }).then(path => { if (current) setInstanceFolder(path); }).catch(cause => { if (current) setLogError(messageForError(cause)); });
+    } else uninstallDialog.current?.close();
+    return () => { current = false; };
+  }, [uninstallQuestion, instanceId]);
+  function askUninstall() { setLogError(null); setDeleteInstance(false); setEraseConfirmed(false); setInstanceFolder(null); setUninstallQuestion(true); }
   const [names, setNames] = useState<VersionNames | null>(null);
   const [lastBackup, setLastBackup] = useState(true);
   const [logError, setLogError] = useState<string | null>(null);
@@ -164,6 +177,9 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       : entry.operation === 'repair' && entry.phase === 'installed' ? 'Reparación completa. Ya puedes jugar.'
       : entry.operation === 'repair' && entry.phase === 'failed' ? 'No pudimos completar la reparación.'
       : entry.operation === 'repair' && entry.phase === 'cancelled' ? 'Reparación cancelada.'
+      : entry.operation === 'uninstall' && entry.eraseRequested && entry.phase === 'installing' ? 'Eliminando la instancia y todos sus datos locales…'
+      : entry.operation === 'uninstall' && entry.eraseRequested && entry.phase === 'uninstalled' ? 'Instancia eliminada con todos sus datos locales.'
+      : entry.operation === 'uninstall' && entry.eraseRequested && entry.phase === 'failed' ? 'La eliminación no se completó. Conservamos la información necesaria para reintentarlo; no abras esta instancia.'
       : entry.operation === 'uninstall' && entry.phase === 'installing' ? (pack ? 'Quitando los archivos del modpack que no modificaste…' : 'Desinstalando y conservando tus datos…')
       : entry.operation === 'uninstall' && entry.phase === 'failed' ? 'No pudimos completar la desinstalación. Conservamos los archivos restantes para recuperar la operación.'
       : entry.operation === 'uninstall' && entry.phase === 'cancelled' ? 'Desinstalación cancelada.'
@@ -247,7 +263,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     <div className="instance-actions">
     <div className="split-button" role="group" aria-label="Controles de la instancia">
     {!active && installAllowed && entry?.phase !== 'installed' && <Button className="primary-play h-12 rounded-r-none text-xl" size="lg" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.operation === 'install' ? 'Reintentar instalación' : 'Instalar'}</Button>}
-    {!active && !installAllowed && !updateTarget?.pack && <Button className="primary-play h-12 rounded-r-none text-xl" size="lg" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}>{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</Button>}
+    {!active && !installAllowed && !updateTarget?.pack && <Button className="primary-play h-12 rounded-r-none text-xl" size="lg" disabled={busy || !allowed || entry?.phase === 'uninstalled' || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}><Play aria-hidden="true" />{allowed && entry?.phase !== 'uninstalled' ? 'Jugar' : 'No disponible para jugar'}</Button>}
     {!active && updateTarget?.pack && <Button className="primary-play h-12 rounded-r-none text-xl" size="lg" disabled={busy} onClick={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</Button>}
     {active && <Button className="primary-play h-12 rounded-r-none text-xl" size="lg" disabled><Gamepad2 aria-hidden="true" />{running ? 'En ejecución' : 'Preparando…'}</Button>}
     <DropdownMenu modal={false} open={optionsEnabled && optionsOpen} onOpenChange={open => setOptionsOpen(optionsEnabled && open)}>
@@ -260,7 +276,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         {!active && updateTarget && !updateTarget.pack && <DropdownMenuItem disabled={busy} onSelect={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</DropdownMenuItem>}
         {!active && repairAllowed && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => void act('begin_repair', { requestId: crypto.randomUUID() })}><Wrench aria-hidden="true" />Reparar archivos</DropdownMenuItem>}
         {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => void cleanNatives()}><RefreshCw aria-hidden="true" />Limpiar nativos antiguos</DropdownMenuItem>}
-        {!active && uninstallAllowed && <><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => setUninstallQuestion(true)}><Trash2 aria-hidden="true" />Desinstalar…</DropdownMenuItem></>}
+        {!active && uninstallAllowed && <><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" disabled={busy} onSelect={askUninstall}><Trash2 aria-hidden="true" />Desinstalar…</DropdownMenuItem></>}
         {!onSettings && !repairAllowed && !cleanupAllowed && !uninstallAllowed && !updateTarget && <DropdownMenuItem disabled>No hay opciones disponibles</DropdownMenuItem>}
       </DropdownMenuContent>
     </DropdownMenu>
@@ -271,32 +287,44 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       <ul>{cleanupDetails.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
     </details>}
     {cleanupError && <p role="alert">{cleanupError}</p>}
-    {!active && uninstallQuestion && <fieldset className="catalog-notice">
-      <legend>Desinstalar conservando mis datos</legend>
+    <dialog ref={uninstallDialog} className="update-dialog" aria-labelledby={instanceId + '-uninstall-title'} onCancel={() => setUninstallQuestion(false)} onClose={() => { if (!uninstallDialog.current?.open) setUninstallQuestion(false); }}>
+    {uninstallQuestion && <>
+      <h2 id={instanceId + '-uninstall-title'}>Desinstalar instancia</h2>
+      {!deleteInstance && <>
       {pack
         ? <p>Quitaremos esta instalación de las disponibles para jugar y eliminaremos solo los mods, packs de recursos y shaders del modpack que no hayas modificado. Conservaremos tus mundos, capturas, tu configuración, los archivos que modificaste o añadiste tú y tus copias de mundos. También eliminaremos las carpetas nativas de esta instancia. Los archivos compartidos de Minecraft y Java también se conservan.</p>
         : <p>Quitaremos esta instalación de las disponibles para jugar y eliminaremos todas sus carpetas nativas, incluidos archivos antiguos, modificados o añadidos allí. Conservaremos tus mundos, ajustes, capturas y copias de mundos en la carpeta de Minecraft. Los archivos compartidos de Minecraft y Java también se conservan.</p>}
       <p>Puedes reinstalar esta instancia cuando esté habilitada en el catálogo. Esta acción no elimina todos sus archivos ni libera el espacio de las cachés compartidas.</p>
+      </>}
+      <label className="backup-choice"><input type="checkbox" checked={deleteInstance} onChange={event => { setDeleteInstance(event.target.checked); setEraseConfirmed(false); }} /><span>Eliminar también la carpeta de la instancia</span></label>
+      {removalPending && <p role="alert">Hay una eliminación pendiente. Marca la opción de eliminar la carpeta para reintentarla.</p>}
+      {deleteInstance && <div className="erase-warning">
+        {logError && <p role="alert">No pudimos verificar la carpeta. Cierra este diálogo y vuelve a intentarlo. {logError}</p>}
+        <p>Se eliminará permanentemente esta carpeta y todo su contenido:</p>
+        <p><code>{instanceFolder ?? (isTauri() ? 'Consultando carpeta…' : 'Carpeta de esta instancia · vista previa')}</code></p>
+        <p>Perderás los mundos, capturas, ajustes, mods añadidos y copias de seguridad de esta instancia. Tus cuentas, las otras instancias y las cachés compartidas se conservan. No se puede deshacer.</p>
+        <label className="backup-choice"><input type="checkbox" checked={eraseConfirmed} onChange={event => setEraseConfirmed(event.target.checked)} /><span>Entiendo que perderé todos los datos de esta instancia</span></label>
+      </div>}
       <div className="account-buttons">
-        <button type="button" disabled={busy} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID() }); }}>Confirmar desinstalación</button>
-        <button type="button" disabled={busy} onClick={() => setUninstallQuestion(false)}>Volver</button>
+        <Button variant="destructive" disabled={busy || !isTauri() || !play?.snapshot || (removalPending && !deleteInstance) || (deleteInstance && (!eraseConfirmed || !instanceFolder))} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID(), deleteInstance }); }}>{deleteInstance ? 'Eliminar instancia' : 'Desinstalar'}</Button>
+        <Button variant="secondary" disabled={busy} onClick={() => setUninstallQuestion(false)}>Cancelar</Button>
       </div>
-    </fieldset>}
+    </>}
+    </dialog>
     <dialog ref={updateDialog} className="update-dialog" aria-labelledby={instanceId + '-update-title'} aria-describedby={instanceId + '-update-warning'} onCancel={() => setUpdateQuestion(null)} onClose={() => { if (!updateDialog.current?.open) setUpdateQuestion(null); }}>
     {updateQuestion && <>
       <h2 id={instanceId + '-update-title'}>{updateQuestion.pack ? versionTitle(names, updateQuestion.fromVersion, updateQuestion.toVersion) : `Actualizar de Minecraft ${updateQuestion.fromVersion} a ${updateQuestion.toVersion}`}</h2>
       {updateQuestion.pack && <p>Cambiaremos solo los archivos del modpack que no hayas modificado. Conservamos los mods que añadiste, tu configuración editada y tus mundos. Si algún archivo tuyo estorba, te lo mostraremos antes de cambiar nada.</p>}
       <p id={instanceId + '-update-warning'}>Una versión nueva puede modificar tus mundos cuando los abras. Volver a los archivos de una versión anterior no recupera los cambios en tus mundos.</p>
-      <label className="backup-choice"><input type="radio" name={`${instanceId}-backup`} checked={updateQuestion.backupWorlds} onChange={() => setUpdateQuestion({ ...updateQuestion, backupWorlds: true })} /><span>Crear una copia de mis mundos antes de actualizar (recomendado)</span></label>
-      <label className="backup-choice"><input type="radio" name={`${instanceId}-backup`} checked={!updateQuestion.backupWorlds} onChange={() => setUpdateQuestion({ ...updateQuestion, backupWorlds: false })} /><span>Actualizar sin copia de mundos</span></label>
+      <label className="backup-choice"><input type="checkbox" checked={updateQuestion.backupWorlds} onChange={event => setUpdateQuestion({ ...updateQuestion, backupWorlds: event.target.checked })} /><span>Crear una copia de mis mundos antes de actualizar (recomendado)</span></label>
       <div className="account-buttons">
-        <button type="button" disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {
+        <Button disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {
           const choice = updateQuestion;
           setUpdateQuestion(null);
           setLastBackup(choice.backupWorlds);
           void act('begin_update', { requestId: crypto.randomUUID(), update: { from_version: choice.fromVersion, to_version: choice.toVersion, backup_worlds: choice.backupWorlds } });
-        }}>Confirmar actualización</button>
-        <button type="button" disabled={busy} onClick={() => setUpdateQuestion(null)}>Conservar versión instalada</button>
+        }}>Actualizar</Button>
+        <Button variant="secondary" disabled={busy} onClick={() => setUpdateQuestion(null)}>Cancelar</Button>
       </div>
     </>}
     </dialog>

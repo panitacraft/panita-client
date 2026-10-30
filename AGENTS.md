@@ -170,6 +170,7 @@ PanitaClient/
 ├─ panita-session.json    # sensitive: Panitacraft session token and a nonsecret member snapshot; hidden on Windows
 ├─ settings.json          # indented disk schema 3; compact, explicit keys
 ├─ insts-cache.json
+├─ instance-erasures.json # temporary explicit full-instance erasure intents; never auto-retried
 ├─ libraries/             # shared, verified caches
 ├─ assets/
 ├─ versions/

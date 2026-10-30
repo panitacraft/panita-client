@@ -53,6 +53,8 @@ beforeEach(() => {
       case 'settings_snapshot': return { instanceId: args?.instanceId ?? null, instance: null, windowWarning: null, global: { schema_version: 2, ram_mib: 4096, extra_jvm_args: [], java_path_override: null, show_console_on_start: false, window_size: { width: 1280, height: 720 }, launcher: { selected_instance_id: 'pack-a', window: null } } };
       case 'account_snapshot': return accounts;
       case 'select_account': accounts = { ...accounts, revision: accounts.revision + 1, selected_account_id: String(args?.accountId) }; return;
+      case 'instance_folder_path': return 'C:\\Synthetic\\PanitaClient\\instances\\aventura';
+      case 'begin_uninstall': return;
       case 'content_cache_size': return 0;
       case 'pack_version_names': return { installed: 'Uno', available: 'Dos' };
       case 'pack_files': return { files: [manualFile], complete: false };
@@ -84,7 +86,7 @@ test('navigation preserves account input and settings drafts, and instance setti
   await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
   expect(screen.getByRole('heading', { name: 'Otra aventura', exact: true })).toBeTruthy();
   expect(screen.queryByRole('heading', { name: 'Caché de archivos de modpacks' })).toBeNull();
-});
+}, 15000);
 
 test('mandatory pack updates open a modal and require explicit world-backup consent', async () => {
   catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
@@ -96,7 +98,7 @@ test('mandatory pack updates open a modal and require explicit world-backup cons
   expect(screen.getByRole('dialog', { name: 'Actualizar el modpack de Uno a Dos' })).toBeTruthy();
   expect((screen.getByLabelText('Crear una copia de mis mundos antes de actualizar (recomendado)') as HTMLInputElement).checked).toBe(true);
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
-  await user.click(screen.getByRole('button', { name: 'Confirmar actualización' }));
+  await user.click(screen.getByRole('button', { name: 'Actualizar', exact: true }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({ instanceId: 'pack-a', update: { from_version: 'v1', to_version: 'v2', backup_worlds: true } }));
 });
 
@@ -287,14 +289,17 @@ test('instance tooltips reuse game and loader badges with exact installed loader
 });
 
 
-test('update status stays noninteractive and preserves the modpack version', async () => {
+test('update status stays in the tooltip while details preserve only the pack version', async () => {
   catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
   const user = userEvent.setup(); mount();
   const article = await screen.findByRole('article', { name: 'Aventura' });
   expect(within(article).queryByRole('button', { name: 'Actualizar', exact: true })).toBeNull();
-  expect(within(article).getByText('Actualización disponible')).toBeTruthy();
-  expect(within(article).getByText('Actualización disponible').querySelector('svg')).not.toBeNull();
+  expect(within(article).queryByText('Actualización disponible')).toBeNull();
   expect(within(article).getByText('vDos')).toBeTruthy();
+  fireEvent.focus(screen.getByRole('button', { name: 'Aventura: Actualización disponible' }));
+  const tooltip = await screen.findByRole('tooltip');
+  expect(within(tooltip).getByText('Actualización disponible').querySelector('svg')).not.toBeNull();
+  expect(within(tooltip).getByText('vDos')).toBeTruthy();
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
 });
@@ -303,6 +308,7 @@ test('instance menu opens fixed folders and existing logs, and routes shared cac
   const user = userEvent.setup(); mount();
   const article = await screen.findByRole('article', { name: 'Aventura' });
   const options = within(article).getByRole('button', { name: 'Opciones de instancia' });
+  expect(within(article).getByRole('button', { name: 'Jugar', exact: true }).querySelector('svg')).not.toBeNull();
   await user.click(options);
   expect(screen.getByRole('menuitem', { name: 'Ver registro', exact: true }).getAttribute('aria-disabled')).toBe('true');
   await user.click(screen.getByRole('menuitem', { name: 'Abrir carpeta', exact: true }));
@@ -323,9 +329,9 @@ test('browser update preview permits inspection while desktop actions stay disab
   const user = userEvent.setup(); mount();
   await user.click(await screen.findByRole('button', { name: 'Modpack con actualización: Actualización disponible' }));
   await user.click(screen.getByRole('button', { name: 'Actualizar…', exact: true }));
-  expect((screen.getByRole('button', { name: 'Confirmar actualización' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Actualizar', exact: true }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByLabelText('Crear una copia de mis mundos antes de actualizar (recomendado)') as HTMLInputElement).checked).toBe(true);
-  await user.click(screen.getByRole('button', { name: 'Conservar versión instalada' }));
+  await user.click(screen.getByRole('button', { name: 'Cancelar', exact: true }));
   expect(screen.queryByRole('dialog')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Opciones de instancia' }));
   expect(screen.getByRole('menuitem', { name: 'Abrir carpeta' }).getAttribute('aria-disabled')).toBe('true');
@@ -339,11 +345,45 @@ test('cancelling the update modal never starts an update and restores the defaul
   const user = userEvent.setup(); mount();
   const trigger = await screen.findByRole('button', { name: 'Actualizar…', exact: true });
   await user.click(trigger);
-  await user.click(screen.getByLabelText('Actualizar sin copia de mundos'));
+  await user.click(screen.getByLabelText('Crear una copia de mis mundos antes de actualizar (recomendado)'));
   const dialog = screen.getByRole('dialog');
   fireEvent(dialog, new Event('cancel', { bubbles: false, cancelable: true }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(trigger);
   expect((screen.getByLabelText('Crear una copia de mis mundos antes de actualizar (recomendado)') as HTMLInputElement).checked).toBe(true);
+});
+
+
+test('uninstall defaults to preserving player files and sends an explicit false deletion choice', async () => {
+  const user = userEvent.setup(); mount();
+  const article = await screen.findByRole('article', { name: 'Aventura' });
+  await user.click(within(article).getByRole('button', { name: 'Opciones de instancia' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Desinstalar…' }));
+  const dialog = screen.getByRole('dialog', { name: 'Desinstalar instancia' });
+  expect((within(dialog).getByLabelText('Eliminar también la carpeta de la instancia') as HTMLInputElement).checked).toBe(false);
+  expect(within(dialog).queryByRole('button', { name: 'Eliminar instancia', exact: true })).toBeNull();
+  await user.click(within(dialog).getByRole('button', { name: 'Desinstalar', exact: true }));
+  expect(backend.invoke).toHaveBeenCalledWith('begin_uninstall', expect.objectContaining({ instanceId: 'pack-a', deleteInstance: false }));
+});
+
+test('permanent erasure requires its folder and a separate acknowledgement, and cancellation sends nothing', async () => {
+  const user = userEvent.setup(); mount();
+  const article = await screen.findByRole('article', { name: 'Aventura' });
+  async function open() { await user.click(within(article).getByRole('button', { name: 'Opciones de instancia' })); await user.click(screen.getByRole('menuitem', { name: 'Desinstalar…' })); }
+  await open();
+  await user.click(screen.getByLabelText('Eliminar también la carpeta de la instancia'));
+  const erase = screen.getByRole('button', { name: 'Eliminar instancia', exact: true }) as HTMLButtonElement;
+  expect(erase.disabled).toBe(true);
+  await screen.findByText('C:\\Synthetic\\PanitaClient\\instances\\aventura');
+  await user.click(screen.getByLabelText('Entiendo que perderé todos los datos de esta instancia'));
+  expect(erase.disabled).toBe(false);
+  await user.click(screen.getByRole('button', { name: 'Cancelar', exact: true }));
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_uninstall')).toBe(false);
+  await open();
+  expect((screen.getByLabelText('Eliminar también la carpeta de la instancia') as HTMLInputElement).checked).toBe(false);
+  await user.click(screen.getByLabelText('Eliminar también la carpeta de la instancia'));
+  await user.click(screen.getByLabelText('Entiendo que perderé todos los datos de esta instancia'));
+  await user.click(screen.getByRole('button', { name: 'Eliminar instancia', exact: true }));
+  expect(backend.invoke).toHaveBeenCalledWith('begin_uninstall', expect.objectContaining({ instanceId: 'pack-a', deleteInstance: true }));
 });

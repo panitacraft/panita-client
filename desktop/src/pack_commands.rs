@@ -146,6 +146,23 @@ pub(super) async fn open_curseforge_project(
     Ok(true)
 }
 
+/// Return only the UUID-owned instance folder for explicit uninstall confirmation.
+#[tauri::command]
+pub(super) async fn instance_folder_path(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    instance_id: Uuid,
+) -> Result<String, ErrorCode> {
+    main_only(&window)?;
+    let paths = paths(&app)?;
+    blocking(move || {
+        paths
+            .instance(instance_id)
+            .map(|path| path.to_string_lossy().into_owned())
+    })
+    .await
+}
+
 /// Open an existing instance root, one of its fixed content folders, or its pack backups. The
 /// frontend picks from a short list; it never supplies a path.
 #[tauri::command]

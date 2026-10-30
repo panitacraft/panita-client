@@ -10,6 +10,7 @@ export interface CatalogInstance {
   localState: 'not_installed' | 'installing' | 'installed' | 'awaiting_files' | 'update_available' | 'needs_repair' | 'running' | 'failed' | 'cancelled';
   installedVersion: string | null;
   hasInstallationManifest: boolean;
+  removalPending?: boolean;
   compatible: boolean;
   supported: boolean;
   minLauncherVersion: string | null;

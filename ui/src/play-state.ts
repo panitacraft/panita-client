@@ -11,6 +11,7 @@ export type PlayEntry = {
   consoleError?: string | null;
   operation: 'install' | 'update' | 'repair' | 'uninstall' | 'play';
   backupRequested: boolean;
+  eraseRequested?: boolean;
   backupOperation: string | null;
   receivedFiles: number;
   reusedFiles: number;

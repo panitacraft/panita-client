@@ -138,6 +138,8 @@
   .page-heading > button { margin-bottom: 24px; padding-left: 0; border: 0; color: #BABABA; }
   .page-heading > .page-back { height: auto; padding: 0; gap: 8px; font-size: 14px; font-weight: 500; background: transparent; box-shadow: none; }
   .update-dialog { width: min(620px, calc(100vw - 40px)); }
+  .erase-warning { border-left: 3px solid #FCA5A5; padding-left: 16px; margin-top: 20px; }
+  .erase-warning code { overflow-wrap: anywhere; }
   .backup-choice { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; line-height: 1.5; }
   .backup-choice input { margin: 4px 0 0; }
   .update-dialog .account-buttons { margin-top: 24px; }

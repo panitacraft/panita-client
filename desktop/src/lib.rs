@@ -258,6 +258,7 @@ pub fn run() {
             pack_commands::open_pack_folder,
             pack_commands::open_curseforge_project,
             pack_commands::open_instance_folder,
+            pack_commands::instance_folder_path,
             pack_commands::pack_version_names,
             pack_commands::import_pack_file,
             pack_commands::content_cache_size,

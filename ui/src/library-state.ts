@@ -14,7 +14,7 @@ export function packPin(source: PackSource | null | undefined): string | null {
 }
 
 export function canInstall(instance: CatalogInstance, stale: boolean): boolean {
-  return !stale && instance.availability === 'enabled' && instance.compatible && instance.supported
+  return !instance.removalPending && !stale && instance.availability === 'enabled' && instance.compatible && instance.supported
     && ['not_installed', 'failed', 'cancelled', 'needs_repair', 'installing'].includes(instance.localState)
     // A recorded pin can exist before an installation finishes. Retrying that
     // pin is safe; changing it belongs to the explicit update workflow.
@@ -23,6 +23,7 @@ export function canInstall(instance: CatalogInstance, stale: boolean): boolean {
 
 export type UpdateTarget = { fromVersion: string; toVersion: string; pack?: boolean };
 export function updateTarget(instance: CatalogInstance, stale: boolean): UpdateTarget | null {
+  if (instance.removalPending) return null;
   if (isPack(instance)) {
     // A newer published pack version replaces Play with Update until it is applied.
     const from = packPin(instance.installedSource);
@@ -44,18 +45,18 @@ function installedPack(instance: CatalogInstance): boolean {
 
 /** Keep maintenance reachable for an existing installation that needs repair. */
 export function canOpenInstanceOptions(instance: CatalogInstance): boolean {
-  return instance.hasInstallationManifest
+  return instance.removalPending || instance.hasInstallationManifest
     && (instance.installedVersion !== null || installedPack(instance))
     && ['installed', 'update_available', 'needs_repair', 'running', 'failed', 'cancelled'].includes(instance.localState);
 }
 
 export function canRepair(instance: CatalogInstance, stale: boolean): boolean {
-  return instance.hasInstallationManifest && !stale && instance.availability === 'enabled' && instance.compatible && instance.supported
+  return !instance.removalPending && instance.hasInstallationManifest && !stale && instance.availability === 'enabled' && instance.compatible && instance.supported
     && (instance.installedVersion !== null || installedPack(instance))
     && ['installed', 'update_available', 'needs_repair', 'failed', 'cancelled'].includes(instance.localState);
 }
 
 export function canUninstall(instance: CatalogInstance): boolean {
-  return instance.hasInstallationManifest && (instance.installedVersion !== null || installedPack(instance))
+  return instance.removalPending || instance.hasInstallationManifest && (instance.installedVersion !== null || installedPack(instance))
     && instance.localState !== 'not_installed' && instance.localState !== 'running';
 }

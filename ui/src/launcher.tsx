@@ -161,18 +161,19 @@ export function Launcher() {
                 <h1>{instance.name}</h1>
                 <p>{instance.description}</p>
                 <div className="instance-tags">
-                  <InstanceBadges instance={instance} updateAvailable={!!updateTarget(instance, catalog.stale || unverified)} showLoaderHint />
+                  <InstanceBadges instance={instance} showLoaderHint />
                   {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
                 </div>
               </div>
             </div>
             <div className="instance-workspace">
+              {instance.removalPending && <p role="alert">La eliminación de esta instancia está incompleta. Abre sus opciones para reintentarla. No se borrará nada automáticamente.</p>}
               {instance.availability === 'missing' && <p role="status">Esta instancia ya no está en el catálogo. Conservamos tus datos locales.</p>}
               {instance.availability === 'unverified' && <p role="status">No pudimos verificar el estado de esta instancia.</p>}
               {!instance.compatible && <p role="status">Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
               {!instance.supported && <p role="status">Este tipo de instancia todavía no es compatible.</p>}
               {instance.installedVersion && <p className="installed-version">Versión instalada: Minecraft {instance.installedVersion}</p>}
-              <PlayControls onPackCache={() => { openSettings('global'); setCacheRequest(value => value + 1); }} instanceId={instance.id} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
+              <PlayControls onPackCache={() => { openSettings('global'); setCacheRequest(value => value + 1); }} instanceId={instance.id} removalPending={instance.removalPending} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
               <PackPanel instanceId={instance.id} awaiting={instance.localState === 'awaiting_files'} onChanged={() => setCatalogAttempt(previous => previous + 1)} />
             </div>
           </article>)}

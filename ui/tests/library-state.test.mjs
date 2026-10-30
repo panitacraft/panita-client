@@ -111,3 +111,12 @@ test('pack repair and uninstall follow the recorded pin instead of a Minecraft v
   assert.equal(canUninstall({ ...installed, localState: 'not_installed' }), false);
   assert.equal(canUninstall({ ...installed, installedSource: null }), false);
 });
+
+test('pending instance erasure exposes only the explicit removal retry', () => {
+  const pending = { ...instance, removalPending: true, localState: 'failed' };
+  assert.equal(canInstall(pending, false), false);
+  assert.equal(canRepair(pending, false), false);
+  assert.equal(updateTarget(pending, false), null);
+  assert.equal(canOpenInstanceOptions(pending), true);
+  assert.equal(canUninstall(pending), true);
+});
