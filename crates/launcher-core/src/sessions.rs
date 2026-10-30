@@ -885,6 +885,9 @@ fn is_storage_error(code: ErrorCode) -> bool {
     matches!(
         code,
         ErrorCode::StorageUnavailable
+            | ErrorCode::StorageReadOnly
+            | ErrorCode::StorageBusy
+            | ErrorCode::InsufficientSpace
             | ErrorCode::StorageCommitUncertain
             | ErrorCode::PermissionDenied
             | ErrorCode::UnsafePermissions

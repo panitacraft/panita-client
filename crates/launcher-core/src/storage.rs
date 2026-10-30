@@ -256,10 +256,16 @@ fn read_file(root: &PrivateDir, name: &Path) -> Result<Option<Vec<u8>>, CoreErro
     Ok(Some(bytes))
 }
 
-fn map_io_error(error: std::io::Error) -> CoreError {
+pub(crate) fn map_io_error(error: std::io::Error) -> CoreError {
     let code = match error.kind() {
         std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
-        std::io::ErrorKind::StorageFull => ErrorCode::InsufficientSpace,
+        std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded => {
+            ErrorCode::InsufficientSpace
+        }
+        std::io::ErrorKind::ReadOnlyFilesystem => ErrorCode::StorageReadOnly,
+        std::io::ErrorKind::ResourceBusy | std::io::ErrorKind::ExecutableFileBusy => {
+            ErrorCode::StorageBusy
+        }
         _ => ErrorCode::StorageUnavailable,
     };
     CoreError::new(code)
@@ -285,6 +291,24 @@ pub(crate) fn map_private_error(error: PrivateFsError) -> CoreError {
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn storage_error_categories_discard_native_messages() {
+        use std::io::ErrorKind;
+        for (kind, expected) in [
+            (ErrorKind::PermissionDenied, ErrorCode::PermissionDenied),
+            (ErrorKind::StorageFull, ErrorCode::InsufficientSpace),
+            (ErrorKind::QuotaExceeded, ErrorCode::InsufficientSpace),
+            (ErrorKind::ReadOnlyFilesystem, ErrorCode::StorageReadOnly),
+            (ErrorKind::ResourceBusy, ErrorCode::StorageBusy),
+            (ErrorKind::ExecutableFileBusy, ErrorCode::StorageBusy),
+            (ErrorKind::Other, ErrorCode::StorageUnavailable),
+        ] {
+            let failure = map_io_error(std::io::Error::new(kind, "sensitive native message"));
+            assert_eq!(failure.code(), expected);
+            assert!(!format!("{failure:?}").contains("sensitive native message"));
+        }
+    }
 
     fn test_paths() -> AppPaths {
         let path = std::env::temp_dir().join(format!("panita-storage-{}", Uuid::new_v4()));

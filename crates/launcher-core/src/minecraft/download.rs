@@ -52,11 +52,7 @@ pub(crate) fn planned_size(
 }
 
 pub(crate) fn io(error: std::io::Error) -> CoreError {
-    CoreError::new(match error.kind() {
-        std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
-        std::io::ErrorKind::StorageFull => ErrorCode::InsufficientSpace,
-        _ => ErrorCode::StorageUnavailable,
-    })
+    crate::storage::map_io_error(error)
 }
 
 pub(crate) fn native_file(file: &private_fs::PrivateFile) -> Result<std::fs::File, CoreError> {
