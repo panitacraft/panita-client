@@ -1,0 +1,50 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+const relativePreview = 'desktop/windows/installer-preview.html';
+const html = readFileSync(existsSync(resolve(relativePreview)) ? resolve(relativePreview) : resolve('..', relativePreview), 'utf8');
+const script = html.match(/<script>([\s\S]*?)<\/script>/)![1];
+const byId = (id: string) => document.getElementById(id)!;
+beforeEach(() => {
+  vi.useFakeTimers();
+  document.documentElement.innerHTML = html.replace(/<script>[\s\S]*?<\/script>/, '');
+  vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(function(this: HTMLDialogElement) { this.setAttribute('open', ''); });
+  vi.spyOn(HTMLDialogElement.prototype, 'close').mockImplementation(function(this: HTMLDialogElement) { this.removeAttribute('open'); });
+  new Function(script)();
+});
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); document.body.innerHTML = ''; });
+test('preview keeps erasure unchecked and requires a separate acknowledgement', () => {
+  (document.querySelector('[data-mode="uninstall"]') as HTMLButtonElement).click();
+  const erase = byId('erase') as HTMLInputElement;
+  expect(erase.checked).toBe(false);
+  erase.click(); byId('primary').click();
+  expect(byId('erase-dialog').hasAttribute('open')).toBe(true);
+  expect((byId('erase-confirm') as HTMLButtonElement).disabled).toBe(true);
+  expect(byId('operation').hidden).toBe(true);
+  byId('erase-cancel').click();
+  expect(byId('erase-dialog').hasAttribute('open')).toBe(false);
+  expect(byId('operation').hidden).toBe(true);
+  byId('primary').click(); byId('acknowledge').click(); byId('erase-confirm').click();
+  expect(byId('operation').hidden).toBe(false);
+  vi.advanceTimersByTime(5600);
+  expect(byId('description').textContent).toContain('todos tus datos se han eliminado');
+});
+test('switching preview mode cancels simulated progress and resets destructive consent', () => {
+  (document.querySelector('[data-mode="uninstall"]') as HTMLButtonElement).click();
+  byId('primary').click();
+  expect(byId('operation').hidden).toBe(false);
+  (document.querySelector('[data-mode="install"]') as HTMLButtonElement).click();
+  vi.advanceTimersByTime(10000);
+  expect(byId('title').textContent).toBe('Instalar Panita Client');
+  expect(byId('operation').hidden).toBe(true);
+  expect((byId('erase') as HTMLInputElement).checked).toBe(false);
+  expect(byId('favicon').getAttribute('href')).toBe('/installer.ico');
+});
+test('preview errors describe possible partial erasure without claiming data was preserved', () => {
+  (document.querySelector('[data-mode="uninstall"]') as HTMLButtonElement).click();
+  byId('erase').click();
+  const stage = byId('stage') as HTMLSelectElement;
+  stage.value = 'error'; stage.dispatchEvent(new Event('change', { bubbles: true }));
+  expect(byId('info-detail').textContent).toContain('Algunos archivos podrían haberse eliminado');
+  expect(byId('action-text').textContent).toBe('Reintentar');
+});

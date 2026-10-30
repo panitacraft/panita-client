@@ -1,131 +1,202 @@
 <!doctype html>
 <html lang="es">
+<head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Panita Client — Vista previa del instalador</title>
+<title>Panita Client · Vista previa del instalador</title>
+<link id="favicon" rel="icon" href="/installer.ico">
 <style>
+  :root { font-family: "Segoe UI", system-ui, sans-serif; color: #F9FFF8; background: #101010; color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; padding: 32px 16px; background: #0b1713; color: #efece5; font: 15px/1.5 "Segoe UI", sans-serif; }
-  .preview { margin: 0 auto 20px; max-width: 440px; }
-  .preview p { margin: 0 0 12px; color: #c4d0c8; font-size: 13px; }
-  .modes { display: flex; gap: 8px; flex-wrap: wrap; }
-  button { font: inherit; cursor: pointer; border: 0; border-radius: 8px; }
-  button:focus-visible, summary:focus-visible { outline: 3px solid #f2cf74; outline-offset: 3px; }
-  .modes button { color: #c4d0c8; background: #1b392e; padding: 8px 12px; font-size: 13px; }
-  .modes button[aria-pressed="true"] { color: #10231e; background: #f2cf74; }
-  .window { position: relative; width: 100%; max-width: 440px; margin: auto; background: #10231e; border: 1px solid #355346; border-radius: 14px; box-shadow: 0 22px 70px #0006; overflow: hidden; }
-  .chrome { display: flex; align-items: center; justify-content: space-between; height: 45px; padding: 0 16px 0 25px; }
-  .chrome span { font-size: 12px; color: #bdc9bd; }
-  .chrome button { color: #c4d0c8; background: transparent; min-width: 36px; min-height: 36px; font-size: 22px; }
-  main { min-height: 495px; padding: 20px 30px 28px; display: flex; flex-direction: column; }
-  .brand { display: flex; align-items: center; gap: 13px; margin-bottom: 32px; }
-  .brand img { width: 53px; height: 53px; }
-  .brand strong { font-size: 20px; font-weight: 650; letter-spacing: -.5px; }
-  .eyebrow { margin: 0 0 9px; color: #f2cf74; font-size: 11px; font-weight: 650; letter-spacing: 1.5px; text-transform: uppercase; }
-  h1 { margin: 0 0 13px; font-size: 29px; line-height: 1.2; font-weight: 650; letter-spacing: -.8px; }
-  .description { margin: 0; color: #c4d0c8; font-size: 14px; }
-  .status { margin-top: 25px; padding: 17px; background: #1b392e; border-radius: 8px; }
-  .status p { margin: 0; font-size: 13px; }
-  .status .secondary { margin-top: 5px; color: #c4d0c8; font-size: 12px; overflow-wrap: anywhere; }
-  progress { display: block; width: 100%; margin: 12px 0 8px; accent-color: #f2cf74; height: 7px; }
-  details { margin-top: 13px; font-size: 12px; color: #c4d0c8; }
+  body { margin: 0; padding: 24px 16px; }
+  button, input, select { font: inherit; }
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 9px 14px; border: 1px solid #515151; border-radius: 7px; background: #292929; color: #F9FFF8; font-size: 14px; font-weight: 600; cursor: pointer; text-decoration: none; }
+  button:hover { background: #383838; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  :where(button, input, select, summary):focus-visible { outline: 2px solid #E4FFDA; outline-offset: 3px; }
+  svg { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
+  .symbol-library { display: none; }
+  .preview-tools { width: min(560px, 100%); margin: 0 auto 20px; }
+  .preview-note { margin: 0 0 14px; font-size: 12px; color: #BABABA; line-height: 1.6; }
+  .preview-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .modes { display: flex; gap: 6px; }
+  .modes button { font-size: 12px; padding: 7px 11px; background: #1B1B1B; border-color: #383838; }
+  .modes button[aria-pressed="true"] { background: #253B1C; color: #E4FFDA; border-color: #54A636; }
+  .stage-choice { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #BABABA; }
+  select { color: #F9FFF8; border: 1px solid #383838; background: #1B1B1B; padding: 7px; border-radius: 6px; font-size: 12px; }
+  .shell-icons { display: flex; align-items: center; gap: 8px; color: #BABABA; font-size: 11px; margin: 14px 0 0; }
+  .shell-icons img { width: 30px; height: 30px; object-fit: contain; }
+  .shell-icons img:nth-of-type(2) { margin-left: 10px; }
+  .window { width: min(560px, 100%); margin: auto; background: #141414; border: 1px solid #383838; border-radius: 10px; box-shadow: 0 20px 70px #0006; overflow: hidden; }
+  .chrome { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 72px; padding: 0 20px; background: #1B1B1B; border-bottom: 1px solid #303030; }
+  .wordmark { display: flex; align-items: center; gap: 12px; font-size: 15px; letter-spacing: 1px; }
+  .wordmark img { width: 40px; height: 40px; object-fit: contain; }
+  .wordmark span { font-weight: 400; }
+  .window-controls { display: flex; align-items: center; gap: 4px; padding-left: 12px; border-left: 1px solid #515151; }
+  .window-controls button { width: 34px; height: 34px; padding: 7px; border: 0; background: transparent; color: #BABABA; }
+  .window-controls button:hover { background: #303030; color: #F9FFF8; }
+  .window-controls #close:hover { background: #542727; color: #FCA5A5; }
+  main { display: flex; flex-direction: column; min-height: 432px; padding: 28px; }
+  h1 { margin: 0 0 12px; font-size: 27px; font-weight: 700; letter-spacing: -.03em; line-height: 1.2; }
+  p { line-height: 1.5; }
+  .description { color: #BABABA; font-size: 14px; margin: 0 0 22px; }
+  .info-card, .operation-card { border: 1px solid #383838; border-radius: 9px; background: #1B1B1B; padding: 16px; }
+  .info-heading { display: flex; align-items: center; gap: 9px; font-size: 14px; font-weight: 600; }
+  .info-heading svg { color: #A9E58C; }
+  .info-card p { margin: 8px 0 0; color: #BABABA; font-size: 12px; overflow-wrap: anywhere; }
+  .options { margin-top: 20px; }
+  .check-row { display: flex; align-items: center; gap: 10px; font-size: 13px; line-height: 1.5; }
+  input[type="checkbox"] { width: 15px; height: 15px; margin: 0; accent-color: #54A636; flex-shrink: 0; }
+  .option-help { margin: 8px 0 0 25px; color: #BABABA; font-size: 12px; }
+  .operation-heading { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; }
+  .operation-heading svg { color: #A9E58C; }
+  .operation-metrics { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; color: #BABABA; font-size: 12px; }
+  .operation-metrics span:first-child { min-width: 0; }
+  .operation-metrics strong { color: #E4FFDA; white-space: nowrap; }
+  progress { display: block; appearance: none; -webkit-appearance: none; width: 100%; height: 8px; margin: 12px 0 10px; border: 0; border-radius: 20px; overflow: hidden; background: #383838; }
+  progress::-webkit-progress-bar { background: #383838; border-radius: 20px; }
+  progress::-webkit-progress-value { background: #54A636; border-radius: 20px; transition: width .3s ease; }
+  progress::-moz-progress-bar { background: #54A636; border-radius: 20px; }
+  .operation-caption { margin: 0; color: #BABABA; font-size: 12px; }
+  details { margin-top: 18px; color: #BABABA; font-size: 12px; }
   summary { cursor: pointer; }
-  #output { padding-top: 9px; line-height: 1.7; white-space: pre-line; }
-  .actions { display: flex; gap: 10px; margin-top: auto; padding-top: 34px; }
-  .actions button { min-height: 47px; padding: 11px 15px; font-size: 14px; font-weight: 650; }
-  .primary { flex: 1; background: #f2cf74; color: #18261c; }
-  .primary.danger { background: #c54c43; color: #fff; }
-  .secondary-button { background: #294739; color: #efece5; }
-  button:disabled { cursor: default; opacity: .65; }
-  footer { padding: 13px 24px; color: #bdc9bd; background: #142b22; text-align: center; font-size: 11px; }
+  #output { margin: 10px 0 0; padding: 12px; border: 1px solid #383838; border-radius: 7px; background: #101010; max-height: 120px; overflow: auto; white-space: pre-wrap; font: 12px/1.6 "Segoe UI", sans-serif; }
+  .result-icon { width: 42px; height: 42px; margin-bottom: 18px; color: #A9E58C; }
+  .result-icon.error { color: #FCA5A5; }
+  .error-card { background: #2A1D1D; border-color: #805050; }
+  .error-card .info-heading { color: #FCA5A5; }
+  .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: auto; padding-top: 28px; }
+  .actions button { min-height: 40px; }
+  .primary { background: #54A636; border-color: #54A636; color: #101A0B; }
+  .primary:hover { background: #65B647; border-color: #65B647; }
+  .danger { background: #FCA5A5; border-color: #FCA5A5; color: #2E1010; }
+  .danger:hover { background: #FECACA; border-color: #FECACA; }
+  .secondary { background: transparent; }
+  .window-footer { display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid #303030; padding: 13px 22px; color: #BABABA; background: #1B1B1B; font-size: 11px; }
+  .minimized main, .minimized .window-footer { display: none; }
+  .restore { display: flex; justify-content: center; margin-top: 16px; }
+  dialog { width: min(480px, calc(100% - 32px)); color: #F9FFF8; background: #1B1B1B; border: 1px solid #515151; border-radius: 12px; padding: 26px; box-shadow: 0 20px 80px #0008; }
+  dialog::backdrop { background: #000B; }
+  dialog h2 { margin: 0 0 14px; font-size: 21px; }
+  dialog p { margin: 0 0 14px; color: #BABABA; font-size: 13px; }
+  dialog code { display: block; margin: 14px 0; padding: 12px; border-radius: 7px; background: #141414; color: #FCA5A5; overflow-wrap: anywhere; font-size: 12px; }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } progress::-webkit-progress-value { transition: none; } }
   [hidden] { display: none !important; }
-  @media (max-width: 380px) { main { padding: 15px 21px 23px; } h1 { font-size: 26px; } }
+  @media (max-width: 420px) { body { padding: 16px 10px; } main { padding: 22px; } h1 { font-size: 24px; } .chrome { padding-inline: 16px; } .actions { flex-wrap: wrap; } .wordmark { font-size: 13px; } }
 </style>
-<div class="preview">
-  <p>Vista previa del diseño · Las acciones son simuladas y no modifican tu equipo.</p>
-  <nav class="modes" aria-label="Vistas del instalador">
-    <button type="button" data-mode="install" aria-pressed="true">Instalar</button>
-    <button type="button" data-mode="update" aria-pressed="false">Actualizar</button>
-    <button type="button" data-mode="uninstall" aria-pressed="false">Desinstalar</button>
-  </nav>
+</head>
+<body>
+<svg class="symbol-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="m18 6-12 12M6 6l12 12"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14-5L3 9m0-6v6h6M4 13a8 8 0 0 0 14 5l3-3m0 6v-6h-6"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7V5h6l2 2h10v13H3ZM3 11h18"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 17h.01"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 1-9 9"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 4 12 8-12 8z"/></symbol>
+</defs></svg>
+<div class="preview-tools">
+  <p class="preview-note">Vista previa · Las acciones, rutas y el progreso son de ejemplo. No se instala ni se elimina nada.</p>
+  <div class="preview-controls">
+    <nav class="modes" aria-label="Vistas del instalador"><button type="button" data-mode="install" aria-pressed="true">Instalar</button><button type="button" data-mode="update" aria-pressed="false">Actualizar</button><button type="button" data-mode="uninstall" aria-pressed="false">Desinstalar</button></nav>
+    <label class="stage-choice">Estado<select id="stage"><option value="ready">Inicio</option><option value="running">En proceso</option><option value="done">Finalizado</option><option value="error">Error</option></select></label>
+  </div>
+  <p class="shell-icons"><img src="/installer.png" alt="Icono del instalador">Instalador<img src="/uninstaller.png" alt="Icono del desinstalador">Desinstalador</p>
 </div>
-<section class="window" aria-label="Panita Client">
-  <header class="chrome"><span>Panita Client</span><button type="button" id="close" aria-label="Cerrar vista previa">×</button></header>
+<section class="window" id="window" aria-label="Panita Client">
+  <header class="chrome"><div class="wordmark"><img src="/logo.svg" alt=""><strong>PANITA <span>CLIENT</span></strong></div><div class="window-controls" role="group" aria-label="Controles de la ventana"><button type="button" id="minimize" aria-label="Minimizar" title="Minimizar"><svg aria-hidden="true"><use href="#i-minus"/></svg></button><button type="button" id="close" aria-label="Cerrar" title="Cerrar"><svg aria-hidden="true"><use href="#i-x"/></svg></button></div></header>
   <main>
-    <div class="brand"><img src="/logo.svg" alt=""><strong>Panita Client</strong></div>
-    <p class="eyebrow">Beta · 0.1.1-beta.1</p>
-    <h1 id="title">Todo listo para empezar</h1>
-    <p class="description" id="description">Instala Panita Client y encuentra tu próxima aventura.</p>
-    <div class="status">
-      <p id="status" role="status" aria-live="polite">Se instalará para tu usuario.</p>
-      <p class="secondary" id="detail">No necesitas instalar Java por separado.</p>
-      <progress id="progress" max="100" value="0" aria-label="Progreso de instalación" hidden></progress>
-      <details id="details" hidden><summary>Ver detalles</summary><div id="output"></div></details>
-    </div>
-    <div class="actions"><button class="secondary-button" id="cancel" type="button">Cancelar</button><button class="primary" id="primary" type="button">Instalar</button></div>
+    <svg id="result-icon" class="result-icon" aria-hidden="true" hidden><use href="#i-check"/></svg>
+    <h1 id="title">Instalar Panita Client</h1><p class="description" id="description">Todo listo para jugar en Panitacraft.</p>
+    <div class="info-card" id="info"><div class="info-heading"><svg aria-hidden="true"><use id="info-symbol" href="#i-folder"/></svg><span id="info-title">Carpeta de instalación</span></div><p id="info-detail"></p></div>
+    <div class="options" id="install-options"><label class="check-row"><input type="checkbox" id="desktop-shortcut" checked>Crear acceso directo en el escritorio</label></div>
+    <div class="options" id="uninstall-options" hidden><label class="check-row"><input type="checkbox" id="erase">Eliminar también mis datos</label><p class="option-help">Incluye cuentas, instancias, mundos y descargas. No se puede deshacer.</p></div>
+    <div class="operation-card" id="operation" hidden role="status" aria-live="polite"><div class="operation-heading"><svg class="spin" aria-hidden="true"><use href="#i-loader"/></svg><span id="operation-title"></span></div><div class="operation-metrics"><span id="status"></span><strong id="percentage">0 %</strong></div><progress id="progress" value="0" max="100" aria-label="Progreso"></progress><p class="operation-caption" id="progress-caption"></p></div>
+    <details id="details" hidden><summary>Ver detalles</summary><pre id="output"></pre></details>
+    <div class="actions"><button class="secondary" id="cancel" type="button"><svg aria-hidden="true"><use href="#i-x"/></svg><span>Cancelar</span></button><button class="primary" id="primary" type="button"><svg aria-hidden="true"><use id="action-symbol" href="#i-download"/></svg><span id="action-text">Instalar</span></button></div>
   </main>
-  <footer>Panitacraft · Un launcher para jugar juntos</footer>
+  <footer class="window-footer"><span>v0.1.1-beta.9</span><span>Panitacraft</span></footer>
 </section>
+<div class="restore" id="restore-region" hidden><button id="restore" type="button">Restaurar vista previa</button></div>
+<dialog id="erase-dialog" aria-labelledby="erase-heading"><h2 id="erase-heading">Eliminar todos tus datos</h2><p>Esta carpeta y todo su contenido se eliminarán permanentemente:</p><code>C:\Users\Jugador\AppData\Roaming\PanitaClient</code><p>Perderás cuentas y sesiones, ajustes, instancias con sus mundos, capturas y copias de seguridad, descargas de Minecraft y Java, cachés y registros.</p><label class="check-row"><input id="acknowledge" type="checkbox">Entiendo que perderé todos estos datos</label><div class="actions"><button class="secondary" id="erase-cancel" type="button"><svg aria-hidden="true"><use href="#i-x"/></svg>Cancelar</button><button class="danger" id="erase-confirm" type="button" disabled><svg aria-hidden="true"><use href="#i-trash"/></svg>Eliminar y desinstalar</button></div></dialog>
 <script>
-  const views = {
-    install: ['Todo listo para empezar', 'Instala Panita Client y encuentra tu próxima aventura.', 'Se instalará para tu usuario.', 'No necesitas instalar Java por separado.', 'Instalar', 'Instalando Panita Client', 'Panita Client está listo', 'Ya puedes abrir el launcher y elegir una instancia.'],
-    update: ['Tu próxima aventura continúa', 'Actualiza Panita Client a la nueva versión beta.', 'Tus datos se conservarán.', 'La actualización mantiene tus cuentas, instancias y mundos.', 'Actualizar', 'Actualizando Panita Client', 'Panita Client está actualizado', 'Tus cuentas, instancias y mundos siguen disponibles.'],
-    uninstall: ['¿Desinstalar Panita Client?', 'Se eliminará el launcher de este equipo.', 'Tus datos se conservarán.', 'Las cuentas guardadas, ajustes, instancias y mundos permanecerán en este equipo.', 'Desinstalar', 'Desinstalando Panita Client', 'Panita Client se desinstaló', 'Tus datos siguen en este equipo. Puedes reinstalar el launcher cuando quieras.'],
-  };
+  'use strict';
   const byId = id => document.getElementById(id);
-  let mode = 'install';
-  let timer;
-  let state = 'ready';
-  function render(nextMode) {
-    clearInterval(timer);
-    mode = nextMode;
-    state = 'ready';
+  const views = {
+    install: { title: 'Instalar Panita Client', description: 'Todo listo para jugar en Panitacraft.', action: 'Instalar', icon: 'download', info: 'Carpeta de instalación', detail: 'C:\\Users\\Jugador\\AppData\\Local\\Panita Client', running: 'Instalando Panita Client', done: 'Panita Client está listo', doneText: 'Abre el launcher, elige una instancia y empieza a jugar.', steps: ['Preparando archivos…', 'Comprobando WebView2…', 'Instalando el launcher…', 'Creando accesos directos…'] },
+    update: { title: 'Actualizar Panita Client', description: 'Instala la nueva versión del launcher.', action: 'Actualizar', icon: 'refresh', info: 'Tus datos se conservan', detail: 'Tus cuentas, instancias, mundos y ajustes seguirán disponibles.', running: 'Actualizando Panita Client', done: 'Panita Client está actualizado', doneText: 'Ya puedes volver a jugar. Tus datos se han conservado.', steps: ['Preparando la actualización…', 'Comprobando archivos…', 'Actualizando el launcher…', 'Actualizando accesos directos…'] },
+    uninstall: { title: 'Desinstalar Panita Client', description: 'El launcher se quitará de este equipo.', action: 'Desinstalar', icon: 'trash', info: 'Tus datos se conservan', detail: 'Puedes reinstalar el launcher y recuperar tus cuentas, instancias y mundos.', running: 'Desinstalando Panita Client', done: 'Panita Client se ha desinstalado', doneText: 'Tus datos siguen en este equipo por si decides volver.', steps: ['Comprobando el launcher…', 'Quitando archivos del launcher…', 'Quitando accesos directos…', 'Terminando la desinstalación…'] },
+  };
+  let mode = 'install', state = 'ready', timer;
+  function symbol(id, name) { byId(id).setAttribute('href', '#i-' + name); }
+  function stopTimer() { clearInterval(timer); timer = undefined; }
+  function render(nextMode = mode, nextState = 'ready') {
+    stopTimer(); mode = nextMode; state = nextState;
     const view = views[mode];
-    ['title', 'description', 'status', 'detail', 'primary'].forEach((id, index) => byId(id).textContent = view[index]);
-    byId('primary').classList.toggle('danger', mode === 'uninstall');
-    byId('primary').disabled = false;
-    byId('cancel').hidden = false;
-    byId('progress').hidden = true;
-    byId('progress').value = 0;
-    byId('details').hidden = true;
-    byId('output').textContent = '';
+    byId('window').hidden = false; byId('window').classList.remove('minimized'); byId('restore-region').hidden = true;
+    byId('stage').value = state; byId('favicon').href = mode === 'uninstall' ? '/uninstaller.ico' : '/installer.ico';
+    byId('title').textContent = view.title; byId('description').textContent = view.description;
+    byId('info').hidden = false; byId('info').classList.remove('error-card');
+    byId('info-title').textContent = view.info; byId('info-detail').textContent = view.detail; symbol('info-symbol', mode === 'install' ? 'folder' : 'check');
+    byId('install-options').hidden = mode !== 'install' || state !== 'ready'; byId('uninstall-options').hidden = mode !== 'uninstall' || state !== 'ready';
+    byId('operation').hidden = true; byId('details').hidden = true; byId('details').open = false; byId('output').textContent = '';
+    byId('result-icon').hidden = true; byId('result-icon').classList.remove('error');
+    byId('primary').disabled = false; byId('primary').classList.toggle('danger', mode === 'uninstall' && state === 'ready');
+    byId('action-text').textContent = view.action; symbol('action-symbol', view.icon);
+    byId('cancel').hidden = false; byId('cancel').disabled = false; byId('close').disabled = false;
     document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === mode)));
+    if (state === 'running') { begin(true); return; }
+    if (state === 'done') {
+      byId('title').textContent = view.done; byId('description').textContent = mode === 'uninstall' && byId('erase').checked ? 'El launcher y todos tus datos se han eliminado de este equipo.' : view.doneText;
+      byId('info').hidden = true; byId('result-icon').hidden = false; symbolForResult('check');
+      byId('cancel').hidden = true; byId('action-text').textContent = mode === 'uninstall' ? 'Cerrar' : 'Abrir Panita Client'; symbol('action-symbol', mode === 'uninstall' ? 'x' : 'play');
+    }
+    if (state === 'error') {
+      byId('title').textContent = mode === 'uninstall' ? 'No pudimos completar la desinstalación' : mode === 'update' ? 'No pudimos completar la actualización' : 'No pudimos completar la instalación';
+      byId('description').textContent = 'Revisa el problema antes de volver a intentarlo.';
+      byId('result-icon').hidden = false; byId('result-icon').classList.add('error'); symbolForResult('alert');
+      byId('info').classList.add('error-card'); symbol('info-symbol', 'alert'); byId('info-title').textContent = 'No se pudo acceder a la carpeta';
+      byId('info-detail').textContent = mode === 'uninstall' && byId('erase').checked ? 'Algunos archivos podrían haberse eliminado. Revisa la carpeta antes de reintentar.' : 'Cierra el launcher, revisa los permisos de la carpeta y vuelve a intentarlo.';
+      byId('action-text').textContent = 'Reintentar'; symbol('action-symbol', 'refresh');
+    }
   }
-  document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => render(button.dataset.mode)));
-  function reset() { render(mode); }
-  byId('cancel').addEventListener('click', reset);
-  byId('close').addEventListener('click', reset);
+  function symbolForResult(name) { byId('result-icon').querySelector('use').setAttribute('href', '#i-' + name); }
+  function begin(paused = false) {
+    stopTimer(); state = 'running'; byId('stage').value = state;
+    byId('title').textContent = views[mode].running; byId('description').textContent = mode === 'uninstall' ? 'Estamos quitando el launcher de este equipo.' : 'Estamos preparando los archivos del launcher.';
+    byId('info').hidden = true; byId('result-icon').hidden = true; byId('install-options').hidden = true; byId('uninstall-options').hidden = true;
+    byId('operation').hidden = false; byId('details').hidden = false; byId('output').textContent = '';
+    byId('primary').disabled = true; byId('primary').classList.remove('danger'); byId('action-text').textContent = 'En proceso…';
+    byId('cancel').hidden = true; byId('close').disabled = true; byId('operation-title').textContent = mode === 'uninstall' ? 'Quitando el launcher…' : 'Preparando la instalación…';
+    let progress = paused ? 58 : 0;
+    function tick() {
+      const step = Math.min(3, Math.floor(progress / 25));
+      byId('progress').value = progress; byId('percentage').textContent = progress + ' %'; byId('status').textContent = views[mode].steps[step];
+      byId('progress-caption').textContent = 'Paso ' + (step + 1) + ' de 4'; byId('output').textContent = views[mode].steps.slice(0, step + 1).join('\n');
+    }
+    tick(); if (paused) return;
+    timer = setInterval(() => { progress = Math.min(100, progress + 5); tick(); if (progress === 100) render(mode, 'done'); }, 280);
+  }
+  function closePreview() { stopTimer(); byId('window').hidden = true; byId('restore-region').hidden = false; }
+  document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => { byId('erase').checked = false; render(button.dataset.mode); }));
+  byId('stage').addEventListener('change', event => render(mode, event.target.value));
+  byId('cancel').addEventListener('click', closePreview); byId('close').addEventListener('click', closePreview);
+  byId('minimize').addEventListener('click', () => { const minimized = byId('window').classList.toggle('minimized'); byId('restore-region').hidden = !minimized; byId('minimize').setAttribute('aria-label', minimized ? 'Restaurar' : 'Minimizar'); byId('minimize').title = minimized ? 'Restaurar' : 'Minimizar'; });
+  byId('restore').addEventListener('click', () => { byId('window').hidden = false; byId('window').classList.remove('minimized'); byId('restore-region').hidden = true; byId('minimize').setAttribute('aria-label', 'Minimizar'); byId('minimize').title = 'Minimizar'; });
   byId('primary').addEventListener('click', () => {
-    if (state === 'done') { reset(); return; }
-    state = 'running';
-    byId('title').textContent = views[mode][5];
-    byId('status').textContent = 'Preparando…';
-    byId('detail').textContent = 'Espera un momento.';
-    byId('progress').hidden = false;
-    byId('details').hidden = false;
-    byId('primary').disabled = true;
-    const steps = mode === 'uninstall'
-      ? ['Cerrando el launcher…', 'Eliminando archivos del launcher…', 'Retirando accesos directos…', 'Datos personales conservados.']
-      : ['Preparando la instalación…', 'Comprobando Microsoft Edge WebView2…', 'Instalando archivos del launcher…', 'Preparando accesos directos…'];
-    let step = 0;
-    timer = setInterval(() => {
-      byId('progress').value = (step + 1) * 25;
-      byId('status').textContent = steps[step];
-      byId('output').textContent += `${steps[step]}\n`;
-      step += 1;
-      if (step === steps.length) {
-        clearInterval(timer);
-        state = 'done';
-        byId('title').textContent = views[mode][6];
-        byId('description').textContent = views[mode][7];
-        byId('status').textContent = 'Proceso completado.';
-        byId('detail').textContent = 'Vista previa: no se realizaron cambios.';
-        byId('primary').textContent = 'Volver al inicio';
-        byId('primary').disabled = false;
-        byId('primary').classList.remove('danger');
-        byId('cancel').hidden = true;
-      }
-    }, 700);
+    if (state === 'done') { closePreview(); return; }
+    if (mode === 'uninstall' && byId('erase').checked) { byId('acknowledge').checked = false; byId('erase-confirm').disabled = true; byId('erase-dialog').showModal(); return; }
+    begin();
   });
+  byId('acknowledge').addEventListener('change', event => { byId('erase-confirm').disabled = !event.target.checked; });
+  byId('erase-cancel').addEventListener('click', () => byId('erase-dialog').close());
+  byId('erase-confirm').addEventListener('click', () => { if (!byId('acknowledge').checked) return; byId('erase-dialog').close(); begin(); });
+  render();
 </script>
+</body>
 </html>
