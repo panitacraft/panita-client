@@ -25,7 +25,8 @@ and repeat installer upgrade/uninstall/ownership tests. Test native dialog layou
 at the target Windows DPI settings; browser-preview checks are insufficient.
 The installer/uninstaller outer window is frameless. Interactive pages provide
 their own Spanish minimize/close controls and a draggable brand header; button
-widgets remain Windows-native. The main launcher retains its window decorations.
+widgets remain Windows-native. The main launcher also uses a custom title bar
+with window controls and dragging; its existing close supervision remains active.
 Busy uninstall is checked by the confirmation page's leave callback, so dismissing
 the warning keeps that page available for retry. The section guard still checks
 again before deletion to catch a launcher started after preflight. The NSIS

@@ -510,8 +510,12 @@ and individual measurements are evidence, not product guarantees.
   safe defaults and idle checks. OS-owned security/runtime dialogs are separate.
 
 - On 2026-10-26 the owner requests keeping the beta checklist only in ignored
-  `docs/`, and confirms frameless styling applies to the installer/uninstaller
-  only. Keep the main launcher window decorations. A busy-launcher uninstall
+  `docs/`. On 2026-10-30 the owner extends frameless styling to the main launcher:
+  provide visible accessible window controls and a draggable header on loading,
+  activation, onboarding and library screens. Keep the existing close supervision
+  and preparation guards. The four-instance rail uses a 560-pixel minimum window
+  height and one selected account avatar; preserve legacy smaller saved sizes by
+  clamping their restored height. A busy-launcher uninstall
   warning must leave its confirmation screen available for retry, with a final
   idle check before deletion. Do not force-close the supervising launcher.
 
@@ -611,8 +615,8 @@ and individual measurements are evidence, not product guarantees.
   `#E4FFDA`, `#BABABA`; primary `#54A636`, `#047500`. Theme switching is not
   implied. Use `ui/src/assets/logo_background.svg` as the authoritative
   background-bearing logo and icon source; preserve its embedded artwork/colors.
-  Keep Spanish player-facing text, keyboard access, contrast and decorated main
-  launcher windows. Final design remains a later plan.
+  Keep Spanish player-facing text, keyboard access, contrast and accessible custom
+  main-window controls and dragging. Final design remains a later plan.
 - Qualify the new installed-product scope on Windows 11 x64 and Ubuntu x64;
   retain the separate Ubuntu 24.04 build baseline. macOS is outside scope.
   Earlier MVP results do not qualify new modpack or updater behavior.
