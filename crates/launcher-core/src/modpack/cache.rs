@@ -1,6 +1,7 @@
 //! Identity-bound public manifest revalidation. A cache hit is content reuse,
 //! never proof of current enabled status, visibility, or Play availability.
 use super::*;
+use crate::panita_api::PanitaCredentials;
 use reqwest::{Client, StatusCode, header};
 use std::time::Duration;
 
@@ -66,6 +67,7 @@ impl CachedManifest {
 pub struct ManifestClient {
     client: Client,
     base: String,
+    auth: Option<PanitaCredentials>,
 }
 impl ManifestClient {
     pub fn new() -> Result<Self, CoreError> {
@@ -79,9 +81,19 @@ impl ManifestClient {
         Ok(Self {
             client,
             base: BASE.to_owned(),
+            auth: None,
         })
     }
-    /// No credentials, transport retry, or fallback on explicit missing responses.
+
+    /// Restricted instances answer 404 unless the request carries the launcher
+    /// key and the member's session, exactly as the catalog does. The credentials
+    /// only reach the fixed API origin; redirects are never followed.
+    pub fn with_auth(mut self, auth: impl Into<Option<PanitaCredentials>>) -> Self {
+        self.auth = auth.into();
+        self
+    }
+
+    /// No transport retry, or fallback on explicit missing responses.
     pub async fn fetch(
         &self,
         id: Uuid,
@@ -105,6 +117,9 @@ impl ManifestClient {
         let validator = cached.and_then(|c| c.etag.as_deref());
         if let Some(etag) = validator {
             request = request.header(header::IF_NONE_MATCH, etag);
+        }
+        if let Some(auth) = &self.auth {
+            request = auth.apply(request);
         }
         let mut response = request
             .send()
@@ -185,7 +200,11 @@ mod tests {
             (503, String::new(), false),
         ]);
         let (client, base) = catalog.test_transport();
-        let client = ManifestClient { client, base };
+        let client = ManifestClient {
+            client,
+            base,
+            auth: None,
+        };
         assert!(client.fetch(id, version, None).await.is_err());
         assert_eq!(
             client
@@ -226,6 +245,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn credentials_reach_the_manifest_request_only_when_supplied() {
+        let (id, version, document) = super::super::tests::fixture();
+        let body = document.to_string();
+        let server =
+            crate::test_http::Server::start(move |_| crate::test_http::Reply::ok(body.clone()));
+        let anonymous = ManifestClient {
+            client: Client::new(),
+            base: server.base().to_owned(),
+            auth: None,
+        };
+        assert!(anonymous.fetch(id, version, None).await.is_ok());
+        let member = ManifestClient {
+            client: Client::new(),
+            base: server.base().to_owned(),
+            auth: PanitaCredentials::new("pk_test_key").ok(),
+        };
+        assert!(member.fetch(id, version, None).await.is_ok());
+        let requests = server.requests();
+        assert_eq!(requests.len(), 2);
+        assert!(!requests[0].headers.contains("x-api-key"));
+        assert!(requests[1].headers.contains("x-api-key: pk_test_key"));
+    }
+
+    #[tokio::test]
     async fn conditional_reuse_is_bound_and_never_hides_missing_or_changed_content() {
         let (id, version, document) = super::super::tests::fixture();
         let body = document.to_string();
@@ -238,7 +281,11 @@ mod tests {
             (404, String::new(), true),
         ]);
         let (client, base) = catalog.test_transport();
-        let client = ManifestClient { client, base };
+        let client = ManifestClient {
+            client,
+            base,
+            auth: None,
+        };
         let cached = client
             .fetch(id, version, None)
             .await
