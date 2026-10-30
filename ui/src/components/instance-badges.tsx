@@ -1,12 +1,14 @@
 import { Blocks } from 'lucide-react';
 import type { CatalogInstance } from '../preview-catalog';
 import { isPack } from '../library-state';
-import minecraft from '../assets/brands/minecraft.webp';
-import neoforge from '../assets/brands/neoforge.png';
-import fabric from '../assets/brands/fabric.png';
+import minecraft from '../assets/brands/minecraft.svg';
+import neoforge from '../assets/brands/neoforge.svg';
+import forge from '../assets/brands/forge.svg';
+import fabric from '../assets/brands/fabric.svg';
 import quilt from '../assets/brands/quilt.svg';
 
 const loaders: Record<string, { name: string; icon: string }> = {
+  forge: { name: 'Forge', icon: forge },
   neoforge: { name: 'NeoForge', icon: neoforge },
   fabric: { name: 'Fabric', icon: fabric },
   quilt: { name: 'Quilt', icon: quilt },
