@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CircleAlert, CircleCheck } from 'lucide-react';
+import { CircleAlert, CircleCheck, LoaderCircle } from 'lucide-react';
 
-type Notice = { message: string; tone: 'success' | 'error' };
+type Notice = { message: string; tone: 'success' | 'error' | 'progress' };
 
 /** Keep confirmations outside the layout; repeat actions restart the expiry timer. */
 export function useTransientNotice() {
@@ -11,7 +11,7 @@ export function useTransientNotice() {
   const show = useCallback((message: string, tone: Notice['tone'] = 'success') => {
     clearTimeout(timer.current);
     setNotice({ message, tone });
-    timer.current = setTimeout(() => setNotice(null), 4000);
+    if (tone !== 'progress') timer.current = setTimeout(() => setNotice(null), 4000);
   }, []);
   useEffect(() => () => clearTimeout(timer.current), []);
   return { notice, show, clear };
@@ -20,7 +20,7 @@ export function useTransientNotice() {
 export function TransientNotice({ notice }: { notice: Notice | null }) {
   return <div className="transient-notice-region" role="status" aria-live="polite" aria-atomic="true">
     {notice && <div className={`transient-notice notice-${notice.tone}`}>
-      {notice.tone === 'success' ? <CircleCheck aria-hidden="true" /> : <CircleAlert aria-hidden="true" />}<span>{notice.message}</span>
+      {notice.tone === 'progress' ? <LoaderCircle className="spin" aria-hidden="true" /> : notice.tone === 'success' ? <CircleCheck aria-hidden="true" /> : <CircleAlert aria-hidden="true" />}<span>{notice.message}</span>
     </div>}
   </div>;
 }

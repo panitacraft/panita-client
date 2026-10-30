@@ -368,3 +368,43 @@
   .crash-dialog .account-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
   @media (max-width: 900px) { .instance-workspace, .instance-hero { padding-inline: 28px; } .log-row { grid-template-columns: 90px 130px 90px minmax(0, 1fr); gap: 8px; } .log-toolbar { gap: 12px; } }
 }
+
+@layer components {
+  .text-action { vertical-align: baseline; align-items: center; line-height: inherit; }
+  .text-action svg { width: 16px; height: 16px; }
+  .settings-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .settings-card-heading h3 { margin: 0; }
+  .settings-card-heading .inherit-toggle { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; color: #BABABA; }
+  .inherit-toggle input[role='switch'] { appearance: none; width: 30px; height: 18px; min-width: 30px; border: 1px solid #777; border-radius: 12px; background: #333; padding: 2px; cursor: pointer; }
+  .inherit-toggle input[role='switch']::before { content: ''; display: block; width: 12px; height: 12px; border-radius: 50%; background: #ddd; transition: transform .15s; }
+  .inherit-toggle input[role='switch']:checked { background: #3c7928; border-color: #78bd58; }
+  .inherit-toggle input[role='switch']:checked::before { transform: translateX(12px); background: #e4ffda; }
+  .inherit-toggle input:focus-visible { outline: 2px solid #a9e58c; outline-offset: 3px; }
+  .inherited-content { opacity: .48; background: #0c0c0c; border-radius: 6px; }
+  .resolution-label { margin: 0 0 8px; font-size: 13px; }
+  .settings-advanced { padding: 14px 16px; }
+  .settings-advanced .settings-card-heading { margin-bottom: 0; }
+  .settings-advanced [id$='-advanced']:not([hidden]) { padding-top: 14px; }
+  .advanced-toggle { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; font-size: 14px; font-weight: 600; }
+  .advanced-toggle svg { width: 18px; height: 18px; color: #a9e58c; }
+  .advanced-toggle .expanded { transform: rotate(180deg); }
+  .settings-tabs { gap: 5px; margin-bottom: 0; border-bottom: 1px solid #383838; padding-left: 12px; }
+  .settings-tabs [role='tab'] { border: 1px solid #383838; border-radius: 7px 7px 0 0; background: #151515; margin-bottom: -1px; padding: 10px 20px; }
+  .settings-tabs [role='tab'][aria-selected='true'] { background: #1c1c1c; color: #e4ffda; border-color: #555; border-bottom-color: #1c1c1c; }
+  .settings-tabs + div > section { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
+  .diagnostic-toolbar { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin: 16px 0; }
+  .diagnostic-toolbar span, .diagnostic-event { display: flex; gap: 8px; align-items: center; }
+  .diagnostic-toolbar label { display: flex; align-items: center; gap: 8px; margin: 0; }
+  .diagnostic-toolbar button { margin-left: auto; }
+  .diagnostic-toolbar svg, .diagnostic-event svg { width: 17px; height: 17px; flex-shrink: 0; color: #a9e58c; }
+  .diagnostic-list li:last-child { border-bottom: 0; }
+  .split-button > .split-trigger:disabled { opacity: .65; }
+  .settings-page > .settings-tabs { margin-bottom: 0; }
+  .settings-tabs ~ div:not([hidden]) > section { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
+  .diagnostic-event.is-error svg { color: #fca5a5; }
+  .diagnostics-section { padding: 20px; border: 1px solid #383838; border-radius: 8px; background: #1c1c1c; }
+  .primary-play[aria-disabled='true'] { opacity: .65; }
+  .text-action { display: inline; }
+  .text-action svg { display: inline-block; vertical-align: -.15em; margin-right: 6px; }
+  .rail-lock.spin { border-radius: 50%; }
+}

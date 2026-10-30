@@ -5,7 +5,7 @@ import { packApi } from './pack-api';
 import { playActive } from './play-state';
 import { usePlaySnapshot } from './play';
 import {
-  cacheRetainedReason, cacheSummary, clearSummary, conflictReasonText, conflictSummary, folderHint, importErrorText, manualHeading,
+  cacheRetainedReason, clearSummary, conflictReasonText, conflictSummary, folderHint, importErrorText, manualHeading,
   reasonText, skippedSummary, formatBytes, type CacheReport, type PackFile, type PackList,
 } from './pack-state';
 
@@ -114,10 +114,10 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
   }
 
   return <section ref={panel} tabIndex={-1} className="settings-section" aria-labelledby="cache-heading">
-    <h2 id="cache-heading">Caché de archivos de modpacks</h2>
-    <p>{isTauri() ? cacheSummary(size) : 'Disponible en la aplicación de escritorio.'}</p>
-    <p>Esta caché es compartida por todos los modpacks. Guarda los archivos ya verificados de los modpacks para no descargarlos de nuevo. Puedes borrarla sin riesgo: tus instancias, mundos y ajustes no dependen de ella.</p>
-    <button type="button" disabled={busy || !isTauri() || size === 0} onClick={() => setQuestion(true)}>Limpiar caché…</button>
+    <h2 id="cache-heading">Caché de modpacks</h2>
+    <p>{size === null ? 'Calculando tamaño…' : `Tamaño actual: ${new Intl.NumberFormat('es', { maximumFractionDigits: 1 }).format(size / 1048576)} MB`}</p>
+    <p>Guarda archivos compartidos para acelerar futuras descargas. Es completamente seguro vaciarla: tus instancias, mundos y ajustes no se verán afectados.</p>
+    <button type="button" disabled={busy || !isTauri() || (size === 0 || size === null)} onClick={() => setQuestion(true)}>Limpiar caché</button>
     {question && <fieldset className="catalog-notice">
       <legend>Limpiar la caché de archivos de modpacks</legend>
       <p>Eliminaremos la carpeta <code>content</code> dentro de la carpeta PanitaClient de tus datos de aplicación ({size === null ? 'tamaño desconocido' : formatBytes(size)}). No tocamos tus instancias, mundos, cuentas ni los archivos de Minecraft y Java.</p>

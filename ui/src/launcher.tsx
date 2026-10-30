@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
-import { ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, Users, WifiOff } from 'lucide-react';
+import { LoaderCircle, ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, Users, WifiOff } from 'lucide-react';
 import { loadCatalog } from './catalog-api';
 import type { CatalogOverview } from './preview-catalog';
 import { messageForError } from './errors';
@@ -100,7 +100,7 @@ export function Launcher() {
           <strong>{instance.name}</strong>
           <p>{instance.description}</p>
           <div className="instance-tags"><InstanceBadges instance={instance} updateAvailable={instance.localState === 'update_available'} />
-            {!['Sin instalar', 'Lista para jugar', 'Actualización disponible'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className={`instance-status ${instance.availability === 'disabled' ? 'status-warning' : ''}`}>{instance.availability === 'disabled' && <LockKeyhole aria-hidden="true" />}{instanceStatus(instance, liveEntry(instance.id))}</span>}
+            {!['Sin instalar', 'Lista para jugar', 'Actualización disponible'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className={`instance-status ${instance.availability === 'disabled' ? 'status-warning' : ''}`}>{instance.availability === 'disabled' && <LockKeyhole aria-hidden="true" />}{['Instalando', 'Reparando', 'Actualizando'].includes(instanceStatus(instance, liveEntry(instance.id))) && <LoaderCircle className="spin" aria-hidden="true" />}{instanceStatus(instance, liveEntry(instance.id))}</span>}
           </div>
         </div>}><Button variant="ghost"
           className={`rail-instance size-13 p-0 ${instance.id === selectedId && page === 'library' ? 'is-selected' : ''} ${instance.availability === 'disabled' ? 'is-disabled' : ''}`}
@@ -109,6 +109,7 @@ export function Launcher() {
           disabled={!preferences || preferences.busy}
           onClick={() => { setPage('library'); if (instance.id !== preferences?.id) void preferences?.select(instance.id); }}>
           <CatalogArtwork url={instance.iconUrl} />
+          {['Instalando', 'Reparando', 'Actualizando'].includes(instanceStatus(instance, liveEntry(instance.id))) && <LoaderCircle className="rail-lock spin" aria-hidden="true" />}
           {liveEntry(instance.id)?.phase === 'running' && <Gamepad2 className="rail-lock" aria-hidden="true" />}
           {instance.availability === 'disabled' && <LockKeyhole className="rail-lock" aria-hidden="true" />}
         </Button></Hint>)}
@@ -133,7 +134,7 @@ export function Launcher() {
         <WindowDragRegion><span className="toolbar-brand">PANITA <span>CLIENT</span></span></WindowDragRegion>
         <div className="flex shrink-0 items-center gap-2">
           <Hint text="Actualizar catálogo"><span className="icon-control"><Button variant="ghost" size="icon" disabled={refreshing} aria-label="Actualizar catálogo" onClick={() => setCatalogAttempt(previous => previous + 1)}><RefreshCw aria-hidden="true" /></Button></span></Hint>
-          <Hint text="Ajustes del launcher"><Button variant="ghost" size="icon" aria-label="Ajustes del launcher" onClick={() => openSettings('global')} aria-current={page === 'settings' && settingsScope === 'global' ? 'page' : undefined}><Settings2 aria-hidden="true" /></Button></Hint>
+          <Hint text="Ajustes Globales"><Button variant="ghost" size="icon" aria-label="Ajustes Globales" onClick={() => openSettings('global')} aria-current={page === 'settings' && settingsScope === 'global' ? 'page' : undefined}><Settings2 aria-hidden="true" /></Button></Hint>
           <WindowControls />
         </div>
       </header>
@@ -165,7 +166,7 @@ export function Launcher() {
                 <p>{instance.description}</p>
                 <div className="instance-tags">
                   <InstanceBadges instance={instance} showLoaderHint />
-                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
+                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible', 'Instalando', 'Reparando', 'Actualizando'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
                 </div>
               </div>
             </div>
@@ -186,13 +187,13 @@ export function Launcher() {
           <ActivationPanel /><Accounts onSnapshot={acceptAccounts} />
         </div>
         <div hidden={page !== 'settings'} className="utility-page settings-page">
-          <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? selected?.name ?? 'Ajustes de instancia' : 'Ajustes del launcher'}</h1></div>
+          <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? `Ajustes · ${selected?.name ?? 'Instancia'}` : 'Ajustes Globales'}</h1><p>{settingsScope === 'instance' ? 'Sobrescribe los ajustes globales solo para esta instancia.' : 'Estos valores se aplicarán por defecto a todas las instancias.'}</p></div>
           {settingsScope === 'global' && <div className="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
             {([['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['diagnostics', 'Diagnóstico']] as const).map(([value, label]) => <Button key={value} variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
           </div>}
           <div hidden={settingsTab !== 'game'}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'storage'}><CachePanel openRequest={cacheRequest} /></div>
-          <div hidden={settingsScope !== 'global' || settingsTab !== 'diagnostics'}><DiagnosticsPanel /></div>
+          <div hidden={settingsScope !== 'global' || settingsTab !== 'diagnostics'}>{settingsScope === 'global' && settingsTab === 'diagnostics' && <DiagnosticsPanel />}</div>
         </div>
       </div>
     </div>

@@ -26,7 +26,10 @@ export function instanceStatus(instance: CatalogInstance, entry?: PlayEntry): st
   if (instance.availability === 'disabled') return 'Deshabilitada';
   if (entry) {
     switch (entry.phase) {
-      case 'preparing': case 'starting': return 'Preparando inicio';
+      case 'starting': return 'Preparando inicio';
+      case 'preparing':
+        if (entry.operation === 'play') return 'Preparando inicio';
+        return entry.operation === 'update' ? 'Actualizando' : entry.operation === 'repair' ? 'Reparando' : entry.operation === 'uninstall' ? 'Desinstalando' : 'Instalando';
       case 'installing': return entry.operation === 'update' ? 'Actualizando' : entry.operation === 'repair' ? 'Reparando' : entry.operation === 'uninstall' ? 'Desinstalando' : 'Instalando';
       case 'warning': return 'Confirmación pendiente';
       case 'running': return 'En ejecución';

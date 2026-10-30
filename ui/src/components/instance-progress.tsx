@@ -1,4 +1,4 @@
-import { LoaderCircle, X } from 'lucide-react';
+import { Download, X, Wrench, RefreshCw, Trash2, ShieldCheck } from 'lucide-react';
 import type { PlayEntry } from '../play-state';
 import { formatBytes, packProgressFraction } from '../pack-state';
 import { Button } from './ui/button';
@@ -13,8 +13,9 @@ export function InstanceProgress({ entry, busy, onCancel }: { entry: PlayEntry; 
     : entry.operation === 'uninstall' ? 'Quitando la instancia…'
     : entry.operation === 'repair' ? 'Comprobando archivos…'
     : entry.operation === 'update' ? 'Actualizando la instancia…' : 'Instalando la instancia…';
+  const Icon = entry.operation === 'repair' ? Wrench : entry.operation === 'update' ? RefreshCw : entry.operation === 'uninstall' ? Trash2 : entry.operation === 'play' ? ShieldCheck : Download;
   return <div className="operation-card" role="status">
-    <div className="operation-heading"><LoaderCircle className="spin" aria-hidden="true" /><strong>{label}</strong>
+    <div className="operation-heading"><Icon aria-hidden="true" /><strong>{label}</strong>
       <Button variant="ghost" size="icon" aria-label="Cancelar operación" disabled={busy || entry.phase === 'cancelling'} onClick={onCancel}><X aria-hidden="true" /></Button>
     </div>
     {measured ? <>

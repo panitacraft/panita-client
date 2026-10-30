@@ -103,12 +103,12 @@ test('navigation preserves settings drafts and account creation remains an expli
   await user.type(await screen.findByLabelText('Nombre de usuario'), 'OtroJugador');
   await user.click(screen.getByRole('button', { name: 'Cancelar' }));
   await user.click(screen.getByRole('button', { name: 'Instancias', exact: true }));
-  await user.click(screen.getByRole('button', { name: 'Ajustes del launcher' }));
-  const ram = await screen.findByLabelText('RAM para Minecraft (MiB)');
+  await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
+  const ram = await screen.findByLabelText('RAM Asignada (MiB)');
   await user.clear(ram); await user.type(ram, '8192');
   await user.click(screen.getByRole('button', { name: 'Inicio: tus instancias' }));
-  await user.click(screen.getByRole('button', { name: 'Ajustes del launcher' }));
-  expect((screen.getByLabelText('RAM para Minecraft (MiB)') as HTMLInputElement).value).toBe('8192');
+  await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
+  expect((screen.getByLabelText('RAM Asignada (MiB)') as HTMLInputElement).value).toBe('8192');
   await user.click(screen.getByRole('button', { name: 'Gestionar cuentas', exact: true }));
   expect(screen.getByRole('heading', { name: 'Perfiles de Minecraft' })).toBeTruthy();
   expect(screen.queryByRole('dialog')).toBeNull();
@@ -116,8 +116,8 @@ test('navigation preserves settings drafts and account creation remains an expli
   await screen.findByRole('heading', { name: 'Otra aventura', exact: true });
   await user.click(within(screen.getByRole('article', { name: 'Otra aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
   await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
-  expect(screen.getByRole('heading', { name: 'Otra aventura', exact: true })).toBeTruthy();
-  expect(screen.queryByRole('heading', { name: 'Caché de archivos de modpacks' })).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Ajustes · Otra aventura', exact: true })).toBeTruthy();
+  expect(screen.queryByRole('heading', { name: 'Caché de modpacks' })).toBeNull();
 }, 15000);
 
 test('mandatory pack updates open a modal and require explicit world-backup consent', async () => {
@@ -240,16 +240,16 @@ test('offline avatars stay local and Microsoft avatar failures use the same loca
   expect(container.querySelector('img')!.getAttribute('src')).toBe(fallback);
 });
 
-test('disabled status provides its explanation on keyboard focus while its options remain usable', async () => {
+test('disabled status explains why both instance controls are disabled', async () => {
   catalog.instances[0] = { ...first, availability: 'disabled', enabled: false };
-  const user = userEvent.setup(); mount();
+  mount();
   const card = await screen.findByRole('article', { name: 'Aventura' });
   const status = within(card).getByText('Deshabilitada');
   fireEvent.focus(status);
   await screen.findByRole('tooltip', { name: 'Esta instancia está deshabilitada. Tus mundos y archivos se conservan.' });
   expect((screen.getByRole('button', { name: 'No disponible para jugar' }) as HTMLButtonElement).disabled).toBe(true);
-  await user.click(within(card).getByRole('button', { name: 'Opciones de instancia' }));
-  expect(screen.getByRole('menuitem', { name: 'Ajustes de la instancia' })).toBeTruthy();
+  expect((within(card).getByRole('button', { name: 'Opciones de instancia' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('menu')).toBeNull();
 });
 
 test('real artwork replaces the decorative fallback, and a failed banner restores it', () => {
@@ -354,7 +354,7 @@ test('instance menu opens fixed folders and existing logs, and routes shared cac
   expect(backend.invoke).toHaveBeenCalledWith('open_game_log', { instanceId: 'pack-a', requestId: 'request' });
   await user.click(options);
   await user.click(screen.getByRole('menuitem', { name: 'Limpiar caché de modpacks…', exact: true }));
-  expect(await screen.findByRole('heading', { name: 'Caché de archivos de modpacks' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'Caché de modpacks' })).toBeTruthy();
   expect(backend.invoke.mock.calls.some(([command]) => command === 'clear_content_cache')).toBe(false);
 });
 
@@ -461,4 +461,36 @@ test('resizing uses additional rail space and restores paging when complete card
     await waitFor(() => expect(container.querySelectorAll('.rail-instance')).toHaveLength(6));
     expect(screen.getByRole('button', { name: 'Más instancias' })).toBeTruthy();
   } finally { size.mockRestore(); }
+});
+
+test('instance inheritance switches disable only their fields and advanced content expands accessibly', async () => {
+  const user = userEvent.setup(); mount();
+  const card = await screen.findByRole('article', { name: 'Aventura' });
+  await user.click(within(card).getByRole('button', { name: 'Opciones de instancia' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia' }));
+  const inherit = await screen.findByRole('switch', { name: 'Heredar ajuste global: Memoria' });
+  const ram = screen.getByLabelText('RAM Asignada (MiB)') as HTMLInputElement;
+  expect(ram.disabled).toBe(true);
+  await user.click(inherit);
+  expect(ram.disabled).toBe(false);
+  expect((screen.getByLabelText('Ancho de Minecraft (píxeles)') as HTMLInputElement).disabled).toBe(true);
+  const advanced = screen.getByRole('button', { name: 'Java y argumentos avanzados' });
+  expect(advanced.getAttribute('aria-expanded')).toBe('false');
+  await user.click(advanced);
+  expect(advanced.getAttribute('aria-expanded')).toBe('true');
+  const jvm = screen.getByLabelText('Memoria y argumentos JVM adicionales (uno por línea)') as HTMLTextAreaElement;
+  expect(jvm.disabled).toBe(true);
+  await user.click(screen.getByRole('switch', { name: 'Heredar ajuste global: Java y argumentos avanzados' }));
+  expect(jvm.disabled).toBe(false);
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'save_instance_settings')).toBe(false);
+});
+
+test('active repair shows one content spinner and disables the options dropdown', async () => {
+  mount();
+  const card = await screen.findByRole('article', { name: 'Aventura' });
+  await emit(entry({ operation: 'repair', phase: 'installing' }));
+  expect(within(card).queryByText('Reparando', { exact: true })).toBeNull();
+  expect((within(card).getByRole('button', { name: 'Opciones de instancia' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(within(card).getByRole('button', { name: 'Preparando…' }).getAttribute('aria-disabled')).toBe('true');
+  expect(card.querySelectorAll('.spin').length).toBe(1);
 });

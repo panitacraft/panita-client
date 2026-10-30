@@ -107,10 +107,16 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   const [cleanupDetails, setCleanupDetails] = useState<NativeCleanupReport['details']>([]);
   const entry = play?.snapshot?.instances.find(entry => entry.instanceId === instanceId);
   const [optionsOpen, setOptionsOpen] = useState(false);
-  const optionsEnabled = optionsAllowed && entry?.phase !== 'uninstalled';
-  useEffect(() => { if (!optionsEnabled) setOptionsOpen(false); }, [optionsEnabled]);
   const active = entry && playActive(entry.phase);
   const running = entry && (entry.phase === 'running' || entry.phase === 'stopping');
+  const optionsVisible = optionsAllowed && entry?.phase !== 'uninstalled';
+  const primaryDisabled = active ? !running || entry.phase === 'stopping'
+    : updateTarget ? busy
+    : (installAllowed && entry?.phase !== 'installed') || entry?.phase === 'uninstalled'
+      ? busy || !installAllowed || !isTauri() || !play?.snapshot
+      : busy || !allowed || !isTauri() || !play?.snapshot;
+  const optionsEnabled = optionsVisible && !primaryDisabled;
+  useEffect(() => { if (!optionsEnabled) setOptionsOpen(false); }, [optionsEnabled]);
 
   async function act<C extends PlayCommand>(command: C, args: Omit<PlayArguments[C], 'instanceId'>) {
     if (!play || busyRef.current) return;
@@ -126,15 +132,16 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     setBusy(true);
     setCleanupError(null);
     setCleanupDetails([]);
-    setCleanupText('Eliminando las carpetas nativas antiguas…');
+    setCleanupText(null);
+    toast.show('Eliminando las carpetas nativas antiguas…', 'progress');
     try {
       const report = await invoke<NativeCleanupReport>('clean_native_cache', { instanceId });
-      if (report.retainedGenerations > 0) setCleanupText(nativeCleanupSummary(report));
+      if (report.retainedGenerations > 0) { toast.clear(); setCleanupText(nativeCleanupSummary(report)); }
       else { setCleanupText(null); toast.show('Caché nativa limpia.'); }
       setCleanupDetails(report.details);
     } catch (cause) {
       setCleanupText(null);
-      setCleanupError(messageForError(cause));
+      toast.clear(); setCleanupError(messageForError(cause));
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -225,9 +232,9 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     </Button> : updateTarget ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy} onClick={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</Button>
       : (installAllowed && entry?.phase !== 'installed') || entry?.phase === 'uninstalled' ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy || !installAllowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.phase === 'failed' ? 'Reintentar instalación' : 'Instalar'}</Button>
       : <Button className="primary-play h-12 text-xl" size="lg" disabled={busy || !allowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}><Play aria-hidden="true" />{allowed ? 'Jugar' : 'No disponible para jugar'}</Button>}
-    {optionsEnabled && <>
+    {optionsVisible && <>
     <DropdownMenu modal={false} open={optionsEnabled && optionsOpen} onOpenChange={open => setOptionsOpen(optionsEnabled && open)}>
-      <DropdownMenuTrigger asChild><Button className="split-trigger h-12 w-12 rounded-l-none p-0" disabled={!optionsEnabled} aria-label="Opciones de instancia" title={optionsEnabled ? 'Opciones de instancia' : 'Instala esta instancia para acceder a sus opciones'}><ChevronDown aria-hidden="true" /></Button></DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild><Button className="split-trigger h-12 w-12 rounded-l-none p-0" disabled={!optionsEnabled} aria-label="Opciones de instancia" title={optionsEnabled ? 'Opciones de instancia' : 'Opciones no disponibles en este momento'}><ChevronDown aria-hidden="true" /></Button></DropdownMenuTrigger>
       <DropdownMenuContent className="instance-menu" align="end" sideOffset={8}>
         {onSettings && <DropdownMenuItem onSelect={onSettings}><Settings2 aria-hidden="true" />Ajustes de la instancia</DropdownMenuItem>}
         <DropdownMenuItem disabled={busy || !isTauri()} onSelect={() => void invoke('open_instance_folder', { instanceId, folder: 'instance' }).catch(cause => setLogError(messageForError(cause)))}><FolderOpen aria-hidden="true" />Abrir carpeta</DropdownMenuItem>
