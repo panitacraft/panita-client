@@ -23,6 +23,7 @@ import { Button } from './components/ui/button';
 import { AccountAvatar } from './components/account-avatar';
 import { Hint } from './components/hint';
 import { TooltipProvider } from './components/ui/tooltip';
+import { WindowControls } from './components/window-controls';
 import { InstanceBadges } from './components/instance-badges';
 
 type CatalogState = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'blocked' } | ({ kind: 'ready' } & CatalogOverview);
@@ -131,6 +132,7 @@ export function Launcher() {
           <Hint text={unverified || (catalog.kind === 'ready' && catalog.stale) ? 'Sin verificar: no pudimos conectar con Panitacraft.' : isTauri() ? 'Sesión de Panitacraft' : 'Vista previa del navegador'}><span className="connection-indicator" tabIndex={0} aria-label={unverified || (catalog.kind === 'ready' && catalog.stale) ? 'Sin verificar' : isTauri() ? 'Panitacraft' : 'Vista previa'}>{unverified || (catalog.kind === 'ready' && catalog.stale) ? <WifiOff aria-hidden="true" /> : <ShieldCheck aria-hidden="true" />}</span></Hint>
           <Hint text="Actualizar catálogo"><span className="icon-control"><Button variant="ghost" size="icon" disabled={refreshing} aria-label="Actualizar catálogo" onClick={() => setCatalogAttempt(previous => previous + 1)}><RefreshCw aria-hidden="true" /></Button></span></Hint>
           <Hint text="Ajustes del launcher"><Button variant="ghost" size="icon" aria-label="Ajustes del launcher" onClick={() => openSettings('global')} aria-current={page === 'settings' && settingsScope === 'global' ? 'page' : undefined}><Settings2 aria-hidden="true" /></Button></Hint>
+          <WindowControls />
         </div>
       </header>
 

@@ -88,6 +88,9 @@
   .launcher-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
   .launcher-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 28px 0 8px; height: var(--chrome-height); flex-shrink: 0; background: #1B1B1B; border-bottom: 1px solid #303030; }
   .launcher-toolbar button { border: 0; }
+  .window-control-divider { width: 1px; height: 22px; background: #515151; margin-inline: 8px; flex-shrink: 0; }
+  .window-controls { display: flex; align-items: center; gap: 4px; }
+  .window-control-error { position: absolute; z-index: 60; right: 20px; top: calc(var(--chrome-height) + 8px); max-width: min(360px, calc(100vw - 120px)); padding: 10px 14px; border: 1px solid #FCA5A5; border-radius: 6px; background: #252525; font-size: 12px; }
   .toolbar-brand { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; letter-spacing: .12em; font-weight: 750; white-space: nowrap; }
   .toolbar-brand > span { color: #BABABA; font-size: inherit; font-weight: 400; }
   .connection-indicator { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; color: #A4D58E; border-radius: 6px; }

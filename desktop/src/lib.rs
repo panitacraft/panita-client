@@ -12,6 +12,7 @@ mod pack_commands;
 mod play_commands;
 mod protocol;
 mod settings_commands;
+mod window_commands;
 #[cfg(windows)]
 mod windows_identity;
 #[cfg(windows)]
@@ -220,6 +221,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             application_name,
+            window_commands::main_window_control,
             initialize,
             diagnostic_snapshot,
             catalog_snapshot,

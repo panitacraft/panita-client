@@ -12,6 +12,7 @@ import type { PlayEntry, PlaySnapshot } from '../src/play-state';
 
 const backend = vi.hoisted(() => ({ native: true, invoke: vi.fn(), listeners: new Map<string, Set<(event: { payload: unknown }) => void>>() }));
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => backend.native, invoke: backend.invoke }));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onResized: async () => () => {} }) }));
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.2.0-alpha' }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: async (name: string, callback: (event: { payload: unknown }) => void) => {
   const callbacks = backend.listeners.get(name) ?? new Set();
@@ -47,6 +48,7 @@ beforeEach(() => {
   accounts = { revision: 1, selected_account_id: 'account', login_pending: false, login_error: null, accounts: [{ metadata: { account_id: 'account', kind: 'offline', username: 'Jugador', profile_id: 'profile', oauth_client_id: null }, status: 'offline', error: null, persisted: true }] };
   backend.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     switch (command) {
+      case 'main_window_control': return false;
       case 'initialize': return;
       case 'catalog_snapshot': return catalog;
       case 'play_snapshot': return play;
