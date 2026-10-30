@@ -10,8 +10,8 @@ import { InstanceBadges } from '../src/components/instance-badges';
 import type { CatalogOverview } from '../src/preview-catalog';
 import type { PlayEntry, PlaySnapshot } from '../src/play-state';
 
-const backend = vi.hoisted(() => ({ invoke: vi.fn(), listeners: new Map<string, Set<(event: { payload: unknown }) => void>>() }));
-vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, invoke: backend.invoke }));
+const backend = vi.hoisted(() => ({ native: true, invoke: vi.fn(), listeners: new Map<string, Set<(event: { payload: unknown }) => void>>() }));
+vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => backend.native, invoke: backend.invoke }));
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: async () => '0.2.0-alpha' }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: async (name: string, callback: (event: { payload: unknown }) => void) => {
   const callbacks = backend.listeners.get(name) ?? new Set();
@@ -40,6 +40,7 @@ async function emit(entry: PlayEntry) {
 }
 
 beforeEach(() => {
+  backend.native = true;
   catalog = { instances: [{ ...first }, { ...first, id: 'pack-b', name: 'Otra aventura' }], stale: false, cacheWarning: null, registryWarning: null };
   play = { revision: 0, processSessionId: 'test', closeBlocked: false, gracefulStopSupported: true, instances: [] };
   backend.listeners.clear();
@@ -56,7 +57,7 @@ beforeEach(() => {
       case 'pack_version_names': return { installed: 'Uno', available: 'Dos' };
       case 'pack_files': return { files: [manualFile], complete: false };
       case 'import_pack_file': throw 'artifact_mismatch';
-      case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': return;
+      case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': case 'open_instance_folder': return;
       default: throw new Error(`Unexpected test command: ${command}`);
     }
   });
@@ -223,8 +224,9 @@ test('fresh instances omit the redundant installation badge and unlock options o
   const options = within(article).getByRole('button', { name: 'Opciones de instancia' }) as HTMLButtonElement;
   expect(options.disabled).toBe(true);
   expect(within(article).queryByText('Sin instalar')).toBeNull();
+  expect(within(article).queryByText('Lista para jugar')).toBeNull();
   expect(article.querySelector('.game-icon')).not.toBeNull();
-  expect(within(article).getByText('NeoForge')).toBeTruthy();
+  expect(within(article).getByAltText('NeoForge')).toBeTruthy();
   expect(article.querySelector('.loader-icon')).not.toBeNull();
   expect(within(article).getByRole('button', { name: 'Instalar', exact: true })).toBeTruthy();
   await user.click(options);
@@ -252,9 +254,9 @@ test('uninstall closes an open options menu before a stale catalog refresh can r
 
 test('loader badges use known icons and do not guess a missing loader', () => {
   const { container, rerender } = render(<InstanceBadges instance={first} />);
-  for (const [id, name] of [['neoforge', 'NeoForge'], ['fabric', 'Fabric'], ['quilt', 'Quilt']]) {
+  for (const [id, name] of [['forge', 'Forge'], ['neoforge', 'NeoForge'], ['fabric', 'Fabric'], ['quilt', 'Quilt']]) {
     rerender(<InstanceBadges instance={{ ...first, source: { ...first.source, loader: id } }} />);
-    expect(screen.getByText(name)).toBeTruthy();
+    expect(screen.getByAltText(name)).toBeTruthy();
     expect(container.querySelector('.loader-icon')).not.toBeNull();
   }
   rerender(<InstanceBadges instance={{ ...first, source: { type: 'modrinth' }, installedSource: null }} />);
@@ -268,7 +270,7 @@ test('instance tooltips reuse game and loader badges with exact installed loader
   catalog.instances[0] = { ...first, installedLoader: { name: 'neoforge', version: '21.1.264' }, source: { ...first.source, label: 'v1.2.3' } };
   mount();
   const article = await screen.findByRole('article', { name: 'Aventura' });
-  expect(within(article).getByText('NeoForge 21.1.264')).toBeTruthy();
+  expect(within(article).getByAltText('NeoForge 21.1.264')).toBeTruthy();
   expect(within(article).getByText('v1.2.3')).toBeTruthy();
   expect(within(article).queryByText('vv1.2.3')).toBeNull();
   const rail = screen.getByRole('button', { name: 'Aventura: Lista para jugar' });
@@ -277,7 +279,54 @@ test('instance tooltips reuse game and loader badges with exact installed loader
   expect(within(tooltip).getByText('Aventura')).toBeTruthy();
   expect(within(tooltip).getByText(first.description)).toBeTruthy();
   expect(within(tooltip).getByText('Minecraft 1.21.1')).toBeTruthy();
-  expect(within(tooltip).getByText('NeoForge 21.1.264')).toBeTruthy();
+  expect(within(tooltip).getByAltText('NeoForge 21.1.264')).toBeTruthy();
   expect(within(tooltip).getByText('v1.2.3')).toBeTruthy();
   expect(tooltip.querySelector('.game-icon')).not.toBeNull();
+  expect(document.querySelector('svg.fill-secondary')).not.toBeNull();
+  expect(within(article).getByAltText('NeoForge 21.1.264').parentElement?.querySelector('.game-icon')).not.toBeNull();
+  expect(within(article).queryByText('Lista para jugar')).toBeNull();
+});
+
+
+test('the version update badge opens consent without starting an update', async () => {
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  const article = await screen.findByRole('article', { name: 'Aventura' });
+  await user.click(within(article).getByRole('button', { name: 'Actualizar', exact: true }));
+  await screen.findByText('Actualizar el modpack de Uno a Dos');
+  expect((screen.getByLabelText('Crear una copia de mis mundos antes de actualizar (recomendado)') as HTMLInputElement).checked).toBe(true);
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
+  expect(within(article).queryByText('vDos')).toBeNull();
+});
+
+test('instance menu opens fixed folders and existing logs, and routes shared cache to confirmation', async () => {
+  const user = userEvent.setup(); mount();
+  const article = await screen.findByRole('article', { name: 'Aventura' });
+  const options = within(article).getByRole('button', { name: 'Opciones de instancia' });
+  await user.click(options);
+  expect(screen.getByRole('menuitem', { name: 'Ver registro', exact: true }).getAttribute('aria-disabled')).toBe('true');
+  await user.click(screen.getByRole('menuitem', { name: 'Abrir carpeta', exact: true }));
+  expect(backend.invoke).toHaveBeenCalledWith('open_instance_folder', { instanceId: 'pack-a', folder: 'instance' });
+  await emit(entry({ phase: 'exited' }));
+  await user.click(options);
+  await user.click(screen.getByRole('menuitem', { name: 'Ver registro', exact: true }));
+  expect(backend.invoke).toHaveBeenCalledWith('open_game_log', { instanceId: 'pack-a', requestId: 'request' });
+  await user.click(options);
+  await user.click(screen.getByRole('menuitem', { name: 'Limpiar caché de modpacks…', exact: true }));
+  expect(await screen.findByRole('heading', { name: 'Caché de archivos de modpacks' })).toBeTruthy();
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'clear_content_cache')).toBe(false);
+});
+
+
+test('browser update preview permits inspection while desktop actions stay disabled', async () => {
+  backend.native = false;
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Modpack con actualización: Actualización disponible' }));
+  await user.click(screen.getByRole('button', { name: 'Actualizar', exact: true }));
+  expect((screen.getByRole('button', { name: 'Confirmar actualización' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText('Crear una copia de mis mundos antes de actualizar (recomendado)') as HTMLInputElement).checked).toBe(true);
+  await user.click(screen.getByRole('button', { name: 'Opciones de instancia' }));
+  expect(screen.getByRole('menuitem', { name: 'Abrir carpeta' }).getAttribute('aria-disabled')).toBe('true');
+  expect(screen.getByRole('menuitem', { name: 'Ver registro' }).getAttribute('aria-disabled')).toBe('true');
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
 });

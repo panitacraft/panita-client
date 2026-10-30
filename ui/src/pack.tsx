@@ -88,7 +88,9 @@ export function PackPanel({ instanceId, awaiting, onChanged }: { instanceId: str
 }
 
 /** Size of the disposable download cache and the explicit action that clears it. */
-export function CachePanel() {
+export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
+  const panel = useRef<HTMLElement>(null);
+  useEffect(() => { if (openRequest) { panel.current?.scrollIntoView?.({ block: 'center' }); panel.current?.focus(); } }, [openRequest]);
   const [size, setSize] = useState<number | null>(null);
   const [question, setQuestion] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -116,10 +118,10 @@ export function CachePanel() {
     }
   }
 
-  return <section className="settings-section" aria-labelledby="cache-heading">
+  return <section ref={panel} tabIndex={-1} className="settings-section" aria-labelledby="cache-heading">
     <h2 id="cache-heading">Caché de archivos de modpacks</h2>
     <p>{isTauri() ? cacheSummary(size) : 'Disponible en la aplicación de escritorio.'}</p>
-    <p>Guarda los archivos ya verificados de los modpacks para no descargarlos de nuevo. Puedes borrarla sin riesgo: tus instancias, mundos y ajustes no dependen de ella.</p>
+    <p>Esta caché es compartida por todos los modpacks. Guarda los archivos ya verificados de los modpacks para no descargarlos de nuevo. Puedes borrarla sin riesgo: tus instancias, mundos y ajustes no dependen de ella.</p>
     <button type="button" disabled={busy || !isTauri() || size === 0} onClick={() => setQuestion(true)}>Limpiar caché…</button>
     {question && <fieldset className="catalog-notice">
       <legend>Limpiar la caché de archivos de modpacks</legend>

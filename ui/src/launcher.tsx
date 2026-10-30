@@ -35,6 +35,8 @@ export function Launcher() {
   const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [page, setPage] = useState<LauncherPage>('library');
+  const [updateRequests, setUpdateRequests] = useState<Record<string, number>>({});
+  const [cacheRequest, setCacheRequest] = useState(0);
   const [settingsScope, setSettingsScope] = useState<'global' | 'instance'>('global');
   const [accountView, setAccountView] = useState<AccountsView | null>(null);
   const [accountBusy, setAccountBusy] = useState(false);
@@ -89,16 +91,15 @@ export function Launcher() {
   return <TooltipProvider delayDuration={250}><main className="launcher-shell">
     <a className="skip-link" href="#launcher-content">Saltar al contenido</a>
     <aside className="instance-rail" aria-label="Navegación de Panita">
-      <Button variant="ghost" className="rail-logo size-14 p-0" aria-label="Inicio: tus instancias" onClick={() => setPage('library')}>
+      <div className="rail-header"><Button variant="ghost" className="rail-logo size-14 p-0 hover:bg-transparent hover:text-foreground" aria-label="Inicio: tus instancias" onClick={() => setPage('library')}>
         <img src={logoWhite} alt="" aria-hidden="true" />
-      </Button>
-      <div className="rail-divider" />
+      </Button></div>
       <nav className="rail-instances" aria-label="Instancias">
         {instances.map(instance => <Hint key={instance.id} side="right" sideOffset={20} text={<div className="instance-hint">
           <strong>{instance.name}</strong>
           <p>{instance.description}</p>
-          <div className="instance-tags"><InstanceBadges instance={instance} />
-            {instanceStatus(instance, liveEntry(instance.id)) !== 'Sin instalar' && <span className={`instance-status ${instance.availability === 'disabled' ? 'status-warning' : ''}`}>{instance.availability === 'disabled' && <LockKeyhole aria-hidden="true" />}{instanceStatus(instance, liveEntry(instance.id))}</span>}
+          <div className="instance-tags"><InstanceBadges instance={instance} updateAvailable={instance.localState === 'update_available'} />
+            {!['Sin instalar', 'Lista para jugar', 'Actualización disponible'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className={`instance-status ${instance.availability === 'disabled' ? 'status-warning' : ''}`}>{instance.availability === 'disabled' && <LockKeyhole aria-hidden="true" />}{instanceStatus(instance, liveEntry(instance.id))}</span>}
           </div>
         </div>}><Button variant="ghost"
           className={`rail-instance size-13 p-0 ${instance.id === selectedId && page === 'library' ? 'is-selected' : ''} ${instance.availability === 'disabled' ? 'is-disabled' : ''}`}
@@ -113,7 +114,7 @@ export function Launcher() {
         {catalog.kind === 'loading' && <span className="rail-placeholder"><Blocks aria-hidden="true" /></span>}
       </nav>
       <div className="rail-bottom">
-        <Hint text="Gestionar cuentas" side="right"><Button variant="ghost" size="icon" className={page === 'accounts' ? 'is-selected' : ''} aria-label="Gestionar cuentas" aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}><Users aria-hidden="true" /></Button></Hint>
+        <Hint text="Gestionar cuentas" side="right"><Button variant="ghost" size="icon" className={`size-10 [&_svg]:size-5 ${page === 'accounts' ? 'is-selected' : ''}`} aria-label="Gestionar cuentas" aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}><Users aria-hidden="true" /></Button></Hint>
         <div className="rail-accounts" role="group" aria-label="Cuentas de Minecraft">
           {accountView?.accounts.map(account => <Hint key={account.metadata.account_id} side="right" text={`${account.metadata.username} · ${account.metadata.kind === 'offline' ? 'Sin conexión' : 'Microsoft'}${account.metadata.account_id === accountView.selected_account_id ? ' · Seleccionada' : ''}`}>
             <Button variant="ghost" className="rail-account size-10 p-0" aria-label={`Seleccionar cuenta: ${account.metadata.username}`} aria-pressed={account.metadata.account_id === accountView.selected_account_id} disabled={accountBusy} onClick={() => void selectAccount(account.metadata.account_id)}><AccountAvatar metadata={account.metadata} /></Button>
@@ -161,8 +162,8 @@ export function Launcher() {
                 <h1>{instance.name}</h1>
                 <p>{instance.description}</p>
                 <div className="instance-tags">
-                  <InstanceBadges instance={instance} />
-                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : instanceStatus(instance, liveEntry(instance.id)) !== 'Sin instalar' && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
+                  <InstanceBadges instance={instance} updateAvailable={!!updateTarget(instance, catalog.stale || unverified)} onUpdate={() => setUpdateRequests(previous => ({ ...previous, [instance.id]: (previous[instance.id] ?? 0) + 1 }))} />
+                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
                 </div>
               </div>
             </div>
@@ -172,20 +173,20 @@ export function Launcher() {
               {!instance.compatible && <p role="status">Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
               {!instance.supported && <p role="status">Este tipo de instancia todavía no es compatible.</p>}
               {instance.installedVersion && <p className="installed-version">Versión instalada: Minecraft {instance.installedVersion}</p>}
-              <PlayControls instanceId={instance.id} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
+              <PlayControls updateRequest={updateRequests[instance.id] ?? 0} onPackCache={() => { openSettings('global'); setCacheRequest(value => value + 1); }} instanceId={instance.id} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available')} />
               <PackPanel instanceId={instance.id} awaiting={instance.localState === 'awaiting_files'} onChanged={() => setCatalogAttempt(previous => previous + 1)} />
             </div>
           </article>)}
         </div>
 
         <div hidden={page !== 'accounts'} className="utility-page">
-          <div className="page-heading"><Button variant="ghost" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Volver a las instancias</Button><h1>Tus cuentas</h1><p>Tu acceso a Panitacraft y tu perfil de Minecraft.</p></div>
+          <div className="page-heading"><Button variant="ghost" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Volver a la lista</Button><h1>Tus cuentas</h1><p>Tu acceso a Panitacraft y tu perfil de Minecraft.</p></div>
           <ActivationPanel /><Accounts onSnapshot={acceptAccounts} />
         </div>
         <div hidden={page !== 'settings'} className="utility-page">
-          <div className="page-heading"><Button variant="ghost" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Volver a las instancias</Button><h1>{settingsScope === 'instance' ? selected?.name ?? 'Ajustes de instancia' : 'Ajustes del launcher'}</h1><p>{settingsScope === 'instance' ? 'Personaliza esta instancia sin cambiar las demás.' : 'Configura Minecraft y administra los recursos de Panita.'}</p></div>
+          <div className="page-heading"><Button variant="ghost" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Volver a la lista</Button><h1>{settingsScope === 'instance' ? selected?.name ?? 'Ajustes de instancia' : 'Ajustes del launcher'}</h1><p>{settingsScope === 'instance' ? 'Personaliza esta instancia sin cambiar las demás.' : 'Configura Minecraft y administra los recursos de Panita.'}</p></div>
           <SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} />
-          <div hidden={settingsScope !== 'global'}><CachePanel /><DiagnosticsPanel /></div>
+          <div hidden={settingsScope !== 'global'}><CachePanel openRequest={cacheRequest} /><DiagnosticsPanel /></div>
         </div>
       </div>
     </div>

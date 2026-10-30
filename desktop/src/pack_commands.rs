@@ -146,7 +146,7 @@ pub(super) async fn open_curseforge_project(
     Ok(true)
 }
 
-/// Open one of an instance's fixed content folders, or its pack backups. The
+/// Open an existing instance root, one of its fixed content folders, or its pack backups. The
 /// frontend picks from a short list; it never supplies a path.
 #[tauri::command]
 pub(super) async fn open_instance_folder(
@@ -160,6 +160,15 @@ pub(super) async fn open_instance_folder(
     let paths = paths(&app)?;
     let directory = blocking(move || {
         let directory = match folder.as_str() {
+            "instance" => {
+                let directory = paths.instance(instance_id)?;
+                if !directory.is_dir() {
+                    return Err(launcher_core::error::CoreError::new(
+                        ErrorCode::InstanceMissing,
+                    ));
+                }
+                return Ok(directory);
+            }
             "mods" | "resourcepacks" | "shaderpacks" => {
                 paths.game_directory(instance_id)?.join(&folder)
             }
