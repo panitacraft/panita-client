@@ -109,18 +109,20 @@ pub(super) async fn start_microsoft_login(
     };
     #[cfg(not(target_os = "linux"))]
     let browser_result = app.opener().open_url(launch.browser_url, None::<&str>);
-    if browser_result.is_err() {
-        let cancelled = accounts
-            .cancel_pending_login(launch.operation_id)
-            .map_err(|error| error.code())?;
-        if cancelled {
-            emit_accounts(&app, &accounts);
-            return Err(ErrorCode::BrowserUnavailable);
-        }
-        // A callback or a later account action already owns the outcome.
+    if browser_result.is_err() && accounts.pending_login_link(launch.operation_id).is_ok() {
+        // Keep the active login available for the player's explicit Copy link action.
+        emit_accounts(&app, &accounts);
+        return Err(ErrorCode::BrowserUnavailable);
     }
     emit_accounts(&app, &accounts);
     Ok(launch.operation_id.to_string())
+}
+
+#[tauri::command]
+pub(super) fn microsoft_login_link(
+    state: tauri::State<'_, DesktopState>,
+) -> Result<String, ErrorCode> {
+    controller(&state)?.login_link().map_err(|e| e.code())
 }
 
 #[tauri::command]

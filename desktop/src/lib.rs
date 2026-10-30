@@ -239,6 +239,7 @@ pub fn run() {
             account_commands::add_offline_account,
             account_commands::start_microsoft_login,
             account_commands::cancel_microsoft_login,
+            account_commands::microsoft_login_link,
             account_commands::select_account,
             account_commands::renew_account,
             account_commands::retry_account_save,

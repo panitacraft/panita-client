@@ -267,6 +267,21 @@ impl AccountController {
         Ok(launch)
     }
 
+    pub fn login_link(&self) -> Result<String, CoreError> {
+        self.state()?.pending.authorization_url()
+    }
+
+    pub fn pending_login_link(&self, operation: Uuid) -> Result<String, CoreError> {
+        let state = self.state()?;
+        if !state
+            .interactive
+            .is_some_and(|ticket| ticket.operation.value() == operation)
+        {
+            return Err(CoreError::new(ErrorCode::OperationCancelled));
+        }
+        state.pending.authorization_url()
+    }
+
     pub fn cancel_login(&self) -> Result<(), CoreError> {
         invalidate(&mut *self.state()?);
         Ok(())
@@ -1172,6 +1187,50 @@ mod tests {
                 .unwrap_or_else(|_| panic!("view"))
                 .login_pending
         );
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn copy_links_only_follow_the_current_pending_operation() {
+        let (client, task) = mock_client(Vec::new());
+        let paths =
+            AppPaths::new(std::env::temp_dir().join(format!("panita-link-{}", Uuid::new_v4())))
+                .unwrap_or_else(|_| panic!("path"));
+        let repository =
+            AccountRepository::new(PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store")));
+        let controller =
+            AccountController::with_client(repository, ProcessSessionId::new(), client)
+                .unwrap_or_else(|error| panic!("controller: {:?}", error.code()));
+        let first = controller
+            .begin_login(None)
+            .unwrap_or_else(|_| panic!("login"));
+        assert_eq!(
+            controller
+                .pending_login_link(first.operation_id)
+                .ok()
+                .as_ref(),
+            Some(&first.browser_url)
+        );
+        assert!(controller.cancel_login().is_ok());
+        assert!(controller.login_link().is_err());
+        let second = controller
+            .begin_login(None)
+            .unwrap_or_else(|_| panic!("login"));
+        assert!(controller.pending_login_link(first.operation_id).is_err());
+        assert_eq!(
+            controller
+                .pending_login_link(second.operation_id)
+                .ok()
+                .as_ref(),
+            Some(&second.browser_url)
+        );
+        assert_eq!(
+            controller.login_link().ok().as_ref(),
+            Some(&second.browser_url)
+        );
+        assert!(controller.cancel_login().is_ok());
         assert!(task.join().is_ok());
         drop(controller);
         assert!(std::fs::remove_dir_all(paths.root()).is_ok());
