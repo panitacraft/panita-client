@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { WindowControls } from './components/window-controls';
+import { WindowDragRegion } from './components/window-drag-region';
+import { TooltipProvider } from './components/ui/tooltip';
 import logoWhite from './assets/logo-white.svg';
 import { Accounts } from './accounts';
 import { invokeAccount } from './account-api';
@@ -155,12 +158,13 @@ function RunningGames() {
 }
 
 function Shell({ children }: { children: ReactNode }) {
-  return <main>
-    <header><span className="wordmark"><img src={logoWhite} alt="" aria-hidden="true" />Panita Client</span></header>
-    {children}
-    <RunningGames />
-    <CrashNotifications names={{}} />
-  </main>;
+  return <TooltipProvider><main className="launcher-shell setup-shell">
+    <header className="launcher-toolbar">
+      <WindowDragRegion><span className="setup-brand"><img src={logoWhite} alt="" aria-hidden="true" draggable={false} /><span className="toolbar-brand">PANITA <span>CLIENT</span></span></span></WindowDragRegion>
+      <WindowControls separator={false} />
+    </header>
+    <div className="setup-content">{children}<RunningGames /><CrashNotifications names={{}} /></div>
+  </main></TooltipProvider>;
 }
 
 /** The window opens on activation, then onboarding, and only then on the launcher. */

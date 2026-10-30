@@ -1,6 +1,7 @@
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { WindowDragRegion } from '../src/components/window-drag-region';
 import { WindowControls } from '../src/components/window-controls';
 import { TooltipProvider } from '../src/components/ui/tooltip';
 
@@ -54,4 +55,15 @@ test('failed window operations report a Spanish error and leave retry available'
   await user.click(screen.getByRole('button', { name: 'Minimizar', exact: true }));
   expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'No pudimos controlar la ventana. Vuelve a intentarlo.');
   expect((screen.getByRole('button', { name: 'Minimizar', exact: true }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+test('the custom header drags on a left press and toggles maximize on a double press', async () => {
+  render(<WindowDragRegion><span>Barra de Panita</span></WindowDragRegion>);
+  fireEvent.mouseDown(screen.getByText('Barra de Panita'), { button: 0, detail: 1 });
+  await waitFor(() => expect(desktop.invoke).toHaveBeenCalledWith('main_window_control', { action: 'drag' }));
+  fireEvent.mouseDown(screen.getByText('Barra de Panita'), { button: 0, detail: 2 });
+  await waitFor(() => expect(desktop.invoke).toHaveBeenCalledWith('main_window_control', { action: 'toggle_maximize' }));
+  desktop.invoke.mockClear();
+  fireEvent.mouseDown(screen.getByText('Barra de Panita'), { button: 2, detail: 1 });
+  expect(desktop.invoke).not.toHaveBeenCalled();
 });

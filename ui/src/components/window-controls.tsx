@@ -7,7 +7,7 @@ import { Hint } from './hint';
 
 type WindowAction = 'state' | 'minimize' | 'toggle_maximize' | 'close';
 
-export function WindowControls() {
+export function WindowControls({ separator = true }: { separator?: boolean }) {
   const native = isTauri();
   const [maximized, setMaximized] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -48,11 +48,11 @@ export function WindowControls() {
   }
 
   return <>
-    <span className="window-control-divider" role="separator" aria-orientation="vertical" />
+    {separator && <span className="window-control-divider" role="separator" aria-orientation="vertical" />}
     <div className="window-controls" role="group" aria-label="Controles de la ventana">
-      <Hint side="bottom" text={native ? 'Minimizar' : 'Minimizar · disponible en la aplicación de escritorio'}><span className="icon-control" tabIndex={native ? undefined : 0}><Button variant="ghost" size="icon" aria-label="Minimizar" disabled={!native || busy} onClick={() => void control('minimize')}><Minus aria-hidden="true" /></Button></span></Hint>
-      <Hint side="bottom" text={native ? maximized ? 'Restaurar' : 'Maximizar' : 'Maximizar · disponible en la aplicación de escritorio'}><span className="icon-control" tabIndex={native ? undefined : 0}><Button variant="ghost" size="icon" aria-label={maximized ? 'Restaurar' : 'Maximizar'} disabled={!native || busy} onClick={() => void control('toggle_maximize')}>{maximized ? <Copy aria-hidden="true" /> : <Square aria-hidden="true" />}</Button></span></Hint>
-      <Hint side="bottom" text={native ? 'Cerrar' : 'Cerrar · disponible en la aplicación de escritorio'}><span className="icon-control" tabIndex={native ? undefined : 0}><Button variant="ghost" size="icon" className="window-close hover:bg-red-700 hover:text-white" aria-label="Cerrar" disabled={!native || busy} onClick={() => void control('close')}><X aria-hidden="true" /></Button></span></Hint>
+      <Hint side="bottom" text={native ? 'Minimizar' : 'Minimizar · disponible en la aplicación de escritorio'}><span className="icon-control" tabIndex={native ? undefined : 0}><Button variant="ghost" size="icon" className="bg-transparent hover:bg-transparent hover:text-foreground" aria-label="Minimizar" disabled={!native || busy} onClick={() => void control('minimize')}><Minus aria-hidden="true" /></Button></span></Hint>
+      <Hint side="bottom" text={native ? maximized ? 'Restaurar' : 'Maximizar' : 'Maximizar · disponible en la aplicación de escritorio'}><span className="icon-control" tabIndex={native ? undefined : 0}><Button variant="ghost" size="icon" className="bg-transparent hover:bg-transparent hover:text-foreground" aria-label={maximized ? 'Restaurar' : 'Maximizar'} disabled={!native || busy} onClick={() => void control('toggle_maximize')}>{maximized ? <Copy aria-hidden="true" /> : <Square aria-hidden="true" />}</Button></span></Hint>
+      <Hint side="bottom" text={native ? 'Cerrar' : 'Cerrar · disponible en la aplicación de escritorio'}><span className="icon-control" tabIndex={native ? undefined : 0}><Button variant="ghost" size="icon" className="window-close bg-transparent hover:bg-transparent hover:text-destructive" aria-label="Cerrar" disabled={!native || busy} onClick={() => void control('close')}><X aria-hidden="true" /></Button></span></Hint>
     </div>
     {error && <span className="window-control-error" role="alert">{error}</span>}
   </>;

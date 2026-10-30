@@ -12,6 +12,10 @@ pub(super) fn main_window_control(
     }
     let failed = |_| ErrorCode::ProcessControlFailed;
     match action.as_str() {
+        "drag" => {
+            window.start_dragging().map_err(failed)?;
+            Ok(None)
+        }
         "minimize" => {
             window.minimize().map_err(failed)?;
             Ok(None)

@@ -66,7 +66,12 @@ test('an activated member without Minecraft accounts can complete offline onboar
 });
 
 test('initialization failure offers a visible retry instead of an empty window', async () => {
-  native.invoke.mockRejectedValueOnce('storage_unavailable');
+  const implementation = native.invoke.getMockImplementation()!;
+  let failed = false;
+  native.invoke.mockImplementation((command: string, ...args: unknown[]) => {
+    if (command === 'initialize' && !failed) { failed = true; return Promise.reject('storage_unavailable'); }
+    return implementation(command, ...args);
+  });
   mount();
   expect(await screen.findByRole('button', { name: 'Reintentar', exact: true })).toBeTruthy();
   const user = userEvent.setup(); await user.click(screen.getByRole('button', { name: 'Reintentar', exact: true }));

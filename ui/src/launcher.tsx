@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
-import { ArrowLeft, Blocks, Gamepad2, LockKeyhole, RefreshCw, Settings2, ShieldCheck, Users, WifiOff } from 'lucide-react';
+import { ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, ShieldCheck, Users, WifiOff } from 'lucide-react';
 import { loadCatalog } from './catalog-api';
 import type { CatalogOverview } from './preview-catalog';
 import { messageForError } from './errors';
 import logoWhite from './assets/logo-white.svg';
 import { Accounts } from './accounts';
-import { invokeAccount } from './account-api';
 import type { AccountsView } from './account-state';
 import { ActivationPanel, useActivation } from './activation';
 import { PlayControls, PlayNotice, usePlaySnapshot } from './play';
@@ -23,6 +22,7 @@ import { Button } from './components/ui/button';
 import { AccountAvatar } from './components/account-avatar';
 import { Hint } from './components/hint';
 import { TooltipProvider } from './components/ui/tooltip';
+import { WindowDragRegion } from './components/window-drag-region';
 import { WindowControls } from './components/window-controls';
 import { InstanceBadges } from './components/instance-badges';
 
@@ -39,9 +39,7 @@ export function Launcher() {
   const [cacheRequest, setCacheRequest] = useState(0);
   const [settingsScope, setSettingsScope] = useState<'global' | 'instance'>('global');
   const [accountView, setAccountView] = useState<AccountsView | null>(null);
-  const [accountBusy, setAccountBusy] = useState(false);
-  const accountSelecting = useRef(false);
-  const [accountError, setAccountError] = useState<string | null>(null);
+  const [instancePage, setInstancePage] = useState(0);
   const [version, setVersion] = useState(__APP_VERSION__);
   const acceptAccounts = useCallback((next: AccountsView | null) => {
     setAccountView(previous => previous && next && previous.revision > next.revision ? previous : next);
@@ -53,6 +51,15 @@ export function Launcher() {
   const instances = catalog.kind === 'ready' ? catalog.instances : [];
   const selectedId = visibleSelection(instances, preferences?.id ?? null);
   const selected = instances.find(instance => instance.id === selectedId);
+  const selectedAccount = accountView?.accounts.find(account => account.metadata.account_id === accountView.selected_account_id);
+  const pageCount = Math.ceil(instances.length / 4);
+  const visiblePage = Math.min(instancePage, Math.max(0, pageCount - 1));
+  const visibleInstances = instances.slice(visiblePage * 4, visiblePage * 4 + 4);
+  const instanceOrder = instances.map(instance => instance.id).join(',');
+  useEffect(() => {
+    const index = instances.findIndex(instance => instance.id === selectedId);
+    setInstancePage(Math.max(0, Math.floor(index / 4)));
+  }, [selectedId, instanceOrder]);
 
   useEffect(() => {
     if (!isTauri()) return;
@@ -77,25 +84,16 @@ export function Launcher() {
     setSettingsScope(scope); setPage('settings');
   }
 
-  async function selectAccount(accountId: string) {
-    if (accountSelecting.current || accountView?.selected_account_id === accountId) return;
-    accountSelecting.current = true;
-    setAccountBusy(true); setAccountError(null);
-    try {
-      await invokeAccount('select_account', { accountId });
-      acceptAccounts(await invokeAccount('account_snapshot', undefined));
-    } catch (cause) { setAccountError(messageForError(cause)); }
-    finally { accountSelecting.current = false; setAccountBusy(false); }
-  }
-
   return <TooltipProvider delayDuration={250}><main className="launcher-shell">
     <a className="skip-link" href="#launcher-content">Saltar al contenido</a>
     <aside className="instance-rail" aria-label="Navegación de Panita">
       <div className="rail-header"><Button variant="ghost" className="rail-logo size-14 p-0 hover:bg-transparent hover:text-foreground" aria-label="Inicio: tus instancias" onClick={() => setPage('library')}>
         <img src={logoWhite} alt="" aria-hidden="true" />
       </Button></div>
-      <nav className="rail-instances" aria-label="Instancias">
-        {instances.map(instance => <Hint key={instance.id} side="right" sideOffset={20} text={<div className="instance-hint">
+      <nav className="rail-browser" aria-label="Instancias">
+        {pageCount > 1 && <Hint text="Instancias anteriores" side="right"><Button variant="ghost" className="rail-nav-control size-6 bg-transparent p-0" aria-label="Instancias anteriores" disabled={visiblePage === 0} onClick={() => setInstancePage(visiblePage - 1)}><ChevronUp aria-hidden="true" /></Button></Hint>}
+        <div className="rail-instances">
+        {visibleInstances.map(instance => <Hint key={instance.id} side="right" sideOffset={20} text={<div className="instance-hint">
           <strong>{instance.name}</strong>
           <p>{instance.description}</p>
           <div className="instance-tags"><InstanceBadges instance={instance} updateAvailable={instance.localState === 'update_available'} />
@@ -112,14 +110,16 @@ export function Launcher() {
           {instance.availability === 'disabled' && <LockKeyhole className="rail-lock" aria-hidden="true" />}
         </Button></Hint>)}
         {catalog.kind === 'loading' && <span className="rail-placeholder"><Blocks aria-hidden="true" /></span>}
+        </div>
+        {pageCount > 1 && <Hint text="Más instancias" side="right"><Button variant="ghost" className="rail-nav-control size-6 bg-transparent p-0" aria-label="Más instancias" disabled={visiblePage + 1 >= pageCount} onClick={() => setInstancePage(visiblePage + 1)}><ChevronDown aria-hidden="true" /></Button></Hint>}
       </nav>
       <div className="rail-bottom">
         <Hint text="Gestionar cuentas" side="right"><Button variant="ghost" size="icon" className={`size-10 [&_svg]:size-5 ${page === 'accounts' ? 'is-selected' : ''}`} aria-label="Gestionar cuentas" aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}><Users aria-hidden="true" /></Button></Hint>
         <div className="rail-accounts" role="group" aria-label="Cuentas de Minecraft">
-          {accountView?.accounts.map(account => <Hint key={account.metadata.account_id} side="right" text={`${account.metadata.username} · ${account.metadata.kind === 'offline' ? 'Sin conexión' : 'Microsoft'}${account.metadata.account_id === accountView.selected_account_id ? ' · Seleccionada' : ''}`}>
-            <Button variant="ghost" className="rail-account size-10 p-0" aria-label={`Seleccionar cuenta: ${account.metadata.username}`} aria-pressed={account.metadata.account_id === accountView.selected_account_id} disabled={accountBusy} onClick={() => void selectAccount(account.metadata.account_id)}><AccountAvatar metadata={account.metadata} /></Button>
-          </Hint>)}
-          {!accountView?.accounts.length && <Hint text="Añadir una cuenta de Minecraft" side="right"><Button variant="ghost" className="rail-account size-10 p-0" aria-label="Añadir una cuenta de Minecraft" onClick={() => setPage('accounts')}><AccountAvatar metadata={null} /></Button></Hint>}
+          {selectedAccount && <Hint side="right" text={selectedAccount.metadata.username + ' · ' + (selectedAccount.metadata.kind === 'offline' ? 'Sin conexión' : 'Microsoft')}>
+            <Button variant="ghost" className="rail-account current-account size-10 p-0" aria-label={'Gestionar cuenta: ' + selectedAccount.metadata.username} onClick={() => setPage('accounts')}><AccountAvatar metadata={selectedAccount.metadata} /></Button>
+          </Hint>}
+          {!selectedAccount && <Hint text={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} side="right"><Button variant="ghost" className="rail-account size-10 p-0" aria-label={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} onClick={() => setPage('accounts')}><AccountAvatar metadata={null} /></Button></Hint>}
         </div>
         <span className="rail-version" title={`Panita Client ${version}`}>v{version}</span>
       </div>
@@ -127,7 +127,7 @@ export function Launcher() {
 
     <div className="launcher-body">
       <header className="launcher-toolbar">
-        <span className="toolbar-brand">PANITA <span>CLIENT</span></span>
+        <WindowDragRegion><span className="toolbar-brand">PANITA <span>CLIENT</span></span></WindowDragRegion>
         <div className="flex shrink-0 items-center gap-2">
           <Hint text={unverified || (catalog.kind === 'ready' && catalog.stale) ? 'Sin verificar: no pudimos conectar con Panitacraft.' : isTauri() ? 'Sesión de Panitacraft' : 'Vista previa del navegador'}><span className="connection-indicator" tabIndex={0} aria-label={unverified || (catalog.kind === 'ready' && catalog.stale) ? 'Sin verificar' : isTauri() ? 'Panitacraft' : 'Vista previa'}>{unverified || (catalog.kind === 'ready' && catalog.stale) ? <WifiOff aria-hidden="true" /> : <ShieldCheck aria-hidden="true" />}</span></Hint>
           <Hint text="Actualizar catálogo"><span className="icon-control"><Button variant="ghost" size="icon" disabled={refreshing} aria-label="Actualizar catálogo" onClick={() => setCatalogAttempt(previous => previous + 1)}><RefreshCw aria-hidden="true" /></Button></span></Hint>
@@ -139,7 +139,6 @@ export function Launcher() {
       <div id="launcher-content" tabIndex={-1} className="launcher-content">
         <div className="launcher-notices">
           <PlayNotice />
-          {accountError && <p role="alert">No pudimos cambiar de cuenta. {accountError}</p>}
           {preferences?.error && <div role="alert" className="catalog-notice"><p>{preferences.error}</p><Button variant="secondary" disabled={preferences.busy} onClick={preferences.retry}>Reintentar preferencias</Button></div>}
           {preferences?.warning && <p role="alert">{preferences.warning}</p>}
           {refreshError && catalog.kind === 'ready' && <p role="alert">No pudimos actualizar las instancias. {refreshError}</p>}
