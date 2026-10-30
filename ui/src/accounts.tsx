@@ -133,7 +133,7 @@ export function Accounts({ suggestedName = '', onSnapshot, onboarding = false }:
   const unavailable = !view || view.login_pending || busy === 'start_microsoft_login' || blocked;
   const choices = <>
     <Button disabled={unavailable} onClick={() => startLogin()}><MicrosoftIcon />Añadir cuenta Microsoft</Button>
-    <Button disabled={!view || blocked} onClick={() => { setUsername(suggestedName); setDialog('offline'); }}><UserRound aria-hidden="true" />Añadir cuenta No premium</Button>
+    <Button variant="outline" disabled={!view || blocked} onClick={() => { setUsername(suggestedName); setDialog('offline'); }}><UserRound aria-hidden="true" />Añadir cuenta No premium</Button>
   </>;
   const feedback = <>
     {error && <p role="alert" className="account-error">{error}</p>}

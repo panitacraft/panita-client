@@ -388,7 +388,7 @@
   .advanced-toggle { display: flex; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; font-size: 14px; font-weight: 600; }
   .advanced-toggle svg { width: 18px; height: 18px; color: #a9e58c; }
   .advanced-toggle .expanded { transform: rotate(180deg); }
-  .settings-tabs { gap: 0; margin-bottom: 0; border-bottom: 1px solid #383838; padding-left: 0; }
+  .settings-tabs { gap: 8px; margin-bottom: 0; border-bottom: 1px solid #383838; padding-left: 0; }
   .settings-tabs [role='tab'] { border: 1px solid #383838; border-radius: 7px 7px 0 0; background: #151515; margin-bottom: -1px; padding: 10px 20px; }
   .settings-tabs [role='tab'][aria-selected='true'] { background: #1b1b1b; color: #e4ffda; border-color: #383838; border-bottom-color: #1b1b1b; }
   .settings-tabs + div > section { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
@@ -414,7 +414,7 @@
   .utility-footer p { margin: 0; font-size: 12px; line-height: 1.6; }
   .utility-footer p + p { margin-top: 2px; }
   .compact-settings { margin-top: 0; }
-  .settings-tabs [role='tab'] + [role='tab'] { border-left: 0; }
+  .settings-tabs [role='tab'] + [role='tab'] { border-left: 1px solid #383838; }
   .settings-tabs [role='tab'] { border-radius: 7px 7px 0 0; }
 }
 @layer components {
