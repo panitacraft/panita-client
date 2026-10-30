@@ -106,10 +106,21 @@ fn hostile_names_and_content_types_are_rejected_before_any_write() {
         "config/lib.so",
         "config/lib.dylib",
         "config/setup.msi",
-        "config/ünicode.txt",
+        "config/evil\u{202E}txt.exe",
+        "config/zero\u{200B}width.txt",
     ] {
         assert!(pack(build(&[(name, b"data")])).is_err(), "{name}");
     }
+}
+
+#[test]
+fn printable_unicode_names_are_accepted_and_fold_like_windows() {
+    for name in ["config/ünicode.txt", "config/§3Fresh §bFlower Pots.txt"] {
+        assert!(pack(build(&[(name, b"data")])).is_ok(), "{name}");
+    }
+    // Windows compares names across all of Unicode, so these are one file.
+    assert!(pack(build(&[("config/É.txt", b"1"), ("config/é.txt", b"2")])).is_err());
+    assert!(pack(build(&[("config/é.txt", b"1"), ("config/e.txt", b"2")])).is_ok());
 }
 
 #[test]

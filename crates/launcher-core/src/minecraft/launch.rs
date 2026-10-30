@@ -59,6 +59,30 @@ fn path_text(path: &Path) -> Result<String, CoreError> {
     Ok(text.to_owned())
 }
 
+/// Discord shows the official "Playing Minecraft" status for a Windows `javaw.exe`
+/// whose command line names the vanilla main class. A loader starts another main
+/// class, so it is named in an inert system property, as Fabric's own profile does.
+const DISCORD_MAIN_CLASS: &str = "net.minecraft.client.main.Main";
+const DISCORD_HINT: &str = "-Dpanita.discord= net.minecraft.client.main.Main ";
+
+/// The runtime executable to start. On Windows this is `javaw.exe` when the
+/// verified runtime lists it, which is the process Discord recognizes; it is the
+/// same JVM without a console. Anywhere else, or without it, the recorded
+/// `java` executable is used unchanged.
+fn launch_executable(plan: &super::plan::InstallPlan) -> &str {
+    plan.java_executable
+        .strip_suffix("java.exe")
+        .and_then(|directory| {
+            plan.artifacts.iter().find(|artifact| {
+                artifact.executable
+                    && artifact.destination.strip_prefix(directory) == Some("javaw.exe")
+            })
+        })
+        .map_or(plan.java_executable.as_str(), |artifact| {
+            artifact.destination.as_str()
+        })
+}
+
 /// A limited JVM option grammar prevents user settings from replacing the
 /// classpath, main class, managed heap/native paths, or injecting argument files.
 /// Construct direct process arguments from the installed manifest. Filesystem
@@ -234,7 +258,7 @@ pub fn build_command(
             return Err(invalid());
         }
         let mut command = LaunchCommand {
-            executable: paths.root().join(&plan.java_executable),
+            executable: paths.root().join(launch_executable(plan)),
             directory: game_directory.to_owned(),
             args: arguments(&metadata.jvm, &launch_platform, &replacements)?,
             redactions: if account.kind == AccountKind::Microsoft {
@@ -260,6 +284,14 @@ pub fn build_command(
         }
         command.args.extend(settings.extra_jvm_args.clone());
         command.args.push(format!("-Xmx{}M", settings.ram_mib));
+        if loader.is_some()
+            && !command
+                .args
+                .iter()
+                .any(|argument| argument.contains(DISCORD_MAIN_CLASS))
+        {
+            command.args.push(DISCORD_HINT.to_owned());
+        }
         command.args.push(loader.map_or_else(
             || version.main_class.clone(),
             |loader| loader.main_class().to_owned(),

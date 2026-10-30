@@ -67,6 +67,8 @@ impl CachedManifest {
 pub struct ManifestClient {
     client: Client,
     base: String,
+    /// A restricted instance's manifest is only served to a request that carries
+    /// the launcher key and the member session; public ones ignore both.
     auth: Option<PanitaCredentials>,
 }
 impl ManifestClient {
@@ -85,15 +87,13 @@ impl ManifestClient {
         })
     }
 
-    /// Restricted instances answer 404 unless the request carries the launcher
-    /// key and the member's session, exactly as the catalog does. The credentials
-    /// only reach the fixed API origin; redirects are never followed.
     pub fn with_auth(mut self, auth: impl Into<Option<PanitaCredentials>>) -> Self {
         self.auth = auth.into();
         self
     }
 
-    /// No transport retry, or fallback on explicit missing responses.
+    /// Credentials only reach the Panita API. No transport retry, or fallback on
+    /// explicit missing responses.
     pub async fn fetch(
         &self,
         id: Uuid,
@@ -114,12 +114,12 @@ impl ManifestClient {
             ))
             .header(header::ACCEPT, "application/json")
             .header(header::CACHE_CONTROL, "no-cache");
+        if let Some(auth) = &self.auth {
+            request = auth.apply(request);
+        }
         let validator = cached.and_then(|c| c.etag.as_deref());
         if let Some(etag) = validator {
             request = request.header(header::IF_NONE_MATCH, etag);
-        }
-        if let Some(auth) = &self.auth {
-            request = auth.apply(request);
         }
         let mut response = request
             .send()
@@ -245,30 +245,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn credentials_reach_the_manifest_request_only_when_supplied() {
-        let (id, version, document) = super::super::tests::fixture();
-        let body = document.to_string();
-        let server =
-            crate::test_http::Server::start(move |_| crate::test_http::Reply::ok(body.clone()));
-        let anonymous = ManifestClient {
-            client: Client::new(),
-            base: server.base().to_owned(),
-            auth: None,
-        };
-        assert!(anonymous.fetch(id, version, None).await.is_ok());
-        let member = ManifestClient {
-            client: Client::new(),
-            base: server.base().to_owned(),
-            auth: PanitaCredentials::new("pk_test_key").ok(),
-        };
-        assert!(member.fetch(id, version, None).await.is_ok());
-        let requests = server.requests();
-        assert_eq!(requests.len(), 2);
-        assert!(!requests[0].headers.contains("x-api-key"));
-        assert!(requests[1].headers.contains("x-api-key: pk_test_key"));
-    }
-
-    #[tokio::test]
     async fn conditional_reuse_is_bound_and_never_hides_missing_or_changed_content() {
         let (id, version, document) = super::super::tests::fixture();
         let body = document.to_string();
@@ -307,5 +283,48 @@ mod tests {
                 .is_err()
         );
         task.join().unwrap_or_else(|_| panic!("server"));
+    }
+
+    #[tokio::test]
+    async fn a_restricted_manifest_is_fetched_only_with_the_key_and_the_session() {
+        use crate::test_http::{Reply, Server};
+        let (id, version, document) = super::super::tests::fixture();
+        let body = document.to_string();
+        // Like the API: a restricted manifest answers 404 to a request without both.
+        let server = Server::start(move |request| {
+            if request.headers.contains("x-api-key") && request.headers.contains("authorization") {
+                Reply::ok(body.clone())
+            } else {
+                Reply::status(404)
+            }
+        });
+        let client = || {
+            let client = Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap_or_else(|_| panic!("client"));
+            ManifestClient {
+                client,
+                base: server.base().to_owned(),
+                auth: None,
+            }
+        };
+        assert_eq!(
+            client()
+                .fetch(id, version, None)
+                .await
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::InstanceMissing)
+        );
+        let credentials = crate::panita_api::tests::credentials()
+            .with_session(&crate::panita_api::tests::session("ps_member"));
+        assert!(
+            client()
+                .with_auth(credentials)
+                .fetch(id, version, None)
+                .await
+                .is_ok()
+        );
     }
 }

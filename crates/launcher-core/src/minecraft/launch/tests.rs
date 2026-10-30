@@ -169,6 +169,22 @@ fn loader_commands_merge_child_libraries_and_keep_module_arguments_platform_spec
             .position(|arg| arg == "-p")
             .ok_or("module")?;
         assert!(module < main);
+        // A loader starts another main class, so Discord's detection needs the hint
+        // ahead of it, exactly once.
+        let hint = command
+            .args
+            .iter()
+            .position(|arg| arg == DISCORD_HINT)
+            .ok_or("hint")?;
+        assert!(hint < main);
+        assert_eq!(
+            command
+                .args
+                .iter()
+                .filter(|arg| *arg == DISCORD_HINT)
+                .count(),
+            1
+        );
         assert_eq!(
             command
                 .args
@@ -528,4 +544,90 @@ fn legacy_cache_destinations_remain_in_launch_arguments() {
         value_after(&command.args, "-cp")
             .ends_with(&path_text(&paths.root().join(legacy)).unwrap_or_default())
     );
+}
+
+fn built(
+    paths: &AppPaths,
+    directory: &Path,
+    installed: &InstalledLock,
+    platform: &Platform,
+    account: &AccountInfo,
+) -> LaunchCommand {
+    build_command(
+        paths,
+        directory,
+        installed,
+        platform,
+        &GlobalSettings::default(),
+        &InstanceSettings::default(),
+        LaunchIdentity {
+            account,
+            minecraft_token: None,
+            xuid: None,
+        },
+    )
+    .unwrap_or_else(|_| panic!("build"))
+}
+
+fn program(command: &LaunchCommand) -> &str {
+    command
+        .executable
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+}
+
+#[test]
+fn windows_starts_javaw_only_when_the_verified_runtime_lists_it() {
+    let (paths, directory, mut installed, platform, account) = fixture("1.21.1", "windows");
+    assert_eq!(
+        program(&built(&paths, &directory, &installed, &platform, &account)),
+        "java.exe"
+    );
+    let java = installed
+        .plan
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.destination == installed.plan.java_executable)
+        .cloned()
+        .unwrap_or_else(|| panic!("java artifact"));
+    let mut javaw = java.clone();
+    javaw.destination = installed
+        .plan
+        .java_executable
+        .replace("java.exe", "javaw.exe");
+    installed.plan.artifacts.push(javaw);
+    let command = built(&paths, &directory, &installed, &platform, &account);
+    assert_eq!(program(&command), "javaw.exe");
+    assert_eq!(
+        command.executable.parent(),
+        paths.root().join(&installed.plan.java_executable).parent()
+    );
+    // An unmarked file is not trusted as the runtime.
+    if let Some(entry) = installed.plan.artifacts.last_mut() {
+        entry.executable = false;
+    }
+    assert_eq!(
+        program(&built(&paths, &directory, &installed, &platform, &account)),
+        "java.exe"
+    );
+    // Linux keeps its executable.
+    let (paths, directory, installed, platform, account) = fixture("1.21.1", "linux");
+    assert_eq!(
+        program(&built(&paths, &directory, &installed, &platform, &account)),
+        "java"
+    );
+}
+
+#[test]
+fn vanilla_names_the_main_class_without_a_discord_hint() {
+    let (paths, directory, installed, platform, account) = fixture("1.21.1", "windows");
+    let command = built(&paths, &directory, &installed, &platform, &account);
+    assert!(
+        command
+            .args
+            .iter()
+            .any(|arg| arg == "net.minecraft.client.main.Main")
+    );
+    assert!(!command.args.iter().any(|arg| arg == DISCORD_HINT));
 }

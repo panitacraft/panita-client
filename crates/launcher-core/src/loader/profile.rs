@@ -281,7 +281,7 @@ struct Workspace {
 
 impl Workspace {
     fn create(paths: &AppPaths, flavor: Flavor) -> Result<Self, CoreError> {
-        let root = PrivateDir::ensure(paths.root()).map_err(map_private_error)?;
+        let root = PrivateDir::ensure_data(paths.root()).map_err(map_private_error)?;
         let libraries = root.ensure_dir("libraries").map_err(map_private_error)?;
         let container = libraries
             .ensure_dir(flavor.name())
@@ -409,7 +409,7 @@ impl ProfileRef {
         use std::io::Read;
         self.validate(&self.minecraft)?;
         let directory =
-            PrivateDir::open(paths.root().join(self.directory())).map_err(read_error)?;
+            PrivateDir::open_data(paths.root().join(self.directory())).map_err(read_error)?;
         let mut file = directory.open_file(MARKER).map_err(read_error)?;
         let mut bytes = Vec::new();
         Read::by_ref(&mut file)
@@ -429,8 +429,8 @@ impl ProfileRef {
     /// Full audit for install, repair and recovery. Never downloads or executes.
     pub fn verify(&self, paths: &AppPaths, cancel: &Cancellation) -> Result<(), CoreError> {
         self.verify_marker(paths)?;
-        let directory =
-            PrivateDir::open(paths.root().join(self.directory())).map_err(map_private_error)?;
+        let directory = PrivateDir::open_data(paths.root().join(self.directory()))
+            .map_err(map_private_error)?;
         for expected in &self.files {
             cancel.check()?;
             let actual = fingerprint(&directory, &expected.path, cancel)?;

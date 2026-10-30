@@ -23,11 +23,12 @@ use std::{
 };
 
 #[derive(Debug)]
-/// A verified private directory retained as a capability, independent of its name.
+/// A path- and identity-verified directory with normal Windows permissions.
 pub struct PrivateDir {
     handle: OwnedHandle,
     id: nt::Identity,
     user: Sid,
+    private_files: bool,
 }
 #[derive(Debug)]
 /// A verified regular file. Native-handle operations are the caller's responsibility.
@@ -35,6 +36,7 @@ pub struct PrivateFile {
     file: File,
     id: nt::Identity,
     user: Sid,
+    private: bool,
 }
 fn harden(handle: impl AsHandle, directory: bool, id: nt::Identity, user: &Sid) -> Result<()> {
     nt::metadata(handle.as_handle(), directory, Some(id))?;
@@ -54,19 +56,32 @@ impl PrivateDir {
     pub fn set_hidden(&self) -> Result<()> {
         nt::hide(&self.handle, true, self.id, &self.user)
     }
-    /// Explicitly restore owner-only access through this retained handle.
+    /// Verify this directory without replacing its ordinary Windows permissions.
     pub fn harden(&self) -> Result<()> {
-        harden(&self.handle, true, self.id, &self.user)
+        self.check_private()
     }
     /// Open and verify a root without following ancestor reparse points.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::acquire(path.as_ref(), false)
+        Self::acquire(path.as_ref(), false, true)
     }
     /// Create only the final root if absent; never repair existing metadata.
     pub fn ensure(path: impl AsRef<Path>) -> Result<Self> {
-        Self::acquire(path.as_ref(), true)
+        Self::acquire(path.as_ref(), true, true)
     }
-    fn acquire(path: &Path, create: bool) -> Result<Self> {
+    /// Open ordinary data whose access is enforced by Windows rather than ownership.
+    pub fn open_data(path: impl AsRef<Path>) -> Result<Self> {
+        Self::acquire(path.as_ref(), false, false)
+    }
+    /// Create an ordinary data directory with normal inherited file permissions.
+    pub fn ensure_data(path: impl AsRef<Path>) -> Result<Self> {
+        Self::acquire(path.as_ref(), true, false)
+    }
+    /// Check the namespace containing credentials without rewriting its permissions.
+    pub fn verify_private_namespace(&self) -> Result<()> {
+        nt::metadata(&self.handle, true, Some(self.id))?;
+        security::verify_namespace(&self.handle, &self.user)
+    }
+    fn acquire(path: &Path, create: bool, private_files: bool) -> Result<Self> {
         crate::path::validate_component_spelling(path)?;
         let absolute = if path.is_absolute() {
             path.to_path_buf()
@@ -107,6 +122,7 @@ impl PrivateDir {
             leaf,
             if create { FILE_OPEN_IF } else { FILE_OPEN } as u32,
             &user,
+            private_files,
         )
     }
     fn directory_at(
@@ -114,6 +130,7 @@ impl PrivateDir {
         name: &OsStr,
         disposition: u32,
         user: &Sid,
+        private_files: bool,
     ) -> Result<Self> {
         // Check ACL capability before creation, not after making an insecure entry
         // on a volume that would ignore the supplied security descriptor.
@@ -130,10 +147,12 @@ impl PrivateDir {
             },
         )?;
         let id = nt::validate(&handle, true, None, user)?;
+        security::migrate_directory(&handle, user)?;
         Ok(Self {
             handle,
             id,
             user: user.clone(),
+            private_files,
         })
     }
     fn parent<'a>(&self, path: &'a Path) -> Result<(OwnedHandle, &'a OsStr)> {
@@ -149,13 +168,28 @@ impl PrivateDir {
     }
     /// Open a verified regular file for reading, relative to this capability.
     pub fn open_file(&self, path: impl AsRef<Path>) -> Result<PrivateFile> {
+        self.open_file_policy(path.as_ref(), self.private_files)
+    }
+    /// Open an ordinary file while retaining kind, identity and hard-link checks.
+    pub fn open_data_file(&self, path: impl AsRef<Path>) -> Result<PrivateFile> {
+        self.open_file_policy(path.as_ref(), false)
+    }
+    fn open_file_policy(&self, path: &Path, private: bool) -> Result<PrivateFile> {
         let (parent, name) = self.parent(path.as_ref())?;
-        let handle = nt::open(Some(&parent), name, false, FILE_OPEN as u32, None)?;
-        let id = nt::validate(&handle, false, None, &self.user)?;
+        let handle = if private {
+            nt::open(Some(&parent), name, false, FILE_OPEN as u32, None)?
+        } else {
+            nt::open_data_file(&parent, name, FILE_OPEN as u32)?
+        };
+        let id = nt::metadata(&handle, false, None)?;
+        if private {
+            security::verify(&handle, &self.user)?;
+        }
         Ok(PrivateFile {
             file: handle.into(),
             id,
             user: self.user.clone(),
+            private,
         })
     }
     /// Exclusively create a readable/writable file with an owner-only protected DACL.
@@ -165,48 +199,83 @@ impl PrivateDir {
     }
     fn create_at(&self, parent: &OwnedHandle, name: &OsStr) -> Result<PrivateFile> {
         nt::volume(parent)?;
-        let handle = nt::open(
-            Some(parent),
-            name,
-            false,
-            FILE_CREATE as u32,
-            Some(&self.user),
-        )?;
-        let id = nt::validate(&handle, false, None, &self.user)?;
+        let handle = if self.private_files {
+            nt::open(
+                Some(parent),
+                name,
+                false,
+                FILE_CREATE as u32,
+                Some(&self.user),
+            )?
+        } else {
+            nt::open_data_file(parent, name, FILE_CREATE as u32)?
+        };
+        let id = nt::metadata(&handle, false, None)?;
+        if self.private_files {
+            security::verify(&handle, &self.user)?;
+        }
         Ok(PrivateFile {
             file: handle.into(),
             id,
             user: self.user.clone(),
+            private: self.private_files,
         })
     }
     /// Open an existing private directory relative to this retained capability.
     pub fn open_dir(&self, path: impl AsRef<Path>) -> Result<Self> {
         let (parent, name) = self.parent(path.as_ref())?;
-        Self::directory_at(&parent, name, FILE_OPEN as u32, &self.user)
+        Self::directory_at(
+            &parent,
+            name,
+            FILE_OPEN as u32,
+            &self.user,
+            self.private_files,
+        )
     }
     /// Exclusively create the final private directory; private parents must exist.
     pub fn create_dir(&self, path: impl AsRef<Path>) -> Result<Self> {
         let (parent, name) = self.parent(path.as_ref())?;
-        Self::directory_at(&parent, name, FILE_CREATE as u32, &self.user)
+        Self::directory_at(
+            &parent,
+            name,
+            FILE_CREATE as u32,
+            &self.user,
+            self.private_files,
+        )
     }
     /// Create or verify the final directory without repairing existing entries.
     pub fn ensure_dir(&self, path: impl AsRef<Path>) -> Result<Self> {
         let (parent, name) = self.parent(path.as_ref())?;
-        Self::directory_at(&parent, name, FILE_OPEN_IF as u32, &self.user)
+        Self::directory_at(
+            &parent,
+            name,
+            FILE_OPEN_IF as u32,
+            &self.user,
+            self.private_files,
+        )
     }
 }
 impl PrivateFile {
     /// Mark this verified file hidden without changing its permissions.
     pub fn set_hidden(&self) -> Result<()> {
-        nt::hide(&self.file, false, self.id, &self.user)
+        self.verify()?;
+        nt::hide(&self.file, false, self.id, &self.user)?;
+        self.verify()
     }
-    /// Explicitly restore owner-only access through this retained handle.
+    /// Restore owner-only access for private files; ordinary data is only revalidated.
     pub fn harden(&self) -> Result<()> {
+        if !self.private {
+            return self.verify();
+        }
         harden(&self.file, false, self.id, &self.user)
     }
-    /// Recheck mutable security metadata through the retained handle.
+    /// Recheck object identity and, for private files, owner-only security.
     pub fn verify(&self) -> Result<()> {
-        nt::validate(&self.file, false, Some(self.id), &self.user).map(|_| ())
+        nt::metadata(&self.file, false, Some(self.id))?;
+        if self.private {
+            security::verify(&self.file, &self.user)?;
+        }
+        Ok(())
     }
     /// Sync file data with revalidation; does not sync a parent directory.
     pub fn sync_data(&self) -> Result<()> {
@@ -268,6 +337,9 @@ pub(crate) fn verify_existing(file: &File) -> Result<()> {
     let user = Sid::process_user()?;
     nt::validate(file, false, None, &user).map(|_| ())
 }
+pub(crate) fn verify_data(file: &File) -> Result<()> {
+    nt::metadata(file, false, None).map(|_| ())
+}
 pub(crate) fn harden_existing(file: &File) -> Result<()> {
     let user = Sid::process_user()?;
     let id = nt::metadata(file, false, None)?;
@@ -282,6 +354,7 @@ impl PrivateDir {
                 handle,
                 id,
                 user: self.user.clone(),
+                private_files: self.private_files,
             },
             leaf.to_os_string(),
         ))

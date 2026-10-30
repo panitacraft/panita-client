@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::{
     catalog::{CatalogInstance, CatalogSource},
     error::{CoreError, ErrorCode},
-    minecraft::safe_path,
+    minecraft::safe_unicode_path,
 };
 
 pub mod archive;
@@ -280,7 +280,7 @@ impl Manifest {
         let mut paths = BTreeSet::new();
         let mut total = 0u64;
         for file in &self.files {
-            safe_path(&file.path)?;
+            safe_unicode_path(&file.path)?;
             let parts: Vec<_> = file.path.split('/').collect();
             let folder = match file.file_type {
                 FileType::Mod => "mods",
@@ -290,7 +290,7 @@ impl Manifest {
             file.hashes.validate()?;
             if parts.len() != 2
                 || parts[0] != folder
-                || !paths.insert(file.path.to_ascii_lowercase())
+                || !paths.insert(path_key(&file.path))
                 || !text(&file.name, 256)
                 || file.size > MAX_FILE_BYTES
                 || (file.source != Origin::Curseforge && file.hashes.sha512.is_none())
@@ -456,7 +456,7 @@ impl MrpackIndex {
             if file.hashes.sha1.is_none()
                 || file.hashes.sha512.is_none()
                 || file.file_size > MAX_FILE_BYTES
-                || !paths.insert(file.path.to_ascii_lowercase())
+                || !paths.insert(path_key(&file.path))
                 || file.downloads.is_empty()
                 || file.downloads.len() > 8
             {
@@ -497,14 +497,19 @@ impl MrpackIndex {
     }
 }
 
+/// The key under which two pack paths are the same file. Windows compares names
+/// without regard to case across all of Unicode, so ASCII-only folding would accept
+/// `É` and `é` as two files that overwrite each other. Upper then lower case also
+/// joins letters that only fold through their capital. This can reject two names a
+/// case-sensitive system would keep apart, never the reverse.
+pub(crate) fn path_key(path: &str) -> String {
+    path.to_uppercase().to_lowercase()
+}
+
 /// Reject launcher metadata and player worlds even though the target root is private.
 pub fn game_path(path: &str) -> Result<(), CoreError> {
-    safe_path(path)?;
-    let root = path
-        .split('/')
-        .next()
-        .ok_or_else(invalid)?
-        .to_ascii_lowercase();
+    safe_unicode_path(path)?;
+    let root = path_key(path.split('/').next().ok_or_else(invalid)?);
     if root.starts_with('.')
         || matches!(
             root.as_str(),

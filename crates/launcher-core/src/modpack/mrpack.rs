@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use super::{
     Environment, MAX_DOCUMENT_BYTES, MrpackIndex,
     archive::{self, ArchiveEntry, Limits, Opened},
-    content, game_path, invalid,
+    content, game_path, invalid, path_key,
     transfer::Expected,
 };
 use crate::{
@@ -34,7 +34,7 @@ pub const CONTENT_ROOTS: [&str; 3] = ["mods", "resourcepacks", "shaderpacks"];
 /// True when a pack may place this game path: no executable or native types, and a
 /// jar only directly inside `mods/`.
 pub fn placeable(path: &str) -> bool {
-    let lower = path.to_ascii_lowercase();
+    let lower = path_key(path);
     match lower.rsplit_once('.') {
         Some((_, "jar")) => matches!(lower.split('/').collect::<Vec<_>>().as_slice(), ["mods", _]),
         Some((_, extension)) => !EXECUTABLES.contains(&extension),
@@ -46,7 +46,7 @@ pub fn placeable(path: &str) -> bool {
 pub fn is_content(path: &str) -> bool {
     path.split('/')
         .next()
-        .is_some_and(|root| CONTENT_ROOTS.contains(&root.to_ascii_lowercase().as_str()))
+        .is_some_and(|root| CONTENT_ROOTS.contains(&path_key(root).as_str()))
 }
 
 /// Server-only overrides and unknown entries are never extracted.
@@ -117,7 +117,7 @@ fn resolve(
 ) -> Result<Vec<ArchiveEntry>, CoreError> {
     let mut chosen: BTreeMap<String, ArchiveEntry> = BTreeMap::new();
     for entry in overrides {
-        let key = entry.path.to_ascii_lowercase();
+        let key = path_key(&entry.path);
         let client = entry.source.starts_with(CLIENT);
         match chosen.get(&key) {
             Some(existing) if existing.source.starts_with(CLIENT) && !client => {}
@@ -129,7 +129,7 @@ fn resolve(
     let downloaded: BTreeSet<String> = index
         .files
         .iter()
-        .map(|file| file.path.to_ascii_lowercase())
+        .map(|file| path_key(&file.path))
         .collect();
     if chosen.keys().any(|path| downloaded.contains(path)) {
         return Err(invalid());

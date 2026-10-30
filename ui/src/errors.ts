@@ -53,7 +53,7 @@ const messages: Record<LauncherErrorCode, string> = {
   operation_busy: 'Hay una operación de inicio de sesión en curso. Espera o cancélala.',
   operation_cancelled: 'La operación se canceló. Puedes intentarlo de nuevo.',
   accounts_file_invalid: 'El archivo de cuentas está dañado o pertenece a una versión no compatible. No lo modificamos para proteger tus datos. Cierra el cliente y restaura una copia de accounts.json en la carpeta PanitaClient de tus datos de aplicación, o elimínalo para empezar de nuevo.',
-  unsafe_permissions: 'La carpeta de datos de Panita Client o uno de sus archivos tiene permisos que otros usuarios podrían leer, así que no lo usamos. Restaura los permisos para que solo tu usuario tenga acceso y vuelve a intentarlo.',
+  unsafe_permissions: 'No pudimos usar un archivo protegido o su carpeta porque sus permisos no son seguros. Revisa que otras cuentas no puedan leerlo ni reemplazarlo y vuelve a intentarlo.',
   callback_not_active: 'Se ignoró un regreso del navegador que ya no estaba activo. Si querías iniciar sesión, vuelve a intentarlo.',
   callback_registration_failed: 'No pudimos configurar el regreso desde el navegador. Reinicia el cliente e inténtalo de nuevo.',
   browser_unavailable: 'No pudimos abrir el navegador del sistema. Revisa tu navegador predeterminado e inténtalo de nuevo.',

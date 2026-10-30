@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use super::{
-    Hashes,
+    Hashes, path_key,
     state::{ManagedFile, Ownership, PackState, SkippedConfiguration},
 };
 use crate::error::CoreError;
@@ -126,7 +126,7 @@ pub fn diff(
     incoming: Vec<Incoming>,
     local: &mut dyn FnMut(&str) -> Result<Local, CoreError>,
 ) -> Result<Diff, CoreError> {
-    let key = |path: &str| path.to_ascii_lowercase();
+    let key = |path: &str| path_key(path);
     let old_files: BTreeMap<String, &ManagedFile> = old
         .files
         .iter()
@@ -286,7 +286,7 @@ pub fn repair_diff(
         let recorded = old
             .files
             .iter()
-            .find(|file| file.path.eq_ignore_ascii_case(&new.path))
+            .find(|file| path_key(&file.path) == path_key(&new.path))
             .filter(|file| is_content(&file.ownership) && same(&file.desired, &new.desired))
             .ok_or_else(super::invalid)?;
         let step = |backup: bool| Step {

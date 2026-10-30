@@ -196,7 +196,7 @@ fn unknown_markers_and_future_state_are_preserved() -> Result<(), Box<dyn std::e
     let paths = paths()?;
     let (plan, staged) = fixture_at(&paths)?;
     let root = staged.root.clone();
-    let directory = PrivateDir::open(&root)?;
+    let directory = PrivateDir::open_data(&root)?;
     directory.write_atomic_durable(MARKER, b"{\"schema\":900}")?;
     assert!(publish(&paths, &plan, staged, &Cancellation::default()).is_err());
     assert_eq!(std::fs::read(root.join(MARKER))?, b"{\"schema\":900}");

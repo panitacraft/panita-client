@@ -50,7 +50,7 @@ fn initialize(
             .app_data_dir()
             .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
         let paths = AppPaths::new(root).map_err(|error| error.code())?;
-        let store = PrivateStore::open(&paths).map_err(|error| error.code())?;
+        let store = PrivateStore::open_application(&paths).map_err(|error| error.code())?;
         let settings = GlobalSettings::load(&store).map_err(|error| error.code())?;
         // A damaged Panita session file does not fail initialization: it is reported
         // through the activation view and blocks activation instead.
