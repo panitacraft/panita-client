@@ -27,6 +27,10 @@ import { WindowDragRegion } from './components/window-drag-region';
 import { WindowControls } from './components/window-controls';
 import { InstanceBadges } from './components/instance-badges';
 
+function UtilityFooter() {
+  return <footer className="utility-footer"><p>© {new Date().getFullYear()} Panitacraft. Todos los derechos reservados.</p><p>Hecho por Javithor &amp; Aerø</p></footer>;
+}
+
 type CatalogState = { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'blocked' } | ({ kind: 'ready' } & CatalogOverview);
 
 export function Launcher() {
@@ -185,6 +189,7 @@ export function Launcher() {
         <div hidden={page !== 'accounts'} className="utility-page">
           <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>Tus cuentas</h1></div>
           <ActivationPanel /><Accounts onSnapshot={acceptAccounts} />
+          <UtilityFooter />
         </div>
         <div hidden={page !== 'settings'} className="utility-page settings-page">
           <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? `Ajustes · ${selected?.name ?? 'Instancia'}` : 'Ajustes Globales'}</h1><p>{settingsScope === 'instance' ? 'Sobrescribe los ajustes globales solo para esta instancia.' : 'Estos valores se aplicarán por defecto a todas las instancias.'}</p></div>
@@ -194,6 +199,7 @@ export function Launcher() {
           <div hidden={settingsTab !== 'game'}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'storage'}><CachePanel openRequest={cacheRequest} /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'diagnostics'}>{settingsScope === 'global' && settingsTab === 'diagnostics' && <DiagnosticsPanel />}</div>
+          <UtilityFooter />
         </div>
       </div>
     </div>
