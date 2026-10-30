@@ -134,6 +134,18 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 - Preserve existing valid data on failed writes. Do not silently replace unreadable or corrupt account data with an empty store.
 - Validate network inputs, download hashes, destinations, redirects, and archive paths. Prevent traversal and writes outside intended directories. Apply least-privilege Tauri capabilities and IPC boundaries.
 - Updates, repairs, and uninstall operations must protect worlds and user-edited files. Make destructive removal explicit; do not overwrite user data merely because it differs from a pack default.
+- On 2026-10-29 the owner approved an optional, unchecked-by-default instance
+  uninstall action that permanently erases the selected instance's entire folder,
+  including worlds, screenshots, settings, added mods and backups. Show its exact
+  UUID-resolved folder and require a separate acknowledgement before deletion.
+  Ordinary uninstall continues preserving player data. Exclude active games and
+  mutations, reject redirected paths, use bounded handle-relative traversal and
+  preserve other instances, accounts and shared caches. Keep a validated external
+  `instance-erasures.json` intent with directory identity while cleanup is pending;
+  block reuse of a partially erased instance and require explicit retry, never
+  automatic erasure at startup. Preserve corrupt/future metadata and intents and
+  report partial failures honestly. This exception applies only to the separately
+  confirmed full-instance erasure.
 - On 2026-10-26 the owner authorizes an optional Windows launcher-uninstall
   action that erases the entire current-user `%APPDATA%\PanitaClient` folder.
   Keep it unchecked by default and require a separate explicit confirmation.
