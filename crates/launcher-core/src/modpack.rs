@@ -81,7 +81,7 @@ pub fn download_url(raw: &str, origin: &Origin) -> Result<url::Url, CoreError> {
         Origin::Curseforge => {
             matches!(
                 url.host_str(),
-                Some("edge.forgecdn.net" | "mediafilecdn.forgecdn.net")
+                Some("edge.forgecdn.net" | "mediafilecdn.forgecdn.net" | "mediafilez.forgecdn.net")
             ) && parts.len() >= 4
                 && parts[0] == "files"
         }

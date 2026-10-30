@@ -277,8 +277,9 @@ impl PackDownloader {
                 return Ok(response);
             }
             if matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308) {
-                // Only GitHub release downloads redirect, to its content hosts.
-                if *origin != Origin::Github || hops >= MAX_REDIRECTS {
+                // Only GitHub release downloads (to its content hosts) and the
+                // CurseForge CDN (to its own file hosts) redirect.
+                if !matches!(origin, Origin::Github | Origin::Curseforge) || hops >= MAX_REDIRECTS {
                     return Err(invalid().into());
                 }
                 hops += 1;
@@ -287,7 +288,11 @@ impl PackDownloader {
                     .get(header::LOCATION)
                     .and_then(|value| value.to_str().ok())
                     .ok_or_else(invalid)?;
-                current = github_redirect(location, hops)?;
+                current = if *origin == Origin::Github {
+                    github_redirect(location, hops)?
+                } else {
+                    download_url(location, origin)?
+                };
                 continue;
             }
             if *origin == Origin::Curseforge && matches!(status.as_u16(), 403 | 404 | 410) {
