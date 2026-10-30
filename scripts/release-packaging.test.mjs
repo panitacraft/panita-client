@@ -8,7 +8,7 @@ import { archPackageVersion, releaseVersion } from './release-version.mjs';
 import { verifyBeta } from './verify-beta.mjs';
 
 test('release tags accept stable and prerelease versions and reject unsafe or invalid identities', () => {
-  for (const version of ['0.1.0', '0.1.0-alpha', '0.1.0-beta.1', '1.0.0-rc.2']) {
+  for (const version of ['0.1.0', '0.1.0-alpha', '0.1.0-beta.1', '0.2.0-beta.1', '1.0.0-rc.2']) {
     assert.equal(releaseVersion(`v${version}`), version);
   }
   for (const tag of [undefined, '0.1.0-alpha', 'v01.1.0', 'v1.0', 'v1.0.0-alpha.01', 'v1.0.0+build', 'v../../file', 'v1.0.0\n']) {

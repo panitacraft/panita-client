@@ -605,8 +605,9 @@ and individual measurements are evidence, not product guarantees.
   never clears a known pending requirement. Verify updater signatures; private
   signing keys stay in CI. This does not claim Windows publisher code signing.
 - Only merged PRs targeting `master` trigger public version allocation, tags and
-  releases after successful checks and packaging. Start at `v0.2.0-alpha` and
-  increment the patch for subsequent releases. `develop` runs CI and may produce
+  releases after successful checks and packaging. Use `0.2.x-beta.x`, starting at `v0.2.0-beta.1`, as approved by the owner
+  on 2026-10-30. Increment the beta number for candidates of the same patch;
+  reset it to 1 when advancing the patch. `develop` runs CI and may produce
   test artifacts, but does not publish releases or advance the update feed. Keep
   version allocation serialized, retries idempotent, artifacts immutable and
   update-feed publication last. Plan/workflow preparation does not itself push,
