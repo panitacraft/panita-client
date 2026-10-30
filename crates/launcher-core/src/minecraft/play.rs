@@ -104,14 +104,22 @@ fn catalog_decision(
     }
 }
 
-/// Modpack updates are mandatory: a current response naming another published
+/// Instance updates are mandatory: a current response naming another published
 /// version than the installed one blocks Play until the player updates. A failed
 /// check never reaches here, so an outage keeps the warning-confirmed launch.
-fn require_current_pack(
+fn require_current_source(
     installed: &CatalogSource,
     current: &CatalogSource,
 ) -> Result<(), CoreError> {
     match (installed, current) {
+        (
+            CatalogSource::Vanilla {
+                minecraft_version: installed,
+            },
+            CatalogSource::Vanilla {
+                minecraft_version: current,
+            },
+        ) if installed != current => Err(CoreError::new(ErrorCode::UpdateRequired)),
         (
             CatalogSource::Custom {
                 current_version_id: installed,
@@ -287,7 +295,7 @@ async fn prepare_with_catalog(
     let current_source = detail.as_ref().ok().map(|current| current.source.clone());
     let decision = catalog_decision(&local.last_catalog, detail).and_then(|warning| {
         if let Some(current) = &current_source {
-            require_current_pack(&local.resolved_source, current)?;
+            require_current_source(&local.resolved_source, current)?;
         }
         Ok(warning)
     });

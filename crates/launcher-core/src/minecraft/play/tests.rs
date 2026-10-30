@@ -2,6 +2,20 @@ use super::*;
 use crate::accounts::AccountRepository;
 use crate::registry::InstallationRecord;
 
+#[test]
+fn a_changed_vanilla_pin_requires_an_explicit_update() {
+    let installed = CatalogSource::Vanilla {
+        minecraft_version: "1.21.1".into(),
+    };
+    let current = CatalogSource::Vanilla {
+        minecraft_version: "1.21.2".into(),
+    };
+    assert!(
+        matches!(require_current_source(&installed, &current), Err(error) if error.code() == ErrorCode::UpdateRequired)
+    );
+    assert!(require_current_source(&installed, &installed).is_ok());
+}
+
 fn successful_auth_chain() -> Vec<(&'static str, u16, String)> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -776,6 +790,41 @@ async fn a_newer_published_pack_version_blocks_play_until_the_player_updates() {
 }
 
 #[tokio::test]
+async fn a_fresh_vanilla_pin_change_blocks_play_but_an_outage_keeps_warning_consent() {
+    let (paths, accounts, id) = fixture();
+    complete_installation(&paths, id);
+    let mut current = crate::catalog::tests::record();
+    current["minecraft_version"] = serde_json::json!("26.2");
+    let reply = serde_json::json!({ "data": current }).to_string();
+    assert_eq!(
+        pack_play(&paths, &accounts, id, (200, reply)).await,
+        Some(ErrorCode::UpdateRequired)
+    );
+    // A known available transition cannot be installed during an outage. The
+    // complete local installation must still reach the warning consent gate.
+    let (catalog, server) = crate::catalog::tests::server(vec![(503, "{}".into(), false)]);
+    let pending = prepare_with_catalog(
+        paths.clone(),
+        id,
+        accounts.clone(),
+        Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform")),
+        ProcessSessionId::new(),
+        Cancellation::default(),
+        catalog,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("prepare: {:?}", error.code()));
+    assert!(pending.catalog_warning_required());
+    assert_eq!(
+        pending.start(None).await.err().map(|error| error.code()),
+        Some(ErrorCode::CatalogConfirmationRequired)
+    );
+    assert!(server.join().is_ok());
+    drop(accounts);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
 async fn a_pack_waiting_for_manual_files_never_reaches_the_installation_audit() {
     let (paths, accounts, id) = fixture();
     complete_installation(&paths, id);
@@ -798,16 +847,16 @@ async fn a_pack_waiting_for_manual_files_never_reaches_the_installation_audit() 
 fn only_other_published_pack_versions_require_an_update() {
     let (old, new) = (Uuid::new_v4(), Uuid::new_v4());
     let pack = |version| pack_catalog(version).source;
-    assert!(require_current_pack(&pack(old), &pack(old)).is_ok());
+    assert!(require_current_source(&pack(old), &pack(old)).is_ok());
     assert_eq!(
-        require_current_pack(&pack(old), &pack(new))
+        require_current_source(&pack(old), &pack(new))
             .err()
             .map(|e| e.code()),
         Some(ErrorCode::UpdateRequired)
     );
-    // Vanilla never pins a pack version, so its updates stay explicit.
+    // An unchanged vanilla pin remains playable too.
     let vanilla = local().source;
-    assert!(require_current_pack(&vanilla, &vanilla).is_ok());
+    assert!(require_current_source(&vanilla, &vanilla).is_ok());
 }
 
 fn modrinth(project: &str, version: &str, loader: Option<&str>) -> CatalogSource {
@@ -821,14 +870,14 @@ fn modrinth(project: &str, version: &str, loader: Option<&str>) -> CatalogSource
 #[test]
 fn a_changed_modrinth_pin_requires_an_update_but_the_same_pin_does_not() {
     let pin = |version| modrinth("project", version, Some("neoforge"));
-    assert!(require_current_pack(&pin("v1"), &pin("v1")).is_ok());
-    let newer = require_current_pack(&pin("v1"), &pin("v2"));
+    assert!(require_current_source(&pin("v1"), &pin("v1")).is_ok());
+    let newer = require_current_source(&pin("v1"), &pin("v2"));
     assert_eq!(
         newer.err().map(|e| e.code()),
         Some(ErrorCode::UpdateRequired)
     );
     // Another project under the same instance is not the installed pack either.
-    let moved = require_current_pack(&pin("v1"), &modrinth("other", "v1", None));
+    let moved = require_current_source(&pin("v1"), &modrinth("other", "v1", None));
     assert_eq!(
         moved.err().map(|e| e.code()),
         Some(ErrorCode::UpdateRequired)
