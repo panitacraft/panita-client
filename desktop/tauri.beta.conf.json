@@ -13,8 +13,8 @@
       },
       "nsis": {
         "template": "windows/installer.nsi",
-        "installerIcon": "icons/icon.ico",
-        "uninstallerIcon": "icons/icon.ico"
+        "installerIcon": "icons/installer.ico",
+        "uninstallerIcon": "icons/uninstaller.ico"
       }
     }
   }
