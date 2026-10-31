@@ -99,7 +99,7 @@ test('navigation preserves settings drafts and account creation remains an expli
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
   await user.click(await screen.findByRole('button', { name: 'Gestionar cuentas', exact: true }));
   await user.click(await screen.findByRole('button', { name: 'Añadir', exact: true }));
-  await user.click(screen.getByRole('menuitem', { name: 'Añadir cuenta No premium' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Añadir cuenta No-Premium' }));
   await user.type(await screen.findByLabelText('Nombre de usuario'), 'OtroJugador');
   await user.click(screen.getByRole('button', { name: 'Cancelar' }));
   await user.click(screen.getByRole('button', { name: 'Instancias', exact: true }));

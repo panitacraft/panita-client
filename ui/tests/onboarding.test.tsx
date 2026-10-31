@@ -60,10 +60,24 @@ test('an activated member without Minecraft accounts can complete offline onboar
   activate(); const user = userEvent.setup(); mount();
   expect(await screen.findByRole('heading', { name: 'Acceder a Minecraft' })).toBeTruthy();
   expect(await screen.findByRole('button', { name: 'Añadir cuenta Microsoft', exact: true })).toBeTruthy();
-  await user.click(screen.getByRole('button', { name: 'Añadir cuenta No premium' }));
+  await user.click(screen.getByRole('button', { name: 'Añadir cuenta No-Premium' }));
   expect((await screen.findByLabelText('Nombre de usuario') as HTMLInputElement).value).toBe('Fixture_Player');
   await user.click(screen.getByRole('button', { name: 'Confirmar' }));
   expect(await screen.findByRole('heading', { name: 'Biblioteca de prueba' })).toBeTruthy();
+});
+
+test('a code screen restored without a typed name does not greet an empty name', async () => {
+  activation = { ...activation, state: 'pending', serial: 'ABCD-EFGH-IJKL', expires_at: Math.floor(Date.now() / 1000) + 120 };
+  mount();
+  expect(await screen.findByLabelText('Código ABCD-EFGH-IJKL')).toBeTruthy();
+  expect(screen.queryByText(/Hola,/)).toBeNull();
+  expect(screen.getByText('Confirma este código en Discord')).toBeTruthy();
+});
+
+test('the Minecraft onboarding card uses the same card as the activation screen', async () => {
+  activate(); mount();
+  const heading = await screen.findByRole('heading', { name: 'Acceder a Minecraft' });
+  expect(heading.closest('section')?.classList.contains('login-card')).toBe(true);
 });
 
 test('initialization failure offers a visible retry instead of an empty window', async () => {

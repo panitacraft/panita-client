@@ -220,9 +220,9 @@ function ActivationScreen() {
   const expired = !pending && !!lastSerial && code === 'activation_expired';
   const help = 'Te damos un código que confirmas desde Discord: envíaselo a Panita Bot por mensaje directo o usa /confirm en el servidor. No necesitas contraseña.';
   return <Shell>
-    <section className="activation-section login-card" aria-labelledby="activation-title">
+    <section className="login-card" aria-labelledby="activation-title">
       <h1 id="activation-title" className="account-title"><img src={logoWhite} alt="" />Acceder a Panita Client</h1>
-      <p className="login-subtitle">{pending || expired ? 'Introduce este código' : 'Vincula tu cuenta de Panitacraft'} <Hint text={help}><button className="info-button" aria-label="Cómo vincular tu cuenta"><Info aria-hidden="true" /></button></Hint></p>
+      <p className="login-subtitle">{pending || expired ? 'Confirma este código en Discord' : 'Vincula tu cuenta de Panitacraft'} <Hint text={help}><button className="info-button" aria-label="Cómo vincular tu cuenta"><Info aria-hidden="true" /></button></Hint></p>
       <TransientNotice notice={toast.notice} />
       {activation.initializationError && <div role="alert"><p>{messageForError(activation.initializationError)}</p><Button onClick={activation.retryInitialization}><RefreshCw aria-hidden="true" />Reintentar</Button></div>}
       {!activation.initializationError && !view && <p role="status">Cargando…</p>}
@@ -232,10 +232,10 @@ function ActivationScreen() {
       {view && !pending && !expired && <form className="activation-form" noValidate onSubmit={event => { event.preventDefault(); void activation.start(identifier); }}>
         <label htmlFor="member-identifier">IGN o usuario de Discord</label>
         <div className="identifier-input"><ProfileArtwork username={identifier.trim()} /><input id="member-identifier" placeholder="Ej. Aerosmith_" value={identifier} onChange={event => setIdentifier(event.target.value)} maxLength={100} required autoComplete="off" /></div>
-        <Button type="submit" disabled={starting || identifier.trim().length === 0}>{starting ? 'Pidiendo tu código…' : 'Continuar'}<ArrowRight aria-hidden="true" /></Button>
+        <Button type="submit" disabled={starting || identifier.trim().length === 0}>{starting ? 'Generando tu código…' : 'Continuar'}<ArrowRight aria-hidden="true" /></Button>
       </form>}
       {(pending || expired) && serial && <div className={`serial-box ${expired ? 'is-expired' : ''}`}>
-        <p className="member-greeting">Hola, <ProfileArtwork username={identifier.trim()} /><strong>{identifier}</strong></p>
+        {identifier.trim() && <p className="member-greeting">Hola, <ProfileArtwork username={identifier.trim()} /><strong>{identifier.trim()}</strong></p>}
         <div className="serial-groups" role="status" aria-label={`Código ${serial}`}><code>{serial}</code></div>
         <Button variant="outline" disabled={expired} onClick={() => void copySerial()}><Copy aria-hidden="true" />Copiar código</Button>
         {pending && <>

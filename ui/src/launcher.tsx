@@ -125,7 +125,7 @@ export function Launcher() {
       <div className="rail-bottom">
         <Hint text="Gestionar cuentas" side="right"><Button variant="ghost" size="icon" className={`size-10 [&_svg]:size-5 ${page === 'accounts' ? 'is-selected' : ''}`} aria-label="Gestionar cuentas" aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}><Users aria-hidden="true" /></Button></Hint>
         <div className="rail-accounts" role="group" aria-label="Cuentas de Minecraft">
-          {selectedAccount && <Hint side="right" text={selectedAccount.metadata.username + ' | ' + (selectedAccount.metadata.kind === 'offline' ? 'No premium' : 'Microsoft')}>
+          {selectedAccount && <Hint side="right" text={selectedAccount.metadata.username + ' | ' + (selectedAccount.metadata.kind === 'offline' ? 'No-Premium' : 'Microsoft')}>
             <Button variant="ghost" className="rail-account current-account size-10 p-0" aria-label={'Gestionar cuenta: ' + selectedAccount.metadata.username} onClick={() => setPage('accounts')}><AccountAvatar metadata={selectedAccount.metadata} /></Button>
           </Hint>}
           {!selectedAccount && <Hint text={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} side="right"><Button variant="ghost" className="rail-account size-10 p-0" aria-label={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} onClick={() => setPage('accounts')}><AccountAvatar metadata={null} /></Button></Hint>}
