@@ -127,3 +127,47 @@ test('the feed command writes a feed only when it advances', async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('a dry run may use any branch but still needs a version that matches its inferred channel', async () => {
+  const beta = await fixture('0.4.0-beta.1');
+  const stable = await fixture('0.4.0');
+  try {
+    const rehearsal = await releasePlan({ branch: 'feat/updater', base: beta, dryRun: true });
+    assert.deepEqual([rehearsal.channel, rehearsal.feeds, rehearsal.prerelease], ['beta', ['updater-beta'], true]);
+    const stableRehearsal = await releasePlan({ branch: 'feat/updater', base: stable, dryRun: true });
+    assert.deepEqual([stableRehearsal.channel, stableRehearsal.feeds], ['stable', ['updater-stable', 'updater-beta']]);
+    // The same branch is refused for a real release, and a known branch keeps its own channel.
+    await assert.rejects(releasePlan({ branch: 'feat/updater', base: beta }), /does not publish releases/);
+    await assert.rejects(releasePlan({ branch: 'develop', base: stable, dryRun: true }), /beta channel requires/);
+  } finally {
+    await rm(beta, { recursive: true, force: true });
+    await rm(stable, { recursive: true, force: true });
+  }
+});
+
+test('the plan command reports a dry run and a real push differently', async () => {
+  const script = join(root, 'scripts/release-plan.mjs');
+  const dry = spawnSync(process.execPath, [script, 'feat/updater', '--dry-run'], { encoding: 'utf8', cwd: root });
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /dry_run=true/);
+  const real = spawnSync(process.execPath, [script, 'feat/updater'], { encoding: 'utf8', cwd: root });
+  assert.notEqual(real.status, 0);
+  assert.match(real.stderr, /does not publish releases/);
+});
+
+test('the feed command can require every installer the feed points at', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'panita-release-installers-'));
+  try {
+    for (const { file } of packageFiles('0.3.0')) await writeFile(join(directory, `${file}.sig`), 'signature');
+    const script = join(root, 'scripts/release-feed.mjs');
+    const out = join(directory, 'latest.json');
+    const run = (...extra) => spawnSync(process.execPath, [script, '--version', '0.3.0', '--dir', directory, '--out', out, ...extra], { encoding: 'utf8' });
+    assert.equal(run().status, 0);
+    const missing = run('--require-installers');
+    assert.notEqual(missing.status, 0);
+    for (const { file } of packageFiles('0.3.0')) await writeFile(join(directory, file), 'installer');
+    assert.equal(run('--require-installers').status, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

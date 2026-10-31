@@ -1,5 +1,5 @@
 import { appendFileSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
@@ -62,7 +62,11 @@ async function main(args) {
   const advance = shouldAdvance(current, version);
   if (advance) {
     const signatures = {};
-    for (const { key, file } of packageFiles(version)) signatures[key] = await readFile(join(directory, `${file}.sig`), 'utf8');
+    for (const { key, file } of packageFiles(version)) {
+      // A dry run also proves every installer the feed points at is among the assets.
+      if (args.includes('--require-installers')) await stat(join(directory, file));
+      signatures[key] = await readFile(join(directory, `${file}.sig`), 'utf8');
+    }
     await writeFile(out, `${JSON.stringify(buildFeed({ version, signatures }), null, 2)}\n`);
   }
   const line = `advance=${advance}`;
