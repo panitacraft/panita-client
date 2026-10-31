@@ -299,6 +299,7 @@ pub fn run() {
             activation_commands::refresh_activation,
             activation_commands::sign_out_activation,
             activation_commands::open_panita_bot,
+            activation_commands::open_terms_of_use,
             update_commands::launcher_update_status,
             update_commands::check_launcher_update,
             update_commands::set_update_channel,

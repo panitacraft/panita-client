@@ -11,13 +11,25 @@ use tauri::Emitter;
 /// here, so the webview can never choose what is opened.
 const PANITA_BOT_CHANNEL: &str = "https://discord.com/channels/@me/898965920700059680";
 
+/// The Terms of Use the member accepts before activating. Fixed here for the same reason.
+const TERMS_OF_USE: &str = "https://www.panitacraft.com/terms-of-use";
+
 #[tauri::command]
 pub(super) async fn open_panita_bot(app: tauri::AppHandle) -> Result<(), ErrorCode> {
+    open_fixed(app, PANITA_BOT_CHANNEL).await
+}
+
+#[tauri::command]
+pub(super) async fn open_terms_of_use(app: tauri::AppHandle) -> Result<(), ErrorCode> {
+    open_fixed(app, TERMS_OF_USE).await
+}
+
+async fn open_fixed(app: tauri::AppHandle, url: &'static str) -> Result<(), ErrorCode> {
     #[cfg(target_os = "linux")]
     let opened = {
         let handle = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            super::linux_browser::open_browser(&handle, PANITA_BOT_CHANNEL.to_owned())
+            super::linux_browser::open_browser(&handle, url.to_owned())
         })
         .await
         .unwrap_or(Err(()))
@@ -26,9 +38,7 @@ pub(super) async fn open_panita_bot(app: tauri::AppHandle) -> Result<(), ErrorCo
     #[cfg(not(target_os = "linux"))]
     let opened = {
         use tauri_plugin_opener::OpenerExt;
-        app.opener()
-            .open_url(PANITA_BOT_CHANNEL, None::<&str>)
-            .is_ok()
+        app.opener().open_url(url, None::<&str>).is_ok()
     };
     if opened {
         Ok(())
