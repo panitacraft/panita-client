@@ -492,6 +492,25 @@ and individual measurements are evidence, not product guarantees.
   and error codes; download ticks must not flood the viewer. Diagnostics remain
   available when account initialization fails and provide no export or account,
   callback, launch-argument, or raw game-log access.
+- Owner decision, 2026-10-31: write one session log file per launcher process for support:
+  the running session writes `logs/latest.log`, and the next launch renames it to
+  `logs/session-{timestamp}-{id}.log` from its own header, with timestamp, level, the same
+  fixed events and error codes, a header with launcher version, platform and
+  hardware facts (operating system, processor, logical cores, memory, graphics
+  adapter, disk capacity), and redacted free-text notes (game exit codes, settings
+  changes with old and new values, account and Panita activation actions without
+  names or serials), plus network notes: one line per API call to Microsoft, Xbox,
+  Minecraft services and the Panita API with a fixed service and route label,
+  status or failure class and elapsed time (never URLs, bodies or headers; frequent
+  activation polls log only failures), and a line whenever connectivity changes
+  between reachable and unreachable. Redact home paths, URL
+  queries, bearer tokens, JWTs and Panita serials, bound each note to 1 KiB and
+  each file to 5 MiB, and never write credentials, callbacks, account data or raw
+  game output. Create the folder 0700 and files 0600 on Unix. Delete only
+  application-named session files older than 48 hours, at startup, never following
+  links. File failures never affect the launcher. The diagnostics tab may open the
+  fixed logs folder; there is still no upload or arbitrary-path access. This
+  supersedes "no export" only for these local files.
 - Optional support identifiers are random process/session and operation UUIDs.
   They correlate one process or action; they are neither content hashes nor online
   report lookup codes. Clear structured events on process exit.

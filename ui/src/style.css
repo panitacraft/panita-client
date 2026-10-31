@@ -123,7 +123,7 @@
   .active-badge svg { width: 12px; height: 12px; }
   .panita-profile-logo { width: 48px; height: 64px; object-fit: contain; }
   .panita-profile-avatar { width: 56px; height: 56px; flex-shrink: 0; object-fit: cover; border-radius: 50%; }
-  .transient-notice-region { position: fixed; left: 112px; bottom: 24px; z-index: 100; max-width: min(420px, calc(100vw - 48px)); pointer-events: none; text-align: left; }
+  .transient-notice-region { position: fixed; right: 24px; bottom: 24px; z-index: 100; max-width: min(420px, calc(100vw - 48px)); pointer-events: none; text-align: left; }
   .transient-notice { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid #54A636; border-radius: 8px; background: #21351c; color: #E4FFDA; box-shadow: 0 8px 30px #0008; font-size: 13px; }
   .transient-notice > svg { width: 18px; height: 18px; flex-shrink: 0; }
   .transient-notice.notice-error { border-color: #FCA5A5; background: #3c2323; color: #FCA5A5; }
@@ -270,9 +270,17 @@
   .play-controls fieldset label { display: flex; align-items: start; gap: 10px; margin: 14px 0; }
   .play-controls > [role='status'] { color: #BABABA; }
   .pack-panel { margin-top: 20px; }
-  .diagnostic-list { max-height: 420px; overflow-y: auto; padding-inline: 28px 12px; }
-  .diagnostic-list li { border-bottom: 1px solid #383838; padding: 8px 0; }
-  .diagnostic-list dd { margin-inline-start: 0; font-size: 12px; color: #BABABA; }
+  .diagnostic-list { height: 380px; overflow-y: auto; margin: 0; padding: 4px 16px; list-style: none; background: #141414; border: 1px solid #515151; border-radius: 6px; }
+  .diagnostic-list { padding: 8px 16px; }
+  .diagnostic-list li { --timeline: #a9e58c; position: relative; margin: 0; padding: 10px 0 10px 28px; }
+  .diagnostic-list li.is-error { --timeline: #fca5a5; }
+  /* One continuous line: each segment runs from its dot center to the next dot center. */
+  .diagnostic-list li::before { content: ""; position: absolute; left: 4px; top: 20px; bottom: -20px; width: 2px; background: var(--timeline); }
+  .diagnostic-list li:last-child::before { display: none; }
+  .timeline-dot { position: absolute; left: 0; top: 15px; width: 10px; height: 10px; border-radius: 50%; background: #141414; border: 2px solid var(--timeline); z-index: 1; box-sizing: border-box; }
+  .timeline-body > p { margin: 0 0 4px; }
+  .timeline-meta { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: #8f8f8f; overflow-wrap: anywhere; }
+  .timeline-meta code { color: inherit; }
   .game-log-section { padding: 24px; }
   .game-log-lines { height: 60vh; overflow: auto; background: #141414; border: 1px solid #515151; padding: 12px; border-radius: 6px; }
   .game-log-lines pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; }
@@ -428,15 +436,15 @@
   .settings-tabs [role='tab'][aria-selected='true'] { background: #1b1b1b; color: #e4ffda; border-color: #383838; border-bottom-color: #1b1b1b; }
   .settings-tabs + div > section { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
   .diagnostic-toolbar { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin: 16px 0; }
-  .diagnostic-toolbar span, .diagnostic-event { display: flex; gap: 8px; align-items: center; }
+  .diagnostic-toolbar span { display: flex; gap: 8px; align-items: center; }
+  .diagnostic-event { display: flex; gap: 8px; align-items: center; }
   .diagnostic-toolbar label { display: flex; align-items: center; gap: 8px; margin: 0; }
-  .diagnostic-toolbar button { margin-left: auto; }
+  .diagnostic-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-left: auto; }
   .diagnostic-toolbar svg, .diagnostic-event svg { width: 17px; height: 17px; flex-shrink: 0; color: #a9e58c; }
-  .diagnostic-list li:last-child { border-bottom: 0; }
   .split-button > .split-trigger:disabled { opacity: .65; }
   .settings-page > .settings-tabs { margin-bottom: 0; }
   .settings-tabs ~ div:not([hidden]) > section { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
-  .diagnostic-event.is-error svg { color: #fca5a5; }
+  .diagnostic-list li .diagnostic-event svg { color: var(--timeline); }
   .diagnostics-section { padding: 20px; border: 1px solid #383838; border-radius: 8px; background: #1c1c1c; }
   .primary-play[aria-disabled='true'] { opacity: .65; }
   .text-action { display: inline; }

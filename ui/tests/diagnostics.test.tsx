@@ -7,8 +7,8 @@ vi.mock('../src/diagnostic-api', () => ({ loadDiagnostics: backend.load }));
 afterEach(cleanup);
 test('diagnostics explain storage categories and filter problems without dropping the last successful reading', async () => {
   backend.load.mockResolvedValueOnce({ capacity: 256, records: [
-    { event: 'application_started', error: null, workflow: null, phase: null, processSessionId: 'synthetic', operationId: null },
-    { event: 'storage_failure', error: 'storage_read_only', workflow: null, phase: null, processSessionId: 'synthetic', operationId: 'operation' },
+    { event: 'application_started', error: null, workflow: null, phase: null, processSessionId: 'synthetic', operationId: null, at: 1761930000000 },
+    { event: 'storage_failure', error: 'storage_read_only', workflow: null, phase: null, processSessionId: 'synthetic', operationId: 'operation', at: 0 },
   ] });
   render(<DiagnosticsPanel />);
   await screen.findByText(/La unidad está en modo de solo lectura/);

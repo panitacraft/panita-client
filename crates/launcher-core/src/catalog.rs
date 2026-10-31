@@ -570,10 +570,17 @@ impl CatalogClient {
             request = request.header(header::IF_NONE_MATCH, etag);
         }
         let fetched = async {
-            let response = request
-                .send()
-                .await
-                .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
+            let started = std::time::Instant::now();
+            let sent = request.send().await;
+            crate::network_log::api_result(
+                "panita-catalog",
+                "GET",
+                "/v1/instances",
+                started,
+                sent.as_ref().map(|reply| reply.status().as_u16()),
+                true,
+            );
+            let response = sent.map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
             if response.status() == StatusCode::NOT_MODIFIED {
                 return cached.ok_or_else(invalid);
             }
@@ -647,7 +654,8 @@ impl CatalogClient {
     /// Every future Play request must call this, then enforce installation_allowed.
     /// Request revalidation is not a guarantee of origin freshness through a CDN.
     pub async fn detail(&self, id: Uuid) -> Result<CatalogInstance, CoreError> {
-        let response = self
+        let started = std::time::Instant::now();
+        let sent = self
             .authorize(
                 self.client
                     .get(format!("{}/v1/instances/{id}", self.base))
@@ -655,8 +663,16 @@ impl CatalogClient {
                     .header(header::CACHE_CONTROL, "no-cache"),
             )
             .send()
-            .await
-            .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
+            .await;
+        crate::network_log::api_result(
+            "panita-catalog",
+            "GET",
+            "/v1/instances/{id}",
+            started,
+            sent.as_ref().map(|reply| reply.status().as_u16()),
+            true,
+        );
+        let response = sent.map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
         if response.status() == StatusCode::NOT_FOUND {
             return Err(CoreError::new(ErrorCode::InstanceMissing));
         }

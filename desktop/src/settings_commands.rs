@@ -84,9 +84,21 @@ pub(super) fn save_global_settings(
 ) -> Result<(), ErrorCode> {
     account_commands::controller(&state)?;
     let (_, store) = store(&app)?;
-    settings
+    let previous = GlobalSettings::load(&store).ok();
+    let saved = settings
         .save_launch_settings(&store)
-        .map_err(|error| error.code())?;
+        .map_err(|error| error.code());
+    state.logs.action("global settings saved", &saved);
+    saved?;
+    if let Some(previous) = previous {
+        let changes = launcher_core::session_log::changes(&previous, &settings, &["launcher"]);
+        if !changes.is_empty() {
+            state.logs.note(
+                launcher_core::session_log::Level::Info,
+                &format!("global settings changed {}", changes.join("; ")),
+            );
+        }
+    }
     Ok(())
 }
 
@@ -103,9 +115,29 @@ pub(super) fn save_instance_settings(
     settings
         .validate_launch(&global)
         .map_err(|error| error.code())?;
-    InstanceRegistry::new(paths)
+    let registry = InstanceRegistry::new(paths);
+    let previous = registry.load_settings(instance_id).ok();
+    let saved = registry
         .save_settings(instance_id, &settings)
-        .map_err(|error| error.code())
+        .map_err(|error| error.code());
+    state
+        .logs
+        .action(&format!("instance {instance_id} settings saved"), &saved);
+    if saved.is_ok()
+        && let Some(previous) = previous
+    {
+        let changes = launcher_core::session_log::changes(&previous, &settings, &[]);
+        if !changes.is_empty() {
+            state.logs.note(
+                launcher_core::session_log::Level::Info,
+                &format!(
+                    "instance {instance_id} settings changed {}",
+                    changes.join("; ")
+                ),
+            );
+        }
+    }
+    saved
 }
 
 #[tauri::command]

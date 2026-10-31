@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, CircleCheck, RefreshCw, Activity } from 'lucide-react';
+import { CircleAlert, CircleCheck, RefreshCw, Activity, FolderOpen } from 'lucide-react';
 import { isTauri } from '@tauri-apps/api/core';
-import { loadDiagnostics } from './diagnostic-api';
+import { loadDiagnostics, openLogsFolder } from './diagnostic-api';
 import { diagnosticText, visibleDiagnosticRecords, type DiagnosticSnapshot } from './diagnostic-state';
 import { messageForError } from './errors';
+
+function formatTime(at: number): string {
+  return new Date(at).toLocaleString('es', { dateStyle: 'short', timeStyle: 'medium', hour12: false });
+}
 
 function DiagnosticViewer() {
   const [snapshot, setSnapshot] = useState<DiagnosticSnapshot | null>(null);
@@ -11,6 +15,7 @@ function DiagnosticViewer() {
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState(false);
+  const [folderError, setFolderError] = useState(false);
   useEffect(() => {
     let active = true;
     setBusy(true);
@@ -25,23 +30,30 @@ function DiagnosticViewer() {
   const visible = errorsOnly ? records.filter(hasProblem) : records;
   return <div aria-busy={busy}>
     <p>Actividad de esta sesión, del evento más reciente al más antiguo. Se conserva hasta cerrar el cliente.</p>
+    <p>Cada sesión también se guarda en un archivo de texto para soporte. La sesión actual es latest.log; al abrir otra sesión recibe su propio nombre. Los archivos se eliminan solos después de 48 horas y no incluyen contraseñas ni tokens.</p>
+    {folderError && <p role="alert">No pudimos abrir la carpeta de registros.</p>}
     <div className="diagnostic-toolbar"><span><Activity aria-hidden="true" />{snapshot?.records.length ?? 0} {snapshot?.records.length === 1 ? 'evento' : 'eventos'}</span><label><input type="checkbox" checked={errorsOnly} onChange={event => setErrorsOnly(event.target.checked)} />Solo problemas</label>
-    <button type="button" disabled={busy || !isTauri()} onClick={() => setAttempt(value => value + 1)}><RefreshCw aria-hidden="true" />Actualizar registro</button></div>
+    <div className="diagnostic-actions"><button type="button" disabled={!isTauri()} onClick={() => { setFolderError(false); openLogsFolder().catch(() => setFolderError(true)); }}><FolderOpen aria-hidden="true" />Abrir carpeta de registros</button>
+    <button type="button" disabled={busy || !isTauri()} onClick={() => setAttempt(value => value + 1)}><RefreshCw aria-hidden="true" />Actualizar registro</button></div></div>
     {busy && <p role="status">Cargando registro…</p>}
     {error && <p role="alert">No pudimos actualizar el registro. Puedes reintentar; conservamos la última lectura.</p>}
     {snapshot && !snapshot.records.length && <p role="status">{isTauri() ? 'Todavía no hay eventos disponibles.' : 'El registro está disponible en la aplicación de escritorio.'}</p>}
     {snapshot && errorsOnly && !visible.length && <p role="status">No hay problemas registrados en esta sesión.</p>}
     {visible.length > 0 && <ol className="diagnostic-list" tabIndex={0} aria-label="Eventos recientes del cliente">
-      {visible.map((record, index) => <li key={index}>
-        <p className={`diagnostic-event ${hasProblem(record) ? 'is-error' : ''}`}>{record.error || record.phase === 'failed' || record.phase === 'exited_with_error' ? <CircleAlert aria-hidden="true" /> : <CircleCheck aria-hidden="true" />}{diagnosticText(record)}</p>
-        {record.error && <p>{messageForError(record.error)}</p>}
-        <details><summary>Detalles para soporte</summary>
-          <dl><dt>Sesión del cliente</dt><dd>{record.processSessionId}</dd>
-            {record.operationId && <><dt>Operación</dt><dd>{record.operationId}</dd></>}
-          </dl>
-          {record.error && <p>Categoría: <code>{record.error}</code></p>}
-        </details>
-      </li>)}
+      {visible.map((record, index) => {
+        const problem = hasProblem(record);
+        return <li key={index} className={problem ? 'is-error' : ''}>
+          <span className="timeline-dot" aria-hidden="true" />
+          <div className="timeline-body">
+            <p className="diagnostic-event"><span>{diagnosticText(record)}</span>{problem ? <CircleAlert aria-hidden="true" /> : <CircleCheck aria-hidden="true" />}</p>
+            {record.error && <p>{messageForError(record.error)}</p>}
+            <p className="timeline-meta">{record.at > 0 && <time dateTime={new Date(record.at).toISOString()}>Fecha {formatTime(record.at)}</time>}
+              <span>Sesión {record.processSessionId}</span>
+              {record.operationId && <span>Operación {record.operationId}</span>}
+              {record.error && <span>Categoría <code>{record.error}</code></span>}</p>
+          </div>
+        </li>;
+      })}
     </ol>}
   </div>;
 }
