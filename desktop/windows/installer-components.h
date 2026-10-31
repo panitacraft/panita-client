@@ -29,6 +29,28 @@ inline void surface(HDC dc, const RECT& bounds, COLORREF fill, COLORREF border, 
   graphics.DrawPath(&pen, &path);
 }
 
+// A keyboard focus ring: an outline only, drawn at the very edge so it stays visible on
+// the green primary button as well as on dark ones. It never changes the control's fill.
+inline void ring(HDC dc, const RECT& bounds, COLORREF stroke, int radius, float width) {
+  Gdiplus::Graphics graphics(dc);
+  graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+  const float inset = width / 2.0f;
+  const auto x = static_cast<Gdiplus::REAL>(bounds.left) + inset;
+  const auto y = static_cast<Gdiplus::REAL>(bounds.top) + inset;
+  const auto w = static_cast<Gdiplus::REAL>(bounds.right - bounds.left) - width;
+  const auto h = static_cast<Gdiplus::REAL>(bounds.bottom - bounds.top) - width;
+  const auto diameter = static_cast<Gdiplus::REAL>((std::min)(radius * 2, static_cast<int>((std::min)(w, h))));
+  if (diameter <= 0) return;
+  Gdiplus::GraphicsPath path;
+  path.AddArc(x, y, diameter, diameter, 180, 90);
+  path.AddArc(x + w - diameter, y, diameter, diameter, 270, 90);
+  path.AddArc(x + w - diameter, y + h - diameter, diameter, diameter, 0, 90);
+  path.AddArc(x, y + h - diameter, diameter, diameter, 90, 90);
+  path.CloseFigure();
+  Gdiplus::Pen pen(color(stroke), width);
+  graphics.DrawPath(&pen, &path);
+}
+
 // Draw every glyph from the same 16-unit vector grid at the actual window DPI.
 inline void icon(HDC dc, Icon type, int x, int y, int size, COLORREF foreground) {
   Gdiplus::Graphics graphics(dc);

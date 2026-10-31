@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <vector>
 #include "installer-components.h"
 
 namespace {
@@ -134,6 +135,8 @@ void compact_page(const Controls& controls) {
     cursor += height + gap;
   };
   row(6, 12, 34);
+  // A page with no sentence under its title leaves no gap.
+  ShowWindow(controls[7], window_text(controls[7]).find_first_not_of(L" \t\r\n") == std::wstring::npos ? SW_HIDE : SW_SHOWNA);
   HWND warning = controls[27];
   const bool error = GetPropW(controls[7], L"PanitaError") != nullptr;
   if (error) {
@@ -142,7 +145,7 @@ void compact_page(const Controls& controls) {
     if (warning) ShowWindow(warning, SW_HIDE);
     row(7, 22, 18);
   }
-  if (controls[8] && controls[9]) {
+  if (visible(controls[8]) && visible(controls[9])) {
     const int inset = 44;
     const int height = text_height(controls[9], content_width - inset - 16);
     place(controls[8], 0, cursor, content_width, height + 32);
@@ -236,13 +239,26 @@ void refresh_actions() {
     SendMessageW(controls[26], PBM_SETRANGE32, range.iLow, range.iHigh);
     if (SendMessageW(controls[26], PBM_GETPOS, 0, 0) != position) SendMessageW(controls[26], PBM_SETPOS, position, 0);
   }
+  // The finished page starts with its details collapsed, even if they were opened while it ran.
+  static bool completion_collapsed;
+  if (state != 3) completion_collapsed = false;
+  else if (!completion_collapsed) {
+    completion_collapsed = true;
+    if (details_open) {
+      details_open = false;
+      if (controls[21]) SetWindowTextW(controls[21], L"Mostrar detalles");
+      PostMessageW(root, apply_message, 0, 0);
+    }
+  }
   EnableWindow(controls[3], TRUE);
   EnableWindow(controls[4], state != 1 && IsWindowEnabled(cancel));
   if (detail_source && (state == 2 || state == 3)) {
     HWND page = GetParent(detail_source);
     const bool uninstall = GetPropW(root, L"PanitaUninstall") != nullptr;
+    const bool updating = GetPropW(root, L"PanitaUpdating") != nullptr;
     const wchar_t* title = state == 2 ? L"Operaci\u00f3n detenida" :
-        uninstall ? L"Desinstalaci\u00f3n completada" : L"Instalaci\u00f3n completada";
+        uninstall ? L"Desinstalaci\u00f3n completada" :
+        updating ? L"Actualizaci\u00f3n completada" : L"Instalaci\u00f3n completada";
     for (HWND child = GetWindow(page, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
       if (GetPropW(child, L"PanitaStageTitle")) SetWindowTextW(child, title);
   }
@@ -403,8 +419,7 @@ void draw_choice(HWND window, HDC dc) {
   text_bounds.top = (bounds.bottom - (measured.bottom - measured.top)) / 2;
   DrawTextW(dc, text, -1, &text_bounds, DT_WORDBREAK | DT_NOPREFIX);
   if (GetFocus() == window && !(SendMessageW(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS)) {
-    InflateRect(&bounds, -1, -1);
-    DrawFocusRect(dc, &bounds);
+    installer_ui::ring(dc, bounds, RGB(228, 255, 218), scale(4), static_cast<float>(scale(2)));
   }
   SelectObject(dc, old_font);
 }
@@ -435,6 +450,63 @@ bool draggable_point(LPARAM position) {
   HitTest hit{point};
   EnumChildWindows(root, interactive_at, reinterpret_cast<LPARAM>(&hit));
   return !hit.interactive;
+}
+
+// Keyboard order: page content in reading order, then the footer buttons (secondary, then the
+// primary action) and the window buttons last. The native order follows creation order, which
+// would put the window buttons first, so Tab is handled here. Only real tab stops take part.
+int tab_rank(HWND window) {
+  const int tag = role(window);
+  if (tag == 3 || tag == 4) return 3;
+  if (window == current_footer) return 2;
+  if (window == GetDlgItem(root, IDOK) || window == GetDlgItem(root, IDCANCEL) || tag == 22) return 1;
+  return 0;
+}
+struct TabStops { std::vector<HWND> windows; };
+BOOL CALLBACK collect_tab_stops(HWND window, LPARAM data) {
+  if ((GetWindowLongPtrW(window, GWL_STYLE) & WS_TABSTOP) && IsWindowVisible(window) && IsWindowEnabled(window))
+    reinterpret_cast<TabStops*>(data)->windows.push_back(window);
+  return TRUE;
+}
+// True once the keyboard has moved focus on the current page. NSIS starts every page with focus on
+// the default action, so the first Tab there means "start at the first control", not "continue".
+bool keyboard_navigated;
+bool move_focus(HWND from, bool backwards) {
+  const bool page_start = !keyboard_navigated && from == current_footer;
+  keyboard_navigated = true;
+  TabStops stops;
+  EnumChildWindows(root, collect_tab_stops, reinterpret_cast<LPARAM>(&stops));
+  auto& order = stops.windows;
+  if (order.size() < 2) return false;
+  auto key = [](HWND window) {
+    RECT bounds{};
+    GetWindowRect(window, &bounds);
+    const int rank = tab_rank(window);
+    return std::array<LONG, 3>{rank, rank == 0 ? bounds.top : 0, bounds.left};
+  };
+  std::stable_sort(order.begin(), order.end(), [&](HWND a, HWND b) { return key(a) < key(b); });
+  const auto found = std::find(order.begin(), order.end(), from);
+  const size_t count = order.size();
+  const size_t index = found == order.end() ? (backwards ? 0 : count - 1) : static_cast<size_t>(found - order.begin());
+  SetFocus(order[page_start && !backwards ? 0 : backwards ? (index + count - 1) % count : (index + 1) % count]);
+  // Keyboard use reveals focus cues, which Windows otherwise hides until it sees a key.
+  SendMessageW(root, WM_CHANGEUISTATE, MAKEWPARAM(UIS_CLEAR, UISF_HIDEFOCUS), 0);
+  return true;
+}
+
+// Tab is taken before the dialog manager sees it, for this window only, so the order above applies
+// even when nothing has focus yet. Other windows of the process (such as the folder picker) and
+// Ctrl+Tab or Alt+Tab keep their normal behavior.
+HHOOK tab_hook;
+LRESULT CALLBACK intercept_tab(int code, WPARAM wp, LPARAM lp) {
+  if (code == HC_ACTION && wp == PM_REMOVE && IsWindow(root)) {
+    auto& key = *reinterpret_cast<MSG*>(lp);
+    if (key.message == WM_KEYDOWN && key.wParam == VK_TAB && GetAncestor(key.hwnd, GA_ROOT) == root &&
+        !(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000) &&
+        move_focus(GetFocus(), GetKeyState(VK_SHIFT) < 0))
+      key.message = WM_NULL;
+  }
+  return CallNextHookEx(tab_hook, code, wp, lp);
 }
 
 void draw_button(const DRAWITEMSTRUCT& item) {
@@ -490,9 +562,7 @@ void draw_button(const DRAWITEMSTRUCT& item) {
     DrawTextW(item.hDC, label.c_str(), -1, &bounds, (disclosure ? DT_LEFT : DT_CENTER) | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
   }
   if ((item.itemState & ODS_FOCUS) && !(item.itemState & ODS_NOFOCUSRECT)) {
-    RECT focus = item.rcItem;
-    InflateRect(&focus, -3, -3);
-    DrawFocusRect(item.hDC, &focus);
+    installer_ui::ring(item.hDC, item.rcItem, RGB(228, 255, 218), scale(6), static_cast<float>(scale(2)));
   }
   SelectObject(item.hDC, old_font);
 }
@@ -599,7 +669,7 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
   if (GetDlgCtrlID(window) == 1006 && message == WM_SETTEXT && lp && phase() == 1) {
     std::wstring status(reinterpret_cast<const wchar_t*>(lp));
     std::transform(status.begin(), status.end(), status.begin(), [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
-    const wchar_t* text = L"Instalando archivos...";
+    const wchar_t* text = GetPropW(root, L"PanitaUpdating") ? L"Actualizando archivos..." : L"Instalando archivos...";
     if (GetPropW(root, L"PanitaUninstall")) text = L"Eliminando archivos...";
     else if (status.find(L"desinstalador") != std::wstring::npos || status.find(L"uninstaller") != std::wstring::npos) text = L"Creando desinstalador...";
     else if (status.find(L"acceso") != std::wstring::npos || status.find(L"shortcut") != std::wstring::npos) text = L"Creando accesos directos...";
@@ -655,7 +725,7 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
     FillRect(dc, &bounds, brush); DeleteObject(brush);
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, error ? RGB(252,165,165) : text_role == 6 || GetPropW(window, L"PanitaStageTitle") ?
-        RGB(249,255,248) : RGB(186,186,186));
+        RGB(249,255,248) : GetPropW(window, L"PanitaSubtle") ? RGB(138,138,138) : RGB(186,186,186));
     HGDIOBJ old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
     const auto text = window_text(window);
     DrawTextW(dc, text.c_str(), -1, &bounds, DT_WORDBREAK | DT_NOPREFIX);
@@ -714,7 +784,9 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
   if (message == WM_WINDOWPOSCHANGED && window == GetDlgItem(root, 3) && visible(window)) {
     ShowWindow(window, SW_HIDE);
   }
-  if (message == WM_CTLCOLORSTATIC && role(reinterpret_cast<HWND>(lp)) == 10) {
+  // The folder field is read-only, but answer both color requests so its text can never sit on a
+  // different surface than the rounded field behind it.
+  if ((message == WM_CTLCOLORSTATIC || message == WM_CTLCOLOREDIT) && role(reinterpret_cast<HWND>(lp)) == 10) {
     SetTextColor(reinterpret_cast<HDC>(wp), RGB(249,255,248));
     SetBkColor(reinterpret_cast<HDC>(wp), card);
     return reinterpret_cast<LRESULT>(log_brush);
@@ -770,7 +842,21 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
       (GetWindowLongPtrW(window, GWL_STYLE) & BS_TYPEMASK) == BS_OWNERDRAW) {
     return DefSubclassProc(window, message, (wp & ~BS_TYPEMASK) | BS_OWNERDRAW, lp);
   }
-  if (message == WM_GETDLGCODE &&
+  // Push buttons repaint whenever focus or the keyboard-cue state changes, so the focus ring
+  // appears on Tab and disappears when focus leaves.
+  if ((message == WM_SETFOCUS || message == WM_KILLFOCUS || message == WM_UPDATEUISTATE) &&
+      lstrcmpiW(window_class, L"Button") == 0 && !choice_control(window)) {
+    const LRESULT result = DefSubclassProc(window, message, wp, lp);
+    InvalidateRect(window, nullptr, FALSE);
+    return result;
+  }
+  // A read-only log must not show its text selected when Tab reaches it.
+  if (window == wrapped_log && message == WM_SETFOCUS) {
+    const LRESULT result = DefSubclassProc(window, message, wp, lp);
+    SendMessageW(window, EM_SETSEL, static_cast<WPARAM>(-1), 0);
+    return result;
+  }
+  if (message == WM_GETDLGCODE && lstrcmpiW(window_class, L"Button") == 0 &&
       (GetWindowLongPtrW(window, GWL_STYLE) & BS_TYPEMASK) == BS_OWNERDRAW) {
     return DefSubclassProc(window, message, wp, lp) | DLGC_BUTTON |
         (window == current_footer ? DLGC_DEFPUSHBUTTON : DLGC_UNDEFPUSHBUTTON);
@@ -809,6 +895,8 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
       current_footer = nullptr;
       hovered_button = nullptr;
       details_open = false;
+      if (tab_hook) UnhookWindowsHookEx(tab_hook);
+      tab_hook = nullptr;
     }
   }
   const LRESULT result = DefSubclassProc(window, message, wp, lp);
@@ -901,6 +989,8 @@ void apply_presentation(HWND parent) {
   if (!log_brush) log_brush = CreateSolidBrush(card);
   if (!background_brush) background_brush = CreateSolidBrush(background);
   SetWindowSubclass(root, presentation, 1, 0);
+  keyboard_navigated = false; // Every page starts again at its first control.
+  if (!tab_hook) tab_hook = SetWindowsHookExW(WH_GETMESSAGE, intercept_tab, nullptr, GetCurrentThreadId());
   EnumChildWindows(root, style_child, 0);
   Controls controls{};
   EnumChildWindows(root, collect_roles, reinterpret_cast<LPARAM>(&controls));
