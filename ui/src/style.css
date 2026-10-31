@@ -525,3 +525,12 @@
   .log-loading > svg { width: 32px; height: 32px; }
   .log-viewport > .log-jump { position: absolute; right: 22px; bottom: 16px; background: #292929; box-shadow: 0 6px 18px #0009; }
 }
+
+@layer components {
+  /* Published instances zoom their icon on hover instead of changing the background; disabled ones refuse the click. */
+  .rail-instance:not(:disabled):hover { background-color: #252525 !important; }
+  .rail-instance.is-selected:not(:disabled):hover { background-color: #21351c !important; }
+  .rail-instance .instance-icon, .rail-instance > svg:not(.rail-lock) { transition: transform 200ms ease; }
+  .rail-instance:not(.is-disabled):hover .instance-icon, .rail-instance:not(.is-disabled):hover > svg:not(.rail-lock) { transform: scale(1.12); }
+  .rail-instance.is-disabled:not(:disabled) { cursor: not-allowed; }
+}
