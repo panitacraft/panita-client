@@ -172,6 +172,18 @@ impl BoundedLog {
         self.write_file(level, &session_log::redact(message));
     }
 
+    /// Record a player or client action and its outcome. `what` must be a fixed
+    /// description without account names, serials or other personal data.
+    pub fn action<T>(&self, what: &str, result: &Result<T, ErrorCode>) {
+        match result {
+            Ok(_) => self.note(Level::Info, &format!("{what} ok")),
+            Err(code) => self.note(
+                Level::Warn,
+                &format!("{what} failed error={}", name_of(code)),
+            ),
+        }
+    }
+
     fn write_file(&self, level: Level, text: &str) {
         if let Some(file) = self
             .file

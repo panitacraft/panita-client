@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 mod account_commands;
 mod activation_commands;
+mod hardware;
 #[cfg(any(target_os = "linux", test))]
 mod linux_activation;
 #[cfg(any(target_os = "linux", test))]
@@ -246,14 +247,12 @@ pub fn run() {
             // Session log files are best effort: a failure keeps in-memory diagnostics.
             let state = app.state::<DesktopState>();
             if let Ok(root) = app.path().app_data_dir() {
-                let header = [
+                let _ = std::fs::create_dir_all(&root);
+                let mut header = vec![
                     format!("launcher version={}", env!("CARGO_PKG_VERSION")),
-                    format!(
-                        "platform os={} arch={}",
-                        std::env::consts::OS,
-                        std::env::consts::ARCH
-                    ),
+                    format!("platform arch={}", std::env::consts::ARCH),
                 ];
+                header.extend(hardware::lines(&root));
                 state
                     .logs
                     .attach_file(&root.join("logs"), state.process, &header);

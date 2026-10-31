@@ -270,7 +270,7 @@
   .play-controls fieldset label { display: flex; align-items: start; gap: 10px; margin: 14px 0; }
   .play-controls > [role='status'] { color: #BABABA; }
   .pack-panel { margin-top: 20px; }
-  .diagnostic-list { max-height: 420px; overflow-y: auto; padding-inline: 28px 12px; }
+  .diagnostic-list { height: 380px; overflow-y: auto; margin: 0; padding: 4px 16px; list-style: none; background: #141414; border: 1px solid #515151; border-radius: 6px; }
   .diagnostic-list li { border-bottom: 1px solid #383838; padding: 8px 0; }
   .diagnostic-list dd { margin-inline-start: 0; font-size: 12px; color: #BABABA; }
   .game-log-section { padding: 24px; }
@@ -430,7 +430,7 @@
   .diagnostic-toolbar { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; margin: 16px 0; }
   .diagnostic-toolbar span, .diagnostic-event { display: flex; gap: 8px; align-items: center; }
   .diagnostic-toolbar label { display: flex; align-items: center; gap: 8px; margin: 0; }
-  .diagnostic-toolbar button { margin-left: auto; }
+  .diagnostic-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-left: auto; }
   .diagnostic-toolbar svg, .diagnostic-event svg { width: 17px; height: 17px; flex-shrink: 0; color: #a9e58c; }
   .diagnostic-list li:last-child { border-bottom: 0; }
   .split-button > .split-trigger:disabled { opacity: .65; }

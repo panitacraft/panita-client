@@ -27,10 +27,10 @@ function DiagnosticViewer() {
   return <div aria-busy={busy}>
     <p>Actividad de esta sesión, del evento más reciente al más antiguo. Se conserva hasta cerrar el cliente.</p>
     <p>Cada sesión también se guarda en un archivo de texto para soporte. Los archivos se eliminan solos después de 48 horas y no incluyen contraseñas ni tokens.</p>
-    <div className="diagnostic-toolbar"><button type="button" disabled={!isTauri()} onClick={() => { setFolderError(false); openLogsFolder().catch(() => setFolderError(true)); }}><FolderOpen aria-hidden="true" />Abrir carpeta de registros</button></div>
     {folderError && <p role="alert">No pudimos abrir la carpeta de registros.</p>}
     <div className="diagnostic-toolbar"><span><Activity aria-hidden="true" />{snapshot?.records.length ?? 0} {snapshot?.records.length === 1 ? 'evento' : 'eventos'}</span><label><input type="checkbox" checked={errorsOnly} onChange={event => setErrorsOnly(event.target.checked)} />Solo problemas</label>
-    <button type="button" disabled={busy || !isTauri()} onClick={() => setAttempt(value => value + 1)}><RefreshCw aria-hidden="true" />Actualizar registro</button></div>
+    <div className="diagnostic-actions"><button type="button" disabled={!isTauri()} onClick={() => { setFolderError(false); openLogsFolder().catch(() => setFolderError(true)); }}><FolderOpen aria-hidden="true" />Abrir carpeta de registros</button>
+    <button type="button" disabled={busy || !isTauri()} onClick={() => setAttempt(value => value + 1)}><RefreshCw aria-hidden="true" />Actualizar registro</button></div></div>
     {busy && <p role="status">Cargando registro…</p>}
     {error && <p role="alert">No pudimos actualizar el registro. Puedes reintentar; conservamos la última lectura.</p>}
     {snapshot && !snapshot.records.length && <p role="status">{isTauri() ? 'Todavía no hay eventos disponibles.' : 'El registro está disponible en la aplicación de escritorio.'}</p>}

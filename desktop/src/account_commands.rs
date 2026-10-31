@@ -61,7 +61,9 @@ pub(super) fn add_offline_account(
     username: String,
 ) -> Result<(), ErrorCode> {
     let accounts = controller(&state)?;
-    accounts.add_offline(&username).map_err(|e| e.code())?;
+    let added = accounts.add_offline(&username).map_err(|e| e.code());
+    state.logs.action("offline account added", &added);
+    added?;
     emit_accounts(&app, &accounts);
     Ok(())
 }
@@ -90,7 +92,9 @@ pub(super) async fn start_microsoft_login(
     };
     let launch = accounts
         .begin_login_with_redirect(intended, redirect)
-        .map_err(|e| e.code())?;
+        .map_err(|e| e.code());
+    state.logs.action("microsoft login started", &launch);
+    let launch = launch?;
     // Test builds only: hand the authorization URL to the harness instead of a browser.
     #[cfg(feature = "test-endpoints")]
     if let Some(path) = std::env::var_os("PANITA_TEST_URL_OUT") {
@@ -131,7 +135,9 @@ pub(super) fn cancel_microsoft_login(
     state: tauri::State<'_, DesktopState>,
 ) -> Result<(), ErrorCode> {
     let accounts = controller(&state)?;
-    accounts.cancel_login().map_err(|e| e.code())?;
+    let cancelled = accounts.cancel_login().map_err(|e| e.code());
+    state.logs.action("microsoft login cancelled", &cancelled);
+    cancelled?;
     emit_accounts(&app, &accounts);
     Ok(())
 }
@@ -146,9 +152,14 @@ pub(super) async fn select_account(
     let accounts = controller(&state)?;
     state.plays.cancel_pending();
     state.plays.publish(&app);
-    accounts.select(id).map_err(|e| e.code())?;
+    let selected = accounts.select(id).map_err(|e| e.code());
+    state.logs.action("account selected", &selected);
+    selected?;
     emit_accounts(&app, &accounts);
     let result = accounts.renew_selected().await.map_err(|e| e.code());
+    state
+        .logs
+        .action("session renewed after account selection", &result);
     emit_accounts(&app, &accounts);
     result
 }
@@ -160,6 +171,7 @@ pub(super) async fn renew_account(
 ) -> Result<(), ErrorCode> {
     let accounts = controller(&state)?;
     let result = accounts.retry_selected().await.map_err(|e| e.code());
+    state.logs.action("session renewal retried", &result);
     emit_accounts(&app, &accounts);
     result
 }
@@ -187,7 +199,9 @@ pub(super) async fn remove_account(
     let accounts = controller(&state)?;
     state.plays.cancel_pending();
     state.plays.publish(&app);
-    let result = accounts.remove(id).map_err(|e| e.code())?;
+    let removed = accounts.remove(id).map_err(|e| e.code());
+    state.logs.action("account removed", &removed);
+    let result = removed?;
     emit_accounts(&app, &accounts);
     // A Microsoft account that became selected needs its session acquired.
     let _ = accounts.renew_selected().await;
@@ -206,6 +220,7 @@ pub(super) async fn validate_account(
         .await
         .map_err(|e| e.code())
         .map(|_| ());
+    state.logs.action("account validated before play", &result);
     emit_accounts(&app, &accounts);
     result
 }
@@ -219,8 +234,14 @@ pub(super) fn handle_callback(app: &tauri::AppHandle, args: Vec<String>) {
         return;
     };
     let app = app.clone();
+    let logs = app.state::<DesktopState>().logs.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = accounts.callback(&args[1]).await;
+        let result = accounts
+            .callback(&args[1])
+            .await
+            .map(|_| ())
+            .map_err(|error| error.code());
+        logs.action("microsoft login completed", &result);
         emit_accounts(&app, &accounts);
     });
 }

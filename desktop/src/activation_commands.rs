@@ -125,9 +125,17 @@ pub(super) async fn start_activation(
     let activation = controller(&state)?;
     let begun = activation.begin(&identifier, &DeviceInfo::detect()).await;
     emit_activation(&app, &activation);
-    begun.map_err(|error| error.code())?;
+    let begun = begun.map_err(|error| error.code());
+    state.logs.action("panita activation requested", &begun);
+    begun?;
+    let logs = state.logs.clone();
     tauri::async_runtime::spawn(async move {
-        let _ = activation.await_confirmation().await;
+        let confirmed = activation
+            .await_confirmation()
+            .await
+            .map(|_| ())
+            .map_err(|error| error.code());
+        logs.action("panita activation finished", &confirmed);
         emit_activation(&app, &activation);
     });
     Ok(())
@@ -139,7 +147,9 @@ pub(super) fn cancel_activation(
     state: tauri::State<'_, DesktopState>,
 ) -> Result<(), ErrorCode> {
     let activation = controller(&state)?;
-    activation.cancel().map_err(|error| error.code())?;
+    let cancelled = activation.cancel().map_err(|error| error.code());
+    state.logs.action("panita activation cancelled", &cancelled);
+    cancelled?;
     emit_activation(&app, &activation);
     Ok(())
 }
@@ -181,6 +191,8 @@ pub(super) async fn sign_out_activation(
     state.plays.publish(&app);
     let outcome = activation.sign_out().await;
     emit_activation(&app, &activation);
-    let outcome = outcome.map_err(|error| error.code())?;
+    let outcome = outcome.map_err(|error| error.code());
+    state.logs.action("panita sign-out", &outcome);
+    let outcome = outcome?;
     Ok(serde_json::json!({ "serverClosed": outcome.server_closed }))
 }

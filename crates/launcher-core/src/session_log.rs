@@ -157,13 +157,15 @@ pub fn redact(text: &str) -> String {
     let mut after_bearer = false;
     for word in cleaned.split_whitespace() {
         let lower = word.to_ascii_lowercase();
-        let secret = after_bearer
-            || looks_like_serial(word)
+        // Instance and operation UUIDs identify support cases and are not secrets.
+        let identifier = uuid::Uuid::parse_str(word).is_ok();
+        let opaque = looks_like_serial(word)
             || word.matches('.').count() == 2 && word.len() > 40 && lower.starts_with("ey")
             || (word.len() >= 32
                 && word.chars().all(|ch| {
                     ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '+' | '/' | '=')
                 }));
+        let secret = after_bearer || (!identifier && opaque);
         after_bearer = matches!(lower.as_str(), "bearer" | "basic" | "authorization:");
         if secret {
             words.push("[redacted]".to_owned());
@@ -183,6 +185,31 @@ pub fn redact(text: &str) -> String {
         result.push_str("…[truncated]");
     }
     result
+}
+
+/// Describe which top-level fields differ, as `key: old -> new`. Fields in `skip`
+/// are ignored, for example window sizes that change on every resize.
+pub fn changes(
+    before: &impl serde::Serialize,
+    after: &impl serde::Serialize,
+    skip: &[&str],
+) -> Vec<String> {
+    let (Ok(serde_json::Value::Object(before)), Ok(serde_json::Value::Object(after))) =
+        (serde_json::to_value(before), serde_json::to_value(after))
+    else {
+        return Vec::new();
+    };
+    after
+        .iter()
+        .filter(|(key, _)| !skip.contains(&key.as_str()))
+        .filter(|(key, value)| before.get(*key) != Some(*value))
+        .map(|(key, value)| {
+            let old = before
+                .get(key)
+                .map_or_else(|| "unset".to_owned(), ToString::to_string);
+            format!("{key}: {old} -> {value}")
+        })
+        .collect()
 }
 
 fn looks_like_serial(word: &str) -> bool {
@@ -220,6 +247,17 @@ mod tests {
         assert!(!out.contains("eyJ"));
         assert!(!out.contains('\n') && !out.contains('\u{7}'));
         assert!(out.contains("https://x.example/cb[query-removed]"));
+    }
+
+    #[test]
+    fn changes_lists_only_differing_fields_and_honors_the_skip_list() {
+        let before = serde_json::json!({ "ram_mib": 4096, "console": false, "window": 1 });
+        let after = serde_json::json!({ "ram_mib": 6144, "console": false, "window": 2 });
+        assert_eq!(
+            changes(&before, &after, &["window"]),
+            ["ram_mib: 4096 -> 6144"]
+        );
+        assert!(changes(&before, &before, &[]).is_empty());
     }
 
     #[test]
