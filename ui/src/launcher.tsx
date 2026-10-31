@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
-import { LoaderCircle, ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, Users, WifiOff } from 'lucide-react';
+import { LoaderCircle, ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, WifiOff } from 'lucide-react';
 import { loadCatalog } from './catalog-api';
 import type { CatalogOverview } from './preview-catalog';
 import { messageForError } from './errors';
@@ -123,10 +123,9 @@ export function Launcher() {
         {pageCount > 1 && <Hint text="Más instancias" side="right"><Button variant="ghost" className="rail-nav-control size-6 bg-transparent p-0" aria-label="Más instancias" disabled={visiblePage + 1 >= pageCount} onClick={() => setInstancePage(visiblePage + 1)}><ChevronDown aria-hidden="true" /></Button></Hint>}
       </nav>
       <div className="rail-bottom">
-        <Hint text="Gestionar cuentas" side="right"><Button variant="ghost" size="icon" className={`size-10 [&_svg]:size-5 ${page === 'accounts' ? 'is-selected' : ''}`} aria-label="Gestionar cuentas" aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}><Users aria-hidden="true" /></Button></Hint>
         <div className="rail-accounts" role="group" aria-label="Cuentas de Minecraft">
           {selectedAccount && <Hint side="right" text={selectedAccount.metadata.username + ' | ' + (selectedAccount.metadata.kind === 'offline' ? 'No-Premium' : 'Microsoft')}>
-            <Button variant="ghost" className="rail-account current-account size-10 p-0" aria-label={'Gestionar cuenta: ' + selectedAccount.metadata.username} onClick={() => setPage('accounts')}><AccountAvatar metadata={selectedAccount.metadata} /></Button>
+            <Button variant="ghost" className={`rail-account current-account size-10 p-0 ${page === 'accounts' ? 'is-selected' : ''}`} aria-label={'Gestionar cuenta: ' + selectedAccount.metadata.username} aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}><AccountAvatar metadata={selectedAccount.metadata} /></Button>
           </Hint>}
           {!selectedAccount && <Hint text={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} side="right"><Button variant="ghost" className="rail-account size-10 p-0" aria-label={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} onClick={() => setPage('accounts')}><AccountAvatar metadata={null} /></Button></Hint>}
         </div>
@@ -158,7 +157,7 @@ export function Launcher() {
         </div>
 
         <div hidden={page !== 'library'} className="library-page">
-          {catalog.kind === 'loading' && <div className="empty-state" role="status"><Blocks aria-hidden="true" /><h1>Preparando tus instancias</h1><p>Cargando el catálogo de Panitacraft…</p></div>}
+          {catalog.kind === 'loading' && <div className="empty-state" role="status"><LoaderCircle className="spin" aria-hidden="true" /><h1>Preparando tus instancias</h1><p>Cargando el catálogo de Panitacraft…</p></div>}
           {catalog.kind === 'blocked' && <div className="empty-state" role="status"><LockKeyhole aria-hidden="true" /><h1>Revisa tus cuentas</h1><p>Las instancias estarán disponibles cuando se resuelva el problema con las cuentas.</p><Button onClick={() => setPage('accounts')}>Abrir cuentas</Button></div>}
           {catalog.kind === 'error' && <div className="empty-state" role="alert"><WifiOff aria-hidden="true" /><h1>No pudimos cargar tus instancias</h1><p>{catalog.message}</p><Button onClick={() => { setCatalog({ kind: 'loading' }); setCatalogAttempt(previous => previous + 1); }}>Reintentar</Button></div>}
           {catalog.kind === 'ready' && instances.length === 0 && <div className="empty-state"><Blocks aria-hidden="true" /><h1>No hay instancias disponibles</h1><p>Vuelve a consultar el catálogo más tarde.</p></div>}

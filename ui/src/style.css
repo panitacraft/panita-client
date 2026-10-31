@@ -313,7 +313,8 @@
   .hero-heading > p { margin-bottom: 16px; }
   .instance-actions { margin-top: 16px; }
   .split-button > .primary-play:only-child { border-radius: 7px; }
-  .primary-play.running-play { opacity: 1; background: #54A636; color: #141414; }
+  .primary-play.force-close-play { opacity: 1; background: #B94545; color: #F9FFF8; }
+  .primary-play.force-close-play:not(:disabled):hover { background: #D05A5A; }
   .primary-play.busy-play { opacity: 1; background: #253b1c; color: #E4FFDA; cursor: progress; }
   .spin { animation: panita-spin 1s linear infinite; }
   @keyframes panita-spin { to { transform: rotate(360deg); } }
@@ -454,4 +455,19 @@
   .settings-card-heading { margin-bottom: 10px; }
   .settings-page .settings-section { padding: 16px; }
   .settings-advanced { margin-top: 12px; }
+}
+
+@layer components {
+  /* Every control that changes color on hover eases into it instead of snapping. */
+  button, summary, [role='menuitem'], [role='tab'], .text-action, .rail-account, .rail-instance, .info-button, input, textarea, select, .inherit-toggle input[role='switch'] {
+    transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, opacity 150ms ease, filter 150ms ease;
+  }
+  /* Menu entries, radio and checkbox options, switches and sliders show the pointer, like buttons. */
+  [role='menuitem']:not([data-disabled]), [role='menuitemradio']:not([data-disabled]), [role='menuitemcheckbox']:not([data-disabled]), [role='option']:not([data-disabled]), [role='tab'], [role='switch']:not(:disabled), select:not(:disabled), input[type='checkbox']:not(:disabled), input[type='radio']:not(:disabled), input[type='range']:not(:disabled), label:has(> input[type='checkbox']:not(:disabled)), label:has(> input[type='radio']:not(:disabled)) { cursor: pointer; }
+  [role='menuitem'][data-disabled], select:disabled, input:disabled, label:has(> input:disabled) { cursor: not-allowed; }
+  .memory-slider:not(:disabled)::-webkit-slider-thumb, .memory-slider:not(:disabled)::-moz-range-thumb { cursor: pointer; }
+  /* Loading and error states sit in the middle of the space left under the toolbar. */
+  .library-page { display: flex; flex-direction: column; }
+  .library-page > .instance-detail { flex: 1; }
+  .library-page > .empty-state { flex: 1; min-height: 0; }
 }

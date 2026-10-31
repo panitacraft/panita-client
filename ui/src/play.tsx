@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronDown, CircleArrowUp, Download, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, MonitorPlay, Square } from 'lucide-react';
+import { ChevronDown, CircleArrowUp, Download, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square } from 'lucide-react';
 import { InstanceProgress } from './components/instance-progress';
 import { AccountDialog } from './components/account-dialog';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
@@ -232,8 +232,8 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     </AccountDialog>}
     <div className="instance-actions">
     <div className="split-button" role="group" aria-label="Controles de la instancia">
-    {active ? <Button className={`primary-play h-12 text-xl ${running ? 'running-play' : 'busy-play'}`} size="lg" aria-disabled={!running || entry.phase === 'stopping'} onClick={() => { if (running && entry && entry.phase !== 'stopping') void invoke('open_game_log', { instanceId, requestId: entry.requestId }).catch(cause => setLogError(messageForError(cause))); }}>
-      {running && entry.phase !== 'stopping' ? <MonitorPlay aria-hidden="true" /> : <LoaderCircle className="spin" aria-hidden="true" />}{running ? entry.phase === 'stopping' ? 'Cerrando…' : 'En ejecución' : 'Preparando…'}
+    {active ? <Button className={`primary-play h-12 text-xl ${running && entry.phase !== 'stopping' ? 'force-close-play' : 'busy-play'}`} size="lg" aria-disabled={!running || entry.phase === 'stopping'} onClick={() => { if (running && entry && entry.phase !== 'stopping') setForceQuestion(entry.requestId); }}>
+      {running && entry.phase !== 'stopping' ? <Square aria-hidden="true" /> : <LoaderCircle className="spin" aria-hidden="true" />}{running ? entry.phase === 'stopping' ? 'Cerrando…' : 'Cerrar forzosamente…' : 'Preparando…'}
     </Button> : updateTarget ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy} onClick={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</Button>
       : (installAllowed && entry?.phase !== 'installed') || entry?.phase === 'uninstalled' ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy || !installAllowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.phase === 'failed' ? 'Reintentar instalación' : 'Instalar'}</Button>
       : launcherRequired ? <Button className="primary-play h-12 text-xl" size="lg" aria-disabled="true" title="Actualiza Panita Client para poder jugar. El botón de versión de la barra lateral inicia la actualización." onClick={() => launcherUpdate?.highlight()}><CircleArrowUp aria-hidden="true" />Actualización requerida</Button>
@@ -248,7 +248,6 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         {pack && onPackCache && <DropdownMenuItem onSelect={onPackCache}><Database aria-hidden="true" />Limpiar caché de modpacks…</DropdownMenuItem>}
         {running && entry && <>
           {play?.snapshot?.gracefulStopSupported && entry.phase !== 'stopping' && <DropdownMenuItem disabled={busy} onSelect={() => void act('stop_game', { requestId: entry.requestId, force: false })}><Square aria-hidden="true" />Solicitar cierre</DropdownMenuItem>}
-          <DropdownMenuItem className="text-destructive" disabled={busy} onSelect={() => setForceQuestion(entry.requestId)}><Square aria-hidden="true" />Cerrar forzosamente…</DropdownMenuItem>
         </>}
         {!active && repairAllowed && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => void act('begin_repair', { requestId: crypto.randomUUID() })}><Wrench aria-hidden="true" />Reparar archivos</DropdownMenuItem>}
         {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => void cleanNatives()}><RefreshCw aria-hidden="true" />Limpiar nativos antiguos</DropdownMenuItem>}
