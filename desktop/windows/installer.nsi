@@ -250,8 +250,8 @@ Function PageReinstall
   ; Upgrading
   ${ElseIf} $R0 = 1
     StrCpy $R1 "$(olderOrUnknownVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
-    StrCpy $R3 "$(dontUninstall)"
+    StrCpy $R2 "Instalación limpia (Recomendado)"
+    StrCpy $R3 "Instalación rápida"
     !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(choowHowToInstall)"
   ; Downgrading
   ${ElseIf} $R0 = -1
@@ -280,7 +280,7 @@ Function PageReinstall
     Pop $R4
     ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
 
-    ${NSD_CreateLabel} 0 0 100% 24u "Opciones de instalación"
+    ${NSD_CreateLabel} 0 0 100% 24u "Actualización detectada"
     Pop $R1
     !insertmacro PANITA_ROLE $R1 6
     SendMessage $R1 ${WM_SETFONT} $PanitaTitleFont 1
@@ -312,9 +312,9 @@ Function PageReinstall
     !insertmacro PANITA_PAGE_LAYOUT $R4
     System::Call 'uxtheme::SetWindowTheme(p R2, w "", w "")'
     System::Call 'uxtheme::SetWindowTheme(p R3, w "", w "")'
-    SetCtlColors $R1 EFECE5 10231E
-    SetCtlColors $R2 EFECE5 10231E
-    SetCtlColors $R3 EFECE5 10231E
+    SetCtlColors $R1 F9FFF8 141414
+    SetCtlColors $R2 F9FFF8 141414
+    SetCtlColors $R3 F9FFF8 141414
     !insertmacro PANITA_RECT $R1 0 152 402 72
     !insertmacro PANITA_RECT $R2 0 246 402 44
     !insertmacro PANITA_RECT $R3 0 310 402 44
@@ -322,14 +322,14 @@ Function PageReinstall
     ${If} $R0 == 0
       ${NSD_CreateLabel} 0 0 0 0 "Esta versión ya está instalada. Puedes reinstalar el launcher o desinstalarlo."
     ${ElseIf} $R0 == 1
-      ${NSD_CreateLabel} 0 0 0 0 "Hay una versión anterior instalada. Elige cómo actualizar el launcher. Tus cuentas, ajustes, instancias y mundos se conservarán."
+      ${NSD_CreateLabel} 0 0 0 0 "Se instalará la nueva versión. Tus perfiles, mundos y ajustes se mantendrán intactos."
     ${Else}
       ${NSD_CreateLabel} 0 0 0 0 "Hay una versión más reciente instalada. Revisa las opciones disponibles antes de continuar."
     ${EndIf}
     Pop $PanitaDescription
     !insertmacro PANITA_ROLE $PanitaDescription 7
     !insertmacro PANITA_RECT $PanitaDescription 0 72 402 72
-    SetCtlColors $PanitaDescription C4D0C8 10231E
+    SetCtlColors $PanitaDescription BABABA 141414
     SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Continuar"
     PanitaUi::Apply /NOUNLOAD
     nsDialogs::Show

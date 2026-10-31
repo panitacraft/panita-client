@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "version": "0.1.1-beta.9",
+  "version": "0.2.0-beta.2",
   "bundle": {
     "publisher": "Panitacraft",
     "copyright": "Copyright © 2026 Panitacraft",
@@ -13,8 +13,8 @@
       },
       "nsis": {
         "template": "windows/installer.nsi",
-        "installerIcon": "icons/icon.ico",
-        "uninstallerIcon": "icons/icon.ico"
+        "installerIcon": "icons/installer.ico",
+        "uninstallerIcon": "icons/uninstaller.ico"
       }
     }
   }

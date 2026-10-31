@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { usePlaySnapshot } from './play';
 import { messageForError } from './errors';
-import { previousLogPage, unacknowledgedCrashes, type GameLogSnapshot } from './game-output-state';
-import { formattedGameLines, logPrefix, readableGameLines } from './game-log-format';
+import { ArrowDownToLine, ChevronUp, ChevronDown, FileText, FolderOpen, RotateCcw, Search, Trash2, TriangleAlert, X } from 'lucide-react';
+import { Button } from './components/ui/button';
+import { unacknowledgedCrashes, type GameLogSnapshot } from './game-output-state';
+import { formattedGameLines, displayLogTime, readableGameLines } from './game-log-format';
 import { startGameLogFeed, type GameLogNotice } from './game-log-feed';
 
 export function CrashNotifications({ names }: { names: Record<string, string> }) {
@@ -40,16 +42,16 @@ export function CrashNotifications({ names }: { names: Record<string, string> })
     } catch (error) { setNotice(messageForError(error)); }
     finally { setBusy(false); }
   }
-  return <dialog ref={dialog} aria-labelledby="crash-title" onClose={() => { if (key) setDismissed(previous => new Set([...previous, key])); }}>
-    <h2 id="crash-title">Minecraft se cerró de forma inesperada</h2>
+  return <dialog ref={dialog} className="crash-dialog" aria-labelledby="crash-title" onClose={() => { if (key) setDismissed(previous => new Set([...previous, key])); }}>
+    <h2 id="crash-title"><TriangleAlert aria-hidden="true" />Minecraft se cerró de forma inesperada</h2>
     {crash && <p>{names[crash.instanceId] ?? 'La instancia de Minecraft'} terminó con un error.{crash.exitCode !== null ? ` Código de salida: ${crash.exitCode}.` : ''}</p>}
-    {summary && <><p>Última salida del juego:</p><pre className="crash-summary">{summary}</pre></>}
-    <p>Revisa el registro o los informes de fallos para obtener más información. Algunos errores no generan un informe.</p>
+    {summary && <details className="crash-details"><summary>Ver últimos mensajes</summary><pre className="crash-summary">{summary}</pre></details>}
+    <p>Revisa el registro para conocer la causa. Puede que Minecraft no haya creado un informe.</p>
     {notice && <p role="status">{notice}</p>}
     <div className="account-buttons">
-      <button type="button" disabled={busy} onClick={() => void open('open_crash_reports')}>Abrir carpeta de informes</button>
-      <button type="button" disabled={busy} onClick={() => void open('open_game_log')}>Ver registro de Minecraft</button>
-      <button type="button" onClick={() => dialog.current?.close()}>Cerrar</button>
+      <Button variant="outline" disabled={busy} onClick={() => void open('open_crash_reports')}><FolderOpen aria-hidden="true" />Informes de fallos</Button>
+      <Button disabled={busy} onClick={() => void open('open_game_log')}><FileText aria-hidden="true" />Ver registro</Button>
+      <Button variant="ghost" onClick={() => dialog.current?.close()}><X aria-hidden="true" />Cerrar</Button>
     </div>
   </dialog>;
 }
@@ -70,6 +72,9 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
   const searchGeneration = useRef(0);
   const list = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
+  const anchor = useRef<{ sequence: string; top: number } | null>(null);
+  const scrollingRead = useRef(false);
+  const [levels, setLevels] = useState(new Set(['normal', 'info', 'warn', 'error', 'fatal', 'notice']));
   useEffect(() => () => { searchGeneration.current++; }, [instanceId, requestId]);
   useEffect(() => startGameLogFeed({
     offset, follow,
@@ -78,10 +83,21 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
       const notice = event.payload;
       if (notice.instanceId === instanceId && notice.requestId === requestId) changed(notice);
     }),
-    receive: next => { setSnapshot(next); setError(null); },
-    fail: cause => setError(messageForError(cause)),
+    receive: next => { setSnapshot(next); setError(null); scrollingRead.current = false; },
+    fail: cause => { setError(messageForError(cause)); scrollingRead.current = false; },
   }), [instanceId, requestId, offset, follow, retry]);
-  const lines = useMemo(() => formattedGameLines((snapshot?.lines ?? []).filter(line => (line.sequence ?? 0) >= viewStart)), [snapshot?.lines, viewStart]);
+  const lines = useMemo(() => formattedGameLines((snapshot?.lines ?? []).filter(line => (line.sequence ?? 0) >= viewStart)).filter(line => {
+    const level = line.metadata?.level?.toLowerCase() ?? (line.stream === 'stderr' ? 'error' : line.stream === 'notice' ? 'notice' : 'normal');
+    return levels.has(level) && (!query.trim() || line.text.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  }), [snapshot?.lines, viewStart, levels, query]);
+  useLayoutEffect(() => {
+    const saved = anchor.current;
+    if (saved && list.current) {
+      const row = list.current.querySelector<HTMLElement>('[data-sequence="' + saved.sequence + '"]');
+      if (row) list.current.scrollTop += row.getBoundingClientRect().top - list.current.getBoundingClientRect().top - saved.top;
+      anchor.current = null;
+    }
+  }, [snapshot]);
   const selected = match === null ? undefined : lines.find(line => (line.sequence ?? -1) >= match)?.sequence;
   useEffect(() => {
     if (follow) end.current?.scrollIntoView({ block: 'end' });
@@ -89,13 +105,33 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
   }, [snapshot, follow, selected]);
 
   function navigate(cursor: number | null) {
+    anchor.current = null; scrollingRead.current = false;
     setFollow(cursor === null); setOffset(cursor);
     list.current?.scrollTo({ top: 0 });
   }
   function clearView() {
+    anchor.current = null; scrollingRead.current = false;
     searchGeneration.current++; setSearching(false); setMatch(null); setSearchNotice(null);
     const start = snapshot?.total ?? 0;
     setViewStart(start); setSnapshot(null); setOffset(start); setFollow(true); setRetry(value => value + 1);
+  }
+  function scrollWindow(backwards: boolean) {
+    if (!snapshot || !list.current || scrollingRead.current) return;
+    const step = Math.max(1, Math.floor(snapshot.pageSize / 2));
+    const cursor = backwards ? Math.max(viewStart, snapshot.offset - step) : snapshot.offset + step;
+    if (backwards ? snapshot.offset <= viewStart : snapshot.nextOffset >= snapshot.total) return;
+    const bounds = list.current.getBoundingClientRect();
+    const visible = [...list.current.querySelectorAll<HTMLElement>('[data-sequence]')].find(row => row.getBoundingClientRect().bottom > bounds.top);
+    anchor.current = visible ? { sequence: visible.dataset.sequence!, top: visible.getBoundingClientRect().top - bounds.top } : null;
+    scrollingRead.current = true; setFollow(false); setOffset(cursor);
+  }
+  function onLogScroll() {
+    const element = list.current;
+    if (!element || !snapshot) return;
+    const bottom = element.scrollHeight - element.clientHeight - element.scrollTop;
+    if (follow && bottom > 60) { setFollow(false); setOffset(snapshot.offset); }
+    if (!follow && element.scrollTop < 60) scrollWindow(true);
+    else if (!follow && bottom < 60) scrollWindow(false);
   }
   async function find(backwards: boolean) {
     if (!query.trim() || searching) return;
@@ -121,53 +157,24 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
     } catch (cause) { if (generation === searchGeneration.current) setSearchNotice(messageForError(cause)); }
     finally { if (generation === searchGeneration.current) setSearching(false); }
   }
-  return <main><section className="game-log-section">
-    <h1>Registro de Minecraft</h1>
-    <p>Historial sin límite de entradas, solo en memoria. Las entradas nuevas llegan por eventos; cada lectura y página son limitadas para mantener la ventana utilizable.</p>
-    <p>Se ocultan datos sensibles y se omiten líneas demasiado largas. No se guarda ni exporta este registro. Las sesiones largas consumen más memoria; el historial termina al cerrar el cliente o reemplazar esta ejecución.</p>
-    <p>Instancia: {instanceId}</p>
-    <div className="game-log-tools">
-      <label><input type="checkbox" checked={follow} onChange={event => {
-        setFollow(event.target.checked); setOffset(event.target.checked ? null : snapshot?.offset ?? viewStart);
-      }} /> Seguir entradas nuevas</label>
-      <label><input type="checkbox" checked={wrap} onChange={event => setWrap(event.target.checked)} /> Ajustar líneas</label>
-      <label><input type="checkbox" checked={colors} onChange={event => setColors(event.target.checked)} /> Colorear niveles</label>
-      <button type="button" disabled={!snapshot} onClick={clearView}>Limpiar vista</button>
-      <button type="button" disabled={viewStart === 0} onClick={() => { setViewStart(0); navigate(null); }}>Restaurar historial</button>
+  return <main className="game-log-window">
+    <header className="log-toolbar">
+      <div className="log-filter" role="search" aria-label="Buscar en el historial de Minecraft"><label htmlFor="log-query"><Search aria-hidden="true" />Filtrar mensajes</label><div className="log-search-input"><input id="log-query" placeholder="Buscar en el registro…" value={query} maxLength={256} onChange={event => { searchGeneration.current++; setSearching(false); setQuery(event.target.value); setMatch(null); setSearchNotice(null); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void find(event.shiftKey); } }} /><Button variant="ghost" size="icon" aria-label="Coincidencia anterior" disabled={!query.trim() || searching} onClick={() => void find(true)}><ChevronUp aria-hidden="true" /></Button><Button variant="ghost" size="icon" aria-label="Coincidencia siguiente" disabled={!query.trim() || searching} onClick={() => void find(false)}><ChevronDown aria-hidden="true" /></Button></div></div>
+      <fieldset className="log-levels"><legend>Niveles</legend>{['debug', 'info', 'warn', 'error', 'fatal'].map(level => <label key={level}><input type="checkbox" checked={levels.has(level)} onChange={event => setLevels(previous => { const next = new Set(previous); if (event.target.checked) next.add(level); else next.delete(level); return next; })} />{level.toUpperCase()}</label>)}</fieldset>
+      <div className="log-actions"><Button variant="outline" disabled={!snapshot} onClick={clearView}><Trash2 aria-hidden="true" />Limpiar vista</Button>{viewStart > 0 && <Button variant="ghost" aria-label="Restaurar historial" onClick={() => { setViewStart(0); navigate(null); }}><RotateCcw aria-hidden="true" /></Button>}</div>
+    </header>
+    <div className="log-options"><label><input type="checkbox" checked={follow} onChange={event => { setFollow(event.target.checked); setOffset(event.target.checked ? null : snapshot?.offset ?? viewStart); }} />Seguir entradas nuevas</label><label><input type="checkbox" checked={wrap} onChange={event => setWrap(event.target.checked)} />Ajustar líneas</label><label><input type="checkbox" checked={colors} onChange={event => setColors(event.target.checked)} />Colores</label><span>{snapshot?.running ? 'Minecraft en ejecución' : 'Registro de Minecraft'}</span><Button variant="ghost" size="icon" aria-label="Ir al final" onClick={() => navigate(null)}><ArrowDownToLine aria-hidden="true" /></Button></div>
+    {searching && <div className="log-feedback" role="status">Buscando en el historial… <button onClick={() => { searchGeneration.current++; setSearching(false); }}>Cancelar búsqueda</button></div>}
+    {searchNotice && <div className="log-feedback" role="status">{searchNotice}</div>}
+    {error && <div className="log-feedback" role="alert">{error}<Button variant="outline" onClick={() => setRetry(value => value + 1)}>Reintentar</Button></div>}
+    <div ref={list} onScroll={onLogScroll} onWheel={event => { if (event.deltaY < 0 && (list.current?.scrollTop ?? 0) < 60) scrollWindow(true); else if (event.deltaY > 0 && list.current && list.current.scrollTop + list.current.clientHeight >= list.current.scrollHeight - 60 && !follow) scrollWindow(false); }} className={'game-log-lines ' + (wrap ? 'log-wrap ' : 'log-nowrap ') + (colors ? 'log-colored' : '')} tabIndex={0} aria-label="Entradas del registro de Minecraft">
+      {lines.length === 0 && <p className="log-empty">{snapshot ? 'Sin mensajes para mostrar.' : 'Cargando registro…'}</p>}
+      {lines.map((line, index) => {
+        const level = line.metadata?.level?.toLowerCase() ?? (line.stream === 'stderr' ? 'error' : 'normal');
+        return <div key={line.sequence ?? index} data-sequence={line.sequence} className={'log-row log-' + level + (line.sequence === selected ? ' log-match' : '')}>
+          <span className="log-time">{displayLogTime(line.metadata?.timestamp ?? null)}<small>{line.metadata?.level ?? line.stream}</small></span><span className="log-logger" title={line.metadata?.logger ?? ''}>{line.metadata?.logger ?? line.stream}</span><span className="log-thread" title={line.metadata?.thread ?? ''}>{line.metadata?.thread}</span><pre>{line.text}</pre>
+        </div>;
+      })}<div ref={end} />
     </div>
-    <p>Limpiar la vista conserva el historial en memoria y permite restaurarlo.</p>
-    <div className="game-log-tools" role="search" aria-label="Buscar en el historial de Minecraft">
-      <label>Buscar en todo el historial <input value={query} maxLength={256} onChange={event => {
-        searchGeneration.current++; setSearching(false); setQuery(event.target.value); setMatch(null); setSearchNotice(null);
-      }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void find(event.shiftKey); } }} /></label>
-      <button type="button" disabled={!query.trim() || searching} onClick={() => void find(true)}>Coincidencia anterior</button>
-      <button type="button" disabled={!query.trim() || searching} onClick={() => void find(false)}>Coincidencia siguiente</button>
-      {searching && <button type="button" onClick={() => { searchGeneration.current++; setSearching(false); }}>Cancelar búsqueda</button>}
-    </div>
-    {searching && <p role="status">Buscando en el historial conservado…</p>}
-    {searchNotice && <p role="status">{searchNotice}</p>}
-    {error && <p role="alert">{error} <button type="button" onClick={() => setRetry(value => value + 1)}>Reintentar lectura</button></p>}
-    {!snapshot && !error && <p role="status">Cargando registro…</p>}
-    {snapshot && <>
-      <p role="status">{snapshot.running ? 'Minecraft está en ejecución.' : 'Minecraft se cerró.' + (snapshot.exitCode !== null ? ' Código de salida: ' + snapshot.exitCode + '.' : '')}</p>
-      <nav aria-label="Páginas del registro de Minecraft">
-        <button type="button" disabled={snapshot.offset <= viewStart} onClick={() => { setMatch(null); navigate(viewStart); }}>Inicio</button>
-        <button type="button" disabled={snapshot.offset <= viewStart} onClick={() => { setMatch(null); navigate(Math.max(viewStart, previousLogPage(snapshot))); }}>Anterior</button>
-        <button type="button" disabled={snapshot.nextOffset >= snapshot.total} onClick={() => { setMatch(null); navigate(snapshot.nextOffset); }}>Siguiente</button>
-        <button type="button" onClick={() => { setMatch(null); navigate(null); }}>Últimas entradas</button>
-      </nav>
-      <p>{snapshot.nextOffset > snapshot.offset ? 'Eventos ' + (snapshot.offset + 1) + '–' + snapshot.nextOffset + ' de ' + snapshot.total : 'Sin entradas en esta página. Total registrado: ' + snapshot.total}. El tamaño de página no limita el historial.</p>
-      <div ref={list} className={'game-log-lines ' + (wrap ? 'log-wrap ' : 'log-nowrap ') + (colors ? 'log-colored' : '')} tabIndex={0} aria-label="Entradas del registro de Minecraft">
-        {lines.length === 0 && <p>Todavía no hay mensajes visibles en esta página.</p>}
-        {lines.map((line, index) => {
-          const level = line.metadata?.level?.toLowerCase() ?? (line.stream === 'stderr' ? 'error' : 'normal');
-          const tone = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'].includes(level) ? level : 'normal';
-          return <pre key={line.sequence ?? index} data-sequence={line.sequence} className={'log-' + tone + (line.sequence === selected ? ' log-match' : '')}>
-            <span className="log-metadata">{logPrefix(line.metadata) || '[' + line.stream + ']'} </span>{line.text}
-          </pre>;
-        })}
-        <div ref={end} />
-      </div>
-    </>}
-  </section></main>;
+  </main>;
 }

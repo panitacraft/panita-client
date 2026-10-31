@@ -52,11 +52,7 @@ pub(crate) fn planned_size(
 }
 
 pub(crate) fn io(error: std::io::Error) -> CoreError {
-    CoreError::new(match error.kind() {
-        std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
-        std::io::ErrorKind::StorageFull => ErrorCode::InsufficientSpace,
-        _ => ErrorCode::StorageUnavailable,
-    })
+    crate::storage::map_io_error(error)
 }
 
 pub(crate) fn native_file(file: &private_fs::PrivateFile) -> Result<std::fs::File, CoreError> {
@@ -191,6 +187,40 @@ pub(crate) struct ArtifactLock {
 
 /// Nonblocking coordination for directory migration and local audits.
 pub(crate) fn try_lock(root: &Path, relative: &str) -> Result<Option<ArtifactLock>, CoreError> {
+    try_lock_inner(root, relative, false)
+}
+pub(crate) fn try_lock_for_erasure(root: &Path) -> Result<Option<ArtifactLock>, CoreError> {
+    try_lock_inner(root, ".installation.lock", true)
+}
+fn check_instance_root(
+    root: &Path,
+    directory: &PrivateDir,
+    relative: &str,
+    erasing: bool,
+) -> Result<(), CoreError> {
+    if relative == ".installation.lock" {
+        use cap_fs_ext::MetadataExt;
+        let original = super::directory_capability(directory)?
+            .dir_metadata()
+            .map_err(io)?;
+        let current = PrivateDir::open(root).map_err(map_private_error)?;
+        let current = super::directory_capability(&current)?
+            .dir_metadata()
+            .map_err(io)?;
+        if original.dev() != current.dev() || original.ino() != current.ino() {
+            return Err(super::invalid());
+        }
+        if !erasing && crate::registry::erasure::blocks_root(root)? {
+            return Err(CoreError::new(ErrorCode::OperationBusy));
+        }
+    }
+    Ok(())
+}
+fn try_lock_inner(
+    root: &Path,
+    relative: &str,
+    erasing: bool,
+) -> Result<Option<ArtifactLock>, CoreError> {
     let (directory, name) = ensure_parent(root, relative)?;
     let source = match directory.open_file(&name) {
         Ok(file) => file,
@@ -213,6 +243,7 @@ pub(crate) fn try_lock(root: &Path, relative: &str) -> Result<Option<ArtifactLoc
     match file.try_lock() {
         Ok(()) => {
             private_fs::verify_data(&file).map_err(map_private_error)?;
+            check_instance_root(root, &directory, relative, erasing)?;
             Ok(Some(ArtifactLock {
                 _file: file,
                 _source: source,
@@ -253,6 +284,7 @@ pub(crate) async fn lock(
         match file.try_lock() {
             Ok(()) => {
                 private_fs::verify_data(&file).map_err(map_private_error)?;
+                check_instance_root(root, &directory, relative, false)?;
                 return Ok(ArtifactLock {
                     _file: file,
                     _source: source,

@@ -146,9 +146,11 @@ struct Entry {
     exit: Option<launcher_core::minecraft::process::GameExit>,
     kind: OperationKind,
     backup_requested: bool,
+    erase_requested: bool,
     backup_operation: Option<Uuid>,
     received_files: u64,
     reused_files: u64,
+    artifact_progress: Option<launcher_core::minecraft::download::DownloadProgress>,
     retained_files: u32,
     native_cleanup: Option<launcher_core::minecraft::native_cache::CleanupReport>,
     pack_progress: Option<launcher_core::modpack::content::PackProgress>,
@@ -364,9 +366,11 @@ impl PlayController {
                 exit: None,
                 kind,
                 backup_requested: false,
+                erase_requested: false,
                 backup_operation: None,
                 received_files: 0,
                 reused_files: 0,
+                artifact_progress: None,
                 retained_files: 0,
                 native_cleanup: None,
                 pack_progress: None,
@@ -422,6 +426,9 @@ impl PlayController {
         else {
             return false;
         };
+        if !progress.reused {
+            entry.artifact_progress = Some(progress);
+        }
         if progress.bytes == progress.total {
             if progress.reused {
                 entry.reused_files += 1;
@@ -492,8 +499,9 @@ impl PlayController {
                     "exitExpected": entry.exit_expected,
                     "consoleError": entry.console_error,
                     "operation": entry.kind.text(),
-                    "backupRequested": entry.backup_requested, "backupOperation": entry.backup_operation,
+                    "backupRequested": entry.backup_requested, "eraseRequested": entry.erase_requested, "backupOperation": entry.backup_operation,
                     "receivedFiles": entry.received_files, "reusedFiles": entry.reused_files,
+                    "artifactProgress": entry.artifact_progress.map(|p| json!({"bytes": p.bytes, "total": p.total})),
                     "retainedFiles": entry.retained_files,
                     "nativeCleanup": entry.native_cleanup,
                     "packProgress": entry.pack_progress.map(|p| json!({"filesDone": p.files_done, "filesTotal": p.files_total, "bytesDone": p.bytes_done, "bytesTotal": p.bytes_total, "reusedFiles": p.reused_files})),
@@ -932,6 +940,7 @@ pub(super) fn begin_install(
         request_id,
         OperationKind::Install,
         None,
+        false,
     )
 }
 
@@ -950,6 +959,7 @@ pub(super) fn begin_update(
         request_id,
         OperationKind::Update,
         Some(update),
+        false,
     )
 }
 
@@ -967,16 +977,22 @@ pub(super) fn begin_repair(
         request_id,
         OperationKind::Repair,
         None,
+        false,
     )
 }
 
 #[tauri::command]
 pub(super) fn begin_uninstall(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, DesktopState>,
     instance_id: Uuid,
     request_id: Uuid,
+    delete_instance: Option<bool>,
 ) -> Result<(), ErrorCode> {
+    if window.label() != "main" {
+        return Err(ErrorCode::InvalidData);
+    }
     begin_maintenance(
         app,
         state,
@@ -984,6 +1000,7 @@ pub(super) fn begin_uninstall(
         request_id,
         OperationKind::Uninstall,
         None,
+        delete_instance.unwrap_or(false),
     )
 }
 
@@ -1021,6 +1038,7 @@ fn begin_maintenance(
     request_id: Uuid,
     kind: OperationKind,
     update: Option<launcher_core::minecraft::update::UpdateRequest>,
+    delete_instance: bool,
 ) -> Result<(), ErrorCode> {
     let platform = if kind == OperationKind::Uninstall {
         None
@@ -1050,6 +1068,7 @@ fn begin_maintenance(
     let controller = state.plays.clone();
     let cancel = controller.reserve_operation(instance_id, request_id, kind)?;
     controller.update(instance_id, request_id, |entry| {
+        entry.erase_requested = delete_instance;
         entry.backup_requested = update.as_ref().is_some_and(|request| request.backup_worlds)
     });
     controller.publish(&app);
@@ -1075,7 +1094,20 @@ fn begin_maintenance(
             cancel.check().map_err(|error| error.code())?;
             if kind == OperationKind::Uninstall {
                 let outcome = tauri::async_runtime::spawn_blocking(move || {
-                    launcher_core::minecraft::maintenance::uninstall(&paths, instance_id, &cancel)
+                    if delete_instance {
+                        launcher_core::registry::InstanceRegistry::new(paths)
+                            .erase_instance(instance_id, &cancel)?;
+                        Ok(launcher_core::minecraft::maintenance::MaintenanceOutcome {
+                            retained_files: 0,
+                            native_cleanup: None,
+                        })
+                    } else {
+                        launcher_core::minecraft::maintenance::uninstall(
+                            &paths,
+                            instance_id,
+                            &cancel,
+                        )
+                    }
                 })
                 .await
                 .map_err(|_| ErrorCode::StorageCommitUncertain)?

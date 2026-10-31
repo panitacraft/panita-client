@@ -139,7 +139,7 @@ pub(super) fn restore_window(app: &tauri::AppHandle, settings: &GlobalSettings) 
     drop(memory);
     let warning = if let Some(saved) = &settings.launcher.window {
         let result = window
-            .set_size(tauri::LogicalSize::new(saved.width, saved.height))
+            .set_size(tauri::LogicalSize::new(saved.width, saved.height.max(700)))
             .and_then(|()| {
                 if saved.maximized {
                     window.maximize()

@@ -12,6 +12,7 @@ mod pack_commands;
 mod play_commands;
 mod protocol;
 mod settings_commands;
+mod window_commands;
 #[cfg(windows)]
 mod windows_identity;
 #[cfg(windows)]
@@ -220,6 +221,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             application_name,
+            window_commands::main_window_control,
             initialize,
             diagnostic_snapshot,
             catalog_snapshot,
@@ -237,6 +239,7 @@ pub fn run() {
             account_commands::add_offline_account,
             account_commands::start_microsoft_login,
             account_commands::cancel_microsoft_login,
+            account_commands::microsoft_login_link,
             account_commands::select_account,
             account_commands::renew_account,
             account_commands::retry_account_save,
@@ -258,6 +261,7 @@ pub fn run() {
             pack_commands::open_pack_folder,
             pack_commands::open_curseforge_project,
             pack_commands::open_instance_folder,
+            pack_commands::instance_folder_path,
             pack_commands::pack_version_names,
             pack_commands::import_pack_file,
             pack_commands::content_cache_size,

@@ -100,7 +100,7 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 - Keep verified public pack files and configuration archives in the shared pack-content cache `content/{algorithm}/{hash[0..2]}/{hash}-{size}`, approved by the owner on 2026-10-27. The algorithm is the strongest supplied hash (`sha512`, `sha1` for CurseForge and manual imports, `sha256` for configuration archives) and the key adds the exact size. Entries have no file extension and are published only after the exact size and every supplied hash verify. Copy cache entries into instances, hashing again, and never hard-link them; a cache name is a claim, never proof. Coordinate writers with interprocess locks per cache shard directory. Instances are independent of the cache, so it is disposable: an explicit player action may clear it. Name the folder and show its size before confirming. Hold the writer locks, skip or report entries used by an active operation, reject redirected paths, never follow links outside `content/`, and report partial failures honestly. Clearing never touches instances, worlds, other caches (`libraries/`, `assets/`, `versions/`, `runtime/`), accounts or settings, and later installs or repairs download the files again. No automatic garbage collection runs.
 - Consume the Panita API. The public catalog is read-only; Panita activation (§4.5) adds authenticated calls to the API's auth routes, including POST and DELETE. The launcher does not access Supabase directly or need its database credentials.
 - Use exact pinned versions. Vanilla uses the catalog Minecraft version; future Modrinth instances use the pinned pack as their authoritative source.
-- Fetch the catalog at startup. Show disabled entries dimmed, with a lock icon and Spanish status text. Check the specific instance through the API on every Play request; an explicit disabled result blocks installation/launch. Disabled or removed entries must not delete local installations or worlds. Installed vanilla updates are explicit, not automatic.
+- Fetch the catalog at startup. Show disabled entries dimmed, with a lock icon and Spanish status text. Check the specific instance through the API on every Play request; an explicit disabled result blocks installation/launch. Disabled or removed entries must not delete local installations or worlds. On 2026-10-30 the owner makes vanilla version transitions mandatory too: a fresh catalog pin mismatch replaces Play with Update, with explicit confirmation and the default world backup. Updates never install automatically. An unavailable current check keeps the existing warning-confirmed offline fallback.
 - If the catalog API is unreachable, show the last valid cached catalog and an on-load Spanish toast explaining that installed instances remain available. Before each fallback launch, require a warning confirmation because current instance status could not be checked. Permit only complete local vanilla installations; do not bypass a known disabled state, install missing files, or treat an explicit disabled/missing response as a network outage. Microsoft authentication requirements remain independent.
 - Keep the core version-agnostic. Resolve Java and game requirements from authoritative metadata; do not hard-code one Minecraft version, loader, or CPU architecture. Broader compatibility does not expand the MVP automatically.
 
@@ -134,6 +134,18 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 - Preserve existing valid data on failed writes. Do not silently replace unreadable or corrupt account data with an empty store.
 - Validate network inputs, download hashes, destinations, redirects, and archive paths. Prevent traversal and writes outside intended directories. Apply least-privilege Tauri capabilities and IPC boundaries.
 - Updates, repairs, and uninstall operations must protect worlds and user-edited files. Make destructive removal explicit; do not overwrite user data merely because it differs from a pack default.
+- On 2026-10-29 the owner approved an optional, unchecked-by-default instance
+  uninstall action that permanently erases the selected instance's entire folder,
+  including worlds, screenshots, settings, added mods and backups. Show its exact
+  UUID-resolved folder and require a separate acknowledgement before deletion.
+  Ordinary uninstall continues preserving player data. Exclude active games and
+  mutations, reject redirected paths, use bounded handle-relative traversal and
+  preserve other instances, accounts and shared caches. Keep a validated external
+  `instance-erasures.json` intent with directory identity while cleanup is pending;
+  block reuse of a partially erased instance and require explicit retry, never
+  automatic erasure at startup. Preserve corrupt/future metadata and intents and
+  report partial failures honestly. This exception applies only to the separately
+  confirmed full-instance erasure.
 - On 2026-10-26 the owner authorizes an optional Windows launcher-uninstall
   action that erases the entire current-user `%APPDATA%\PanitaClient` folder.
   Keep it unchecked by default and require a separate explicit confirmation.
@@ -158,6 +170,7 @@ PanitaClient/
 ├─ panita-session.json    # sensitive: Panitacraft session token and a nonsecret member snapshot; hidden on Windows
 ├─ settings.json          # indented disk schema 3; compact, explicit keys
 ├─ insts-cache.json
+├─ instance-erasures.json # temporary explicit full-instance erasure intents; never auto-retried
 ├─ libraries/             # shared, verified caches
 ├─ assets/
 ├─ versions/
@@ -276,7 +289,7 @@ panita-client/
 
 - Keep business logic in the UI-independent Rust core. Keep desktop integration thin and UI state separate from account secrets.
 - Closing the launcher window while games run hides it and keeps the owning process supervising those games. Opening the launcher again restores that process and its active-instance controls. Exit automatically after the last game and cancelled pending launch finish if the window remains hidden; keep an open or minimized window alive. Cancel other pending launches when hiding, and preserve the preparation-only close guard. This owner-approved behavior supersedes requiring the launcher window to remain open during gameplay (2026-10-18).
-- The owner requested crash notifications and a separate Minecraft log window on 2026-10-23. Unexpected nonzero game exit restores a hidden launcher and shows a Spanish dialog with its exit code, a bounded redacted crash excerpt, a paged execution-log viewer and an option to open that instance's existing `minecraft/crash-reports/` directory. Requested stops do not produce crash notifications. Missing reports are reported honestly. On 2026-10-24 the owner explicitly approved unlimited Minecraft log entry retention in memory only, superseding the 256-event console ring. Keep all accepted redacted entries for the current/most recent execution of each instance until replaced or the launcher exits; memory use can grow with output. Bound each IPC page and rendered page, and retain per-line size and redaction protections. The log viewer never accepts arbitrary paths or commands, reads account files, persists/exports console output, or exposes credentials. Structured launcher diagnostics remain separate and retain their 256-event limit.
+- The owner requested crash notifications and a separate Minecraft log window on 2026-10-23. Unexpected nonzero game exit restores a hidden launcher and shows a Spanish dialog with its exit code, a bounded redacted crash excerpt, a continuously scrolling execution-log viewer and an option to open that instance's existing `minecraft/crash-reports/` directory. Requested stops do not produce crash notifications. Missing reports are reported honestly. On 2026-10-24 the owner explicitly approved unlimited Minecraft log entry retention in memory only, superseding the 256-event console ring. Keep all accepted redacted entries for the current/most recent execution of each instance until replaced or the launcher exits; memory use can grow with output. Bound each IPC read and rendered window, and retain per-line size and redaction protections. The log viewer never accepts arbitrary paths or commands, reads account files, persists/exports console output, or exposes credentials. Structured launcher diagnostics remain separate and retain their 256-event limit.
 - Keep storage, networking, and platform integrations testable behind clear boundaries. Avoid abstractions or dependencies without a concrete need.
 - The owner approved Prism as a behavioral reference for live Minecraft logs, formatting and local viewer controls on 2026-10-25. Use scoped change notifications with short burst coalescing, sequential cursor catch-up, Log4j time/level/thread/logger formatting, full retained-history search with bounded scans, wrap/colors, and local clear/restore. Keep the approved unlimited memory-only history, redaction, per-line protections and bounded IPC/rendering. Clear must not delete retained history. Do not add persistence, copying, uploading or export. Implement independently; do not copy Prism source.
 - Keep phased implementation work in the implementation plan and decision documents. Annex A preserves the accepted account-storage decision within this file so these policies remain available without separate documents.
@@ -373,7 +386,7 @@ Complete Microsoft → Xbox Live → XSTS → Minecraft Services → Java profil
 
 The immutable catalog UUID remains the installation identity. Use a stable, validated slug-derived directory as specified in §4.1, with collision handling and recoverable migration from legacy UUID folders. Catalog renames must not move an installation or change its identity.
 
-Microsoft accounts require successful current Play validation even for installed vanilla. They cannot silently become offline accounts or launch using an expired previously validated profile. Explicit offline accounts may launch fully installed vanilla without connectivity; all required game files, Java, assets, libraries, and natives must be local. Vanilla catalog updates do not force immediate upgrades of installed instances.
+Microsoft accounts require successful current Play validation even for installed vanilla. They cannot silently become offline accounts or launch using an expired previously validated profile. Explicit offline accounts may launch fully installed vanilla without connectivity; all required game files, Java, assets, libraries, and natives must be local. A fresh vanilla catalog pin mismatch requires an explicit update before Play (owner decision, 2026-10-30); the warning-confirmed outage fallback remains available.
 
 Check the specific instance's API status on every Play request. A disabled result blocks the launch workflow; show disabled cards dimmed with a lock and Spanish status text. During catalog API outages, show the last valid cached list and an on-load Spanish toast indicating that installed instances remain available. Require explicit user confirmation of a warning before each fallback launch of a complete local vanilla installation. A previously known disabled state remains blocked. This fallback does not bypass current Microsoft/Minecraft authentication validation, and explicit disabled/missing responses are not outages. Preserve local data in every case.
 
@@ -497,8 +510,13 @@ and individual measurements are evidence, not product guarantees.
   safe defaults and idle checks. OS-owned security/runtime dialogs are separate.
 
 - On 2026-10-26 the owner requests keeping the beta checklist only in ignored
-  `docs/`, and confirms frameless styling applies to the installer/uninstaller
-  only. Keep the main launcher window decorations. A busy-launcher uninstall
+  `docs/`. On 2026-10-30 the owner extends frameless styling to the main launcher:
+  provide visible accessible window controls and a draggable header on loading,
+  activation, onboarding and library screens. Keep the existing close supervision
+  and preparation guards. The owner expands the rail on 2026-10-30 to at least
+  six visible instances, using additional vertical space before paging. Use a
+  700-pixel minimum window height and one selected account avatar; preserve legacy smaller saved sizes by
+  clamping their restored height. A busy-launcher uninstall
   warning must leave its confirmation screen available for retry, with a final
   idle check before deletion. Do not force-close the supervising launcher.
 
@@ -565,7 +583,7 @@ and individual measurements are evidence, not product guarantees.
 - Modpack updates are mandatory (owner decision, 2026-10-27): a newer published
   pack version replaces Play with Update until applied, except during a catalog or
   network outage, with the warning described in Annex A. This supersedes the
-  earlier optional-update decision for packs; vanilla updates stay explicit.
+  earlier optional-update decision for packs. On 2026-10-30 mandatory pin synchronization also applies to vanilla, with explicit update confirmation and the existing outage fallback.
 - Player-added mods and configuration are permitted and remain player-owned.
   Preserve them during update, repair and ordinary instance uninstall. Report
   pack/user destination collisions rather than adopting or overwriting user files.
@@ -587,8 +605,9 @@ and individual measurements are evidence, not product guarantees.
   never clears a known pending requirement. Verify updater signatures; private
   signing keys stay in CI. This does not claim Windows publisher code signing.
 - Only merged PRs targeting `master` trigger public version allocation, tags and
-  releases after successful checks and packaging. Start at `v0.2.0-alpha` and
-  increment the patch for subsequent releases. `develop` runs CI and may produce
+  releases after successful checks and packaging. Use `0.2.x-beta.x`, starting at `v0.2.0-beta.1`, as approved by the owner
+  on 2026-10-30. Increment the beta number for candidates of the same patch;
+  reset it to 1 when advancing the patch. `develop` runs CI and may produce
   test artifacts, but does not publish releases or advance the update feed. Keep
   version allocation serialized, retries idempotent, artifacts immutable and
   update-feed publication last. Plan/workflow preparation does not itself push,
@@ -596,10 +615,11 @@ and individual measurements are evidence, not product guarantees.
 - Use the annotated launcher layout reference and supplied palette for the
   interim facelift: dark `#141414`, `#1B1B1B`, `#515151`; light `#F9FFF8`,
   `#E4FFDA`, `#BABABA`; primary `#54A636`, `#047500`. Theme switching is not
-  implied. Use `ui/src/assets/logo_background.svg` as the authoritative
-  background-bearing logo and icon source; preserve its embedded artwork/colors.
-  Keep Spanish player-facing text, keyboard access, contrast and decorated main
-  launcher windows. Final design remains a later plan.
+  implied. Use the owner-updated `desktop/icons/source.svg` as the application
+  icon source (2026-10-30); preserve its artwork and colors. Use the
+  background-bearing logo in navigation headers (owner decision, 2026-10-30).
+  Keep Spanish player-facing text, keyboard access, contrast and accessible custom
+  main-window controls and dragging. Final design remains a later plan.
 - Qualify the new installed-product scope on Windows 11 x64 and Ubuntu x64;
   retain the separate Ubuntu 24.04 build baseline. macOS is outside scope.
   Earlier MVP results do not qualify new modpack or updater behavior.

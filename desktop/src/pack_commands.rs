@@ -146,7 +146,24 @@ pub(super) async fn open_curseforge_project(
     Ok(true)
 }
 
-/// Open one of an instance's fixed content folders, or its pack backups. The
+/// Return only the UUID-owned instance folder for explicit uninstall confirmation.
+#[tauri::command]
+pub(super) async fn instance_folder_path(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    instance_id: Uuid,
+) -> Result<String, ErrorCode> {
+    main_only(&window)?;
+    let paths = paths(&app)?;
+    blocking(move || {
+        paths
+            .instance(instance_id)
+            .map(|path| path.to_string_lossy().into_owned())
+    })
+    .await
+}
+
+/// Open an existing instance root, one of its fixed content folders, or its pack backups. The
 /// frontend picks from a short list; it never supplies a path.
 #[tauri::command]
 pub(super) async fn open_instance_folder(
@@ -160,6 +177,15 @@ pub(super) async fn open_instance_folder(
     let paths = paths(&app)?;
     let directory = blocking(move || {
         let directory = match folder.as_str() {
+            "instance" => {
+                let directory = paths.instance(instance_id)?;
+                if !directory.is_dir() {
+                    return Err(launcher_core::error::CoreError::new(
+                        ErrorCode::InstanceMissing,
+                    ));
+                }
+                return Ok(directory);
+            }
             "mods" | "resourcepacks" | "shaderpacks" => {
                 paths.game_directory(instance_id)?.join(&folder)
             }

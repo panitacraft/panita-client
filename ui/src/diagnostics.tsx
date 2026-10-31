@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { CircleAlert, CircleCheck, RefreshCw, Activity } from 'lucide-react';
 import { isTauri } from '@tauri-apps/api/core';
 import { loadDiagnostics } from './diagnostic-api';
 import { diagnosticText, visibleDiagnosticRecords, type DiagnosticSnapshot } from './diagnostic-state';
@@ -6,6 +7,7 @@ import { messageForError } from './errors';
 
 function DiagnosticViewer() {
   const [snapshot, setSnapshot] = useState<DiagnosticSnapshot | null>(null);
+  const [errorsOnly, setErrorsOnly] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState(false);
@@ -18,21 +20,26 @@ function DiagnosticViewer() {
       .finally(() => { if (active) setBusy(false); });
     return () => { active = false; };
   }, [attempt]);
+  const records = snapshot ? visibleDiagnosticRecords(snapshot) : [];
+  const hasProblem = (record: typeof records[number]) => !!record.error || record.phase === 'failed' || record.phase === 'exited_with_error';
+  const visible = errorsOnly ? records.filter(hasProblem) : records;
   return <div aria-busy={busy}>
-    <p>Se muestran hasta 256 eventos de esta ejecución, del más reciente al más antiguo. El registro se borra al cerrar el cliente.</p>
-    <button type="button" disabled={busy || !isTauri()} onClick={() => setAttempt(value => value + 1)}>Actualizar registro</button>
+    <p>Actividad de esta sesión, del evento más reciente al más antiguo. Se conserva hasta cerrar el cliente.</p>
+    <div className="diagnostic-toolbar"><span><Activity aria-hidden="true" />{snapshot?.records.length ?? 0} {snapshot?.records.length === 1 ? 'evento' : 'eventos'}</span><label><input type="checkbox" checked={errorsOnly} onChange={event => setErrorsOnly(event.target.checked)} />Solo problemas</label>
+    <button type="button" disabled={busy || !isTauri()} onClick={() => setAttempt(value => value + 1)}><RefreshCw aria-hidden="true" />Actualizar registro</button></div>
     {busy && <p role="status">Cargando registro…</p>}
     {error && <p role="alert">No pudimos actualizar el registro. Puedes reintentar; conservamos la última lectura.</p>}
     {snapshot && !snapshot.records.length && <p role="status">{isTauri() ? 'Todavía no hay eventos disponibles.' : 'El registro está disponible en la aplicación de escritorio.'}</p>}
-    {snapshot && snapshot.records.length > 0 && <ol className="diagnostic-list" tabIndex={0} aria-label="Eventos recientes del cliente">
-      {visibleDiagnosticRecords(snapshot).map((record, index) => <li key={index}>
-        <p>{diagnosticText(record)}</p>
+    {snapshot && errorsOnly && !visible.length && <p role="status">No hay problemas registrados en esta sesión.</p>}
+    {visible.length > 0 && <ol className="diagnostic-list" tabIndex={0} aria-label="Eventos recientes del cliente">
+      {visible.map((record, index) => <li key={index}>
+        <p className={`diagnostic-event ${hasProblem(record) ? 'is-error' : ''}`}>{record.error || record.phase === 'failed' || record.phase === 'exited_with_error' ? <CircleAlert aria-hidden="true" /> : <CircleCheck aria-hidden="true" />}{diagnosticText(record)}</p>
         {record.error && <p>{messageForError(record.error)}</p>}
-        <details><summary>Identificadores para soporte</summary>
+        <details><summary>Detalles para soporte</summary>
           <dl><dt>Sesión del cliente</dt><dd>{record.processSessionId}</dd>
             {record.operationId && <><dt>Operación</dt><dd>{record.operationId}</dd></>}
           </dl>
-          <p>La sesión agrupa los eventos de una ejecución del cliente; la operación relaciona los eventos de una misma acción. Al reportar un problema, comparte el evento, su error y estos identificadores. No son códigos de acceso ni permiten consultar un informe en línea.</p>
+          {record.error && <p>Categoría: <code>{record.error}</code></p>}
         </details>
       </li>)}
     </ol>}
@@ -40,12 +47,8 @@ function DiagnosticViewer() {
 }
 
 export function DiagnosticsPanel() {
-  const [open, setOpen] = useState(false);
   return <section className="diagnostics-section" aria-labelledby="diagnostics-heading">
     <h2 id="diagnostics-heading">Registro del cliente</h2>
-    <details onToggle={event => setOpen(event.currentTarget.open)}>
-      <summary>Ver eventos recientes</summary>
-      {open && <DiagnosticViewer />}
-    </details>
+    <DiagnosticViewer />
   </section>;
 }

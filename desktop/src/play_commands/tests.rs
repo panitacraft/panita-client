@@ -224,6 +224,12 @@ fn installation_progress_is_bounded_scoped_and_terminal_results_are_authoritativ
             ..progress
         },
     );
+    let partial = controller.snapshot().unwrap_or_else(|_| panic!("snapshot"));
+    assert_eq!(
+        partial["instances"][0]["artifactProgress"],
+        json!({"bytes": 5, "total": 10})
+    );
+    assert_eq!(partial["instances"][0]["receivedFiles"], json!(0));
     controller.installation_progress(instance, request, progress);
     controller.installation_progress(
         instance,
@@ -237,6 +243,10 @@ fn installation_progress_is_bounded_scoped_and_terminal_results_are_authoritativ
     assert_eq!(snapshot["instances"][0]["receivedFiles"], json!(1));
     assert_eq!(snapshot["instances"][0]["reusedFiles"], json!(1));
     assert_eq!(snapshot["instances"][0]["operation"], json!("install"));
+    assert_eq!(
+        snapshot["instances"][0]["artifactProgress"],
+        json!({"bytes": 10, "total": 10})
+    );
     // Cancellation after publication cannot undo a completed manifest.
     assert!(controller.cancel(instance, request).is_ok());
     controller.update(instance, request, |entry| entry.phase = Phase::Installed);
@@ -464,7 +474,9 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
             "exitSuccess",
             "operation",
             "backupRequested",
+            "eraseRequested",
             "backupOperation",
+            "artifactProgress",
             "receivedFiles",
             "reusedFiles",
             "retainedFiles",

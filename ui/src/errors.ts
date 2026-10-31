@@ -2,7 +2,7 @@ export type LauncherErrorCode =
   | 'world_backup_unsafe' | 'update_selection_changed'
   | 'invalid_data'
   | 'permission_denied'
-  | 'storage_unavailable'
+  | 'storage_unavailable' | 'storage_read_only' | 'storage_busy'
   | 'storage_commit_uncertain'
   | 'native_cleanup_incomplete'
   | 'network_unavailable' | 'authentication_required' | 'account_not_found'
@@ -37,6 +37,8 @@ const messages: Record<LauncherErrorCode, string> = {
   unsupported_instance: 'Esta instancia requiere otra versión o funciones que todavía no están disponibles.',
   invalid_data: 'No pudimos validar los datos recibidos o guardados. Inténtalo de nuevo.',
   permission_denied: 'No pudimos acceder a los datos locales. Revisa los permisos e inténtalo de nuevo.',
+  storage_read_only: 'La unidad está en modo de solo lectura. Comprueba su protección contra escritura e inténtalo de nuevo.',
+  storage_busy: 'El sistema indica que un archivo está en uso. Cierra Minecraft u otros programas que usen la carpeta e inténtalo de nuevo.',
   storage_unavailable: 'Los datos locales no están disponibles. Inténtalo de nuevo.',
   storage_commit_uncertain: 'No pudimos confirmar si se guardaron los datos. Reinicia el cliente y compruébalo.',
   network_unavailable: 'No pudimos conectar con el servicio. Revisa tu conexión e inténtalo de nuevo.',
@@ -69,7 +71,7 @@ const messages: Record<LauncherErrorCode, string> = {
   api_key_rejected: 'El servicio rechazó esta versión de Panita Client. Instala la versión más reciente.',
   manual_files_required: 'Faltan archivos que debes descargar tú mismo. Complétalos para poder jugar.',
   pack_conflict: 'Ya existen archivos tuyos donde este modpack necesita instalar los suyos. No cambiamos nada: revisa la lista, muévelos o elimínalos y vuelve a instalar.',
-  update_required: 'Hay una versión nueva de este modpack y debes actualizarla antes de jugar. Usa el botón «Actualizar…» de esta instancia.',
+  update_required: 'Actualiza esta instancia antes de jugar.',
 };
 
 export function messageForError(error: unknown): string {

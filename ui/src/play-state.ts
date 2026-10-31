@@ -11,9 +11,12 @@ export type PlayEntry = {
   consoleError?: string | null;
   operation: 'install' | 'update' | 'repair' | 'uninstall' | 'play';
   backupRequested: boolean;
+  eraseRequested?: boolean;
   backupOperation: string | null;
   receivedFiles: number;
   reusedFiles: number;
+  /** Latest reported artifact transfer, never a whole-install byte total. */
+  artifactProgress?: { bytes: number; total: number } | null;
   retainedFiles: number;
   nativeCleanup?: import('./native-cleanup-state').NativeCleanupReport | null;
   packProgress?: import('./pack-state').PackProgress | null;
@@ -41,6 +44,6 @@ export function playActive(phase: PlayPhase): boolean {
 }
 
 export function installationRefreshKey(snapshot: PlaySnapshot | null): string {
-  return snapshot?.instances.filter(entry => entry.operation !== 'play' && !playActive(entry.phase))
+  return snapshot?.instances.filter(entry => (entry.operation !== 'play' || entry.error === 'update_required') && !playActive(entry.phase))
     .map(entry => `${entry.instanceId}:${entry.requestId}:${entry.phase}`).sort().join('|') ?? '';
 }
