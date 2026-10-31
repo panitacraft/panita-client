@@ -524,7 +524,7 @@ void draw_button(const DRAWITEMSTRUCT& item) {
   const COLORREF fill = disabled ? RGB(42, 42, 42) :
       chrome ? (hover ? (tag == 4 ? RGB(84, 39, 39) : RGB(48, 48, 48)) : card) :
       destructive ? (hover ? RGB(254, 202, 202) : RGB(252, 165, 165)) :
-      primary ? (pressed ? RGB(4, 117, 0) : hover ? RGB(101, 182, 71) : accent_color) :
+      primary ? (pressed ? RGB(4, 117, 0) : hover ? RGB(228, 255, 218) : accent_color) :
       (hover ? RGB(56, 56, 56) : RGB(27, 27, 27));
   installer_ui::surface(item.hDC, item.rcItem, fill,
       primary || chrome || disclosure ? fill : RGB(81, 81, 81), scale(6));
