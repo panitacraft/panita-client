@@ -3,7 +3,7 @@
   "app": {
     "appDirectoriesOverride": {
       "data": "$DATA/PanitaClient",
-      "localData": "$LOCALDATA/PanitaClient Core"
+      "localData": "webview"
     }
   }
 }

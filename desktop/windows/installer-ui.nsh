@@ -411,7 +411,7 @@ Var PanitaStageTitle
         System::Call 'user32::SetPropW(p $PanitaDescription, w "PanitaError", p 1)'
         SetCtlColors $PanitaDescription FCA5A5 141414
         ; The full list of what is erased appears only here, where the player confirms it.
-        ${NSD_SetText} $PanitaCardText "$APPDATA\PanitaClient$\r$\n$LOCALAPPDATA\PanitaClient Core$\r$\n$\r$\nSe eliminarán ambas carpetas: cuentas y sesiones, ajustes, instancias con mundos, capturas y copias de seguridad, descargas de Minecraft y Java, cachés y registros."
+        ${NSD_SetText} $PanitaCardText "$APPDATA\PanitaClient$\r$\n$\r$\nSe eliminará toda la carpeta: cuentas y sesiones, ajustes, instancias con mundos, capturas y copias de seguridad, descargas de Minecraft y Java, cachés y registros."
         !insertmacro PANITA_RECT $PanitaCardBackground 0 270 402 168
         !insertmacro PANITA_RECT $PanitaCardText 16 282 370 144
         ShowWindow $PanitaCardBackground ${SW_SHOW}

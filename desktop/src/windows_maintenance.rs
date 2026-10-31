@@ -60,9 +60,15 @@ pub(super) fn remove(identifier: &str) -> i32 {
         return 3;
     }
     // The browser data is disposable; a failure is still reported so the uninstaller can retry.
-    match data_removal::local_root().and_then(|local| data_removal::remove_web_data_in(&local)) {
-        Ok(()) => 0,
-        Err(_) => 3,
+    let install = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf));
+    match (install, data_removal::local_root()) {
+        (Some(install), Ok(local)) => match data_removal::remove_web_data_in(&install, &local) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        },
+        _ => 3,
     }
 }
 
