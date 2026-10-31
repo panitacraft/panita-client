@@ -83,6 +83,7 @@
   .serial-instructions code { display: inline-block; white-space: nowrap; font-weight: 600; }
   .serial-box .serial-expiry { color: #BABABA; font-size: 12px; margin: 8px 0; }
   .is-expired .serial-groups { opacity: .4; }
+  .inline-code { font-family: Consolas, 'Cascadia Mono', 'Courier New', monospace; font-size: .92em; padding: 1px 6px; border-radius: 4px; background: #141414; color: #F9FFF8; white-space: nowrap; }
   .login-wait { display: flex; align-items: center; gap: 10px; }
   .login-wait svg { width: 18px; height: 18px; flex-shrink: 0; color: #54A636; }
   .text-action { padding: 0; border: 0; border-radius: 0; background: transparent; color: #54A636; font-size: inherit; }

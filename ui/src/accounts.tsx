@@ -1,4 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
+import { MessageText } from './components/message-text';
 import { Check, ChevronDown, Copy, Ellipsis, LoaderCircle, LogIn, LogOut, Plus, RefreshCw, Save, ShieldCheck, UserRound, X } from 'lucide-react';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { Button } from './components/ui/button';
@@ -136,8 +137,8 @@ export function Accounts({ suggestedName = '', onSnapshot, onboarding = false }:
     <Button className="font-semibold" variant="outline" disabled={!view || blocked} onClick={() => { setUsername(suggestedName); setDialog('offline'); }}><UserRound aria-hidden="true" />Añadir cuenta No-Premium</Button>
   </>;
   const feedback = <>
-    {error && <p role="alert" className="account-error">{error}</p>}
-    {view?.login_error && <p role="alert" className="account-error">{messageForError(view.login_error)}</p>}
+    {error && <p role="alert" className="account-error"><MessageText text={error} /></p>}
+    {view?.login_error && <p role="alert" className="account-error"><MessageText text={messageForError(view.login_error)} /></p>}
   </>;
   return <section className={`accounts-section ${onboarding ? 'account-onboarding login-card' : ''}`} aria-labelledby="accounts-heading">
     {onboarding ? <>
@@ -154,7 +155,7 @@ export function Accounts({ suggestedName = '', onSnapshot, onboarding = false }:
     </div>}
     {!desktop && <p>La gestión de cuentas está disponible en la aplicación de escritorio.</p>}
     {!dialog && feedback}
-    {cleanupWarning && <p role="alert" className="account-error">{cleanupWarning}</p>}
+    {cleanupWarning && <p role="alert" className="account-error"><MessageText text={cleanupWarning} /></p>}
     {!dialog && !confirming && <TransientNotice notice={toast.notice} />}
     {desktop && !view && !error && <p role="status">Cargando cuentas…</p>}
     {desktop && !view && error && !blocked && <Button onClick={() => { dispatch({ type: 'start', operation: ++sequence.current, command: 'initialize' }); setAttempt(previous => previous + 1); }}>Reintentar</Button>}
@@ -169,7 +170,7 @@ export function Accounts({ suggestedName = '', onSnapshot, onboarding = false }:
           <div className="profile-info"><div className="profile-name"><strong>{account.metadata.username}</strong>{selected && <span className="active-badge"><Check aria-hidden="true" />Activa</span>}</div>
             <span className="profile-type">{microsoft ? <MicrosoftIcon /> : <UserRound aria-hidden="true" />}{microsoft ? 'Microsoft' : 'No-Premium'}</span>
             {microsoft && account.status !== 'ready' && <p className="profile-status">{statusText[account.status]}</p>}
-            {account.error && <p role="alert">{messageForError(account.error)}</p>}
+            {account.error && <p role="alert"><MessageText text={messageForError(account.error)} /></p>}
             {!account.persisted && <p role="alert">Esta cuenta no se ha guardado. Reintenta guardarla antes de cerrar el cliente.</p>}
           </div>
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`Opciones de ${account.metadata.username}`}><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger>

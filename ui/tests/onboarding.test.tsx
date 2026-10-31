@@ -118,3 +118,12 @@ test('activation preserves the full serial, supports copy, and regenerates expir
   await waitFor(() => expect((screen.getByRole('button', { name: 'Copiar código' }) as HTMLButtonElement).disabled).toBe(false));
   expect(native.invoke).toHaveBeenLastCalledWith('activation_snapshot', undefined);
 });
+
+test('file names inside an activation error are shown as inline code', async () => {
+  activation = { ...activation, error: 'activation_file_invalid' };
+  mount();
+  const alert = await screen.findByRole('alert');
+  const file = alert.querySelector('code.inline-code');
+  expect(file?.textContent).toBe('panita-session.json');
+  expect(alert.textContent).toContain('Cierra el cliente y elimina panita-session.json');
+});

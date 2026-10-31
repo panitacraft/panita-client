@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
+import { MessageText } from './components/message-text';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { WindowControls } from './components/window-controls';
@@ -226,7 +227,7 @@ function ActivationScreen() {
       <TransientNotice notice={toast.notice} />
       {activation.initializationError && <div role="alert"><p>{messageForError(activation.initializationError)}</p><Button onClick={activation.retryInitialization}><RefreshCw aria-hidden="true" />Reintentar</Button></div>}
       {!activation.initializationError && !view && <p role="status">Cargando…</p>}
-      {shown && !expired && !waitingOffline && !needsConnection && <p role="alert" className="account-error">{shown}</p>}
+      {shown && !expired && !waitingOffline && !needsConnection && <p role="alert" className="account-error"><MessageText text={shown} /></p>}
       {needsConnection && <p role="alert">No pudimos conectar con Panitacraft. Revisa tu conexión e inténtalo de nuevo.</p>}
       {waitingOffline && <p role="status">No pudimos conectar con el servicio. Seguimos esperando tu confirmación mientras el código siga vigente.</p>}
       {view && !pending && !expired && <form className="activation-form" noValidate onSubmit={event => { event.preventDefault(); void activation.start(identifier); }}>
@@ -282,7 +283,7 @@ export function ActivationPanel() {
       <p>Tu sesión de Panitacraft no se ha guardado. Reintenta guardarla antes de cerrar el cliente.</p>
       <Button onClick={() => void activation.retrySave()}><RefreshCw aria-hidden="true" />Reintentar guardado</Button>
     </div>}
-    {(activation.error ?? (view.error === 'api_key_rejected' ? view.error : null)) && <p role="alert" className="account-error">{messageForError(activation.error ?? view.error)}</p>}
+    {(activation.error ?? (view.error === 'api_key_rejected' ? view.error : null)) && <p role="alert" className="account-error"><MessageText text={messageForError(activation.error ?? view.error)} /></p>}
     <TransientNotice notice={toast.notice} />
     <div className="profile-row panita-profile">
       <PanitaAvatar url={user.avatar_url} />
