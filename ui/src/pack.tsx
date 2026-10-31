@@ -4,6 +4,7 @@ import { messageForError } from './errors';
 import { packApi } from './pack-api';
 import { playActive } from './play-state';
 import { usePlaySnapshot } from './play';
+import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import {
   cacheRetainedReason, clearSummary, conflictReasonText, conflictSummary, folderHint, importErrorText, manualHeading,
   reasonText, skippedSummary, formatBytes, type CacheReport, type PackFile, type PackList,
@@ -92,6 +93,7 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
   const busyRef = useRef(false);
   const [report, setReport] = useState<CacheReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const toast = useTransientNotice();
 
   async function refresh() {
     try { setSize(await packApi.cacheSize()); } catch (cause) { setError(packImportError(cause)); }
@@ -101,11 +103,16 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
   async function clear() {
     if (busyRef.current) return;
     busyRef.current = true;
-    setBusy(true); setError(null); setQuestion(false);
+    setBusy(true); setError(null); setQuestion(false); setReport(null);
+    toast.show('Limpiando la caché de modpacks…', 'progress');
     try {
-      setReport(await packApi.clearCache());
+      const cleared = await packApi.clearCache();
       await refresh();
+      // Partial results need their explanation on screen; a clean result is just confirmed.
+      if (cleared.retainedEntries > 0) { toast.clear(); setReport(cleared); }
+      else toast.show(`Caché de modpacks limpia (${formatBytes(cleared.removedBytes)} liberados).`);
     } catch (cause) {
+      toast.clear();
       setError(packImportError(cause));
     } finally {
       busyRef.current = false;
@@ -134,5 +141,6 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
       </details>}
     </div>}
     {error && <p role="alert">{error}</p>}
+    <TransientNotice notice={toast.notice} />
   </section>;
 }
