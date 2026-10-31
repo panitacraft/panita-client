@@ -7,7 +7,8 @@ run-name: Release ${{ github.ref_name }} (${{ github.sha }})
 # not start other workflows, so this one workflow plans, builds, tags and publishes everything.
 on:
   push:
-    branches: [develop, master]
+    # A push to a rehearsal branch is always a dry run, which needs no workflow on the default branch.
+    branches: [develop, master, 'rehearsal/**']
   workflow_dispatch:
     inputs:
       dry_run:
@@ -46,10 +47,18 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.16.0'
+      - name: Choose real or dry-run mode
+        id: mode
+        env:
+          INPUT: ${{ inputs.dry_run }}
+        run: |
+          dry=false
+          if [ "${INPUT:-}" = true ] || [[ "$GITHUB_REF_NAME" == rehearsal/* ]]; then dry=true; fi
+          echo "dry=$dry" >> "$GITHUB_OUTPUT"
       - name: Derive the release from the committed version
         id: plan
         env:
-          DRY_RUN: ${{ inputs.dry_run }}
+          DRY_RUN: ${{ steps.mode.outputs.dry }}
         run: |
           args=()
           if [ "${DRY_RUN:-}" = true ]; then args+=(--dry-run); fi
@@ -58,7 +67,7 @@ jobs:
         id: state
         env:
           TAG: ${{ steps.plan.outputs.tag }}
-          DRY_RUN: ${{ inputs.dry_run }}
+          DRY_RUN: ${{ steps.mode.outputs.dry }}
         run: |
           state=none
           # A dry run always builds, whatever the real release of this version looks like.
