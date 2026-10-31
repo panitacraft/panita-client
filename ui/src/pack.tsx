@@ -137,8 +137,8 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
         <li className="is-warning"><TriangleAlert aria-hidden="true" />Esta acción no se puede deshacer.</li>
       </ul>
       <div className="account-buttons">
-        <Button variant="destructive" disabled={busy} onClick={() => void clear()}>Confirmar limpieza</Button>
-        <Button variant="secondary" disabled={busy} onClick={() => setQuestion(false)}>Volver</Button>
+        <Button className="justify-start text-left" variant="destructive" disabled={busy} onClick={() => void clear()}>Confirmar limpieza</Button>
+        <Button className="justify-start text-left" variant="secondary" disabled={busy} onClick={() => setQuestion(false)}>Volver</Button>
       </div>
     </AccountDialog>}
     {report && <div role="status">
