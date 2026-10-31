@@ -268,7 +268,9 @@ mod tests {
             let (paths, accounts, id) = crate::minecraft::play::tests::fixture();
             drop(accounts);
             crate::minecraft::play::tests::complete_installation(&paths, id);
-            let root = paths.instance(id).expect("fixture instance");
+            let root = paths
+                .instance(id)
+                .unwrap_or_else(|_| panic!("fixture instance"));
             Self { paths, id, root }
         }
         fn registry(&self) -> InstanceRegistry {
@@ -278,15 +280,16 @@ mod tests {
             let record = self
                 .registry()
                 .get(self.id)
-                .expect("record")
-                .expect("owned");
-            let private = private_fs::PrivateDir::open(&self.root).expect("private");
+                .unwrap_or_else(|_| panic!("record"))
+                .unwrap_or_else(|| panic!("owned"));
+            let private =
+                private_fs::PrivateDir::open(&self.root).unwrap_or_else(|_| panic!("private"));
             let identity = directory_capability(&private)
-                .expect("capability")
+                .unwrap_or_else(|_| panic!("capability"))
                 .dir_metadata()
-                .expect("identity");
+                .unwrap_or_else(|_| panic!("identity"));
             PrivateStore::open(&self.paths)
-                .expect("store")
+                .unwrap_or_else(|_| panic!("store"))
                 .with_lock(|transaction| {
                     save(
                         transaction,
@@ -297,7 +300,7 @@ mod tests {
                         }],
                     )
                 })
-                .expect("intent");
+                .unwrap_or_else(|_| panic!("intent"));
         }
     }
     impl Drop for Fixture {
@@ -309,23 +312,27 @@ mod tests {
     fn erase_removes_worlds_backups_and_metadata_but_preserves_siblings_and_shared_data() {
         let f = Fixture::new();
         let sibling = f.paths.root().join("instances/unowned-player-folder");
-        std::fs::create_dir_all(&sibling).expect("sibling");
-        std::fs::write(sibling.join("keep.txt"), b"other instance").expect("canary");
+        std::fs::create_dir_all(&sibling).unwrap_or_else(|_| panic!("sibling"));
+        std::fs::write(sibling.join("keep.txt"), b"other instance")
+            .unwrap_or_else(|_| panic!("canary"));
         let shared = f.paths.root().join("shared-canary.txt");
-        std::fs::write(&shared, b"shared data").expect("shared");
-        std::fs::create_dir_all(f.root.join("minecraft/saves/world")).expect("world");
-        std::fs::write(f.root.join("minecraft/saves/world/level.dat"), b"world").expect("world");
-        std::fs::hard_link(&shared, f.root.join("minecraft/linked.txt")).expect("hard link");
+        std::fs::write(&shared, b"shared data").unwrap_or_else(|_| panic!("shared"));
+        std::fs::create_dir_all(f.root.join("minecraft/saves/world"))
+            .unwrap_or_else(|_| panic!("world"));
+        std::fs::write(f.root.join("minecraft/saves/world/level.dat"), b"world")
+            .unwrap_or_else(|_| panic!("world"));
+        std::fs::hard_link(&shared, f.root.join("minecraft/linked.txt"))
+            .unwrap_or_else(|_| panic!("hard link"));
         f.registry()
             .erase_instance(f.id, &Cancellation::default())
-            .expect("erase");
+            .unwrap_or_else(|_| panic!("erase"));
         assert!(!f.root.exists());
         assert_eq!(
-            std::fs::read(&shared).expect("shared retained"),
+            std::fs::read(&shared).unwrap_or_else(|_| panic!("shared retained")),
             b"shared data"
         );
         assert_eq!(
-            std::fs::read(sibling.join("keep.txt")).expect("sibling retained"),
+            std::fs::read(sibling.join("keep.txt")).unwrap_or_else(|_| panic!("sibling retained")),
             b"other instance"
         );
         assert!(f.paths.accounts().exists());
@@ -335,12 +342,13 @@ mod tests {
     fn erase_refuses_busy_instances_and_precommit_cancellation() {
         let f = Fixture::new();
         let lease = try_lock(&f.root, ".installation.lock")
-            .expect("lock")
-            .expect("idle");
+            .unwrap_or_else(|_| panic!("lock"))
+            .unwrap_or_else(|| panic!("idle"));
         assert_eq!(
             f.registry()
                 .erase_instance(f.id, &Cancellation::default())
-                .expect_err("busy")
+                .err()
+                .unwrap_or_else(|| panic!("busy"))
                 .code(),
             ErrorCode::OperationBusy
         );
@@ -355,15 +363,19 @@ mod tests {
     fn pending_erasure_blocks_normal_operations_and_only_explicit_retry_finishes_it() {
         let f = Fixture::new();
         f.intent();
-        std::fs::remove_file(f.root.join("installed.json")).expect("simulate partial deletion");
-        let records = f.registry().load().expect("discover pending instance");
+        std::fs::remove_file(f.root.join("installed.json"))
+            .unwrap_or_else(|_| panic!("simulate partial deletion"));
+        let records = f
+            .registry()
+            .load()
+            .unwrap_or_else(|_| panic!("discover pending instance"));
         assert_eq!(records[0].state, InstallationState::Failed);
         assert!(f.registry().prepare_instance(f.id).is_err());
         assert!(try_lock(&f.root, ".installation.lock").is_err());
         assert!(f.root.join("minecraft").exists());
         f.registry()
             .erase_instance(f.id, &Cancellation::default())
-            .expect("explicit retry");
+            .unwrap_or_else(|_| panic!("explicit retry"));
         assert!(!f.root.exists());
         assert!(!f.paths.root().join(FILE).exists());
     }
@@ -371,12 +383,19 @@ mod tests {
     fn absent_completed_folder_stays_discoverable_until_explicit_marker_retirement() {
         let f = Fixture::new();
         f.intent();
-        std::fs::remove_dir_all(&f.root).expect("simulate final removal before marker retirement");
-        assert_eq!(f.registry().load().expect("discover intent").len(), 1);
+        std::fs::remove_dir_all(&f.root)
+            .unwrap_or_else(|_| panic!("simulate final removal before marker retirement"));
+        assert_eq!(
+            f.registry()
+                .load()
+                .unwrap_or_else(|_| panic!("discover intent"))
+                .len(),
+            1
+        );
         assert!(!f.root.exists());
         f.registry()
             .erase_instance(f.id, &Cancellation::default())
-            .expect("retire intent");
+            .unwrap_or_else(|_| panic!("retire intent"));
         assert!(!f.root.exists());
         assert!(!f.paths.root().join(FILE).exists());
     }
@@ -385,39 +404,41 @@ mod tests {
         let f = Fixture::new();
         let bytes = b"{\"schema\":999,\"type\":\"erase_instances\",\"entries\":[]}";
         PrivateStore::open(&f.paths)
-            .expect("store")
+            .unwrap_or_else(|_| panic!("store"))
             .with_lock(|t| t.write(FILE, bytes))
-            .expect("future marker");
+            .unwrap_or_else(|_| panic!("future marker"));
         assert!(
             f.registry()
                 .erase_instance(f.id, &Cancellation::default())
                 .is_err()
         );
         assert_eq!(
-            std::fs::read(f.paths.root().join(FILE)).expect("retained"),
+            std::fs::read(f.paths.root().join(FILE)).unwrap_or_else(|_| panic!("retained")),
             bytes
         );
-        std::fs::remove_file(f.paths.root().join(FILE)).expect("fixture reset");
-        std::fs::write(f.root.join("transaction.json"), b"unknown intent").expect("transaction");
+        std::fs::remove_file(f.paths.root().join(FILE)).unwrap_or_else(|_| panic!("fixture reset"));
+        std::fs::write(f.root.join("transaction.json"), b"unknown intent")
+            .unwrap_or_else(|_| panic!("transaction"));
         assert!(
             f.registry()
                 .erase_instance(f.id, &Cancellation::default())
                 .is_err()
         );
         assert!(f.root.join("installed.json").exists());
-        std::fs::remove_file(f.root.join("transaction.json")).expect("fixture reset");
+        std::fs::remove_file(f.root.join("transaction.json"))
+            .unwrap_or_else(|_| panic!("fixture reset"));
         let mut manifest: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(f.root.join("installed.json")).expect("manifest"),
+            &std::fs::read(f.root.join("installed.json")).unwrap_or_else(|_| panic!("manifest")),
         )
-        .expect("JSON");
+        .unwrap_or_else(|_| panic!("JSON"));
         manifest["schema"] = serde_json::json!(999);
         private_fs::PrivateDir::open(&f.root)
-            .expect("private")
+            .unwrap_or_else(|_| panic!("private"))
             .write_atomic_durable(
                 "installed.json",
-                &serde_json::to_vec(&manifest).expect("JSON"),
+                &serde_json::to_vec(&manifest).unwrap_or_else(|_| panic!("JSON")),
             )
-            .expect("future manifest");
+            .unwrap_or_else(|_| panic!("future manifest"));
         assert!(
             f.registry()
                 .erase_instance(f.id, &Cancellation::default())
@@ -431,23 +452,30 @@ mod tests {
         use std::os::windows::fs::OpenOptionsExt;
         let f = Fixture::new();
         let file = f.root.join("minecraft/locked.txt");
-        std::fs::write(&file, b"locked player data").expect("file");
+        std::fs::write(&file, b"locked player data").unwrap_or_else(|_| panic!("file"));
         let held = std::fs::OpenOptions::new()
             .read(true)
             .share_mode(3)
             .open(&file)
-            .expect("deny deletion");
+            .unwrap_or_else(|_| panic!("deny deletion"));
         assert!(
             f.registry()
                 .erase_instance(f.id, &Cancellation::default())
                 .is_err()
         );
-        assert!(!pending(&f.paths).expect("intent").is_empty());
-        assert_eq!(f.registry().load().expect("discover")[0].id, f.id);
+        assert!(
+            !pending(&f.paths)
+                .unwrap_or_else(|_| panic!("intent"))
+                .is_empty()
+        );
+        assert_eq!(
+            f.registry().load().unwrap_or_else(|_| panic!("discover"))[0].id,
+            f.id
+        );
         drop(held);
         f.registry()
             .erase_instance(f.id, &Cancellation::default())
-            .expect("retry");
+            .unwrap_or_else(|_| panic!("retry"));
         assert!(!f.root.exists());
     }
     #[cfg(unix)]
@@ -455,9 +483,10 @@ mod tests {
     fn symlink_preflight_rejects_redirects_without_deleting_any_data() {
         let f = Fixture::new();
         let outside = f.paths.root().join("outside");
-        std::fs::create_dir(&outside).expect("outside");
-        std::fs::write(outside.join("keep"), b"keep").expect("canary");
-        std::os::unix::fs::symlink(&outside, f.root.join("minecraft/redirect")).expect("symlink");
+        std::fs::create_dir(&outside).unwrap_or_else(|_| panic!("outside"));
+        std::fs::write(outside.join("keep"), b"keep").unwrap_or_else(|_| panic!("canary"));
+        std::os::unix::fs::symlink(&outside, f.root.join("minecraft/redirect"))
+            .unwrap_or_else(|_| panic!("symlink"));
         assert!(
             f.registry()
                 .erase_instance(f.id, &Cancellation::default())
@@ -477,15 +506,20 @@ mod additional_tests {
         let (paths, accounts, id) = crate::minecraft::play::tests::fixture();
         drop(accounts);
         let registry = InstanceRegistry::new(paths.clone());
-        let root = registry.prepare_instance(id).expect("prepare");
-        let record = registry.get(id).expect("record").expect("owned");
-        let private = private_fs::PrivateDir::open(&root).expect("private");
+        let root = registry
+            .prepare_instance(id)
+            .unwrap_or_else(|_| panic!("prepare"));
+        let record = registry
+            .get(id)
+            .unwrap_or_else(|_| panic!("record"))
+            .unwrap_or_else(|| panic!("owned"));
+        let private = private_fs::PrivateDir::open(&root).unwrap_or_else(|_| panic!("private"));
         let identity = directory_capability(&private)
-            .expect("capability")
+            .unwrap_or_else(|_| panic!("capability"))
             .dir_metadata()
-            .expect("identity");
+            .unwrap_or_else(|_| panic!("identity"));
         PrivateStore::open(&paths)
-            .expect("store")
+            .unwrap_or_else(|_| panic!("store"))
             .with_lock(|t| {
                 save(
                     t,
@@ -496,7 +530,7 @@ mod additional_tests {
                     }],
                 )
             })
-            .expect("intent");
+            .unwrap_or_else(|_| panic!("intent"));
         assert!(
             crate::minecraft::download::lock(&root, ".installation.lock", &Cancellation::default())
                 .await
@@ -508,18 +542,21 @@ mod additional_tests {
         assert!(registry.remember_catalog(&[changed]).is_ok());
         registry
             .erase_instance(id, &Cancellation::default())
-            .expect("explicit erase");
-        std::fs::remove_dir_all(paths.root()).expect("cleanup");
+            .unwrap_or_else(|_| panic!("explicit erase"));
+        std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
     }
     #[test]
     fn redirected_player_folder_is_rejected_before_publishing_erasure_intent() {
         let (paths, accounts, id) = crate::minecraft::play::tests::fixture();
         drop(accounts);
         let registry = InstanceRegistry::new(paths.clone());
-        let root = registry.prepare_instance(id).expect("prepare");
+        let root = registry
+            .prepare_instance(id)
+            .unwrap_or_else(|_| panic!("prepare"));
         let target = paths.root().join("outside");
-        std::fs::create_dir(&target).expect("outside");
-        std::fs::write(target.join("keep.txt"), b"outside player data").expect("canary");
+        std::fs::create_dir(&target).unwrap_or_else(|_| panic!("outside"));
+        std::fs::write(target.join("keep.txt"), b"outside player data")
+            .unwrap_or_else(|_| panic!("canary"));
         let link = root.join("minecraft/redirect");
         #[cfg(windows)]
         {
@@ -528,11 +565,11 @@ mod additional_tests {
                 .arg(link.components().collect::<PathBuf>())
                 .arg(target.components().collect::<PathBuf>())
                 .output()
-                .expect("junction creation");
+                .unwrap_or_else(|_| panic!("junction creation"));
             assert!(output.status.success());
         }
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &link).expect("symlink");
+        std::os::unix::fs::symlink(&target, &link).unwrap_or_else(|_| panic!("symlink"));
         assert!(
             registry
                 .erase_instance(id, &Cancellation::default())
@@ -542,9 +579,9 @@ mod additional_tests {
         assert!(target.join("keep.txt").exists());
         assert!(!paths.root().join(FILE).exists());
         #[cfg(windows)]
-        std::fs::remove_dir(&link).expect("remove junction itself");
+        std::fs::remove_dir(&link).unwrap_or_else(|_| panic!("remove junction itself"));
         #[cfg(unix)]
-        std::fs::remove_file(&link).expect("remove symlink itself");
-        std::fs::remove_dir_all(paths.root()).expect("cleanup");
+        std::fs::remove_file(&link).unwrap_or_else(|_| panic!("remove symlink itself"));
+        std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
     }
 }

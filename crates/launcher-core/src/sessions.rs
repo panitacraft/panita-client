@@ -273,9 +273,9 @@ impl AccountController {
 
     pub fn pending_login_link(&self, operation: Uuid) -> Result<String, CoreError> {
         let state = self.state()?;
-        if !state
+        if state
             .interactive
-            .is_some_and(|ticket| ticket.operation.value() == operation)
+            .is_none_or(|ticket| ticket.operation.value() != operation)
         {
             return Err(CoreError::new(ErrorCode::OperationCancelled));
         }
