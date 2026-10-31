@@ -17,6 +17,13 @@ if ($Check) { return }
 if ([string]::IsNullOrWhiteSpace($env:PANITA_LAUNCHER_API_KEY)) {
   throw 'Set the public PANITA_LAUNCHER_API_KEY build variable before packaging.'
 }
+if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+  throw 'Set TAURI_SIGNING_PRIVATE_KEY (key text or path) and TAURI_SIGNING_PRIVATE_KEY_PASSWORD to create updater signatures.'
+}
+# The container cannot see host paths, so pass the key by value through the environment only.
+if (Test-Path -LiteralPath $env:TAURI_SIGNING_PRIVATE_KEY -PathType Leaf) {
+  $env:TAURI_SIGNING_PRIVATE_KEY = (Get-Content -LiteralPath $env:TAURI_SIGNING_PRIVATE_KEY -Raw).Trim()
+}
 $runId = [guid]::NewGuid().ToString('N')
 $buildRoot = Join-Path $workspace "target/linux-build/$runId"
 [IO.Directory]::CreateDirectory($buildRoot) | Out-Null
@@ -32,6 +39,7 @@ $scriptMount = "type=bind,source=$scriptPath,target=/build-candidate.sh,readonly
 Invoke-BuildTool 'docker' @('create', '--platform', 'linux/amd64', '--name', $container,
   '--cpus', '2', '--memory', '4g', '--memory-swap', '6g', '--env', 'CARGO_BUILD_JOBS=2',
   '--env', 'PANITA_LAUNCHER_API_KEY',
+  '--env', 'TAURI_SIGNING_PRIVATE_KEY', '--env', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
   '--mount', $inputMount, '--mount', $scriptMount,
   '--mount', 'type=volume,source=panita-linux-cargo-registry,target=/home/panita-build/.cargo/registry',
   '--mount', 'type=volume,source=panita-linux-cargo-git,target=/home/panita-build/.cargo/git',

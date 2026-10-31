@@ -79,6 +79,10 @@ jobs:
         run: node --test scripts/*.test.mjs
       - name: Build unsigned installers
         shell: bash
+        env:
+          # Updater signing only; this is not Windows publisher code signing.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: node scripts/build-beta.mjs --release-tag "$RELEASE_TAG"
       - name: Verify installer hashes and provenance
         shell: bash
