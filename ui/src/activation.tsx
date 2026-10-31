@@ -227,8 +227,8 @@ function ActivationScreen() {
       <TransientNotice notice={toast.notice} />
       {activation.initializationError && <div role="alert"><p>{messageForError(activation.initializationError)}</p><Button onClick={activation.retryInitialization}><RefreshCw aria-hidden="true" />Reintentar</Button></div>}
       {!activation.initializationError && !view && <p role="status">Cargando…</p>}
-      {shown && !expired && !waitingOffline && !needsConnection && <p role="alert" className="account-error"><MessageText text={shown} /></p>}
-      {needsConnection && <p role="alert">No pudimos conectar con Panitacraft. Revisa tu conexión e inténtalo de nuevo.</p>}
+      {shown && !expired && !waitingOffline && !needsConnection && <p role="alert" className="login-error"><MessageText text={shown} /></p>}
+      {needsConnection && <p role="alert" className="login-error">No pudimos conectar con Panitacraft. Revisa tu conexión e inténtalo de nuevo.</p>}
       {waitingOffline && <p role="status">No pudimos conectar con el servicio. Seguimos esperando tu confirmación mientras el código siga vigente.</p>}
       {view && !pending && !expired && <form className="activation-form" noValidate onSubmit={event => { event.preventDefault(); void activation.start(identifier); }}>
         <label htmlFor="member-identifier">IGN o usuario de Discord</label>

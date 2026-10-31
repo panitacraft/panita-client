@@ -83,6 +83,9 @@
   .serial-instructions code { display: inline-block; white-space: nowrap; font-weight: 600; }
   .serial-box .serial-expiry { color: #BABABA; font-size: 12px; margin: 8px 0; }
   .is-expired .serial-groups { opacity: .4; }
+  /* An error on the first-run card sits in its own red box, centered, with file names in the same red. */
+  .login-error { margin: 0 0 14px; padding: 12px 14px; border: 1px solid #6B3B3B; border-radius: 8px; background: #2A1C1C; color: #FCA5A5; text-align: center; line-height: 1.5; }
+  .login-error .inline-code { color: inherit; background: #00000040; }
   .inline-code { font-family: Consolas, 'Cascadia Mono', 'Courier New', monospace; font-size: .92em; padding: 1px 6px; border-radius: 4px; background: #141414; color: #F9FFF8; white-space: nowrap; }
   .login-wait { display: flex; align-items: center; gap: 10px; }
   .login-wait svg { width: 18px; height: 18px; flex-shrink: 0; color: #54A636; }
