@@ -5,20 +5,28 @@ export type GlobalLaunchSettings = {
   show_console_on_start: boolean;
 };
 export type GlobalSettings = GlobalLaunchSettings & {
-  launcher: { selected_instance_id: string | null; window: (WindowSize & { maximized: boolean }) | null };
+  launcher: {
+    selected_instance_id: string | null; window: (WindowSize & { maximized: boolean }) | null;
+    close_to_tray?: boolean; hide_on_game_start?: boolean; reopen_on_game_exit?: boolean;
+  };
 };
+export type TrayPreferences = { closeToTray: boolean; hideOnGameStart: boolean; reopenOnGameExit: boolean };
 export type InstanceSettings = {
   schema_version: number; ram_mib: number | null; extra_jvm_args: string[] | null;
   java_path_override: string | null; window_size: WindowSize | null;
   show_console_on_start: boolean | null;
 };
-export type SettingsSnapshot = { global: GlobalSettings; instance: InstanceSettings | null; instanceId: string | null; windowWarning: string | null };
+export type SettingsSnapshot = {
+  global: GlobalSettings; instance: InstanceSettings | null; instanceId: string | null; windowWarning: string | null;
+  /** True when the notification-area icon exists, so its preferences can apply. */
+  trayAvailable?: boolean;
+};
 export type SettingsDraft = {
   ram: string; width: string; height: string; jvm: string;
   inheritRam: boolean; inheritWindow: boolean; inheritJvm: boolean;
   clearJava: boolean;
   showConsole: boolean; inheritConsole: boolean;
-};
+} & TrayPreferences;
 
 export function settingsDraft(snapshot: SettingsSnapshot): SettingsDraft {
   const { global, instance } = snapshot;
@@ -33,7 +41,14 @@ export function settingsDraft(snapshot: SettingsSnapshot): SettingsDraft {
     clearJava: false,
     showConsole: instance?.show_console_on_start ?? global.show_console_on_start ?? false,
     inheritConsole: instance?.show_console_on_start == null,
+    closeToTray: global.launcher.close_to_tray ?? false,
+    hideOnGameStart: global.launcher.hide_on_game_start ?? false,
+    reopenOnGameExit: global.launcher.reopen_on_game_exit ?? false,
   };
+}
+
+export function trayPreferences(draft: SettingsDraft): TrayPreferences {
+  return { closeToTray: draft.closeToTray, hideOnGameStart: draft.hideOnGameStart, reopenOnGameExit: draft.reopenOnGameExit };
 }
 
 function integer(value: string, min: number, max: number): number {
