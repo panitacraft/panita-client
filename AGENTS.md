@@ -37,7 +37,7 @@ Panita Client is an unofficial, plug-and-play Minecraft launcher for friends. It
 ### Branch convention
 
 - Use `develop` as the development branch. Keep `master` as the existing primary branch; do not rename it or change remote defaults without explicit authorization.
-- Every new phase must use its own new branch from `develop`, using `<type>/<short-description>`, for example `feat/auth-fundamentals`, `fix/session-renewal`, or `docs/development-setup`. Do not implement a phase directly on `develop` or reuse the previous phase's branch. Base each dependent phase on the accepted work integrated into `develop`; integration and pushes retain their authorization requirements. This owner decision applies from 2026-10-27.
+- Every new phase must use its own new branch from `develop`, using `<type>/<short-description>`, for example `feat/auth-fundamentals`, `fix/session-renewal`, or `docs/development-setup`. Do not implement a phase directly on `develop` or reuse the previous phase's branch. Base each dependent phase on the accepted work integrated into `develop`; integration and pushes retain their authorization requirements. This owner decision applies from 2026-10-27. Exception (owner decision, 2026-10-30): the launcher auto-update and release-channel work of §8 is implemented in one branch, `feat/auto-updater-and-wizard-facelift`, with separate commits per phase.
 - Use the commit types listed below and lowercase, hyphen-separated descriptions. Do not create extra branches without a concrete reason.
 - Branch creation is local unless explicitly authorized otherwise. Pushes, remote branch changes, and GitHub issue mutations require authorization for that scope.
 
