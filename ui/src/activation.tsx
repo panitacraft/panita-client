@@ -255,6 +255,13 @@ function Onboarding() {
   return <Shell><Accounts onboarding suggestedName={user ? offlineNameSuggestion(user) : ''} /></Shell>;
 }
 
+/** The member's Discord avatar, falling back to the Panita logo when absent or failing to load. */
+function PanitaAvatar({ url }: { url: string | null }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!url || url === failed) return <img className="panita-profile-logo" src={logoWhite} alt="" />;
+  return <img className="panita-profile-avatar" src={url} alt="" aria-hidden="true" referrerPolicy="no-referrer" decoding="async" onError={() => setFailed(url)} />;
+}
+
 /** The member's Panitacraft account inside the launcher, with the session controls. */
 export function ActivationPanel() {
   const activation = useActivation();
@@ -278,7 +285,7 @@ export function ActivationPanel() {
     {(activation.error ?? (view.error === 'api_key_rejected' ? view.error : null)) && <p role="alert" className="account-error">{messageForError(activation.error ?? view.error)}</p>}
     <TransientNotice notice={toast.notice} />
     <div className="profile-row panita-profile">
-      <img className="panita-profile-logo" src={logoWhite} alt="" />
+      <PanitaAvatar url={user.avatar_url} />
       <div className="profile-info"><div className="profile-name"><strong>{memberName(user)}</strong><span className="active-badge"><Check aria-hidden="true" />Activa</span></div><span className="profile-type">{user.discord_name}</span>{hint && <p>{hint}</p>}</div>
       <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Opciones de Panitacraft"><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => setConfirming(true)}><LogOut />Cerrar sesión</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
     </div>

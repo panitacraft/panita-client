@@ -108,6 +108,7 @@
   .active-badge { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #54A636; border-radius: 4px; padding: 2px 6px; color: #E4FFDA; background: #21351c; font-size: 11px; }
   .active-badge svg { width: 12px; height: 12px; }
   .panita-profile-logo { width: 48px; height: 64px; object-fit: contain; }
+  .panita-profile-avatar { width: 56px; height: 56px; flex-shrink: 0; object-fit: cover; border-radius: 50%; }
   .transient-notice-region { position: fixed; right: 24px; bottom: 24px; z-index: 100; max-width: min(420px, calc(100vw - 48px)); pointer-events: none; text-align: left; }
   .transient-notice { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid #54A636; border-radius: 8px; background: #21351c; color: #E4FFDA; box-shadow: 0 8px 30px #0008; font-size: 13px; }
   .transient-notice > svg { width: 18px; height: 18px; flex-shrink: 0; }
