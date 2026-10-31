@@ -5,7 +5,7 @@ export type DiagnosticPhase = 'preparing' | 'installing' | 'installed' | 'uninst
 export type DiagnosticRecord = {
   processSessionId: string;
   operationId: string | null;
-  event: 'activation_failure' | 'application_started' | 'operation_cancelled' | 'storage_failure' | 'catalog_failure' | 'workflow_changed' | 'browser_dispatch_failed' | 'browser_context_unavailable' | 'browser_gio_failed' | 'browser_system_opener_failed' | 'browser_system_opener_timed_out' | 'browser_fallback_succeeded';
+  event: 'activation_failure' | 'launcher_update_failure' | 'application_started' | 'operation_cancelled' | 'storage_failure' | 'catalog_failure' | 'workflow_changed' | 'browser_dispatch_failed' | 'browser_context_unavailable' | 'browser_gio_failed' | 'browser_system_opener_failed' | 'browser_system_opener_timed_out' | 'browser_fallback_succeeded';
   workflow: Workflow | null;
   phase: DiagnosticPhase | null;
   error: LauncherErrorCode | null;
@@ -26,6 +26,7 @@ const phases: Record<DiagnosticPhase, string> = {
 export function diagnosticText(record: DiagnosticRecord): string {
   switch (record.event) {
     case 'activation_failure': return 'No se pudo verificar el acceso a Panitacraft.';
+    case 'launcher_update_failure': return 'No se pudo comprobar o aplicar una actualización de Panita Client.';
     case 'application_started': return 'Se inició Panita Client.';
     case 'operation_cancelled': return 'Se canceló una operación.';
     case 'storage_failure': return 'No pudimos acceder o guardar los datos del cliente.';

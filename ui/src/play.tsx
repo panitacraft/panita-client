@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronDown, Download, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, MonitorPlay, Square } from 'lucide-react';
+import { ChevronDown, CircleArrowUp, Download, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, MonitorPlay, Square } from 'lucide-react';
 import { InstanceProgress } from './components/instance-progress';
 import { AccountDialog } from './components/account-dialog';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
@@ -9,6 +9,8 @@ import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { messageForError } from './errors';
 import { acceptPlaySnapshot, playActive, type PlaySnapshot } from './play-state';
+import { useLauncherUpdate } from './update';
+import { blocksPlay } from './update-state';
 import type { UpdateTarget } from './library-state';
 import { invokePlay, type PlayArguments, type PlayCommand } from './play-api';
 import { nativeCleanupSummary, nativeRetentionReason, type NativeCleanupReport } from './native-cleanup-state';
@@ -108,6 +110,9 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   const entry = play?.snapshot?.instances.find(entry => entry.instanceId === instanceId);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const active = entry && playActive(entry.phase);
+  // A required launcher update replaces Play; installing and updating instances stay available.
+  const launcherUpdate = useLauncherUpdate();
+  const launcherRequired = !active && blocksPlay(launcherUpdate?.view ?? null);
   const running = entry && (entry.phase === 'running' || entry.phase === 'stopping');
   const optionsVisible = optionsAllowed && entry?.phase !== 'uninstalled';
   const primaryDisabled = active ? !running || entry.phase === 'stopping'
@@ -231,6 +236,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       {running && entry.phase !== 'stopping' ? <MonitorPlay aria-hidden="true" /> : <LoaderCircle className="spin" aria-hidden="true" />}{running ? entry.phase === 'stopping' ? 'Cerrando…' : 'En ejecución' : 'Preparando…'}
     </Button> : updateTarget ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy} onClick={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</Button>
       : (installAllowed && entry?.phase !== 'installed') || entry?.phase === 'uninstalled' ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy || !installAllowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.phase === 'failed' ? 'Reintentar instalación' : 'Instalar'}</Button>
+      : launcherRequired ? <Button className="primary-play h-12 text-xl" size="lg" aria-disabled="true" title="Actualiza Panita Client para poder jugar. El botón de versión de la barra lateral inicia la actualización." onClick={() => launcherUpdate?.highlight()}><CircleArrowUp aria-hidden="true" />Actualización requerida</Button>
       : <Button className="primary-play h-12 text-xl" size="lg" disabled={busy || !allowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}><Play aria-hidden="true" />{allowed ? 'Jugar' : 'No disponible para jugar'}</Button>}
     {optionsVisible && <>
     <DropdownMenu modal={false} open={optionsEnabled && optionsOpen} onOpenChange={open => setOptionsOpen(optionsEnabled && open)}>

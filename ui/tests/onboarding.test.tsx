@@ -60,10 +60,24 @@ test('an activated member without Minecraft accounts can complete offline onboar
   activate(); const user = userEvent.setup(); mount();
   expect(await screen.findByRole('heading', { name: 'Acceder a Minecraft' })).toBeTruthy();
   expect(await screen.findByRole('button', { name: 'Añadir cuenta Microsoft', exact: true })).toBeTruthy();
-  await user.click(screen.getByRole('button', { name: 'Añadir cuenta No premium' }));
+  await user.click(screen.getByRole('button', { name: 'Añadir cuenta No-Premium' }));
   expect((await screen.findByLabelText('Nombre de usuario') as HTMLInputElement).value).toBe('Fixture_Player');
   await user.click(screen.getByRole('button', { name: 'Confirmar' }));
   expect(await screen.findByRole('heading', { name: 'Biblioteca de prueba' })).toBeTruthy();
+});
+
+test('a code screen restored without a typed name does not greet an empty name', async () => {
+  activation = { ...activation, state: 'pending', serial: 'ABCD-EFGH-IJKL', expires_at: Math.floor(Date.now() / 1000) + 120 };
+  mount();
+  expect(await screen.findByLabelText('Código ABCD-EFGH-IJKL')).toBeTruthy();
+  expect(screen.queryByText(/Hola,/)).toBeNull();
+  expect(screen.getByText('Confirma este código en Discord')).toBeTruthy();
+});
+
+test('the Minecraft onboarding card uses the same card as the activation screen', async () => {
+  activate(); mount();
+  const heading = await screen.findByRole('heading', { name: 'Acceder a Minecraft' });
+  expect(heading.closest('section')?.classList.contains('login-card')).toBe(true);
 });
 
 test('initialization failure offers a visible retry instead of an empty window', async () => {
@@ -103,4 +117,27 @@ test('activation preserves the full serial, supports copy, and regenerates expir
   await user.click(screen.getByRole('button', { name: 'Generar otro código' }));
   await waitFor(() => expect((screen.getByRole('button', { name: 'Copiar código' }) as HTMLButtonElement).disabled).toBe(false));
   expect(native.invoke).toHaveBeenLastCalledWith('activation_snapshot', undefined);
+});
+
+test('file names inside an activation error are shown as inline code', async () => {
+  activation = { ...activation, error: 'activation_file_invalid' };
+  mount();
+  const alert = await screen.findByRole('alert');
+  const file = alert.querySelector('code.inline-code');
+  expect(file?.textContent).toBe('panita-session.json');
+  expect(alert.textContent).toContain('Cierra el cliente y elimina panita-session.json');
+});
+
+test('Panita Bot opens its Discord conversation and a failure says what to do instead', async () => {
+  activation = { ...activation, state: 'pending', serial: 'ABCD-EFGH-IJKL', expires_at: Math.floor(Date.now() / 1000) + 120 };
+  const implementation = native.invoke.getMockImplementation()!;
+  native.invoke.mockImplementation(async (command: string, ...rest: unknown[]) => command === 'open_panita_bot' ? undefined : implementation(command, ...rest));
+  const user = userEvent.setup(); mount();
+  const link = await screen.findByRole('button', { name: 'Panita Bot' });
+  await user.click(link);
+  expect(native.invoke).toHaveBeenCalledWith('open_panita_bot', undefined);
+  native.invoke.mockImplementation(async (command: string, ...rest: unknown[]) => command === 'open_panita_bot' ? Promise.reject('browser_unavailable') : implementation(command, ...rest));
+  await user.click(link);
+  expect(await screen.findByText(/No pudimos abrir Discord/)).toBeTruthy();
+  expect(document.querySelector('.serial-instructions code')?.textContent).toBe('/confirm ABCD-EFGH-IJKL');
 });

@@ -523,6 +523,35 @@ fn catalog_outage_needs_warning_but_missing_disabled_and_bad_data_never_fall_bac
 }
 
 #[tokio::test]
+async fn a_pending_launcher_update_blocks_play_before_any_reservation_or_catalog_request() {
+    let (paths, accounts, id) = fixture();
+    let running = crate::launcher_update::current_version().unwrap_or_else(|_| panic!("version"));
+    let newer = semver::Version::new(running.major + 1, 0, 0);
+    let store = PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store"));
+    assert!(crate::launcher_update::record_check(&store, &running, Some(&newer), 1).is_ok());
+    // No catalog response is queued, so any catalog request would fail this test.
+    let (catalog, server) = crate::catalog::tests::server(vec![]);
+    let result = prepare_with_catalog(
+        paths.clone(),
+        id,
+        accounts.clone(),
+        Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform")),
+        ProcessSessionId::new(),
+        Cancellation::default(),
+        catalog,
+    )
+    .await;
+    assert_eq!(
+        result.err().map(|e| e.code()),
+        Some(ErrorCode::LauncherUpdateRequired)
+    );
+    assert!(server.join().is_ok());
+    assert!(LaunchLease::acquire(&paths, id).is_ok());
+    drop((accounts, store));
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
 async fn explicit_disabled_detail_is_recorded_and_releases_launch_reservation() {
     let (paths, accounts, id) = fixture();
     let mut response = crate::catalog::tests::record();

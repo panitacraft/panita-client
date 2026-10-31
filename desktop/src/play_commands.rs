@@ -605,6 +605,26 @@ impl PlayController {
         }
     }
 
+    /// Reserve the launcher for a launcher update. It succeeds only while no game or
+    /// operation is active, and then refuses all new work until the reservation ends.
+    pub(super) fn begin_update_apply(&self) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.closing || state.entries.values().any(|entry| entry.phase.active()) {
+            return false;
+        }
+        state.closing = true;
+        true
+    }
+
+    /// End the reservation after an update could not be applied.
+    pub(super) fn cancel_update_apply(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.closing = false;
+        }
+    }
+
     pub fn cancel_pending(&self) {
         if let Ok(mut state) = self.state.lock() {
             state.cancel_pending(false);

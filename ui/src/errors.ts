@@ -17,7 +17,8 @@ export type LauncherErrorCode =
   | 'activation_required' | 'activation_unavailable' | 'activation_unknown_account'
   | 'activation_not_activated' | 'activation_rate_limited' | 'activation_expired'
   | 'activation_consumed' | 'activation_file_invalid' | 'session_rejected' | 'api_key_rejected'
-  | 'manual_files_required' | 'pack_conflict' | 'update_required';
+  | 'manual_files_required' | 'pack_conflict' | 'update_required'
+  | 'launcher_update_required' | 'launcher_update_unsupported' | 'launcher_update_failed';
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
@@ -54,7 +55,7 @@ const messages: Record<LauncherErrorCode, string> = {
   minecraft_not_owned: 'Esta cuenta no tiene un perfil de Minecraft Java disponible. Comprueba tu licencia y crea el perfil.',
   operation_busy: 'Hay una operación de inicio de sesión en curso. Espera o cancélala.',
   operation_cancelled: 'La operación se canceló. Puedes intentarlo de nuevo.',
-  accounts_file_invalid: 'El archivo de cuentas está dañado o pertenece a una versión no compatible. No lo modificamos para proteger tus datos. Cierra el cliente y restaura una copia de accounts.json en la carpeta PanitaClient de tus datos de aplicación, o elimínalo para empezar de nuevo.',
+  accounts_file_invalid: 'El archivo de cuentas está dañado o no es compatible. Cierra el cliente y restaura una copia de accounts.json (o elimínalo para empezar de nuevo) en la carpeta PanitaClient de tus datos de aplicación.',
   unsafe_permissions: 'No pudimos usar un archivo protegido o su carpeta porque sus permisos no son seguros. Revisa que otras cuentas no puedan leerlo ni reemplazarlo y vuelve a intentarlo.',
   callback_not_active: 'Se ignoró un regreso del navegador que ya no estaba activo. Si querías iniciar sesión, vuelve a intentarlo.',
   callback_registration_failed: 'No pudimos configurar el regreso desde el navegador. Reinicia el cliente e inténtalo de nuevo.',
@@ -66,12 +67,15 @@ const messages: Record<LauncherErrorCode, string> = {
   activation_rate_limited: 'Tienes demasiados códigos pendientes.',
   activation_expired: 'El código venció. Pide uno nuevo.',
   activation_consumed: 'Este código ya no es válido. Pide uno nuevo.',
-  activation_file_invalid: 'El archivo de activación está dañado o pertenece a una versión no compatible. No lo modificamos para proteger tus datos. Cierra el cliente y elimina panita-session.json (un archivo oculto) de la carpeta PanitaClient de tus datos de aplicación para activar de nuevo.',
+  activation_file_invalid: 'El archivo de sesión está dañado o no es compatible. Cierra el cliente y elimina panita-session.json (archivo oculto) en la carpeta de los datos de la aplicación.',
   session_rejected: 'Tu sesión de Panitacraft se cerró. Actívala de nuevo para continuar.',
   api_key_rejected: 'El servicio rechazó esta versión de Panita Client. Instala la versión más reciente.',
   manual_files_required: 'Faltan archivos que debes descargar tú mismo. Complétalos para poder jugar.',
   pack_conflict: 'Ya existen archivos tuyos donde este modpack necesita instalar los suyos. No cambiamos nada: revisa la lista, muévelos o elimínalos y vuelve a instalar.',
   update_required: 'Actualiza esta instancia antes de jugar.',
+  launcher_update_required: 'Actualiza Panita Client antes de jugar.',
+  launcher_update_unsupported: 'Esta instalación no puede actualizarse sola. Instala la versión nueva desde la página de la versión.',
+  launcher_update_failed: 'No se pudo actualizar Panita Client. Inténtalo de nuevo.',
 };
 
 export function messageForError(error: unknown): string {

@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
+import { MessageText } from './components/message-text';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { WindowControls } from './components/window-controls';
@@ -217,29 +218,34 @@ function ActivationScreen() {
     catch { toast.show('No pudimos copiar el código. Selecciónalo y cópialo a mano.', 'error'); }
   }
 
+  async function openBot() {
+    try { await invokeActivation('open_panita_bot', undefined); }
+    catch { toast.show('No pudimos abrir Discord. Busca a Panita Bot en tus mensajes directos.', 'error'); }
+  }
+
   const expired = !pending && !!lastSerial && code === 'activation_expired';
   const help = 'Te damos un código que confirmas desde Discord: envíaselo a Panita Bot por mensaje directo o usa /confirm en el servidor. No necesitas contraseña.';
   return <Shell>
-    <section className="activation-section login-card" aria-labelledby="activation-title">
+    <section className="login-card" aria-labelledby="activation-title">
       <h1 id="activation-title" className="account-title"><img src={logoWhite} alt="" />Acceder a Panita Client</h1>
-      <p className="login-subtitle">{pending || expired ? 'Introduce este código' : 'Vincula tu cuenta de Panitacraft'} <Hint text={help}><button className="info-button" aria-label="Cómo vincular tu cuenta"><Info aria-hidden="true" /></button></Hint></p>
+      <p className="login-subtitle">{pending || expired ? 'Confirma este código en Discord' : 'Vincula tu cuenta de Panitacraft'} <Hint text={help}><button className="info-button" aria-label="Cómo vincular tu cuenta"><Info aria-hidden="true" /></button></Hint></p>
       <TransientNotice notice={toast.notice} />
       {activation.initializationError && <div role="alert"><p>{messageForError(activation.initializationError)}</p><Button onClick={activation.retryInitialization}><RefreshCw aria-hidden="true" />Reintentar</Button></div>}
       {!activation.initializationError && !view && <p role="status">Cargando…</p>}
-      {shown && !expired && !waitingOffline && !needsConnection && <p role="alert" className="account-error">{shown}</p>}
-      {needsConnection && <p role="alert">No pudimos conectar con Panitacraft. Revisa tu conexión e inténtalo de nuevo.</p>}
+      {shown && !expired && !waitingOffline && !needsConnection && <p role="alert" className="login-error"><MessageText text={shown} /></p>}
+      {needsConnection && <p role="alert" className="login-error">No pudimos conectar con Panitacraft. Revisa tu conexión e inténtalo de nuevo.</p>}
       {waitingOffline && <p role="status">No pudimos conectar con el servicio. Seguimos esperando tu confirmación mientras el código siga vigente.</p>}
       {view && !pending && !expired && <form className="activation-form" noValidate onSubmit={event => { event.preventDefault(); void activation.start(identifier); }}>
         <label htmlFor="member-identifier">IGN o usuario de Discord</label>
         <div className="identifier-input"><ProfileArtwork username={identifier.trim()} /><input id="member-identifier" placeholder="Ej. Aerosmith_" value={identifier} onChange={event => setIdentifier(event.target.value)} maxLength={100} required autoComplete="off" /></div>
-        <Button type="submit" disabled={starting || identifier.trim().length === 0}>{starting ? 'Pidiendo tu código…' : 'Continuar'}<ArrowRight aria-hidden="true" /></Button>
+        <Button type="submit" disabled={starting || identifier.trim().length === 0}>{starting ? 'Generando tu código…' : 'Continuar'}<ArrowRight aria-hidden="true" /></Button>
       </form>}
       {(pending || expired) && serial && <div className={`serial-box ${expired ? 'is-expired' : ''}`}>
-        <p className="member-greeting">Hola, <ProfileArtwork username={identifier.trim()} /><strong>{identifier}</strong></p>
+        {identifier.trim() && <p className="member-greeting">Hola, <ProfileArtwork username={identifier.trim()} /><strong>{identifier.trim()}</strong></p>}
         <div className="serial-groups" role="status" aria-label={`Código ${serial}`}><code>{serial}</code></div>
         <Button variant="outline" disabled={expired} onClick={() => void copySerial()}><Copy aria-hidden="true" />Copiar código</Button>
         {pending && <>
-          <p className="serial-instructions">Envía el código a <strong>Panita Bot</strong> por mensaje directo.<br />En el servidor, usa <code>/confirm {serial}</code></p>
+          <p className="serial-instructions">Envía el código a <button type="button" className="text-action bot-link" title="Abrir la conversación con Panita Bot en Discord" onClick={() => void openBot()}>Panita Bot</button> por mensaje directo.<br />En el servidor, usa <code>/confirm {serial}</code></p>
           <p className="serial-expiry">Vence en {countdownText(remainingSeconds(view?.expires_at ?? null, now))}.</p>
         </>}
         <p>¿No eres tú? <button className="text-action" disabled={!!activation.busy} onClick={() => { void activation.cancel().then(() => setLastSerial(null)); }}>Cambiar</button></p>
@@ -253,6 +259,13 @@ function Onboarding() {
   const activation = useActivation();
   const user = activation?.view?.user ?? null;
   return <Shell><Accounts onboarding suggestedName={user ? offlineNameSuggestion(user) : ''} /></Shell>;
+}
+
+/** The member's Discord avatar, falling back to the Panita logo when absent or failing to load. */
+function PanitaAvatar({ url }: { url: string | null }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!url || url === failed) return <img className="panita-profile-logo" src={logoWhite} alt="" />;
+  return <img className="panita-profile-avatar" src={url} alt="" aria-hidden="true" referrerPolicy="no-referrer" decoding="async" onError={() => setFailed(url)} />;
 }
 
 /** The member's Panitacraft account inside the launcher, with the session controls. */
@@ -275,10 +288,10 @@ export function ActivationPanel() {
       <p>Tu sesión de Panitacraft no se ha guardado. Reintenta guardarla antes de cerrar el cliente.</p>
       <Button onClick={() => void activation.retrySave()}><RefreshCw aria-hidden="true" />Reintentar guardado</Button>
     </div>}
-    {(activation.error ?? (view.error === 'api_key_rejected' ? view.error : null)) && <p role="alert" className="account-error">{messageForError(activation.error ?? view.error)}</p>}
+    {(activation.error ?? (view.error === 'api_key_rejected' ? view.error : null)) && <p role="alert" className="account-error"><MessageText text={messageForError(activation.error ?? view.error)} /></p>}
     <TransientNotice notice={toast.notice} />
     <div className="profile-row panita-profile">
-      <img className="panita-profile-logo" src={logoWhite} alt="" />
+      <PanitaAvatar url={user.avatar_url} />
       <div className="profile-info"><div className="profile-name"><strong>{memberName(user)}</strong><span className="active-badge"><Check aria-hidden="true" />Activa</span></div><span className="profile-type">{user.discord_name}</span>{hint && <p>{hint}</p>}</div>
       <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Opciones de Panitacraft"><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => setConfirming(true)}><LogOut />Cerrar sesión</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
     </div>

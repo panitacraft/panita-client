@@ -25,6 +25,20 @@ fn acquisition_rejects_interior_dots_before_path_normalization() {
     assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
 }
 
+/// Restores a directory the attacker moved. On Windows a rename fails while the victim briefly
+/// holds a handle inside the directory, so the restore retries instead of failing the test.
+fn restore(from: &Path, to: &Path) {
+    let mut last = None;
+    for _ in 0..10_000 {
+        match std::fs::rename(from, to) {
+            Ok(()) => return,
+            Err(error) => last = Some(error),
+        }
+        std::thread::yield_now();
+    }
+    panic!("could not restore {from:?}: {last:?}");
+}
+
 pub(crate) fn redirect(dir: &PrivateDir, root: &Path, outside: &Path) {
     let barrier = Barrier::new(2);
     let replacements = AtomicUsize::new(0);
@@ -38,9 +52,9 @@ pub(crate) fn redirect(dir: &PrivateDir, root: &Path, outside: &Path) {
                 if std::fs::rename(root.join("bad"), root.join("slot")).is_ok() {
                     replacements.fetch_add(1, Ordering::Relaxed);
                     std::thread::yield_now();
-                    std::fs::rename(root.join("slot"), root.join("bad")).unwrap();
+                    restore(&root.join("slot"), &root.join("bad"));
                 }
-                std::fs::rename(root.join("park"), root.join("slot")).unwrap();
+                restore(&root.join("park"), &root.join("slot"));
             }
         });
         barrier.wait();

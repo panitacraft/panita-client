@@ -8,11 +8,12 @@ import { PreferencesProvider } from './settings';
 import { GameLogWindow } from './game-output';
 import { logWindowIdentity } from './game-output-state';
 import { Launcher } from './launcher';
+import { LauncherUpdateProvider } from './update';
 import './style.css';
 
 const logIdentity = isTauri() ? logWindowIdentity(getCurrentWindow().label) : null;
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {logIdentity ? <GameLogWindow {...logIdentity} /> : <PreferencesProvider><PlayProvider><ActivationProvider><ActivationGate><Launcher /></ActivationGate></ActivationProvider></PlayProvider></PreferencesProvider>}
+    {logIdentity ? <GameLogWindow {...logIdentity} /> : <PreferencesProvider><PlayProvider><ActivationProvider><ActivationGate><LauncherUpdateProvider><Launcher /></LauncherUpdateProvider></ActivationGate></ActivationProvider></PlayProvider></PreferencesProvider>}
   </React.StrictMode>,
 );

@@ -28,13 +28,13 @@ afterEach(cleanup);
 
 test('offline cancellation never submits and validation errors remain inside the dialog', async () => {
   const user = userEvent.setup(); render(<Accounts onboarding />);
-  await waitFor(() => expect((screen.getByRole('button', { name: 'Añadir cuenta No premium' }) as HTMLButtonElement).disabled).toBe(false));
-  await user.click(screen.getByRole('button', { name: 'Añadir cuenta No premium' }));
+  await waitFor(() => expect((screen.getByRole('button', { name: 'Añadir cuenta No-Premium' }) as HTMLButtonElement).disabled).toBe(false));
+  await user.click(screen.getByRole('button', { name: 'Añadir cuenta No-Premium' }));
   await user.type(screen.getByLabelText('Nombre de usuario'), 'Fixture');
   await user.click(screen.getByRole('button', { name: 'Cancelar' }));
   expect(backend.invoke.mock.calls.some(([command]) => command === 'add_offline_account')).toBe(false);
   expect(screen.queryByRole('dialog')).toBeNull();
-  await user.click(screen.getByRole('button', { name: 'Añadir cuenta No premium' }));
+  await user.click(screen.getByRole('button', { name: 'Añadir cuenta No-Premium' }));
   await user.type(screen.getByLabelText('Nombre de usuario'), 'Fixture');
   backend.invoke.mockRejectedValueOnce('invalid_username');
   await user.click(screen.getByRole('button', { name: 'Confirmar' }));
@@ -48,6 +48,10 @@ test('Microsoft link copying and cancellation use the active backend operation',
   await user.click(button);
   const dialog = await screen.findByRole('dialog', { name: 'Añadir cuenta Microsoft' });
   await waitFor(() => expect((within(dialog).getByRole('button', { name: 'Copiar enlace' }) as HTMLButtonElement).disabled).toBe(false));
+  // While the browser step is pending, a spinner shares the line with the waiting sentence.
+  const waiting = within(dialog).getByText(/Completa el inicio de sesión en tu navegador/);
+  expect(waiting.classList.contains('login-wait')).toBe(true);
+  expect(waiting.querySelector('svg.spin')).not.toBeNull();
   await user.click(within(dialog).getByRole('button', { name: 'Copiar enlace' }));
   expect(await screen.findByText('Enlace copiado.')).toBeTruthy();
   expect(await navigator.clipboard.readText()).toBe('https://login.microsoftonline.com/fixture');
@@ -90,8 +94,8 @@ test('account management reuses offline creation and only removes after confirma
   const image = document.querySelector('.profile-bust')!;
   expect(image.getAttribute('src')).toContain('/3d/bust/MHF_Steve?width=128&height=128');
   await user.click(screen.getByRole('button', { name: 'Añadir', exact: true }));
-  await user.click(screen.getByRole('menuitem', { name: 'Añadir cuenta No premium' }));
-  expect(screen.getByRole('dialog', { name: 'Nueva cuenta No premium' })).toBeTruthy();
+  await user.click(screen.getByRole('menuitem', { name: 'Añadir cuenta No-Premium' }));
+  expect(screen.getByRole('dialog', { name: 'Nueva cuenta No-Premium' })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Cancelar' }));
   await user.click(screen.getByRole('button', { name: 'Opciones de Fixture' }));
   await user.click(screen.getByRole('menuitem', { name: 'Quitar cuenta' }));

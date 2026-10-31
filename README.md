@@ -96,13 +96,15 @@ the package contents, AppImage extraction and runtime linkage, and copies both c
 `target/beta/`. It does not install anything on the testing VM. Compilation and
 package inspection do not establish installed-product qualification.
 
-The [manual beta workflow](.github/workflows/prepare-beta.yml) checks and packages
-committed `develop` into temporary Actions artifacts for review. It requires an
-explicit dispatch with the matching beta version, uses read-only repository
-permissions, and does not create releases or tags. Dispatch and publication need
-owner authorization. Each newly built artifact requires its own qualification;
-prior test reports do not certify a different file. Release preparation documents
-remain local under the ignored `docs/` directory.
+The [release workflow](.github/workflows/release.yml) publishes from the committed
+version: a push to `develop` releases a beta (`X.Y.Z-beta.N`) and a push to `master`
+releases a stable version (`X.Y.Z`). It builds the exact pushed commit on Windows and
+Linux, signs the updater packages with the repository's updater key, tags that commit
+and publishes the release, and advances the signed update feeds last (the stable
+release moves both feeds). An already published version is never rebuilt, and a feed
+only moves forward. Each newly built artifact requires its own qualification; prior
+test reports do not certify a different file. Release preparation documents remain
+local under the ignored `docs/` directory.
 
 The [release workflow](.github/workflows/release.yml) runs when a `v*` tag is pushed
 to GitHub. Use a semantic version such as `v0.1.0-alpha`, `v0.1.0-beta.1` or

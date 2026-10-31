@@ -6,6 +6,22 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { archPackageVersion, releaseVersion } from './release-version.mjs';
 
+/**
+ * An updater signature file is base64 of a minisign signature whose trusted comment names the
+ * released version. This checks its shape and identity, not the cryptography: the updater plugin
+ * verifies the signature itself against the embedded public key.
+ */
+export function checkUpdaterSignature(text, version) {
+  const encoded = text.trim();
+  const decoded = /^[A-Za-z0-9+/]+={0,2}$/.test(encoded) ? Buffer.from(encoded, 'base64').toString('utf8') : '';
+  const lines = decoded.split('\n');
+  const trusted = lines[2] ?? '';
+  if (lines.length < 4 || !lines[0].startsWith('untrusted comment:') || !/^[A-Za-z0-9+/=]{60,}$/.test(lines[1])
+      || !trusted.startsWith('trusted comment:') || !trusted.split(/\s+/).includes(`version:${version}`)) {
+    throw new Error("Invalid updater signature");
+  }
+}
+
 // Artifact paths come from the release contract, never from a candidate manifest.
 export async function verifyBeta({ directory, platform, version, revision, release = false, withArch = false, loaderValidation = false }) {
   if (loaderValidation && (release || withArch)) throw new Error('Loader validation cannot be a release');
@@ -47,6 +63,11 @@ export async function verifyBeta({ directory, platform, version, revision, relea
     }
     if (loaderValidation && (JSON.stringify(candidate.features) !== '["loader-validation"]'
         || candidate.distribution !== 'internal_validation_only')) throw new Error('Invalid loader validation provenance');
+    if (!loaderValidation && distribution !== 'archlinux') {
+      const signaturePath = `${artifact}.sig`;
+      if (!(await lstat(signaturePath).catch(() => null))?.isFile()) throw new Error(`Missing updater signature: ${name}.sig`);
+      checkUpdaterSignature(await readFile(signaturePath, 'utf8'), version);
+    }
     const hash = createHash('sha256');
     for await (const chunk of createReadStream(artifact)) hash.update(chunk);
     const digest = hash.digest('hex');

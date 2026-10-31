@@ -72,6 +72,7 @@ pub enum LogEvent {
     /// A Panita activation step failed or the session ended. Never the account,
     /// serial, token or service response, only the fixed error code.
     ActivationFailure(ErrorCode),
+    LauncherUpdateFailure(ErrorCode),
     WorkflowChanged {
         request: Uuid,
         workflow: Workflow,
@@ -169,6 +170,10 @@ impl BoundedLog {
                     }
                     LogEvent::ActivationFailure(code) => {
                         view.event = "activation_failure";
+                        view.error = Some(code);
+                    }
+                    LogEvent::LauncherUpdateFailure(code) => {
+                        view.event = "launcher_update_failure";
                         view.error = Some(code);
                     }
                     LogEvent::WorkflowChanged {

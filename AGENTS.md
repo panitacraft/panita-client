@@ -37,7 +37,7 @@ Panita Client is an unofficial, plug-and-play Minecraft launcher for friends. It
 ### Branch convention
 
 - Use `develop` as the development branch. Keep `master` as the existing primary branch; do not rename it or change remote defaults without explicit authorization.
-- Every new phase must use its own new branch from `develop`, using `<type>/<short-description>`, for example `feat/auth-fundamentals`, `fix/session-renewal`, or `docs/development-setup`. Do not implement a phase directly on `develop` or reuse the previous phase's branch. Base each dependent phase on the accepted work integrated into `develop`; integration and pushes retain their authorization requirements. This owner decision applies from 2026-10-27.
+- Every new phase must use its own new branch from `develop`, using `<type>/<short-description>`, for example `feat/auth-fundamentals`, `fix/session-renewal`, or `docs/development-setup`. Do not implement a phase directly on `develop` or reuse the previous phase's branch. Base each dependent phase on the accepted work integrated into `develop`; integration and pushes retain their authorization requirements. This owner decision applies from 2026-10-27. Exception (owner decision, 2026-10-30): the launcher auto-update and release-channel work of §8 is implemented in one branch, `feat/auto-updater-and-wizard-facelift`, with separate commits per phase.
 - Use the commit types listed below and lowercase, hyphen-separated descriptions. Do not create extra branches without a concrete reason.
 - Branch creation is local unless explicitly authorized otherwise. Pushes, remote branch changes, and GitHub issue mutations require authorization for that scope.
 
@@ -158,6 +158,13 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
   open a partially erased profile or retry erasure automatically at startup.
   This explicitly supersedes data-preservation requirements only for this
   separately confirmed full-profile erasure; all other operations retain them.
+- On 2026-10-30 the owner approves a narrow exception to the normal-user rule for
+  updating the Linux `.deb` launcher package: the signed, verified package is
+  installed through the operating system's `pkexec` prompt only. The launcher
+  never reads, stores or relays an administrator password, never falls back to
+  `sudo` password piping or a launcher-drawn password dialog, and never elevates
+  for accounts, instances or any other operation. If `pkexec` is unavailable or
+  denied, show the manual update-required screen of §8 and preserve all data.
 
 ### 4.4 Data on disk
 
@@ -169,6 +176,7 @@ PanitaClient/
 ├─ account-removals.json  # temporary nonsecret pending account-removal recovery
 ├─ panita-session.json    # sensitive: Panitacraft session token and a nonsecret member snapshot; hidden on Windows
 ├─ settings.json          # indented disk schema 3; compact, explicit keys
+├─ update-state.json      # nonsecret launcher-update channel and pending requirement (§8)
 ├─ insts-cache.json
 ├─ instance-erasures.json # temporary explicit full-instance erasure intents; never auto-retried
 ├─ libraries/             # shared, verified caches
@@ -604,14 +612,12 @@ and individual measurements are evidence, not product guarantees.
   mandatory update is already known, permit use with a warning. A failed check
   never clears a known pending requirement. Verify updater signatures; private
   signing keys stay in CI. This does not claim Windows publisher code signing.
-- Only merged PRs targeting `master` trigger public version allocation, tags and
-  releases after successful checks and packaging. Use `0.2.x-beta.x`, starting at `v0.2.0-beta.1`, as approved by the owner
-  on 2026-10-30. Increment the beta number for candidates of the same patch;
-  reset it to 1 when advancing the patch. `develop` runs CI and may produce
-  test artifacts, but does not publish releases or advance the update feed. Keep
-  version allocation serialized, retries idempotent, artifacts immutable and
-  update-feed publication last. Plan/workflow preparation does not itself push,
-  merge, create release tags or publish binaries.
+- Release channels follow §8 (owner decision, 2026-10-30): merges to `develop`
+  publish beta releases and merges to `master` publish stable releases. This
+  supersedes the earlier master-only publication rule and the `0.2.x-beta.x`
+  scheme. Keep version allocation serialized, retries idempotent, artifacts
+  immutable and update-feed publication last. Plan/workflow preparation does not
+  itself push, merge, create release tags or publish binaries.
 - Use the annotated launcher layout reference and supplied palette for the
   interim facelift: dark `#141414`, `#1B1B1B`, `#515151`; light `#F9FFF8`,
   `#E4FFDA`, `#BABABA`; primary `#54A636`, `#047500`. Theme switching is not
@@ -623,3 +629,65 @@ and individual measurements are evidence, not product guarantees.
 - Qualify the new installed-product scope on Windows 11 x64 and Ubuntu x64;
   retain the separate Ubuntu 24.04 build baseline. macOS is outside scope.
   Earlier MVP results do not qualify new modpack or updater behavior.
+
+## 8. Release Channels, Updates and Versioning (2026-10-30)
+
+Owner decisions of 2026-10-30. They replace the master-only release rule and the
+`0.2.x-beta.x` scheme of §7; the mandatory-update behavior of §7 and Annex A
+still applies to both channels.
+
+### Channels
+
+- A merge to `develop` publishes a **beta** release (`X.Y.Z-beta.N`, GitHub
+  prerelease). A merge to `master` publishes a **stable** release (`X.Y.Z`).
+  Nothing else publishes: pull requests and unmerged branches only run CI.
+- The launcher follows the stable feed by default. Receiving beta versions is an
+  explicit player opt-in. The beta feed also carries every stable release, so a
+  beta player moves to the stable build when it supersedes the beta.
+- Both feeds are static, HTTPS, signed `latest.json` files served as assets of the
+  fixed releases `updater-stable` and `updater-beta`. Do not rely on GitHub's
+  generic latest-release selection, which skips prereleases, and do not call the
+  GitHub REST API from the launcher. The Panita API supplies no update data.
+- One workflow builds from the exact merged commit, tags that commit, uploads
+  installers, signatures and checksums, and advances the feed last. A feed update
+  must carry a strictly greater version than the current feed. Retries are
+  idempotent: an existing tag is never rebuilt or replaced. Published binaries are
+  immutable; a bad release is superseded by a forward fix.
+- Updater signatures are mandatory and distinct from Windows publisher code
+  signing. Only the verification public key ships; the private key and its password
+  stay in CI secrets. The launcher accepts only artifact URLs under this
+  repository's release assets and only a version newer than the running one.
+- Update delivery by package: Windows NSIS (Windows 10 and 11, one installer) and
+  Linux AppImage update in place; the Linux `.deb` updates through the system
+  package manager (see §4.3 exception). Packages the updater cannot own, such as
+  the Arch/CachyOS package, show the Spanish update-required screen with a link
+  to the release instead of attempting an install. Existing installations without
+  an updater need one manual install; do not claim automatic upgrade from them.
+- Apply updates only when no supervised game and no active mutation exists, as
+  required by §7. Keep a durable pending-update requirement that a failed check or
+  a restart never clears.
+
+### Versioning
+
+- The committed version is the single authority across `package.json`,
+  `ui/package.json`, both Cargo manifests and `Cargo.lock`, the Tauri
+  configurations and installer preview. CI verifies that they agree and that a
+  release tag equals the committed version; it never rewrites it and never creates
+  version commits. Commits keep the owner as sole author.
+- `develop` carries `X.Y.Z-beta.N`, where `X.Y.Z` is the next stable version.
+  `master` carries `X.Y.Z` with no suffix. The format stays compatible with
+  `scripts/release-version.mjs`.
+- Every change that ships in the application binary updates the version by
+  magnitude: a breaking change (`!`) raises the major number, `feat` the minor
+  number, and `fix`, `perf` or shipped `refactor` the patch number. `docs`,
+  `test`, `style`, `chore` and `ops` without binary effect do not change it.
+- Derive the minimum base from the last stable tag and the magnitude. If the
+  current base already satisfies it, increment `N`; otherwise start the new base
+  at `-beta.1`. Promotion to stable removes the suffix in a
+  `client, build: release X.Y.Z` commit on `develop` before the pull request to
+  `master`.
+- The agent states the intended resulting version when it starts a task, accepts
+  the owner's override, and applies it once with `scripts/bump-version.mjs` in a
+  separate `client, build: bump version to X.Y.Z[-beta.N]` commit immediately
+  before the final commit of the change. Parallel branches may collide on the
+  number; re-derive it at merge time.
