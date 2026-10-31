@@ -128,7 +128,7 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
     <p>{size === null ? 'Calculando tamaño…' : `Tamaño actual: ${new Intl.NumberFormat('es', { maximumFractionDigits: 1 }).format(size / 1048576)} MB`}</p>
     <p>Guarda archivos compartidos para acelerar futuras descargas. Es completamente seguro vaciarla: tus instancias, mundos y ajustes no se verán afectados.</p>
     <button type="button" disabled={busy || !isTauri() || (size === 0 || size === null)} onClick={() => setQuestion(true)}>Limpiar caché</button>
-    {question && <AccountDialog className="update-dialog cache-dialog" titleClassName="dialog-title" onCancel={() => setQuestion(false)}
+    {question && <AccountDialog className="update-dialog" titleClassName="dialog-title" onCancel={() => setQuestion(false)}
       title={<><Database aria-hidden="true" />Limpiar la caché de modpacks</>}>
       <ul className="update-notes">
         <li><FolderOpen aria-hidden="true" />Eliminaremos la carpeta <code>content</code> de tus datos de aplicación ({size === null ? 'tamaño desconocido' : formatBytes(size)}).</li>

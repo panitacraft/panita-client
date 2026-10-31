@@ -247,7 +247,6 @@
   .backup-choice { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; line-height: 1.5; }
   .backup-choice input { margin: 4px 0 0; }
   .update-dialog .account-buttons { margin-top: 24px; }
-  .cache-dialog .account-buttons button { justify-content: flex-start; text-align: left; }
   .page-heading > p { color: #BABABA; }
   .utility-page > section, .utility-page > div > section { background: #1B1B1B; border: 1px solid #383838; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
   .empty-state { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; min-height: 340px; text-align: center; padding: 40px; }
