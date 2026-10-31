@@ -56,9 +56,21 @@ pub(super) fn remove(identifier: &str) -> i32 {
     {
         launcher_core::activation::close_stored_session_blocking(&root);
     }
-    match data_removal::remove_current_profile() {
+    if data_removal::remove_current_profile().is_err() {
+        return 3;
+    }
+    // The browser data is disposable; a failure is still reported so the uninstaller can retry.
+    match data_removal::local_root().and_then(|local| data_removal::remove_web_data_in(&local)) {
         Ok(()) => 0,
         Err(_) => 3,
+    }
+}
+
+/// Earlier builds kept the browser data in a folder named after the application identifier.
+/// Retire it before the webview opens the new one; failures are retried on the next start.
+pub(super) fn retire_legacy_web_data() {
+    if let Ok(local) = data_removal::local_root() {
+        data_removal::retire_legacy_web_data_in(&local);
     }
 }
 

@@ -158,6 +158,17 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
   open a partially erased profile or retry erasure automatically at startup.
   This explicitly supersedes data-preservation requirements only for this
   separately confirmed full-profile erasure; all other operations retain them.
+  Owner decision, 2026-10-31: on Windows the launcher's embedded browser data
+  lives in `%LOCALAPPDATA%\PanitaClient Core` (set through
+  `desktop/tauri.windows.conf.json`) instead of a folder named after the
+  application identifier. It is disposable and holds no account or player data.
+  The same confirmed erasure also removes it, and the legacy
+  `%LOCALAPPDATA%\com.panitacraft.client` folder, refusing redirected folders;
+  the confirmation names both folders. At startup the launcher removes the
+  legacy folder only when it holds nothing but the browser's own `EBWebView`
+  profile, and leaves it alone otherwise. The application identifier and the
+  `%APPDATA%\PanitaClient` data path do not change. Before erasing, the
+  uninstaller also closes the saved Panitacraft session on the API, best effort.
 - On 2026-10-30 the owner approves a narrow exception to the normal-user rule for
   updating the Linux `.deb` launcher package: the signed, verified package is
   installed through the operating system's `pkexec` prompt only. The launcher

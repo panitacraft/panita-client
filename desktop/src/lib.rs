@@ -202,6 +202,8 @@ pub fn run() {
         return;
     }
     #[cfg(windows)]
+    windows_maintenance::retire_legacy_web_data();
+    #[cfg(windows)]
     if !windows_identity::configure(&context.config().identifier) {
         // Cosmetic shell integration must not prevent account or game recovery.
         eprintln!("Windows application identity setup failed");
