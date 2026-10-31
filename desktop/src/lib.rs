@@ -251,6 +251,7 @@ pub fn run() {
             update_commands::set_update_channel,
             update_commands::apply_launcher_update,
             update_commands::cancel_launcher_update_apply,
+            update_commands::open_launcher_release_page,
             settings_commands::settings_snapshot,
             settings_commands::save_global_settings,
             settings_commands::save_instance_settings,

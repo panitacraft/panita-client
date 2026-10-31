@@ -537,6 +537,41 @@ pub(super) fn apply_launcher_update(
     Ok(state.launcher_update.view(&app))
 }
 
+/// Open the release page of the offered version for packages that cannot update
+/// themselves. Only the validated page held here can be opened; the webview supplies none.
+#[tauri::command]
+pub(super) async fn open_launcher_release_page(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<(), ErrorCode> {
+    let page = state
+        .launcher_update
+        .lock()
+        .release_page
+        .clone()
+        .ok_or(ErrorCode::LauncherUpdateFailed)?;
+    #[cfg(target_os = "linux")]
+    let opened = {
+        let handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            super::linux_browser::open_browser(&handle, page)
+        })
+        .await
+        .unwrap_or(Err(()))
+        .is_ok()
+    };
+    #[cfg(not(target_os = "linux"))]
+    let opened = {
+        use tauri_plugin_opener::OpenerExt;
+        app.opener().open_url(page, None::<&str>).is_ok()
+    };
+    if opened {
+        Ok(())
+    } else {
+        Err(ErrorCode::BrowserUnavailable)
+    }
+}
+
 #[tauri::command]
 pub(super) fn cancel_launcher_update_apply(
     app: tauri::AppHandle,
