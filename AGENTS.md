@@ -492,6 +492,17 @@ and individual measurements are evidence, not product guarantees.
   and error codes; download ticks must not flood the viewer. Diagnostics remain
   available when account initialization fails and provide no export or account,
   callback, launch-argument, or raw game-log access.
+- Owner decision, 2026-10-31: write one session log file per launcher process to
+  `logs/session-{timestamp}-{id}.log` for support, with timestamp, level, the same
+  fixed events and error codes, a header with launcher version and platform, and
+  redacted free-text notes (for example game exit codes). Redact home paths, URL
+  queries, bearer tokens, JWTs and Panita serials, bound each note to 1 KiB and
+  each file to 5 MiB, and never write credentials, callbacks, account data or raw
+  game output. Create the folder 0700 and files 0600 on Unix. Delete only
+  application-named session files older than 48 hours, at startup, never following
+  links. File failures never affect the launcher. The diagnostics tab may open the
+  fixed logs folder; there is still no upload or arbitrary-path access. This
+  supersedes "no export" only for these local files.
 - Optional support identifiers are random process/session and operation UUIDs.
   They correlate one process or action; they are neither content hashes nor online
   report lookup codes. Clear structured events on process exit.
