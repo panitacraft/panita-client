@@ -72,6 +72,25 @@ pub fn artifact_allowed(url: &str, version: &Version) -> bool {
     })
 }
 
+/// Accept a feed entry only if it is a newer version that this channel may offer and its
+/// artifact belongs to that exact release. The feed is untrusted until this passes.
+pub fn validate_offer(
+    channel: UpdateChannel,
+    current: &Version,
+    version: &str,
+    artifact_url: &str,
+) -> Result<Version, CoreError> {
+    let offered =
+        Version::parse(version).map_err(|_| CoreError::new(ErrorCode::ArtifactMismatch))?;
+    if offered <= *current
+        || !channel.accepts(&offered)
+        || !artifact_allowed(artifact_url, &offered)
+    {
+        return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+    }
+    Ok(offered)
+}
+
 /// The human-readable release page, used when the package cannot update itself.
 pub fn release_page(version: &Version) -> String {
     format!("{RELEASES}tag/v{version}")
@@ -102,10 +121,12 @@ pub fn record_check(
 ) -> Result<UpdateState, CoreError> {
     store.with_lock(|tx| {
         let mut state = load_document(tx)?;
+        let channel = state.channel;
+        // A requirement the selected channel does not offer cannot be satisfied, so it lapses.
         let mut pending = state
             .pending_version
             .take()
-            .filter(|pending| pending > current);
+            .filter(|pending| pending > current && channel.accepts(pending));
         if let Some(newest) =
             newest.filter(|newest| *newest > current && state.channel.accepts(newest))
             && pending.as_ref().is_none_or(|pending| newest > pending)
@@ -124,9 +145,10 @@ pub fn pending_update(
     store: &PrivateStore,
     current: &Version,
 ) -> Result<Option<Version>, CoreError> {
-    Ok(load(store)?
+    let state = load(store)?;
+    Ok(state
         .pending_version
-        .filter(|pending| pending > current))
+        .filter(|pending| pending > current && state.channel.accepts(pending)))
 }
 
 /// The launch gate. A known newer release blocks new launches. A damaged state file cannot
@@ -247,6 +269,35 @@ mod tests {
     }
 
     #[test]
+    fn an_offer_must_be_newer_in_channel_and_hosted_by_its_own_release() {
+        let current = version("1.0.0");
+        let url = |v: &str| {
+            format!("https://github.com/panitacraft/panita-client/releases/download/v{v}/setup.exe")
+        };
+        let accepted = |channel, v: &str, link: &str| validate_offer(channel, &current, v, link);
+        assert_eq!(
+            accepted(UpdateChannel::Stable, "1.1.0", &url("1.1.0")).ok(),
+            Some(version("1.1.0"))
+        );
+        assert!(accepted(UpdateChannel::Beta, "1.1.0-beta.2", &url("1.1.0-beta.2")).is_ok());
+        for (channel, v, link) in [
+            (UpdateChannel::Stable, "1.1.0-beta.2", url("1.1.0-beta.2")),
+            (UpdateChannel::Stable, "1.0.0", url("1.0.0")),
+            (UpdateChannel::Stable, "0.9.0", url("0.9.0")),
+            (UpdateChannel::Stable, "1.1.0", url("1.2.0")),
+            (UpdateChannel::Stable, "not-a-version", url("1.1.0")),
+            (
+                UpdateChannel::Stable,
+                "1.1.0",
+                "https://example.com/setup.exe".to_owned(),
+            ),
+        ] {
+            let error = accepted(channel, v, &link).err().map(|e| e.code());
+            assert_eq!(error, Some(ErrorCode::ArtifactMismatch), "{v} {link}");
+        }
+    }
+
+    #[test]
     fn a_newer_release_becomes_a_durable_requirement_that_blocks_launch() {
         let (paths, store) = store();
         let current = version("0.2.0-beta.3");
@@ -308,6 +359,20 @@ mod tests {
             load(&store).ok().map(|s| s.channel),
             Some(UpdateChannel::Beta)
         );
+        cleanup(&paths, store);
+    }
+
+    #[test]
+    fn leaving_the_beta_channel_releases_a_beta_only_requirement() {
+        let (paths, store) = store();
+        let current = version("1.0.0");
+        set_channel(&store, UpdateChannel::Beta).unwrap_or_else(|_| panic!("channel"));
+        record_check(&store, &current, Some(&version("1.1.0-beta.1")), 1)
+            .unwrap_or_else(|_| panic!("record"));
+        assert!(pending_update(&store, &current).ok().flatten().is_some());
+        set_channel(&store, UpdateChannel::Stable).unwrap_or_else(|_| panic!("channel"));
+        // The stable feed will never offer it, so it must not keep blocking play.
+        assert_eq!(pending_update(&store, &current).ok().flatten(), None);
         cleanup(&paths, store);
     }
 
