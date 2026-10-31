@@ -13,12 +13,12 @@ mod pack_commands;
 mod play_commands;
 mod protocol;
 mod settings_commands;
-#[cfg(windows)]
 mod tray;
 mod update_commands;
 mod window_commands;
 #[cfg(windows)]
 mod windows_identity;
+#[cfg(windows)]
 mod windows_maintenance;
 
 struct DesktopState {
