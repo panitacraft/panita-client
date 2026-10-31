@@ -143,15 +143,37 @@ pub fn prune(directory: &Path, now: SystemTime) -> usize {
 /// Make free text safe for a support log: one line, bounded, without home paths,
 /// URL queries, bearer tokens, JWTs, Panita serials or long opaque secrets.
 pub fn redact(text: &str) -> String {
-    let home = ["USERPROFILE", "HOME"]
+    let homes = ["USERPROFILE", "HOME"]
         .iter()
         .filter_map(|key| std::env::var(key).ok())
-        .filter(|value| value.len() > 3)
         .collect::<Vec<_>>();
+    redact_with_homes(text, &homes)
+}
+
+/// Replace each home directory, in either slash style and ignoring ASCII case
+/// (Windows paths differ in case), with `~`.
+fn mask_home(text: &str, home: &str) -> String {
+    let mut result = text.to_owned();
+    for needle in [home.to_owned(), home.replace('\\', "/")] {
+        let lower_needle = needle.to_ascii_lowercase();
+        let mut masked = String::with_capacity(result.len());
+        let mut rest = result.as_str();
+        // ASCII lowercasing keeps byte offsets identical to the original text.
+        while let Some(position) = rest.to_ascii_lowercase().find(&lower_needle) {
+            masked.push_str(&rest[..position]);
+            masked.push('~');
+            rest = &rest[position + needle.len()..];
+        }
+        masked.push_str(rest);
+        result = masked;
+    }
+    result
+}
+
+fn redact_with_homes(text: &str, homes: &[String]) -> String {
     let mut cleaned = text.to_owned();
-    for value in home {
-        cleaned = cleaned.replace(&value, "~");
-        cleaned = cleaned.replace(&value.replace('\\', "/"), "~");
+    for home in homes.iter().filter(|home| home.len() > 3) {
+        cleaned = mask_home(&cleaned, home);
     }
     let mut words = Vec::new();
     let mut after_bearer = false;
@@ -258,6 +280,23 @@ mod tests {
             ["ram_mib: 4096 -> 6144"]
         );
         assert!(changes(&before, &before, &[]).is_empty());
+    }
+
+    #[test]
+    fn home_directories_are_masked_in_both_slash_styles_and_any_case() {
+        let windows = vec!["C:\\Users\\Flore".to_owned()];
+        let out = redact_with_homes("path c:\\users\\flore\\x and C:/Users/Flore/y", &windows);
+        assert_eq!(out, "path ~\\x and ~/y");
+        let unix = vec!["/home/ana".to_owned()];
+        assert_eq!(
+            redact_with_homes("/home/ana/.local/share/a", &unix),
+            "~/.local/share/a"
+        );
+        assert_eq!(
+            redact_with_homes("/home/anabel", &["/ho".to_owned()]),
+            "/home/anabel",
+            "short homes are ignored"
+        );
     }
 
     #[test]

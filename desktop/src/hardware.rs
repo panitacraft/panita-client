@@ -43,16 +43,9 @@ fn os() -> String {
 
 #[cfg(target_os = "linux")]
 fn os() -> String {
-    let name = std::fs::read_to_string("/etc/os-release")
-        .ok()
-        .and_then(|text| {
-            text.lines()
-                .find_map(|line| line.strip_prefix("PRETTY_NAME="))
-                .map(|value| value.trim_matches('"').to_owned())
-        })
-        .unwrap_or_else(|| "linux".to_owned());
+    let release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
     let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
-    format!("{name} kernel={}", kernel.trim())
+    linux_text::os(&release, &kernel)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -70,15 +63,7 @@ fn cpu_name() -> String {
 
 #[cfg(target_os = "linux")]
 fn cpu_name() -> String {
-    std::fs::read_to_string("/proc/cpuinfo")
-        .ok()
-        .and_then(|text| {
-            text.lines()
-                .find(|line| line.starts_with("model name"))
-                .and_then(|line| line.split_once(':'))
-                .map(|(_, value)| value.trim().to_owned())
-        })
-        .unwrap_or_else(|| "unknown".to_owned())
+    linux_text::cpu_name(&std::fs::read_to_string("/proc/cpuinfo").unwrap_or_default())
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -96,15 +81,7 @@ fn memory() -> (Option<u64>, Option<u64>) {
 
 #[cfg(target_os = "linux")]
 fn memory() -> (Option<u64>, Option<u64>) {
-    let text = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
-    let field = |name: &str| {
-        text.lines()
-            .find_map(|line| line.strip_prefix(name))
-            .and_then(|rest| rest.trim_start_matches(':').split_whitespace().next())
-            .and_then(|value| value.parse::<u64>().ok())
-            .map(|kib| kib * 1024)
-    };
-    (field("MemTotal"), field("MemAvailable"))
+    linux_text::memory(&std::fs::read_to_string("/proc/meminfo").unwrap_or_default())
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -123,18 +100,18 @@ fn gpu() -> String {
 
 #[cfg(target_os = "linux")]
 fn gpu() -> String {
-    std::fs::read_to_string("/sys/class/drm/card0/device/uevent")
-        .ok()
-        .map(|text| {
-            let value = |key: &str| {
-                text.lines()
-                    .find_map(|line| line.strip_prefix(key))
-                    .unwrap_or("unknown")
-                    .to_owned()
-            };
-            format!("driver={} pci_id={}", value("DRIVER="), value("PCI_ID="))
+    // Hybrid laptops expose several cards; list each one that has a kernel driver.
+    let cards: Vec<String> = (0..4)
+        .filter_map(|index| {
+            std::fs::read_to_string(format!("/sys/class/drm/card{index}/device/uevent")).ok()
         })
-        .unwrap_or_else(|| "unknown".to_owned())
+        .filter_map(|text| linux_text::gpu(&text))
+        .collect();
+    if cards.is_empty() {
+        "unknown".to_owned()
+    } else {
+        cards.join(", ")
+    }
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
@@ -142,9 +119,104 @@ fn gpu() -> String {
     "unknown".to_owned()
 }
 
+/// Parsers for Linux system files. Pure text functions so every platform can test them.
+#[cfg(any(target_os = "linux", test))]
+mod linux_text {
+    pub(super) fn os(release: &str, kernel: &str) -> String {
+        let name = release
+            .lines()
+            .find_map(|line| line.strip_prefix("PRETTY_NAME="))
+            .map_or("linux", |value| value.trim().trim_matches('"'));
+        format!("{name} kernel={}", kernel.trim())
+    }
+
+    pub(super) fn cpu_name(cpuinfo: &str) -> String {
+        cpuinfo
+            .lines()
+            .find(|line| line.starts_with("model name"))
+            .and_then(|line| line.split_once(':'))
+            .map_or_else(
+                || "unknown".to_owned(),
+                |(_, value)| value.trim().to_owned(),
+            )
+    }
+
+    /// Total and available bytes from the kibibyte fields of /proc/meminfo.
+    pub(super) fn memory(meminfo: &str) -> (Option<u64>, Option<u64>) {
+        let field = |name: &str| {
+            meminfo
+                .lines()
+                .find_map(|line| line.strip_prefix(name))
+                .and_then(|rest| rest.trim_start_matches(':').split_whitespace().next())
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(|kib| kib * 1024)
+        };
+        (field("MemTotal"), field("MemAvailable"))
+    }
+
+    pub(super) fn gpu(uevent: &str) -> Option<String> {
+        let value = |key: &str| uevent.lines().find_map(|line| line.strip_prefix(key));
+        let driver = value("DRIVER=")?;
+        Some(format!(
+            "{driver} ({})",
+            value("PCI_ID=").unwrap_or("unknown")
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_ubuntu_style_system_files() {
+        let release = "NAME=\"Ubuntu\"
+PRETTY_NAME=\"Ubuntu 26.04 LTS\"
+ID=ubuntu
+";
+        assert_eq!(
+            linux_text::os(
+                release,
+                "6.14.0-generic
+"
+            ),
+            "Ubuntu 26.04 LTS kernel=6.14.0-generic"
+        );
+        assert_eq!(linux_text::os("", ""), "linux kernel=");
+        let cpuinfo = "processor	: 0
+model name	: AMD Ryzen 7 5800X 8-Core Processor
+";
+        assert_eq!(
+            linux_text::cpu_name(cpuinfo),
+            "AMD Ryzen 7 5800X 8-Core Processor"
+        );
+        assert_eq!(linux_text::cpu_name("Hardware : x"), "unknown");
+        let meminfo = "MemTotal:       16318464 kB
+MemFree:  100 kB
+MemAvailable:   9000000 kB
+";
+        assert_eq!(
+            linux_text::memory(meminfo),
+            (Some(16318464 * 1024), Some(9000000 * 1024))
+        );
+        assert_eq!(linux_text::memory("garbage"), (None, None));
+        assert_eq!(
+            linux_text::gpu(
+                "DRIVER=nvidia
+PCI_ID=10DE:2684
+"
+            )
+            .as_deref(),
+            Some("nvidia (10DE:2684)")
+        );
+        assert_eq!(
+            linux_text::gpu(
+                "PCI_SLOT_NAME=0000:00:02.0
+"
+            ),
+            None
+        );
+    }
 
     #[test]
     fn describes_the_machine_without_failing() {
