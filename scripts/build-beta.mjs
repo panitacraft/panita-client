@@ -44,8 +44,11 @@ function run(command, commandArgs, capture = false) {
 const revision = run('git', ['rev-parse', 'HEAD'], true);
 const dirty = run('git', ['status', '--porcelain', '--untracked-files=normal'], true).length > 0;
 if (dirty) throw new Error('Commit task changes before producing an installer candidate.');
-if (release && run('git', ['rev-parse', `refs/tags/${releaseTag}^{commit}`], true) !== revision) {
-  throw new Error('Release tag must identify the current source commit.');
+if (release) {
+  // The tag is created at the built commit when the release is published, so it may not exist
+  // yet. If it does exist it must already identify this exact commit.
+  const tagged = spawnSync('git', ['rev-parse', '--quiet', '--verify', `refs/tags/${releaseTag}^{commit}`], { cwd: root, encoding: 'utf8', windowsHide: true });
+  if (tagged.status === 0 && tagged.stdout.trim() !== revision) throw new Error('Release tag must identify the current source commit.');
 }
 const destination = join(root, loaderValidation ? 'target/loader-validation' : release ? 'target/releases' : 'target/beta', config.version, os);
 console.log(`Unsigned ${loaderValidation ? 'internal loader validation' : release ? 'release' : 'beta'}: ${config.version} (${bundles.map(([bundle]) => bundle).join(', ')})\nSource: ${revision}\nOutput: ${destination}`);
