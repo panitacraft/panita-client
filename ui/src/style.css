@@ -80,7 +80,7 @@
   .serial-groups { display: flex; justify-content: center; margin: 14px 0 10px; }
   .serial-groups code { background: #141414; border: 1px solid #515151; border-radius: 5px; padding: 12px 14px; font-size: clamp(16px, 2vw, 22px); font-weight: 700; letter-spacing: .08em; user-select: text; white-space: nowrap; }
   .serial-instructions { margin: 14px 0 8px; line-height: 1.5; }
-  .serial-instructions code { display: inline-block; white-space: nowrap; font-weight: 600; }
+  .serial-instructions code { display: inline-block; white-space: nowrap; font-weight: 600; font-family: Consolas, 'Cascadia Mono', 'Courier New', monospace; color: #B3FF99; }
   .serial-box .serial-expiry { color: #BABABA; font-size: 12px; margin: 8px 0; }
   .is-expired .serial-groups { opacity: .4; }
   /* An error on the first-run card sits in its own red box, centered, with file names in the same red. */
@@ -91,6 +91,9 @@
   .login-wait svg { width: 18px; height: 18px; flex-shrink: 0; color: #54A636; }
   .text-action { padding: 0; border: 0; border-radius: 0; background: transparent; color: #54A636; font-size: inherit; }
   .text-action:not(:disabled):hover { background: transparent; text-decoration: underline; }
+  /* The bot link, the member name and the confirm command share the light green of the hover. */
+  .bot-link { color: #B3FF99; font-weight: 700; }
+  .member-greeting strong { color: #B3FF99; }
   .login-safety { font-size: 12px; color: #BABABA; }
   .account-onboarding { text-align: center; }
   .account-onboarding .account-title { justify-content: center; }

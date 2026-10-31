@@ -127,3 +127,17 @@ test('file names inside an activation error are shown as inline code', async () 
   expect(file?.textContent).toBe('panita-session.json');
   expect(alert.textContent).toContain('Cierra el cliente y elimina panita-session.json');
 });
+
+test('Panita Bot opens its Discord conversation and a failure says what to do instead', async () => {
+  activation = { ...activation, state: 'pending', serial: 'ABCD-EFGH-IJKL', expires_at: Math.floor(Date.now() / 1000) + 120 };
+  const implementation = native.invoke.getMockImplementation()!;
+  native.invoke.mockImplementation(async (command: string, ...rest: unknown[]) => command === 'open_panita_bot' ? undefined : implementation(command, ...rest));
+  const user = userEvent.setup(); mount();
+  const link = await screen.findByRole('button', { name: 'Panita Bot' });
+  await user.click(link);
+  expect(native.invoke).toHaveBeenCalledWith('open_panita_bot', undefined);
+  native.invoke.mockImplementation(async (command: string, ...rest: unknown[]) => command === 'open_panita_bot' ? Promise.reject('browser_unavailable') : implementation(command, ...rest));
+  await user.click(link);
+  expect(await screen.findByText(/No pudimos abrir Discord/)).toBeTruthy();
+  expect(document.querySelector('.serial-instructions code')?.textContent).toBe('/confirm ABCD-EFGH-IJKL');
+});

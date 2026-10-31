@@ -218,6 +218,11 @@ function ActivationScreen() {
     catch { toast.show('No pudimos copiar el código. Selecciónalo y cópialo a mano.', 'error'); }
   }
 
+  async function openBot() {
+    try { await invokeActivation('open_panita_bot', undefined); }
+    catch { toast.show('No pudimos abrir Discord. Busca a Panita Bot en tus mensajes directos.', 'error'); }
+  }
+
   const expired = !pending && !!lastSerial && code === 'activation_expired';
   const help = 'Te damos un código que confirmas desde Discord: envíaselo a Panita Bot por mensaje directo o usa /confirm en el servidor. No necesitas contraseña.';
   return <Shell>
@@ -240,7 +245,7 @@ function ActivationScreen() {
         <div className="serial-groups" role="status" aria-label={`Código ${serial}`}><code>{serial}</code></div>
         <Button variant="outline" disabled={expired} onClick={() => void copySerial()}><Copy aria-hidden="true" />Copiar código</Button>
         {pending && <>
-          <p className="serial-instructions">Envía el código a <strong>Panita Bot</strong> por mensaje directo.<br />En el servidor, usa <code>/confirm {serial}</code></p>
+          <p className="serial-instructions">Envía el código a <button type="button" className="text-action bot-link" title="Abrir la conversación con Panita Bot en Discord" onClick={() => void openBot()}>Panita Bot</button> por mensaje directo.<br />En el servidor, usa <code>/confirm {serial}</code></p>
           <p className="serial-expiry">Vence en {countdownText(remainingSeconds(view?.expires_at ?? null, now))}.</p>
         </>}
         <p>¿No eres tú? <button className="text-action" disabled={!!activation.busy} onClick={() => { void activation.cancel().then(() => setLastSerial(null)); }}>Cambiar</button></p>
