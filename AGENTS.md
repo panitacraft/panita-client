@@ -498,7 +498,11 @@ and individual measurements are evidence, not product guarantees.
   hardware facts (operating system, processor, logical cores, memory, graphics
   adapter, disk capacity), and redacted free-text notes (game exit codes, settings
   changes with old and new values, account and Panita activation actions without
-  names or serials). Redact home paths, URL
+  names or serials), plus network notes: one line per API call to Microsoft, Xbox,
+  Minecraft services and the Panita API with a fixed service and route label,
+  status or failure class and elapsed time (never URLs, bodies or headers; frequent
+  activation polls log only failures), and a line whenever connectivity changes
+  between reachable and unreachable. Redact home paths, URL
   queries, bearer tokens, JWTs and Panita serials, bound each note to 1 KiB and
   each file to 5 MiB, and never write credentials, callbacks, account data or raw
   game output. Create the folder 0700 and files 0600 on Unix. Delete only
