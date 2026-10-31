@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { usePlaySnapshot } from './play';
 import { messageForError } from './errors';
-import { ArrowDownToLine, ChevronUp, ChevronDown, FileText, FolderOpen, RotateCcw, Search, Trash2, TriangleAlert, X } from 'lucide-react';
+import { LoaderCircle, ChevronsDown, ChevronUp, ChevronDown, FileText, FolderOpen, RotateCcw, Search, Trash2, TriangleAlert, X } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { TooltipProvider } from './components/ui/tooltip';
 import { WindowControls } from './components/window-controls';
@@ -178,6 +178,7 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
     <div className="log-viewport">
     <div ref={list} onScroll={onLogScroll} onWheel={event => { if (event.deltaY < 0 && (list.current?.scrollTop ?? 0) < 60) scrollWindow(true); else if (event.deltaY > 0 && list.current && list.current.scrollTop + list.current.clientHeight >= list.current.scrollHeight - 60 && !follow) scrollWindow(false); }} className={'game-log-lines ' + (wrap ? 'log-wrap ' : 'log-nowrap ') + (colors ? 'log-colored' : '')} tabIndex={0} aria-label="Entradas del registro de Minecraft">
       {lines.length === 0 && <p className="log-empty">{snapshot ? 'Sin mensajes para mostrar.' : ''}</p>}
+      {!snapshot && !error && <div className="log-loading" role="status" aria-label="Cargando"><LoaderCircle className="spin" aria-hidden="true" /></div>}
       {lines.map((line, index) => {
         const level = line.metadata?.level?.toLowerCase() ?? (line.stream === 'stderr' ? 'error' : 'normal');
         return <div key={line.sequence ?? index} data-sequence={line.sequence} className={'log-row log-' + level + (line.sequence === selected ? ' log-match' : '')}>
@@ -185,7 +186,7 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
         </div>;
       })}<div ref={end} />
     </div>
-    <Button variant="ghost" size="icon" className="log-jump" aria-label="Ir al final" title="Ir al final" onClick={() => navigate(null)}><ArrowDownToLine aria-hidden="true" /></Button>
+    <Button variant="ghost" size="icon" className="log-jump" aria-label="Ir al final" title="Ir al final" onClick={() => navigate(null)}><ChevronsDown aria-hidden="true" /></Button>
     </div>
   </main></TooltipProvider>;
 }

@@ -484,9 +484,12 @@
   .library-page, .utility-page { animation: panita-page-in 240ms ease-out; }
   .settings-page > div:not([hidden]) { animation: panita-fade-in 200ms ease-out; }
   .instance-detail { animation: panita-fade-in 260ms ease-out; }
-  .artwork-fade { opacity: 0; transition: opacity 2600ms ease-in-out, transform 3600ms cubic-bezier(.2, .7, .2, 1); }
-  .banner-image.artwork-fade { transform: scale(1.04); }
-  .artwork-fade.is-loaded { opacity: 1; transform: none; }
+  /* An animation replays whenever its page is shown again, so switching instances fades the banner in too. */
+  .artwork-fade { opacity: 0; }
+  .artwork-fade.is-loaded { opacity: 1; animation: panita-artwork-in 2600ms ease-in-out; }
+  .banner-image.artwork-fade.is-loaded { animation-name: panita-banner-in; animation-duration: 3000ms; }
+  @keyframes panita-artwork-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes panita-banner-in { from { opacity: 0; transform: scale(1.04); } to { opacity: 1; transform: none; } }
   .dialog-title { display: flex; align-items: center; gap: 12px; }
   .dialog-title > svg { width: 24px; height: 24px; flex-shrink: 0; color: #54A636; }
   .update-notes { display: grid; gap: 10px; margin: 18px 0; padding: 14px 16px; list-style: none; border: 1px solid #383838; border-radius: 8px; background: #141414; }
@@ -508,7 +511,7 @@
 
 @layer components {
   /* The log viewer's own title bar mirrors the main toolbar, with smaller chrome. */
-  .log-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; padding: 0 12px 0 14px; flex-shrink: 0; background: #1B1B1B; border-bottom: 1px solid #303030; }
+  .game-log-window > .log-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; padding: 0 12px 0 14px; flex-shrink: 0; background: #1B1B1B; border-bottom: 1px solid #303030; }
   .log-titlebar button { border: 0; }
   .log-titlebar-logo { width: 26px; height: 26px; margin-right: 12px; object-fit: contain; }
   .log-titlebar-title { margin-left: 14px; padding-left: 14px; border-left: 1px solid #515151; color: #BABABA; font-size: 13px; white-space: nowrap; }
@@ -516,5 +519,7 @@
   .log-levels legend { padding: 0; }
   .log-viewport { position: relative; display: flex; flex: 1; min-height: 0; }
   .log-viewport > .game-log-lines { flex: 1; min-width: 0; }
+  .log-loading { display: flex; align-items: center; justify-content: center; height: 100%; color: #A4D58E; }
+  .log-loading > svg { width: 32px; height: 32px; }
   .log-viewport > .log-jump { position: absolute; right: 22px; bottom: 16px; background: #292929; box-shadow: 0 6px 18px #0009; }
 }
