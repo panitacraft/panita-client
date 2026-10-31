@@ -543,10 +543,10 @@
   /* Published instances zoom their icon on hover instead of changing the background; disabled ones refuse the click. */
   .rail-instance:not(:disabled):hover { background-color: #252525 !important; }
   .rail-instance.is-selected:not(:disabled):hover { background-color: #21351c !important; }
-  .rail-instance .instance-icon { clip-path: inset(0 round 11px); }
+  .rail-instance .instance-icon { clip-path: inset(0 round 5px); }
   .rail-instance .instance-icon, .rail-instance > svg:not(.rail-lock) { transition: transform 200ms ease, clip-path 200ms ease; }
   .rail-instance:not(.is-disabled):hover > svg:not(.rail-lock) { transform: scale(1.12); }
   /* The zoomed image is clipped back to the button's inner box, so the border stays visible. */
-  .rail-instance:not(.is-disabled):hover .instance-icon { transform: scale(1.12); clip-path: inset(5.36% round 10px); }
+  .rail-instance:not(.is-disabled):hover .instance-icon { transform: scale(1.12); clip-path: inset(5.36% round 5px); }
   .rail-instance.is-disabled:not(:disabled) { cursor: not-allowed; }
 }
