@@ -84,11 +84,11 @@ test('update conflicts explain each reason and only offer to move files aside wh
 
 test('version titles name both versions and shorten raw identifiers', async () => {
   const state = await import('../src/pack-state.ts');
-  assert.equal(state.versionTitle({ installed: '0.1', available: '0.2' }, 'a', 'b'), 'Actualizar el modpack de 0.1 a 0.2');
-  assert.equal(state.versionTitle(null, 'v1', 'v2'), 'Actualizar el modpack de v1 a v2');
+  assert.equal(state.versionTitle({ installed: '0.1', available: '0.2' }, 'a', 'b'), 'Actualizar Modpack (v0.1 → v0.2)');
+  assert.equal(state.versionTitle(null, 'v1', 'v2'), 'Actualizar Modpack (v1 → v2)');
   assert.equal(
     state.versionTitle({ installed: null, available: null }, '04ac0877-11a5-4de2-9a41-a41dbb44f1ee', '9f3c1d2e-aaaa-bbbb-cccc-111122223333'),
-    'Actualizar el modpack de 04ac0877… a 9f3c1d2e…',
+    'Actualizar Modpack (04ac0877… → 9f3c1d2e…)',
   );
 });
 

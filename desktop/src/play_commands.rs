@@ -893,6 +893,7 @@ fn show_game_log(
     } else {
         tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
             .title("Registro de Minecraft — Panita Client")
+            .decorations(false)
             .inner_size(900.0, 600.0)
             .min_inner_size(520.0, 360.0)
             .build()

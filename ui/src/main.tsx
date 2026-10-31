@@ -9,7 +9,10 @@ import { GameLogWindow } from './game-output';
 import { logWindowIdentity } from './game-output-state';
 import { Launcher } from './launcher';
 import { LauncherUpdateProvider } from './update';
+import { applyMotion, readMotion } from './motion';
 import './style.css';
+
+applyMotion(readMotion());
 
 const logIdentity = isTauri() ? logWindowIdentity(getCurrentWindow().label) : null;
 createRoot(document.getElementById('root')!).render(

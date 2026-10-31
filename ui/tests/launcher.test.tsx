@@ -78,7 +78,7 @@ test('refreshing a selected vanilla instance replaces Play with a mandatory upda
   expect(screen.queryByRole('button', { name: 'Jugar', exact: true })).toBeNull();
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(update);
-  expect(screen.getByRole('dialog', { name: 'Actualizar de Minecraft 1.21.1 a 1.21.2' })).toBeTruthy();
+  expect(screen.getByRole('dialog', { name: 'Actualizar Minecraft (1.21.1 → 1.21.2)' })).toBeTruthy();
   expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
 });
 
@@ -86,7 +86,7 @@ test('the running primary action stays available and crashes use the branded dia
   const user = userEvent.setup(); mount();
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
   await emit(entry({}));
-  expect((screen.getByRole('button', { name: 'En ejecución', exact: true }) as HTMLButtonElement).disabled).toBe(false);
+  expect((screen.getByRole('button', { name: 'Cerrar forzosamente…', exact: true }) as HTMLButtonElement).disabled).toBe(false);
   await emit(entry({ phase: 'exited', exitSuccess: false, exitCode: -1 }));
   const dialog = await screen.findByRole('dialog', { name: 'Minecraft se cerró de forma inesperada' });
   expect(dialog.classList.contains('crash-dialog')).toBe(true);
@@ -97,7 +97,7 @@ test('the running primary action stays available and crashes use the branded dia
 test('navigation preserves settings drafts and account creation remains an explicit modal', async () => {
   const user = userEvent.setup(); mount();
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
-  await user.click(await screen.findByRole('button', { name: 'Gestionar cuentas', exact: true }));
+  await user.click(await screen.findByRole('button', { name: /^Gestionar cuenta/ }));
   await user.click(await screen.findByRole('button', { name: 'Añadir', exact: true }));
   await user.click(screen.getByRole('menuitem', { name: 'Añadir cuenta No-Premium' }));
   await user.type(await screen.findByLabelText('Nombre de usuario'), 'OtroJugador');
@@ -109,7 +109,7 @@ test('navigation preserves settings drafts and account creation remains an expli
   await user.click(screen.getByRole('button', { name: 'Inicio: tus instancias' }));
   await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
   expect((screen.getByLabelText('RAM Asignada (MiB)') as HTMLInputElement).value).toBe('8192');
-  await user.click(screen.getByRole('button', { name: 'Gestionar cuentas', exact: true }));
+  await user.click(screen.getByRole('button', { name: /^Gestionar cuenta/ }));
   expect(screen.getByRole('heading', { name: 'Perfiles de Minecraft' })).toBeTruthy();
   expect(screen.queryByRole('dialog')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Otra aventura: Lista para jugar' }));
@@ -126,8 +126,8 @@ test('mandatory pack updates open a modal and require explicit world-backup cons
   const update = await screen.findByRole('button', { name: 'Actualizar…' });
   expect(screen.queryByRole('button', { name: 'Jugar', exact: true })).toBeNull();
   await user.click(update);
-  await screen.findByText('Actualizar el modpack de Uno a Dos');
-  expect(screen.getByRole('dialog', { name: 'Actualizar el modpack de Uno a Dos' })).toBeTruthy();
+  await screen.findByText('Actualizar Modpack (Uno → Dos)');
+  expect(screen.getByRole('dialog', { name: 'Actualizar Modpack (Uno → Dos)' })).toBeTruthy();
   expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(screen.getByRole('button', { name: 'Actualizar', exact: true }));
@@ -178,10 +178,7 @@ test('running controls survive navigation and force stop never happens without c
   await emit(entry({}));
   await user.click(screen.getByRole('button', { name: 'Otra aventura: Lista para jugar' }));
   await user.click(screen.getByRole('button', { name: 'Aventura: En ejecución' }));
-  await user.click(screen.getByRole('button', { name: 'En ejecución', exact: true }));
-  expect(backend.invoke).toHaveBeenCalledWith('open_game_log', { instanceId: 'pack-a', requestId: 'request' });
-  await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
-  await user.click(screen.getByRole('menuitem', { name: 'Cerrar forzosamente…' }));
+  await user.click(screen.getByRole('button', { name: 'Cerrar forzosamente…', exact: true }));
   expect(backend.invoke.mock.calls.some(([command]) => command === 'stop_game')).toBe(false);
   await user.click(within(screen.getByRole('dialog', { name: 'Cerrar Minecraft' })).getByRole('button', { name: 'Cancelar', exact: true }));
   expect(screen.queryByRole('button', { name: 'Confirmar cierre forzoso' })).toBeNull();

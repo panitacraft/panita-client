@@ -16,6 +16,11 @@
   --color-border: #515151;
   --color-input: #515151;
   --color-ring: #E4FFDA;
+  --color-danger: #B94545;
+  --color-danger-hover: #D05A5A;
+  --color-danger-soft: #3A1D1D;
+  --color-danger-soft-hover: #4D2626;
+  --color-danger-soft-border: #6B3B3B;
   --color-destructive: #FCA5A5;
   --color-destructive-foreground: #141414;
 }
@@ -31,7 +36,7 @@
   button:not(:disabled), summary { cursor: pointer; }
   button:not(:disabled):hover { background: #383838; }
   button:disabled { opacity: .5; cursor: not-allowed; }
-  :where(button, a, input, textarea, select, summary, [tabindex]):focus-visible { outline: 2px solid #E4FFDA; outline-offset: 4px; }
+  :where(button, a, input, textarea, select, summary, [tabindex]):focus-visible { outline: .75px solid #E4FFDA; outline-offset: 4px; }
   button svg, summary svg { width: 18px; height: 18px; flex-shrink: 0; }
   section { max-width: 1100px; margin: 0 auto; padding: 28px 32px; }
   h1 { margin: 0 0 12px; font-size: 30px; font-weight: 700; line-height: 1.15; letter-spacing: -.035em; }
@@ -70,7 +75,7 @@
   .info-button { display: inline-flex; background: transparent; border: 0; padding: 2px; color: #BABABA; }
   .info-button svg { width: 16px; height: 16px; }
   .identifier-input { display: flex; align-items: center; gap: 10px; background: #141414; border: 1px solid #515151; border-radius: 6px; padding: 0 12px; }
-  .identifier-input:focus-within { outline: 2px solid #E4FFDA; outline-offset: 2px; }
+  .identifier-input:focus-within { outline: .75px solid #E4FFDA; outline-offset: 2px; }
   .identifier-input input { border: 0; width: 100%; outline: none; padding-inline: 0; background: transparent; }
   .profile-head { width: 24px; height: 24px; object-fit: contain; image-rendering: pixelated; flex-shrink: 0; }
   .activation-form > button { width: 100%; margin-top: 14px; }
@@ -118,7 +123,7 @@
   .active-badge svg { width: 12px; height: 12px; }
   .panita-profile-logo { width: 48px; height: 64px; object-fit: contain; }
   .panita-profile-avatar { width: 56px; height: 56px; flex-shrink: 0; object-fit: cover; border-radius: 50%; }
-  .transient-notice-region { position: fixed; right: 24px; bottom: 24px; z-index: 100; max-width: min(420px, calc(100vw - 48px)); pointer-events: none; text-align: left; }
+  .transient-notice-region { position: fixed; left: 112px; bottom: 24px; z-index: 100; max-width: min(420px, calc(100vw - 48px)); pointer-events: none; text-align: left; }
   .transient-notice { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid #54A636; border-radius: 8px; background: #21351c; color: #E4FFDA; box-shadow: 0 8px 30px #0008; font-size: 13px; }
   .transient-notice > svg { width: 18px; height: 18px; flex-shrink: 0; }
   .transient-notice.notice-error { border-color: #FCA5A5; background: #3c2323; color: #FCA5A5; }
@@ -138,7 +143,7 @@
   .rail-instances { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 64px; padding: 4px 6px; flex-shrink: 0; }
   .rail-nav-control { flex-shrink: 0; border: 0; color: #BABABA; }
   .rail-instance { position: relative; width: 52px; height: 52px; padding: 0; flex-shrink: 0; border: 1px solid #515151; border-radius: 12px; background: #252525; color: #BABABA; }
-  .rail-instance.is-selected { border-color: #54A636; box-shadow: 0 0 0 3px #54A63640; color: #E4FFDA; background: #21351c; }
+  .rail-instance.is-selected { border-color: #54A636; box-shadow: 0 0 0 .75px #54A636; color: #E4FFDA; background: #21351c; }
   .rail-instance.is-disabled { opacity: .6; }
   .instance-icon { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
   .rail-lock { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; background: #1B1B1B; border-radius: 4px; padding: 2px; color: #F9FFF8; }
@@ -154,7 +159,7 @@
   .rail-version-slot.has-retry .rail-version { min-width: 0; font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
   .rail-bottom .rail-retry { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; padding: 0; flex-shrink: 0; border-radius: 4px; background: transparent; color: #ef4444; cursor: pointer; }
   .rail-bottom .rail-retry:hover:not(:disabled) { background: #3a1d1d; color: #f87171; }
-  .rail-bottom .rail-retry:focus-visible, .rail-bottom .rail-update:focus-visible { outline: 2px solid #E4FFDA; outline-offset: 2px; }
+  .rail-bottom .rail-retry:focus-visible, .rail-bottom .rail-update:focus-visible { outline: .75px solid #E4FFDA; outline-offset: 2px; }
   .rail-retry svg { width: 11px; height: 11px; }
   .rail-bottom .rail-update { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 100%; height: 100%; padding: 0; border-radius: 6px; background: #54A636; color: #141414; font-size: 9px; font-weight: 700; line-height: 1; cursor: pointer; }
   .rail-bottom .rail-update:hover:not([aria-disabled='true']) { background: #B3FF99; }
@@ -164,10 +169,10 @@
   .rail-update svg { width: 12px; height: 12px; flex-shrink: 0; }
   .rail-update.is-highlighted { animation: rail-update-pulse 1s ease-in-out 3; }
   @keyframes rail-update-pulse { 0%, 100% { box-shadow: 0 0 0 0 #54A63600; } 50% { box-shadow: 0 0 0 6px #54A636aa; } }
-  @media (prefers-reduced-motion: reduce) { .rail-update.is-highlighted { animation: none; outline: 2px solid #E4FFDA; outline-offset: 2px; } }
+  @media (prefers-reduced-motion: reduce) { .rail-update.is-highlighted { animation: none; outline: .75px solid #E4FFDA; outline-offset: 2px; } }
   .rail-accounts { display: flex; align-items: center; flex-direction: column; padding: 2px; flex-shrink: 0; }
   .rail-account { overflow: hidden; border-radius: 8px; flex-shrink: 0; }
-  .rail-account.current-account { box-shadow: 0 0 0 2px #54A636; }
+  .rail-account.current-account { box-shadow: 0 0 0 .75px #54A636; }
   .account-avatar { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; border-radius: inherit; }
   .rail-placeholder { padding: 14px; color: #BABABA; }
   .launcher-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
@@ -228,7 +233,7 @@
   .split-button > .split-trigger { border-radius: 0 7px 7px 0; border: 0; border-left: 1px solid #14141466; flex-shrink: 0; }
   .instance-menu { min-width: 240px; max-width: calc(100vw - 24px); }
   .instance-menu [role='menuitem'] { padding: 10px 12px; gap: 10px; font-size: 13px; }
-  .instance-menu [role='menuitem']:focus { outline: 2px solid #E4FFDA; outline-offset: -2px; }
+  .instance-menu [role='menuitem']:focus { outline: .75px solid #E4FFDA; outline-offset: -2px; }
   .utility-page { max-width: 1000px; margin: 0 auto; padding: 32px; }
   .page-heading { margin-bottom: 28px; }
   .page-heading > button { margin-bottom: 24px; padding-left: 0; border: 0; color: #BABABA; }
@@ -278,7 +283,7 @@
   .game-log-lines.log-colored .log-warn { color: #E9D591; }
   .game-log-lines.log-colored .log-info { color: #E4FFDA; }
   .game-log-lines.log-colored .log-debug, .game-log-lines.log-colored .log-trace { color: #B4C9E9; }
-  .game-log-lines .log-match { outline: 2px solid #E9D591; outline-offset: 1px; background: #383728; }
+  .game-log-lines .log-match { outline: .75px solid #E9D591; outline-offset: 1px; background: #383728; }
   .log-metadata { font-weight: 600; }
   .crash-summary { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   .activation-form { display: grid; gap: 14px; margin-top: 28px; justify-items: start; }
@@ -298,7 +303,7 @@
     .instance-actions { margin-top: 16px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+    :root:not([data-motion]) *, :root:not([data-motion]) *::before, :root:not([data-motion]) *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
 }
 
@@ -313,7 +318,6 @@
   .hero-heading > p { margin-bottom: 16px; }
   .instance-actions { margin-top: 16px; }
   .split-button > .primary-play:only-child { border-radius: 7px; }
-  .primary-play.running-play { opacity: 1; background: #54A636; color: #141414; }
   .primary-play.busy-play { opacity: 1; background: #253b1c; color: #E4FFDA; cursor: progress; }
   .spin { animation: panita-spin 1s linear infinite; }
   @keyframes panita-spin { to { transform: rotate(360deg); } }
@@ -403,7 +407,7 @@
   .inherit-toggle input[role='switch']::before { content: ''; display: block; width: 12px; height: 12px; border-radius: 50%; background: #ddd; transition: transform .15s; }
   .inherit-toggle input[role='switch']:checked { background: #3c7928; border-color: #78bd58; }
   .inherit-toggle input[role='switch']:checked::before { transform: translateX(12px); background: #e4ffda; }
-  .inherit-toggle input:focus-visible { outline: 2px solid #a9e58c; outline-offset: 3px; }
+  .inherit-toggle input:focus-visible { outline: .75px solid #a9e58c; outline-offset: 3px; }
   /* A settings row: the text on the left, the control on the right, both centered on the same line. */
   .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid #333; border-radius: 8px; background: #1B1B1B; }
   .setting-row .setting-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -454,4 +458,82 @@
   .settings-card-heading { margin-bottom: 10px; }
   .settings-page .settings-section { padding: 16px; }
   .settings-advanced { margin-top: 12px; }
+}
+
+@layer components {
+  /* Every control that changes color on hover eases into it instead of snapping. */
+  button, summary, [role='menuitem'], [role='tab'], .text-action, .rail-account, .rail-instance, .info-button, input, textarea, select, .inherit-toggle input[role='switch'] {
+    transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease, opacity 150ms ease, filter 150ms ease;
+  }
+  /* Menu entries, radio and checkbox options, switches and sliders show the pointer, like buttons. */
+  [role='menuitem']:not([data-disabled]), [role='menuitemradio']:not([data-disabled]), [role='menuitemcheckbox']:not([data-disabled]), [role='option']:not([data-disabled]), [role='tab'], [role='switch']:not(:disabled), select:not(:disabled), input[type='checkbox']:not(:disabled), input[type='radio']:not(:disabled), input[type='range']:not(:disabled), label:has(> input[type='checkbox']:not(:disabled)), label:has(> input[type='radio']:not(:disabled)) { cursor: pointer; }
+  [role='menuitem'][data-disabled], select:disabled, input:disabled, label:has(> input:disabled) { cursor: not-allowed; }
+  .memory-slider:not(:disabled)::-webkit-slider-thumb, .memory-slider:not(:disabled)::-moz-range-thumb { cursor: pointer; }
+  /* Loading and error states sit in the middle of the space left under the toolbar. */
+  .library-page { display: flex; flex-direction: column; }
+  .library-page > .instance-detail { flex: 1; }
+  .library-page > .empty-state { flex: 1; min-height: 0; }
+}
+
+@layer components {
+  /* The motion setting (General tab) is authoritative; spinners keep turning because they signal work. */
+  :root[data-motion='off'] *:not(.spin), :root[data-motion='off'] *::before, :root[data-motion='off'] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  @keyframes panita-page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes panita-fade-in { from { opacity: 0; } to { opacity: 1; } }
+  /* Hidden pages become displayed again when selected, which replays the entrance. */
+  .library-page, .utility-page { animation: panita-page-in 240ms ease-out; }
+  .settings-page > div:not([hidden]) { animation: panita-fade-in 200ms ease-out; }
+  .instance-detail { animation: panita-fade-in 260ms ease-out; }
+  /* An animation replays whenever its page is shown again, so switching instances fades the banner in too. */
+  .artwork-fade { opacity: 0; }
+  .artwork-fade.is-loaded { opacity: 1; animation: panita-artwork-in 2600ms ease-in-out; }
+  .banner-image.artwork-fade.is-loaded { animation-name: panita-banner-in; animation-duration: 3000ms; }
+  .artwork-fade.is-loaded.has-played { animation-duration: 1000ms; }
+  .banner-image.artwork-fade.is-loaded.has-played { animation-duration: 1500ms; }
+  @keyframes panita-artwork-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes panita-banner-in { from { opacity: 0; transform: scale(1.04); } to { opacity: 1; transform: none; } }
+  .dialog-title { display: flex; align-items: center; gap: 12px; }
+  .dialog-title > svg { width: 24px; height: 24px; flex-shrink: 0; color: #54A636; }
+  .update-notes { display: grid; gap: 10px; margin: 18px 0; padding: 14px 16px; list-style: none; border: 1px solid #383838; border-radius: 8px; background: #141414; }
+  .update-notes li { display: flex; align-items: flex-start; gap: 10px; margin: 0; font-size: 13px; line-height: 1.5; color: #BABABA; }
+  .update-notes li > svg { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; color: #54A636; }
+  .update-notes li.is-warning > svg { color: #E9D591; }
+  .operation-dock { position: fixed; right: 24px; bottom: 24px; z-index: 90; display: flex; flex-direction: column; gap: 10px; width: min(380px, calc(100vw - 136px)); animation: panita-page-in 220ms ease-out; }
+  .operation-dock .operation-card { width: 100%; margin: 0; background: #1B1B1B; box-shadow: 0 12px 36px #000a; }
+  .operation-title { display: flex; flex-direction: column; min-width: 0; }
+  .operation-title > small { color: #BABABA; font-size: 11px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+@layer components {
+  .indeterminate-bar { position: relative; height: 8px; margin: 10px 0 4px; overflow: hidden; border-radius: 4px; background: #333; }
+  .indeterminate-bar::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: 4px; background: #54A636; animation: panita-indeterminate 1.4s ease-in-out infinite; }
+  :root[data-motion='off'] .indeterminate-bar::after { animation: panita-indeterminate 1.4s ease-in-out infinite !important; }
+  @keyframes panita-indeterminate { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+}
+
+@layer components {
+  /* The log viewer's own title bar mirrors the main toolbar, with smaller chrome. */
+  .game-log-window > .log-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; padding: 0 12px 0 14px; flex-shrink: 0; background: #1B1B1B; border-bottom: 1px solid #303030; }
+  .log-titlebar button { border: 0; }
+  .log-titlebar-logo { width: 26px; height: 26px; margin-right: 12px; object-fit: contain; }
+  .log-titlebar-title { margin-left: 14px; padding-left: 14px; border-left: 1px solid #515151; color: #BABABA; font-size: 13px; white-space: nowrap; }
+  .log-search-input input { height: 36px; padding-block: 0; }
+  .log-levels legend { padding: 0; }
+  .log-viewport { position: relative; display: flex; flex: 1; min-height: 0; }
+  .log-viewport > .game-log-lines { flex: 1; min-width: 0; }
+  .log-loading { display: flex; align-items: center; justify-content: center; height: 100%; color: #A4D58E; }
+  .log-loading > svg { width: 32px; height: 32px; }
+  .log-viewport > .log-jump { position: absolute; right: 22px; bottom: 16px; background: #292929; box-shadow: 0 6px 18px #0009; }
+}
+
+@layer components {
+  /* Published instances zoom their icon on hover instead of changing the background; disabled ones refuse the click. */
+  .rail-instance:not(:disabled):hover { background-color: #252525 !important; }
+  .rail-instance.is-selected:not(:disabled):hover { background-color: #21351c !important; }
+  .rail-instance .instance-icon { clip-path: inset(0 round 11px); }
+  .rail-instance .instance-icon, .rail-instance > svg:not(.rail-lock) { transition: transform 200ms ease, clip-path 200ms ease; }
+  .rail-instance:not(.is-disabled):hover > svg:not(.rail-lock) { transform: scale(1.12); }
+  /* The zoomed image is clipped back to the button's inner box, so the border stays visible. */
+  .rail-instance:not(.is-disabled):hover .instance-icon { transform: scale(1.12); clip-path: inset(5.36% round 10px); }
+  .rail-instance.is-disabled:not(:disabled) { cursor: not-allowed; }
 }

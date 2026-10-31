@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
-import { LoaderCircle, ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, Users, WifiOff } from 'lucide-react';
+import { LoaderCircle, ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, WifiOff } from 'lucide-react';
 import { loadCatalog } from './catalog-api';
 import type { CatalogOverview } from './preview-catalog';
 import { messageForError } from './errors';
@@ -10,11 +10,11 @@ import { useInstanceRail } from './use-instance-rail';
 import { Accounts } from './accounts';
 import type { AccountsView } from './account-state';
 import { ActivationPanel, useActivation } from './activation';
-import { PlayControls, PlayNotice, usePlaySnapshot } from './play';
+import { OperationDock, PlayControls, PlayNotice, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
 import { canInstall, canOpenInstanceOptions, canRepair, canUninstall, isPack, updateTarget } from './library-state';
 import { SettingsPanel, usePreferences } from './settings';
-import { UpdatesPanel, VersionBadge } from './update';
+import { GeneralPanel, VersionBadge } from './update';
 import { DiagnosticsPanel } from './diagnostics';
 import { CachePanel, PackPanel } from './pack';
 import { CrashNotifications } from './game-output';
@@ -44,7 +44,7 @@ export function Launcher() {
   const [page, setPage] = useState<LauncherPage>('library');
   const [cacheRequest, setCacheRequest] = useState(0);
   const [settingsScope, setSettingsScope] = useState<'global' | 'instance'>('global');
-  const [settingsTab, setSettingsTab] = useState<'game' | 'storage' | 'updates' | 'diagnostics'>('game');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'game' | 'storage' | 'diagnostics'>('general');
   const [accountView, setAccountView] = useState<AccountsView | null>(null);
   const [instancePage, setInstancePage] = useState(0);
   const [version, setVersion] = useState(__APP_VERSION__);
@@ -89,7 +89,7 @@ export function Launcher() {
   }, [installationChanges, catalogAttempt]);
 
   function openSettings(scope: 'global' | 'instance') {
-    setSettingsScope(scope); setSettingsTab('game'); setPage('settings');
+    setSettingsScope(scope); setSettingsTab(scope === 'global' ? 'general' : 'game'); setPage('settings');
   }
 
   return <TooltipProvider delayDuration={250}><main className="launcher-shell">
@@ -123,10 +123,9 @@ export function Launcher() {
         {pageCount > 1 && <Hint text="Más instancias" side="right"><Button variant="ghost" className="rail-nav-control size-6 bg-transparent p-0" aria-label="Más instancias" disabled={visiblePage + 1 >= pageCount} onClick={() => setInstancePage(visiblePage + 1)}><ChevronDown aria-hidden="true" /></Button></Hint>}
       </nav>
       <div className="rail-bottom">
-        <Hint text="Gestionar cuentas" side="right"><Button variant="ghost" size="icon" className={`size-10 [&_svg]:size-5 ${page === 'accounts' ? 'is-selected' : ''}`} aria-label="Gestionar cuentas" aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}><Users aria-hidden="true" /></Button></Hint>
         <div className="rail-accounts" role="group" aria-label="Cuentas de Minecraft">
           {selectedAccount && <Hint side="right" text={selectedAccount.metadata.username + ' | ' + (selectedAccount.metadata.kind === 'offline' ? 'No-Premium' : 'Microsoft')}>
-            <Button variant="ghost" className="rail-account current-account size-10 p-0" aria-label={'Gestionar cuenta: ' + selectedAccount.metadata.username} onClick={() => setPage('accounts')}><AccountAvatar metadata={selectedAccount.metadata} /></Button>
+            <Button variant="ghost" className={`rail-account current-account size-10 p-0 ${page === 'accounts' ? 'is-selected' : ''}`} aria-label={'Gestionar cuenta: ' + selectedAccount.metadata.username} aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}><AccountAvatar metadata={selectedAccount.metadata} /></Button>
           </Hint>}
           {!selectedAccount && <Hint text={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} side="right"><Button variant="ghost" className="rail-account size-10 p-0" aria-label={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} onClick={() => setPage('accounts')}><AccountAvatar metadata={null} /></Button></Hint>}
         </div>
@@ -158,7 +157,7 @@ export function Launcher() {
         </div>
 
         <div hidden={page !== 'library'} className="library-page">
-          {catalog.kind === 'loading' && <div className="empty-state" role="status"><Blocks aria-hidden="true" /><h1>Preparando tus instancias</h1><p>Cargando el catálogo de Panitacraft…</p></div>}
+          {catalog.kind === 'loading' && <div className="empty-state" role="status"><LoaderCircle className="spin" aria-hidden="true" /><h1>Preparando tus instancias</h1><p>Cargando el catálogo de Panitacraft…</p></div>}
           {catalog.kind === 'blocked' && <div className="empty-state" role="status"><LockKeyhole aria-hidden="true" /><h1>Revisa tus cuentas</h1><p>Las instancias estarán disponibles cuando se resuelva el problema con las cuentas.</p><Button onClick={() => setPage('accounts')}>Abrir cuentas</Button></div>}
           {catalog.kind === 'error' && <div className="empty-state" role="alert"><WifiOff aria-hidden="true" /><h1>No pudimos cargar tus instancias</h1><p>{catalog.message}</p><Button onClick={() => { setCatalog({ kind: 'loading' }); setCatalogAttempt(previous => previous + 1); }}>Reintentar</Button></div>}
           {catalog.kind === 'ready' && instances.length === 0 && <div className="empty-state"><Blocks aria-hidden="true" /><h1>No hay instancias disponibles</h1><p>Vuelve a consultar el catálogo más tarde.</p></div>}
@@ -171,7 +170,7 @@ export function Launcher() {
                 <p>{instance.description}</p>
                 <div className="instance-tags">
                   <InstanceBadges instance={instance} showLoaderHint />
-                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible', 'Instalando', 'Reparando', 'Actualizando'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
+                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible', 'Instalando', 'Reparando', 'Actualizando', 'Preparando inicio', 'Cerrando Minecraft'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
                 </div>
               </div>
             </div>
@@ -195,16 +194,17 @@ export function Launcher() {
         <div hidden={page !== 'settings'} className="utility-page settings-page">
           <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? `Ajustes · ${selected?.name ?? 'Instancia'}` : 'Ajustes Globales'}</h1><p>{settingsScope === 'instance' ? 'Sobrescribe los ajustes globales solo para esta instancia.' : 'Estos valores se aplicarán por defecto a todas las instancias.'}</p></div>
           {settingsScope === 'global' && <div className="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
-            {([['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['updates', 'Actualizaciones'], ['diagnostics', 'Diagnóstico']] as const).map(([value, label]) => <Button key={value} className="rounded-b-none" variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
+            {([['general', 'General'], ['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['diagnostics', 'Diagnóstico']] as const).map(([value, label]) => <Button key={value} className="rounded-b-none" variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
           </div>}
-          <div hidden={settingsTab !== 'game'}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
+          <div hidden={settingsScope === 'global' && settingsTab !== 'game'}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'storage'}><CachePanel openRequest={cacheRequest} /></div>
-          <div hidden={settingsScope !== 'global' || settingsTab !== 'updates'}><UpdatesPanel /></div>
+          <div hidden={settingsScope !== 'global' || settingsTab !== 'general'}><GeneralPanel /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'diagnostics'}>{settingsScope === 'global' && settingsTab === 'diagnostics' && <DiagnosticsPanel />}</div>
           <UtilityFooter />
         </div>
       </div>
     </div>
+    <OperationDock names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} />
     <CrashNotifications names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} />
   </main></TooltipProvider>;
 }

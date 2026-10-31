@@ -85,7 +85,8 @@ export function updateConflictHeading(count: number): string {
 
 export function versionTitle(names: VersionNames | null, from: string, to: string): string {
   const shown = (name: string | null | undefined, id: string) => name ?? (id.length > 12 ? `${id.slice(0, 8)}…` : id);
-  return `Actualizar el modpack de ${shown(names?.installed, from)} a ${shown(names?.available, to)}`;
+  const tagged = (name: string) => (/^\d[\w.+-]*$/.test(name) ? `v${name}` : name);
+  return `Actualizar Modpack (${tagged(shown(names?.installed, from))} → ${tagged(shown(names?.available, to))})`;
 }
 
 export function backedUpSummary(paths: string[]): string {

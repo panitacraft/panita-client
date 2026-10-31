@@ -5,6 +5,7 @@ import { CircleArrowUp, ExternalLink, LoaderCircle, RefreshCw, RotateCw } from '
 import { Button } from './components/ui/button';
 import { Hint } from './components/hint';
 import { messageForError } from './errors';
+import { useMotion } from './motion';
 import { invokeUpdate } from './update-api';
 import { badgeModel, channelLocked, type BadgeIcon, type LauncherUpdateView, type UpdateAction, type UpdateChannel } from './update-state';
 
@@ -126,12 +127,20 @@ export function VersionBadge({ version }: { version: string }) {
   </div>;
 }
 
-export function UpdatesPanel() {
+export function GeneralPanel() {
   const update = useLauncherUpdate();
+  const [motion, setMotion] = useMotion();
   const view = update?.view ?? null;
   const locked = channelLocked(view) || update?.busy === true;
   return <section className="settings-section" aria-labelledby="updates-heading">
-    <h2 id="updates-heading" className="sr-only">Actualizaciones</h2>
+    <h2 id="updates-heading" className="sr-only">General</h2>
+    <label className="inherit-toggle setting-row">
+      <span className="setting-text">
+        <strong>Efectos de movimiento</strong>
+        <small>Animaciones al cambiar de pantalla, cargar imágenes y pasar el cursor. Desactívalas si prefieres una interfaz más estática.</small>
+      </span>
+      <input role="switch" aria-label="Efectos de movimiento" type="checkbox" checked={motion} onChange={event => setMotion(event.target.checked)} />
+    </label>
     <p>Versión instalada: <strong>{view?.currentVersion ? `v${view.currentVersion}` : 'desconocida'}</strong></p>
     <label className="inherit-toggle setting-row">
       <span className="setting-text">

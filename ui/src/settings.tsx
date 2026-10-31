@@ -64,6 +64,9 @@ export function SettingsPanel({ instanceId, local, scope }: { instanceId: string
   </section>;
 }
 
+const RAM_SLIDER_STEP_MIB = 512;
+const formatGiB = (mib: number) => Number((mib / 1024).toFixed(2));
+
 function InheritToggle({ checked, onChange, name }: { checked: boolean; onChange: (value: boolean) => void; name: string }) {
   return <label className="inherit-toggle"><span>Heredar ajuste global</span><input role="switch" aria-label={`Heredar ajuste global: ${name}`} type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} /></label>;
 }
@@ -118,6 +121,7 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
     } finally { saving.current = false; if (mounted.current) setBusy(false); }
   }
   const prefix = instance ? 'instance-settings' : 'global-settings';
+  const sliderMax = Math.ceil(Math.min(262144, Math.max(32768, Number(draft?.ram) || 0)) / RAM_SLIDER_STEP_MIB) * RAM_SLIDER_STEP_MIB;
   const customJava = snapshot && (snapshot.instance?.java_path_override ?? snapshot.global.java_path_override);
   return <>
     {!desktop && <p>Los ajustes están disponibles en la aplicación de escritorio.</p>}
@@ -131,9 +135,9 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
           <div className="settings-card memory-card">
             <div className="settings-card-heading"><h3><MemoryStick aria-hidden="true" />Memoria</h3>{instance && <InheritToggle name="Memoria" checked={draft.inheritRam} onChange={value => change({ inheritRam: value })} />}</div>
             <div className={instance && draft.inheritRam ? 'inherited-content' : undefined}>
-            <div className="memory-value"><label htmlFor={prefix + '-ram'}>RAM Asignada (MiB)</label><input id={prefix + '-ram'} type="number" min="512" max="262144" step="1" required disabled={instance && draft.inheritRam} value={draft.ram} onChange={event => change({ ram: event.target.value })} /><output>{Number(draft.ram) / 1024 || 0} GiB</output></div>
-            <input className="memory-slider" aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={Math.min(262144, Math.max(32768, Number(draft.ram) || 0))} step="1" disabled={instance && draft.inheritRam} value={/^\d+$/.test(draft.ram) ? draft.ram : '512'} onChange={event => change({ ram: event.target.value })} />
-            <div className="memory-ticks" aria-hidden="true"><span>512 MiB</span><span>{Math.round(Math.min(262144, Math.max(32768, Number(draft.ram) || 0)) / 2048)} GiB</span><span>{Math.min(262144, Math.max(32768, Number(draft.ram) || 0)) / 1024} GiB</span></div>
+            <div className="memory-value"><label htmlFor={prefix + '-ram'}>RAM Asignada (MiB)</label><input id={prefix + '-ram'} type="number" min="512" max="262144" step="1" required disabled={instance && draft.inheritRam} value={draft.ram} onChange={event => change({ ram: event.target.value })} /><output>{formatGiB(Number(draft.ram) || 0)} GiB</output></div>
+            <input className="memory-slider" aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={sliderMax} step={RAM_SLIDER_STEP_MIB} disabled={instance && draft.inheritRam} value={/^\d+$/.test(draft.ram) ? draft.ram : '512'} onChange={event => change({ ram: event.target.value })} />
+            <div className="memory-ticks" aria-hidden="true"><span>512 MiB</span><span>{formatGiB(sliderMax / 2)} GiB</span><span>{formatGiB(sliderMax)} GiB</span></div>
             </div>
           </div>
           <div className="settings-card">
