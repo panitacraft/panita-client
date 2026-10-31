@@ -239,6 +239,8 @@ async fn prepare_with_catalog(
     catalog: CatalogClient,
 ) -> Result<PendingPlay, CoreError> {
     cancel.check()?;
+    // A known newer launcher release blocks new launches before any reservation is taken.
+    crate::launcher_update::require_current(&PrivateStore::open(&paths)?)?;
     let selection = accounts.play_selection()?;
     let root = paths.clone();
     let lease = tokio::task::spawn_blocking(move || LaunchLease::acquire(&root, instance))

@@ -9,6 +9,7 @@ pub mod data_removal;
 mod device;
 pub mod error;
 mod instance_layout;
+pub mod launcher_update;
 pub mod loader;
 pub mod logging;
 pub mod minecraft;

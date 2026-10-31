@@ -72,6 +72,12 @@ pub enum ErrorCode {
     PackConflict,
     /// The installed modpack is older than the published one and must be updated.
     UpdateRequired,
+    /// A newer launcher release is required before a new game launch can start.
+    LauncherUpdateRequired,
+    /// This installation cannot update itself; the player must install the release manually.
+    LauncherUpdateUnsupported,
+    /// A launcher update was found but could not be downloaded, verified or applied.
+    LauncherUpdateFailed,
 }
 
 #[derive(Debug)]
