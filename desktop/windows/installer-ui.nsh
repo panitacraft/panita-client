@@ -268,16 +268,14 @@ Var PanitaStageTitle
     ReadRegStr $0 SHCTX "${UNINSTKEY}" "DisplayVersion"
     ${If} $0 == ""
       StrCpy $PanitaUpdating 0
-      !insertmacro PANITA_HEADING "Instalar Panita Client" "Un launcher hecho a medida para nuestra comunidad."
+      !insertmacro PANITA_HEADING "Instalar Panita Client" ""
       SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Instalar"
     ${Else}
       StrCpy $PanitaUpdating 1
-      !insertmacro PANITA_HEADING "Actualizar Panita Client" "Un launcher hecho a medida para nuestra comunidad."
+      !insertmacro PANITA_HEADING "Actualizar Panita Client" ""
       SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Actualizar"
     ${EndIf}
-    ; The tagline is a quiet second line under the title, not a card.
-    System::Call 'user32::SetPropW(p $PanitaDescription, w "PanitaSubtle", p 1)'
-    ${NSD_CreateLabel} 0 0 0 0 "Carpeta"
+    ${NSD_CreateLabel} 0 0 0 0 "Ubicación de la instalación"
     Pop $0
     !insertmacro PANITA_ROLE $0 24
     SetCtlColors $0 BABABA 141414

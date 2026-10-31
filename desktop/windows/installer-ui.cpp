@@ -23,6 +23,7 @@ constexpr COLORREF accent_color = RGB(84, 166, 54);
 HWND root;
 HFONT body_font;
 HFONT caption_font;
+HFONT option_font;
 HBRUSH log_brush;
 HBRUSH background_brush;
 HWND detail_source;
@@ -214,7 +215,7 @@ void refresh_actions() {
   place(action, shell_width - 28 - width, shell_height - 68, width, 40);
   SetWindowPos(action, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   if (show_cancel) {
-    place(cancel, shell_width - 138 - width, shell_height - 68, 100, 40);
+    place(cancel, shell_width - 146 - width, shell_height - 68, 108, 40);
     SetWindowPos(cancel, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
 
@@ -383,12 +384,13 @@ void draw_choice(HWND window, HDC dc) {
   HBRUSH base = CreateSolidBrush(background);
   FillRect(dc, &bounds, base);
   DeleteObject(base);
-  const int size = MulDiv(role(window) == 12 ? 14 : 18, dpi, 96);
+  const int size = MulDiv(role(window) == 12 ? 16 : 18, dpi, 96);
   const bool checked = SendMessageW(window, BM_GETCHECK, 0, 0) == BST_CHECKED;
   const bool enabled = IsWindowEnabled(window) != FALSE;
+  const bool hover = enabled && hovered_button == window;
   const LONG_PTR kind = GetWindowLongPtrW(window, GWL_STYLE) & BS_TYPEMASK;
   const bool radio = kind == BS_RADIOBUTTON || kind == BS_AUTORADIOBUTTON;
-  const COLORREF accent = enabled ? accent_color : RGB(135,135,135);
+  const COLORREF accent = !enabled ? RGB(135,135,135) : hover ? RGB(179,255,153) : accent_color;
   RECT box{0, (bounds.bottom - size) / 2, size, (bounds.bottom + size) / 2};
   if (radio) {
     Gdiplus::Graphics graphics(dc);
@@ -411,7 +413,7 @@ void draw_choice(HWND window, HDC dc) {
   HGDIOBJ old_font = SelectObject(dc,
       reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
   SetBkMode(dc, TRANSPARENT);
-  SetTextColor(dc, role(window) == 12 ? RGB(186, 186, 186) : IsWindowEnabled(window) ? RGB(249, 255, 248) : RGB(135, 135, 135));
+  SetTextColor(dc, role(window) == 12 && !hover ? RGB(186, 186, 186) : IsWindowEnabled(window) ? RGB(249, 255, 248) : RGB(135, 135, 135));
   RECT text_bounds = bounds;
   text_bounds.left = size + MulDiv(10, dpi, 96);
   RECT measured = text_bounds;
@@ -584,6 +586,8 @@ void paint_surface(HWND window, HDC dc) {
   LineTo(dc, scale(shell_width - 116) - origin.x, scale(48) - origin.y);
   SelectObject(dc, previous);
   DeleteObject(pen);
+  // The frameless window gets a quiet outline that follows its rounded corners.
+  if (window == root) installer_ui::ring(dc, bounds, RGB(81, 81, 81), scale(10), static_cast<float>(scale(1)));
 }
 void draw_badge(HDC dc, RECT bounds, const std::wstring& text) {
   FillRect(dc, &bounds, log_brush);
@@ -611,9 +615,13 @@ void paint_brand(HWND window, HDC dc) {
   SelectObject(dc, body_font);
   bounds.left += measured.right + scale(6);
   DrawTextW(dc, L"CLIENT", -1, &bounds, DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-  RECT badge{scale(150), scale(8), scale(254), scale(32)};
+  RECT client{};
+  DrawTextW(dc, L"CLIENT", -1, &client, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
+  bounds.left += client.right + scale(10);
   const auto version = window_text(static_cast<HWND>(GetPropW(root, L"PanitaVersionLabel")));
-  draw_badge(dc, badge, version);
+  SelectObject(dc, caption_font);
+  SetTextColor(dc, RGB(138, 138, 138));
+  DrawTextW(dc, version.c_str(), -1, &bounds, DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
   SelectObject(dc, previous);
 }
 void paint_card(HWND window, HDC dc) {
@@ -686,6 +694,10 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
     }
     TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
     TrackMouseEvent(&tracking);
+  }
+  if (message == WM_SETCURSOR && lstrcmpiW(window_class, L"Button") == 0 && IsWindowEnabled(window)) {
+    SetCursor(LoadCursorW(nullptr, IDC_HAND));
+    return TRUE;
   }
   if (message == WM_MOUSELEAVE && hovered_button == window) {
     hovered_button = nullptr;
@@ -885,7 +897,8 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
       graphics_token = 0;
       DeleteObject(body_font);
       DeleteObject(caption_font);
-      body_font = caption_font = nullptr;
+      DeleteObject(option_font);
+      body_font = caption_font = option_font = nullptr;
       DeleteObject(log_brush);
       log_brush = nullptr;
       DeleteObject(background_brush);
@@ -935,8 +948,13 @@ BOOL CALLBACK style_child(HWND window, LPARAM) {
   LOGFONTW font{};
   const auto current_font = reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0));
   GetObjectW(current_font, sizeof(font), &font);
+  const int control_id = GetDlgCtrlID(window);
+  const bool footer_button = control_id == IDOK || control_id == IDCANCEL || tag == 22;
   if (tag == 12) {
-    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(caption_font), TRUE);
+    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(option_font), TRUE);
+  } else if (footer_button) {
+    // 7. The footer buttons share one font size.
+    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(body_font), TRUE);
   } else if (tag == 5) {
     SetWindowLongPtrW(window, GWL_STYLE, GetWindowLongPtrW(window, GWL_STYLE) | SS_CENTERIMAGE);
     SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(caption_font), TRUE);
@@ -983,6 +1001,9 @@ void apply_presentation(HWND parent) {
         FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     caption_font = CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE,
+        FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    option_font = CreateFontW(-MulDiv(10, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE,
         FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
   }
