@@ -620,7 +620,7 @@ and individual measurements are evidence, not product guarantees.
   itself push, merge, create release tags or publish binaries.
 - Use the annotated launcher layout reference and supplied palette for the
   interim facelift: dark `#141414`, `#1B1B1B`, `#515151`; light `#F9FFF8`,
-  `#E4FFDA`, `#BABABA`; primary `#54A636`, `#047500`. Theme switching is not
+  `#E4FFDA`, `#BABABA`; primary `#54A636`, `#047500`; danger `#B94545` (hover `#D05A5A`, owner decision 2026-10-31). Theme switching is not
   implied. Use the owner-updated `desktop/icons/source.svg` as the application
   icon source (2026-10-30); preserve its artwork and colors. Use the
   background-bearing logo in navigation headers (owner decision, 2026-10-30).

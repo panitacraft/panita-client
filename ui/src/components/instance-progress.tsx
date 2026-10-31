@@ -27,6 +27,7 @@ export function InstanceProgress({ entry, busy, onCancel, title }: { entry: Play
         <div className="operation-metrics"><span>Archivo de Minecraft / Java</span><span>{formatBytes(artifact.bytes)} / {formatBytes(artifact.total)}</span></div>
         <progress aria-label="Descarga del archivo actual" max={artifact.total} value={Math.min(artifact.total, artifact.bytes)} />
       </>}
+      {!(artifact && artifact.total > 0) && <div className="indeterminate-bar" role="progressbar" aria-label="Procesando" />}
       <p>{entry.operation === 'play' ? 'Comprobando archivos y cuenta.' : `${entry.receivedFiles} archivos recibidos · ${entry.reusedFiles} reutilizados`}</p>
     </>}
   </div>;
