@@ -67,7 +67,7 @@ const messages: Record<LauncherErrorCode, string> = {
   activation_rate_limited: 'Tienes demasiados códigos pendientes.',
   activation_expired: 'El código venció. Pide uno nuevo.',
   activation_consumed: 'Este código ya no es válido. Pide uno nuevo.',
-  activation_file_invalid: 'El archivo de sesión está dañado o no es compatible. Cierra el cliente y elimina panita-session.json (oculto) de la carpeta PanitaClient en tus datos de aplicación.',
+  activation_file_invalid: 'El archivo de sesión está dañado o no es compatible. Cierra el cliente y elimina panita-session.json (archivo oculto) en la carpeta de los datos de la aplicación.',
   session_rejected: 'Tu sesión de Panitacraft se cerró. Actívala de nuevo para continuar.',
   api_key_rejected: 'El servicio rechazó esta versión de Panita Client. Instala la versión más reciente.',
   manual_files_required: 'Faltan archivos que debes descargar tú mismo. Complétalos para poder jugar.',
