@@ -492,8 +492,9 @@ and individual measurements are evidence, not product guarantees.
   and error codes; download ticks must not flood the viewer. Diagnostics remain
   available when account initialization fails and provide no export or account,
   callback, launch-argument, or raw game-log access.
-- Owner decision, 2026-10-31: write one session log file per launcher process to
-  `logs/session-{timestamp}-{id}.log` for support, with timestamp, level, the same
+- Owner decision, 2026-10-31: write one session log file per launcher process for support:
+  the running session writes `logs/latest.log`, and the next launch renames it to
+  `logs/session-{timestamp}-{id}.log` from its own header, with timestamp, level, the same
   fixed events and error codes, a header with launcher version, platform and
   hardware facts (operating system, processor, logical cores, memory, graphics
   adapter, disk capacity), and redacted free-text notes (game exit codes, settings
