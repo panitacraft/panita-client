@@ -14,6 +14,7 @@ import { PlayControls, PlayNotice, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
 import { canInstall, canOpenInstanceOptions, canRepair, canUninstall, isPack, updateTarget } from './library-state';
 import { SettingsPanel, usePreferences } from './settings';
+import { LauncherUpdateNotice, UpdatesPanel } from './update';
 import { DiagnosticsPanel } from './diagnostics';
 import { CachePanel, PackPanel } from './pack';
 import { CrashNotifications } from './game-output';
@@ -43,7 +44,7 @@ export function Launcher() {
   const [page, setPage] = useState<LauncherPage>('library');
   const [cacheRequest, setCacheRequest] = useState(0);
   const [settingsScope, setSettingsScope] = useState<'global' | 'instance'>('global');
-  const [settingsTab, setSettingsTab] = useState<'game' | 'storage' | 'diagnostics'>('game');
+  const [settingsTab, setSettingsTab] = useState<'game' | 'storage' | 'updates' | 'diagnostics'>('game');
   const [accountView, setAccountView] = useState<AccountsView | null>(null);
   const [instancePage, setInstancePage] = useState(0);
   const [version, setVersion] = useState(__APP_VERSION__);
@@ -145,6 +146,7 @@ export function Launcher() {
 
       <div id="launcher-content" tabIndex={-1} className="launcher-content">
         <div className="launcher-notices">
+          <LauncherUpdateNotice />
           <PlayNotice names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} />
           {preferences?.error && <div role="alert" className="catalog-notice"><p>{preferences.error}</p><Button variant="secondary" disabled={preferences.busy} onClick={preferences.retry}>Reintentar preferencias</Button></div>}
           {preferences?.warning && <p role="alert">{preferences.warning}</p>}
@@ -194,10 +196,11 @@ export function Launcher() {
         <div hidden={page !== 'settings'} className="utility-page settings-page">
           <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? `Ajustes · ${selected?.name ?? 'Instancia'}` : 'Ajustes Globales'}</h1><p>{settingsScope === 'instance' ? 'Sobrescribe los ajustes globales solo para esta instancia.' : 'Estos valores se aplicarán por defecto a todas las instancias.'}</p></div>
           {settingsScope === 'global' && <div className="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
-            {([['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['diagnostics', 'Diagnóstico']] as const).map(([value, label]) => <Button key={value} className="rounded-b-none" variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
+            {([['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['updates', 'Actualizaciones'], ['diagnostics', 'Diagnóstico']] as const).map(([value, label]) => <Button key={value} className="rounded-b-none" variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
           </div>}
           <div hidden={settingsTab !== 'game'}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'storage'}><CachePanel openRequest={cacheRequest} /></div>
+          <div hidden={settingsScope !== 'global' || settingsTab !== 'updates'}><UpdatesPanel /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'diagnostics'}>{settingsScope === 'global' && settingsTab === 'diagnostics' && <DiagnosticsPanel />}</div>
           <UtilityFooter />
         </div>
