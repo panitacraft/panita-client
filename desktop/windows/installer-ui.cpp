@@ -80,6 +80,15 @@ std::wstring window_text(HWND window) {
   text.resize(static_cast<size_t>(length));
   return text;
 }
+// Identical text, fonts and ranges still repaint a control, and the 100 ms timer reapplies them,
+// so each one is written only when it actually changes.
+void set_text(HWND window, const wchar_t* text) {
+  if (window_text(window) != text) SetWindowTextW(window, text);
+}
+void set_font(HWND window, HFONT font) {
+  if (reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)) != font)
+    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+}
 int text_height(HWND window, int width) {
   auto text = window_text(window);
   HDC dc = GetDC(window);
@@ -103,7 +112,7 @@ void resize_shell(HWND page, int content_bottom = 340) {
       SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
   place(page, 28, 16, content_width, shell_height - 32);
   HRGN rounded = CreateRoundRectRgn(0, 0, scale(shell_width) + 1, scale(shell_height) + 1, scale(20), scale(20));
-  if (!SetWindowRgn(root, rounded, TRUE)) DeleteObject(rounded);
+  if (!SetWindowRgn(root, rounded, FALSE)) DeleteObject(rounded);
 }
 void position_header(const Controls& controls) {
   place(controls[1], 0, 0, 40, 40);
@@ -199,10 +208,10 @@ void refresh_actions() {
   const bool show_cancel = !failed_close && state == 0;
   ShowWindow(action == cancel ? next : cancel, show_cancel ? SW_SHOWNA : SW_HIDE);
   ShowWindow(action, state == 1 ? SW_HIDE : SW_SHOWNA);
-  if (failed_close) SetWindowTextW(cancel, L"Cerrar");
+  if (failed_close) set_text(cancel, L"Cerrar");
   else if (state == 3) {
     const bool uninstall = GetPropW(root, L"PanitaUninstall") != nullptr;
-    SetWindowTextW(next, uninstall ? L"Cerrar" : L"Continuar");
+    set_text(next, uninstall ? L"Cerrar" : L"Continuar");
   }
   HDC dc = GetDC(action);
   HGDIOBJ previous_font = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(action, WM_GETFONT, 0, 0)));
@@ -237,7 +246,10 @@ void refresh_actions() {
     PBRANGE range{};
     SendMessageW(source, PBM_GETRANGE, FALSE, reinterpret_cast<LPARAM>(&range));
     const int position = state == 3 ? range.iHigh : static_cast<int>(SendMessageW(source, PBM_GETPOS, 0, 0));
-    SendMessageW(controls[26], PBM_SETRANGE32, range.iLow, range.iHigh);
+    PBRANGE shown{};
+    SendMessageW(controls[26], PBM_GETRANGE, FALSE, reinterpret_cast<LPARAM>(&shown));
+    if (shown.iLow != range.iLow || shown.iHigh != range.iHigh)
+      SendMessageW(controls[26], PBM_SETRANGE32, range.iLow, range.iHigh);
     if (SendMessageW(controls[26], PBM_GETPOS, 0, 0) != position) SendMessageW(controls[26], PBM_SETPOS, position, 0);
   }
   // The finished page starts with its details collapsed, even if they were opened while it ran.
@@ -951,20 +963,19 @@ BOOL CALLBACK style_child(HWND window, LPARAM) {
   const int control_id = GetDlgCtrlID(window);
   const bool footer_button = control_id == IDOK || control_id == IDCANCEL || tag == 22;
   if (tag == 12) {
-    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(option_font), TRUE);
+    set_font(window, option_font);
   } else if (footer_button) {
     // 7. The footer buttons share one font size.
-    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(body_font), TRUE);
+    set_font(window, body_font);
   } else if (tag == 5) {
     SetWindowLongPtrW(window, GWL_STYLE, GetWindowLongPtrW(window, GWL_STYLE) | SS_CENTERIMAGE);
-    SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(caption_font), TRUE);
+    set_font(window, caption_font);
   } else if (font.lfHeight >= -MulDiv(14, GetDpiForWindow(root), 96)) {
     RECT bounds{};
     GetWindowRect(window, &bounds);
     const bool compact_button = lstrcmpiW(type, L"Button") == 0 && !choice_control(window) &&
         bounds.bottom - bounds.top <= MulDiv(32, GetDpiForWindow(root), 96);
-    SendMessageW(window, WM_SETFONT,
-        reinterpret_cast<WPARAM>(compact_button ? caption_font : body_font), TRUE);
+    set_font(window, compact_button ? caption_font : body_font);
   }
   if (lstrcmpiW(type, L"Button") == 0) {
     LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
@@ -982,6 +993,8 @@ BOOL CALLBACK style_child(HWND window, LPARAM) {
 void apply_presentation(HWND parent) {
   if (!IsWindow(parent)) return;
   root = parent;
+  const bool suspended = IsWindowVisible(root) != FALSE;
+  if (suspended) SendMessageW(root, WM_SETREDRAW, FALSE, 0);
   SetWindowLongPtrW(root, GWL_STYLE, GetWindowLongPtrW(root, GWL_STYLE) | WS_CLIPCHILDREN);
   if (!graphics_token) {
     Gdiplus::GdiplusStartupInput input;
@@ -1021,7 +1034,8 @@ void apply_presentation(HWND parent) {
   EnumChildWindows(root, style_child, 0);
   refresh_actions();
   SetTimer(root, controls_timer, 100, nullptr);
-  RedrawWindow(root, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+  if (suspended) SendMessageW(root, WM_SETREDRAW, TRUE, 0);
+  RedrawWindow(root, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
 }
 }
 
