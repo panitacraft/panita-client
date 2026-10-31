@@ -11,7 +11,7 @@ import logoBackground from './assets/logo_background.svg';
 import { Button } from './components/ui/button';
 import { Hint } from './components/hint';
 import { AccountDialog } from './components/account-dialog';
-import { ProfileArtwork } from './components/profile-artwork';
+import { DiscordIcon, ProfileArtwork } from './components/profile-artwork';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from './components/ui/dropdown-menu';
 import logoWhite from './assets/logo-white.svg';
 import { Accounts } from './accounts';
@@ -292,7 +292,7 @@ export function ActivationPanel() {
     <TransientNotice notice={toast.notice} />
     <div className="profile-row panita-profile">
       <PanitaAvatar url={user.avatar_url} />
-      <div className="profile-info"><div className="profile-name"><strong>{memberName(user)}</strong><span className="active-badge"><Check aria-hidden="true" />Activa</span></div><span className="profile-type">{user.discord_name}</span>{hint && <p>{hint}</p>}</div>
+      <div className="profile-info"><div className="profile-name"><strong>{memberName(user)}</strong><span className="active-badge"><Check aria-hidden="true" />Activa</span></div><span className="profile-type"><DiscordIcon />{user.discord_name}</span>{hint && <p>{hint}</p>}</div>
       <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label="Opciones de Panitacraft"><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => setConfirming(true)}><LogOut />Cerrar sesión</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
     </div>
     {confirming && <AccountDialog title="Cerrar sesión de Panitacraft" onCancel={() => setConfirming(false)}>

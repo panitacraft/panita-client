@@ -298,7 +298,7 @@
     .instance-actions { margin-top: 16px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+    :root:not([data-motion]) *, :root:not([data-motion]) *::before, :root:not([data-motion]) *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
   }
 }
 
@@ -313,8 +313,6 @@
   .hero-heading > p { margin-bottom: 16px; }
   .instance-actions { margin-top: 16px; }
   .split-button > .primary-play:only-child { border-radius: 7px; }
-  .primary-play.force-close-play { opacity: 1; background: #B94545; color: #F9FFF8; }
-  .primary-play.force-close-play:not(:disabled):hover { background: #D05A5A; }
   .primary-play.busy-play { opacity: 1; background: #253b1c; color: #E4FFDA; cursor: progress; }
   .spin { animation: panita-spin 1s linear infinite; }
   @keyframes panita-spin { to { transform: rotate(360deg); } }
@@ -470,4 +468,28 @@
   .library-page { display: flex; flex-direction: column; }
   .library-page > .instance-detail { flex: 1; }
   .library-page > .empty-state { flex: 1; min-height: 0; }
+}
+
+@layer components {
+  /* The motion setting (General tab) is authoritative; spinners keep turning because they signal work. */
+  :root[data-motion='off'] *:not(.spin), :root[data-motion='off'] *::before, :root[data-motion='off'] *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  @keyframes panita-page-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  @keyframes panita-fade-in { from { opacity: 0; } to { opacity: 1; } }
+  /* Hidden pages become displayed again when selected, which replays the entrance. */
+  .library-page, .utility-page { animation: panita-page-in 240ms ease-out; }
+  .settings-page > div:not([hidden]) { animation: panita-fade-in 200ms ease-out; }
+  .instance-detail { animation: panita-fade-in 260ms ease-out; }
+  .artwork-fade { opacity: 0; transition: opacity 700ms ease, transform 1100ms cubic-bezier(.2, .7, .2, 1); }
+  .banner-image.artwork-fade { transform: scale(1.04); }
+  .artwork-fade.is-loaded { opacity: 1; transform: none; }
+  .dialog-title { display: flex; align-items: center; gap: 12px; }
+  .dialog-title > svg { width: 24px; height: 24px; flex-shrink: 0; color: #54A636; }
+  .update-notes { display: grid; gap: 10px; margin: 18px 0; padding: 14px 16px; list-style: none; border: 1px solid #383838; border-radius: 8px; background: #141414; }
+  .update-notes li { display: flex; align-items: flex-start; gap: 10px; margin: 0; font-size: 13px; line-height: 1.5; color: #BABABA; }
+  .update-notes li > svg { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; color: #54A636; }
+  .update-notes li.is-warning > svg { color: #E9D591; }
+  .operation-dock { position: fixed; left: 112px; bottom: 24px; z-index: 90; display: flex; flex-direction: column; gap: 10px; width: min(380px, calc(100vw - 136px)); animation: panita-page-in 220ms ease-out; }
+  .operation-dock .operation-card { width: 100%; margin: 0; background: #1B1B1B; box-shadow: 0 12px 36px #000a; }
+  .operation-title { display: flex; flex-direction: column; min-width: 0; }
+  .operation-title > small { color: #BABABA; font-size: 11px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }

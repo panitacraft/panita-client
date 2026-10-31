@@ -10,11 +10,11 @@ import { useInstanceRail } from './use-instance-rail';
 import { Accounts } from './accounts';
 import type { AccountsView } from './account-state';
 import { ActivationPanel, useActivation } from './activation';
-import { PlayControls, PlayNotice, usePlaySnapshot } from './play';
+import { OperationDock, PlayControls, PlayNotice, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
 import { canInstall, canOpenInstanceOptions, canRepair, canUninstall, isPack, updateTarget } from './library-state';
 import { SettingsPanel, usePreferences } from './settings';
-import { UpdatesPanel, VersionBadge } from './update';
+import { GeneralPanel, VersionBadge } from './update';
 import { DiagnosticsPanel } from './diagnostics';
 import { CachePanel, PackPanel } from './pack';
 import { CrashNotifications } from './game-output';
@@ -44,7 +44,7 @@ export function Launcher() {
   const [page, setPage] = useState<LauncherPage>('library');
   const [cacheRequest, setCacheRequest] = useState(0);
   const [settingsScope, setSettingsScope] = useState<'global' | 'instance'>('global');
-  const [settingsTab, setSettingsTab] = useState<'game' | 'storage' | 'updates' | 'diagnostics'>('game');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'game' | 'storage' | 'diagnostics'>('general');
   const [accountView, setAccountView] = useState<AccountsView | null>(null);
   const [instancePage, setInstancePage] = useState(0);
   const [version, setVersion] = useState(__APP_VERSION__);
@@ -89,7 +89,7 @@ export function Launcher() {
   }, [installationChanges, catalogAttempt]);
 
   function openSettings(scope: 'global' | 'instance') {
-    setSettingsScope(scope); setSettingsTab('game'); setPage('settings');
+    setSettingsScope(scope); setSettingsTab(scope === 'global' ? 'general' : 'game'); setPage('settings');
   }
 
   return <TooltipProvider delayDuration={250}><main className="launcher-shell">
@@ -194,16 +194,17 @@ export function Launcher() {
         <div hidden={page !== 'settings'} className="utility-page settings-page">
           <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? `Ajustes · ${selected?.name ?? 'Instancia'}` : 'Ajustes Globales'}</h1><p>{settingsScope === 'instance' ? 'Sobrescribe los ajustes globales solo para esta instancia.' : 'Estos valores se aplicarán por defecto a todas las instancias.'}</p></div>
           {settingsScope === 'global' && <div className="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
-            {([['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['updates', 'Actualizaciones'], ['diagnostics', 'Diagnóstico']] as const).map(([value, label]) => <Button key={value} className="rounded-b-none" variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
+            {([['general', 'General'], ['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['diagnostics', 'Diagnóstico']] as const).map(([value, label]) => <Button key={value} className="rounded-b-none" variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
           </div>}
-          <div hidden={settingsTab !== 'game'}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
+          <div hidden={settingsScope === 'global' && settingsTab !== 'game'}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'storage'}><CachePanel openRequest={cacheRequest} /></div>
-          <div hidden={settingsScope !== 'global' || settingsTab !== 'updates'}><UpdatesPanel /></div>
+          <div hidden={settingsScope !== 'global' || settingsTab !== 'general'}><GeneralPanel /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'diagnostics'}>{settingsScope === 'global' && settingsTab === 'diagnostics' && <DiagnosticsPanel />}</div>
           <UtilityFooter />
         </div>
       </div>
     </div>
+    <OperationDock names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} />
     <CrashNotifications names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} />
   </main></TooltipProvider>;
 }

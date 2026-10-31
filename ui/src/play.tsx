@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronDown, CircleArrowUp, Download, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square } from 'lucide-react';
+import { ChevronDown, CircleArrowUp, Download, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { InstanceProgress } from './components/instance-progress';
 import { AccountDialog } from './components/account-dialog';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
@@ -74,6 +74,17 @@ export function PlayNotice({ names = {} }: { names?: Record<string, string> }) {
     {play?.error && <p role="alert">{play.error}</p>}
     {play?.snapshot?.closeBlocked && <p className="catalog-notice" role="alert">No pudimos cerrar esta ventana. Cancela la instalación o el inicio pendiente y vuelve a intentarlo. Puedes minimizar esta ventana.</p>}
   </>;
+}
+
+/** Progress of running operations floats over every screen, so players keep using the launcher; it closes by itself when work ends. */
+export function OperationDock({ names = {} }: { names?: Record<string, string> }) {
+  const play = useContext(PlayContext);
+  const entries = (play?.snapshot?.instances ?? []).filter(entry => playActive(entry.phase) && entry.phase !== 'running' && entry.phase !== 'stopping' && entry.phase !== 'warning');
+  if (entries.length === 0) return null;
+  return <div className="operation-dock" aria-label="Operaciones en curso">
+    {entries.map(entry => <InstanceProgress key={entry.requestId} entry={entry} busy={false} title={names[entry.instanceId]}
+      onCancel={() => void play?.act('cancel_play', { instanceId: entry.instanceId, requestId: entry.requestId })} />)}
+  </div>;
 }
 
 export function usePlaySnapshot() {
@@ -175,7 +186,6 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     <TransientNotice notice={toast.notice} />
     {logError && <p role="alert">{logError}</p>}
     {entry?.consoleError && <p role="alert">Minecraft se inició, pero no pudimos abrir su consola automáticamente. Puedes volver a intentarlo con «Ver registro». {messageForError(entry.consoleError)}</p>}
-    {active && !running && entry.phase !== 'warning' && <InstanceProgress entry={entry} busy={busy} onCancel={() => void act('cancel_play', { requestId: entry.requestId })} />}
     {entry && (entry.operation === 'repair' || entry.operation === 'uninstall') && !active && entry.retainedFiles > 0 && <p role="status">Conservamos {entry.retainedFiles} archivos nativos modificados o que no pudimos comprobar.</p>}
     {entry?.nativeCleanup && !active && entry.nativeCleanup.retainedGenerations > 0 && <div role="status">
       <p>{nativeCleanupSummary(entry.nativeCleanup)}</p>
@@ -232,7 +242,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     </AccountDialog>}
     <div className="instance-actions">
     <div className="split-button" role="group" aria-label="Controles de la instancia">
-    {active ? <Button className={`primary-play h-12 text-xl ${running && entry.phase !== 'stopping' ? 'force-close-play' : 'busy-play'}`} size="lg" aria-disabled={!running || entry.phase === 'stopping'} onClick={() => { if (running && entry && entry.phase !== 'stopping') setForceQuestion(entry.requestId); }}>
+    {active ? <Button className={`primary-play h-12 text-xl ${running && entry.phase !== 'stopping' ? 'bg-[#B94545] text-[#F9FFF8] hover:bg-[#D05A5A]' : 'busy-play'}`} size="lg" aria-disabled={!running || entry.phase === 'stopping'} onClick={() => { if (running && entry && entry.phase !== 'stopping') setForceQuestion(entry.requestId); }}>
       {running && entry.phase !== 'stopping' ? <Square aria-hidden="true" /> : <LoaderCircle className="spin" aria-hidden="true" />}{running ? entry.phase === 'stopping' ? 'Cerrando…' : 'Cerrar forzosamente…' : 'Preparando…'}
     </Button> : updateTarget ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy} onClick={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</Button>
       : (installAllowed && entry?.phase !== 'installed') || entry?.phase === 'uninstalled' ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy || !installAllowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.phase === 'failed' ? 'Reintentar instalación' : 'Instalar'}</Button>
@@ -287,9 +297,12 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     </dialog>
     <dialog ref={updateDialog} className="update-dialog" aria-labelledby={instanceId + '-update-title'} aria-describedby={instanceId + '-update-warning'} onCancel={() => setUpdateQuestion(null)} onClose={() => { if (!updateDialog.current?.open) setUpdateQuestion(null); }}>
     {updateQuestion && <>
-      <h2 id={instanceId + '-update-title'}>{updateQuestion.pack ? versionTitle(names, updateQuestion.fromVersion, updateQuestion.toVersion) : `Actualizar de Minecraft ${updateQuestion.fromVersion} a ${updateQuestion.toVersion}`}</h2>
-      {updateQuestion.pack && <p>Actualizaremos los archivos del modpack sin cambios. Tus mundos, mods añadidos y ajustes editados se conservan.</p>}
-      <p id={instanceId + '-update-warning'}>Abrir mundos con otra versión puede cambiarlos. Volver de versión no deshace esos cambios.</p>
+      <h2 id={instanceId + '-update-title'} className="dialog-title"><CircleArrowUp aria-hidden="true" />{updateQuestion.pack ? versionTitle(names, updateQuestion.fromVersion, updateQuestion.toVersion) : `Actualizar Minecraft (${updateQuestion.fromVersion} → ${updateQuestion.toVersion})`}</h2>
+      <ul className="update-notes">
+        {updateQuestion.pack && <li><ShieldCheck aria-hidden="true" />Actualizaremos solo los archivos del modpack que no hayas cambiado.</li>}
+        {updateQuestion.pack && <li><ShieldCheck aria-hidden="true" />Tus mundos, mods añadidos y ajustes editados se conservan.</li>}
+        <li id={instanceId + '-update-warning'} className="is-warning"><TriangleAlert aria-hidden="true" />Abrir mundos con otra versión puede cambiarlos. Volver de versión no deshace esos cambios.</li>
+      </ul>
       <label className="backup-choice"><input type="checkbox" checked={updateQuestion.backupWorlds} onChange={event => setUpdateQuestion({ ...updateQuestion, backupWorlds: event.target.checked })} /><span>Crear copia de mis mundos (recomendado)</span></label>
       <div className="account-buttons">
         <Button disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {

@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { PlayControls } from '../src/play';
 import { TooltipProvider } from '../src/components/ui/tooltip';
-import { LauncherUpdateProvider, UpdatesPanel, VersionBadge } from '../src/update';
+import { LauncherUpdateProvider, GeneralPanel, VersionBadge } from '../src/update';
 import type { LauncherUpdateView } from '../src/update-state';
 
 const backend = vi.hoisted(() => ({ invoke: vi.fn(), listeners: new Map<string, Set<(event: { payload: unknown }) => void>>() }));
@@ -33,7 +33,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 async function mount() {
-  render(<TooltipProvider><LauncherUpdateProvider><VersionBadge version="0.2.0-beta.3" /><PlayControls instanceId="pack-a" allowed /><UpdatesPanel /></LauncherUpdateProvider></TooltipProvider>);
+  render(<TooltipProvider><LauncherUpdateProvider><VersionBadge version="0.2.0-beta.3" /><PlayControls instanceId="pack-a" allowed /><GeneralPanel /></LauncherUpdateProvider></TooltipProvider>);
   await waitFor(() => expect(backend.invoke).toHaveBeenCalledWith('launcher_update_status', undefined));
 }
 async function emit(next: LauncherUpdateView) {

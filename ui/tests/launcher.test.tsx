@@ -78,7 +78,7 @@ test('refreshing a selected vanilla instance replaces Play with a mandatory upda
   expect(screen.queryByRole('button', { name: 'Jugar', exact: true })).toBeNull();
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(update);
-  expect(screen.getByRole('dialog', { name: 'Actualizar de Minecraft 1.21.1 a 1.21.2' })).toBeTruthy();
+  expect(screen.getByRole('dialog', { name: 'Actualizar Minecraft (1.21.1 → 1.21.2)' })).toBeTruthy();
   expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
 });
 
@@ -126,8 +126,8 @@ test('mandatory pack updates open a modal and require explicit world-backup cons
   const update = await screen.findByRole('button', { name: 'Actualizar…' });
   expect(screen.queryByRole('button', { name: 'Jugar', exact: true })).toBeNull();
   await user.click(update);
-  await screen.findByText('Actualizar el modpack de Uno a Dos');
-  expect(screen.getByRole('dialog', { name: 'Actualizar el modpack de Uno a Dos' })).toBeTruthy();
+  await screen.findByText('Actualizar Modpack (Uno → Dos)');
+  expect(screen.getByRole('dialog', { name: 'Actualizar Modpack (Uno → Dos)' })).toBeTruthy();
   expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(screen.getByRole('button', { name: 'Actualizar', exact: true }));
