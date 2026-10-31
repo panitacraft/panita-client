@@ -494,8 +494,11 @@ and individual measurements are evidence, not product guarantees.
   callback, launch-argument, or raw game-log access.
 - Owner decision, 2026-10-31: write one session log file per launcher process to
   `logs/session-{timestamp}-{id}.log` for support, with timestamp, level, the same
-  fixed events and error codes, a header with launcher version and platform, and
-  redacted free-text notes (for example game exit codes). Redact home paths, URL
+  fixed events and error codes, a header with launcher version, platform and
+  hardware facts (operating system, processor, logical cores, memory, graphics
+  adapter, disk capacity), and redacted free-text notes (game exit codes, settings
+  changes with old and new values, account and Panita activation actions without
+  names or serials). Redact home paths, URL
   queries, bearer tokens, JWTs and Panita serials, bound each note to 1 KiB and
   each file to 5 MiB, and never write credentials, callbacks, account data or raw
   game output. Create the folder 0700 and files 0600 on Unix. Delete only
