@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::error::ErrorCode;
@@ -88,6 +89,8 @@ pub enum LogEvent {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticRecord {
+    /// Milliseconds since the Unix epoch when the event was recorded.
+    at: u64,
     process_session_id: Uuid,
     operation_id: Option<Uuid>,
     event: &'static str,
@@ -112,7 +115,7 @@ pub struct LogRecord {
 
 #[derive(Default)]
 pub struct BoundedLog {
-    records: Mutex<VecDeque<LogRecord>>,
+    records: Mutex<VecDeque<(SystemTime, LogRecord)>>,
     file: Mutex<Option<SessionFile>>,
 }
 
@@ -132,7 +135,7 @@ impl BoundedLog {
         if records.len() == MAX_EVENTS {
             records.pop_front();
         }
-        records.push_back(record);
+        records.push_back((SystemTime::now(), record));
         drop(records);
         let view = Self::view_of(record);
         self.write_file(Self::level_of(&view, &record), &Self::describe(&view));
@@ -154,9 +157,9 @@ impl BoundedLog {
         for line in header {
             file.write(Level::Info, &session_log::redact(line));
         }
-        for record in self.snapshot() {
+        for (at, record) in self.timed_snapshot() {
             let view = Self::view_of(record);
-            file.write(Self::level_of(&view, &record), &Self::describe(&view));
+            file.write_at(at, Self::level_of(&view, &record), &Self::describe(&view));
         }
         let path = file.path().to_path_buf();
         *self
@@ -238,6 +241,13 @@ impl BoundedLog {
     }
 
     pub fn snapshot(&self) -> Vec<LogRecord> {
+        self.timed_snapshot()
+            .into_iter()
+            .map(|(_, record)| record)
+            .collect()
+    }
+
+    fn timed_snapshot(&self) -> Vec<(SystemTime, LogRecord)> {
         self.records
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
@@ -247,7 +257,17 @@ impl BoundedLog {
     }
 
     pub fn view(&self) -> DiagnosticSnapshot {
-        let records = self.snapshot().into_iter().map(Self::view_of).collect();
+        let records = self
+            .timed_snapshot()
+            .into_iter()
+            .map(|(at, record)| {
+                let mut view = Self::view_of(record);
+                view.at = at
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(0));
+                view
+            })
+            .collect();
         DiagnosticSnapshot {
             capacity: MAX_EVENTS,
             records,
@@ -258,6 +278,7 @@ impl BoundedLog {
         {
             {
                 let mut view = DiagnosticRecord {
+                    at: 0,
                     process_session_id: record.process.value(),
                     operation_id: record.operation.map(OperationId::value),
                     event: "application_started",
@@ -350,7 +371,7 @@ mod tests {
                     serde_json::json!("browser_unavailable")
                 }
             );
-            assert_eq!(record.as_object().map(|object| object.len()), Some(6));
+            assert_eq!(record.as_object().map(|object| object.len()), Some(7));
         }
     }
 
@@ -420,6 +441,7 @@ mod tests {
         assert_eq!(
             keys,
             [
+                "at",
                 "error",
                 "event",
                 "operationId",

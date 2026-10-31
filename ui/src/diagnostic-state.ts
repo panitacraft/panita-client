@@ -3,6 +3,8 @@ import type { LauncherErrorCode } from './errors';
 export type Workflow = 'play' | 'install' | 'update' | 'repair' | 'uninstall';
 export type DiagnosticPhase = 'preparing' | 'installing' | 'installed' | 'uninstalled' | 'warning' | 'starting' | 'running' | 'stopping' | 'cancelling' | 'exited' | 'exited_with_error' | 'failed' | 'cancelled';
 export type DiagnosticRecord = {
+  /** Milliseconds since the Unix epoch; 0 when unknown. */
+  at: number;
   processSessionId: string;
   operationId: string | null;
   event: 'activation_failure' | 'launcher_update_failure' | 'application_started' | 'operation_cancelled' | 'storage_failure' | 'catalog_failure' | 'workflow_changed' | 'browser_dispatch_failed' | 'browser_context_unavailable' | 'browser_gio_failed' | 'browser_system_opener_failed' | 'browser_system_opener_timed_out' | 'browser_fallback_succeeded';

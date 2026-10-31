@@ -1,6 +1,7 @@
 //! Per-session diagnostic log files under `logs/`, written for support.
 //!
-//! One file is created per launcher process and pruned after 48 hours. Lines are
+//! The running session writes `latest.log`. When the next session starts, that file
+//! is renamed to its own `session-{start}-{id}.log` name. Files are pruned after 48 hours. Lines are
 //! redacted before they reach the disk; the file never receives credentials,
 //! callbacks, serials or account files.
 use std::fs::{File, OpenOptions};
@@ -15,6 +16,8 @@ const MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
 const MAX_MESSAGE_CHARS: usize = 1024;
 const FILE_PREFIX: &str = "session-";
 const FILE_SUFFIX: &str = ".log";
+/// Name of the file the running session writes.
+pub const LATEST: &str = "latest.log";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Level {
@@ -41,7 +44,9 @@ pub struct SessionFile {
 }
 
 impl SessionFile {
-    /// Prune expired session logs, then create this process's file.
+    /// Archive the previous session's `latest.log`, prune expired logs, then create
+    /// this process's `latest.log`. If it cannot be created (for example another
+    /// launcher still holds it), this session writes a uniquely named file instead.
     pub fn create(directory: &Path, process: ProcessSessionId) -> std::io::Result<Self> {
         std::fs::create_dir_all(directory)?;
         #[cfg(unix)]
@@ -49,23 +54,16 @@ impl SessionFile {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))?;
         }
+        archive_latest(directory);
         prune(directory, SystemTime::now());
-        let (stamp, _) = timestamp(SystemTime::now());
         let id = process.value().simple().to_string();
-        let name = format!(
-            "{FILE_PREFIX}{}-{}{FILE_SUFFIX}",
-            stamp.replace([':', '-'], "").replace('T', "-"),
-            &id[..8]
-        );
-        let path = directory.join(name);
-        let mut options = OpenOptions::new();
-        options.create_new(true).append(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let file = options.open(&path)?;
+        let (stamp, _) = timestamp(SystemTime::now());
+        let named = directory.join(archive_name(&stamp, &id[..8]));
+        let latest = directory.join(LATEST);
+        let (file, path) = match open_new(&latest) {
+            Ok(file) => (file, latest),
+            Err(_) => (open_new(&named)?, named),
+        };
         Ok(Self {
             file,
             path,
@@ -79,10 +77,14 @@ impl SessionFile {
     }
 
     pub fn write(&mut self, level: Level, text: &str) {
+        self.write_at(SystemTime::now(), level, text);
+    }
+
+    pub fn write_at(&mut self, time: SystemTime, level: Level, text: &str) {
         if self.full {
             return;
         }
-        let (stamp, _) = timestamp(SystemTime::now());
+        let (stamp, _) = timestamp(time);
         let line = format!("{stamp} [{}] {text}\n", level.label());
         if self.written + line.len() as u64 > MAX_FILE_BYTES {
             self.full = true;
@@ -96,6 +98,73 @@ impl SessionFile {
             self.written += line.len() as u64;
         }
     }
+}
+
+fn open_new(path: &Path) -> std::io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create_new(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+/// `session-20261031-120000-1a2b3c4d.log` from an ISO timestamp and a short id.
+fn archive_name(stamp: &str, id: &str) -> String {
+    let compact: String = stamp
+        .chars()
+        .take(19)
+        .filter(|ch| ch.is_ascii_digit() || *ch == 'T')
+        .collect::<String>()
+        .replace('T', "-");
+    format!("{FILE_PREFIX}{compact}-{id}{FILE_SUFFIX}")
+}
+
+/// Rename the previous session's `latest.log` to the name its own header gives
+/// (start time and process id). A missing or unreadable header falls back to the
+/// file's modification time and an `unknown` id. Failure leaves the file in place.
+fn archive_latest(directory: &Path) {
+    let latest = directory.join(LATEST);
+    // Never follow links or touch anything that is not a regular file.
+    if !std::fs::symlink_metadata(&latest).is_ok_and(|metadata| metadata.is_file()) {
+        return;
+    }
+    let mut head = [0u8; 256];
+    let read = File::open(&latest)
+        .and_then(|mut file| std::io::Read::read(&mut file, &mut head))
+        .unwrap_or(0);
+    let first = String::from_utf8_lossy(&head[..read]);
+    let first = first.lines().next().unwrap_or_default();
+    let stamp = first
+        .split_whitespace()
+        .next()
+        .filter(|word| word.len() >= 19 && word.as_bytes()[4] == b'-')
+        .map(str::to_owned)
+        .or_else(|| {
+            std::fs::metadata(&latest)
+                .and_then(|metadata| metadata.modified())
+                .ok()
+                .map(|modified| timestamp(modified).0)
+        })
+        .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_owned());
+    let id = first
+        .split("process=")
+        .nth(1)
+        .map(|rest| {
+            rest.chars()
+                .filter(char::is_ascii_hexdigit)
+                .take(8)
+                .collect::<String>()
+        })
+        .filter(|id| id.len() == 8)
+        .unwrap_or_else(|| "unknown".to_owned());
+    let mut target = directory.join(archive_name(&stamp, &id));
+    if target.exists() {
+        target = directory.join(archive_name(&stamp, &format!("{id}-dup")));
+    }
+    let _ = std::fs::rename(&latest, target);
 }
 
 fn timestamp(time: SystemTime) -> (String, u64) {
@@ -118,7 +187,9 @@ pub fn prune(directory: &Path, now: SystemTime) -> usize {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if !name.starts_with(FILE_PREFIX) || !name.ends_with(FILE_SUFFIX) {
+        let owned =
+            name == LATEST || (name.starts_with(FILE_PREFIX) && name.ends_with(FILE_SUFFIX));
+        if !owned {
             continue;
         }
         let Ok(metadata) = entry.metadata() else {
@@ -321,6 +392,56 @@ mod tests {
         assert!(other.exists(), "unrelated files are never deleted");
         assert!(prune(&dir, SystemTime::now()) == 0);
         assert!(std::fs::remove_dir_all(dir).is_ok());
+    }
+
+    #[test]
+    fn the_next_session_renames_latest_to_its_own_name() {
+        let dir = scratch();
+        let first_process = ProcessSessionId::new();
+        let Ok(mut first) = SessionFile::create(&dir, first_process) else {
+            panic!("first");
+        };
+        first.write(
+            Level::Info,
+            &format!("session started process={}", first_process.value()),
+        );
+        assert_eq!(
+            first.path().file_name().and_then(|n| n.to_str()),
+            Some(LATEST)
+        );
+        drop(first);
+        let Ok(second) = SessionFile::create(&dir, ProcessSessionId::new()) else {
+            panic!("second");
+        };
+        assert_eq!(
+            second.path().file_name().and_then(|n| n.to_str()),
+            Some(LATEST)
+        );
+        let id = first_process.value().simple().to_string();
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(names.contains(&LATEST.to_owned()));
+        assert!(
+            names.iter().any(|name| name.starts_with(FILE_PREFIX)
+                && name.ends_with(&format!("{}{FILE_SUFFIX}", &id[..8]))),
+            "{names:?}"
+        );
+        drop(second);
+        assert!(std::fs::remove_dir_all(dir).is_ok());
+    }
+
+    #[test]
+    fn archive_names_are_compact_and_filesystem_safe() {
+        assert_eq!(
+            archive_name("2026-10-31T12:00:05.123Z", "1a2b3c4d"),
+            "session-20261031-120005-1a2b3c4d.log"
+        );
     }
 
     #[test]
