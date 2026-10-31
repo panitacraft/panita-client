@@ -4,11 +4,14 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 mod account_commands;
 mod activation_commands;
+mod folder_opener;
 mod hardware;
 #[cfg(any(target_os = "linux", test))]
 mod linux_activation;
 #[cfg(any(target_os = "linux", test))]
 mod linux_browser;
+#[cfg(any(target_os = "linux", test))]
+mod linux_desktop;
 mod pack_commands;
 mod play_commands;
 mod protocol;
@@ -115,7 +118,6 @@ async fn open_logs_folder(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
 ) -> Result<bool, launcher_core::error::ErrorCode> {
-    use tauri_plugin_opener::OpenerExt;
     if window.label() != "main" {
         return Err(launcher_core::error::ErrorCode::InvalidData);
     }
@@ -127,19 +129,7 @@ async fn open_logs_folder(
         .join("logs");
     std::fs::create_dir_all(&directory)
         .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
-    let opening = tauri::async_runtime::spawn_blocking(move || {
-        app.opener()
-            .open_path(directory.to_string_lossy(), None::<&str>)
-            .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)
-    });
-    // Windows shell integration may keep waiting; report an indeterminate result as opened.
-    match tokio::time::timeout(std::time::Duration::from_secs(5), opening).await {
-        Ok(result) => {
-            result.map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)??;
-            Ok(true)
-        }
-        Err(_) => Ok(true),
-    }
+    folder_opener::open(app, directory).await.map(|_| true)
 }
 
 #[tauri::command]
