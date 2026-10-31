@@ -6,6 +6,37 @@ use launcher_core::panita_api::{DeviceInfo, PanitaCredentials};
 use std::sync::Arc;
 use tauri::Emitter;
 
+/// The direct-message channel with the Panita bot, where a login code is confirmed. Discord opens
+/// it in the desktop application when installed and in the browser otherwise. The address is fixed
+/// here, so the webview can never choose what is opened.
+const PANITA_BOT_CHANNEL: &str = "https://discord.com/channels/@me/898965920700059680";
+
+#[tauri::command]
+pub(super) async fn open_panita_bot(app: tauri::AppHandle) -> Result<(), ErrorCode> {
+    #[cfg(target_os = "linux")]
+    let opened = {
+        let handle = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            super::linux_browser::open_browser(&handle, PANITA_BOT_CHANNEL.to_owned())
+        })
+        .await
+        .unwrap_or(Err(()))
+        .is_ok()
+    };
+    #[cfg(not(target_os = "linux"))]
+    let opened = {
+        use tauri_plugin_opener::OpenerExt;
+        app.opener()
+            .open_url(PANITA_BOT_CHANNEL, None::<&str>)
+            .is_ok()
+    };
+    if opened {
+        Ok(())
+    } else {
+        Err(ErrorCode::BrowserUnavailable)
+    }
+}
+
 pub(super) fn controller(state: &DesktopState) -> Result<Arc<ActivationController>, ErrorCode> {
     state
         .activation
