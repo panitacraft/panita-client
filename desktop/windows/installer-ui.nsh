@@ -1,5 +1,6 @@
 ; Native presentation only. Installation and upgrade logic remains in installer.nsi.
 !include nsDialogs.nsh
+!define PANITA_BRAND_PNG "${__FILEDIR__}\..\icons\icon.png"
 !define PANITA_BRAND_ICON "${__FILEDIR__}\..\icons\icon.ico"
 !addplugindir /x86-unicode "${__FILEDIR__}\..\..\target\installer-ui"
 !define MUI_BGCOLOR "141414"
@@ -182,12 +183,15 @@ Var PanitaProgressNotice
 !macroend
 
 !macro PANITA_BRAND PREFIX
+  ${NSD_CreateLabel} 0 0 0 0 "v${VERSION}"
+  Pop $0
+  !insertmacro PANITA_ROLE $0 5
   ${NSD_CreateIcon} 0 0 32u 32u ""
   Pop $0
   !insertmacro PANITA_ROLE $0 1
   SetCtlColors $0 F9FFF8 141414
   SendMessage $0 ${STM_SETICON} $PanitaIcon 0
-  ${NSD_CreateLabel} 0 0 0 0 "PANITA CLIENT"
+  ${NSD_CreateLabel} 0 0 0 0 "PANITA CLIENT · v${VERSION}"
   Pop $0
   !insertmacro PANITA_ROLE $0 2
   ${NSD_AddStyle} $0 ${SS_CENTERIMAGE}
@@ -258,20 +262,24 @@ Var PanitaProgressNotice
     !insertmacro PANITA_BRAND ""
     ReadRegStr $0 SHCTX "${UNINSTKEY}" "DisplayVersion"
     ${If} $0 == ""
-      !insertmacro PANITA_HEADING "Instala Panita Client" "Tus instancias y amigos, en un solo lugar."
+      !insertmacro PANITA_HEADING "Opciones de Instalación" "Un launcher hecho a medida para nuestra comunidad."
       SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Instalar"
     ${Else}
-      !insertmacro PANITA_HEADING "Actualiza Panita Client" "Instala la nueva versión y sigue jugando."
+      !insertmacro PANITA_HEADING "Opciones de Instalación" "Un launcher hecho a medida para nuestra comunidad."
       SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Actualizar"
     ${EndIf}
-    !insertmacro PANITA_CARD "Solo para tu usuario. Minecraft y Java se descargarán cuando instales una instancia." 270 82
-    ${NSD_CreateLabel} 0 0 0 0 "Carpeta: $INSTDIR"
+    !insertmacro PANITA_CARD "Los recursos del juego se descargarán al añadir un modpack." 270 82
+    ${NSD_CreateLabel} 0 0 0 0 "Carpeta del launcher"
+    Pop $0
+    !insertmacro PANITA_ROLE $0 24
+    SetCtlColors $0 BABABA 141414
+    ${NSD_CreateText} 0 0 0 0 "$INSTDIR"
     Pop $PanitaPath
     !insertmacro PANITA_ROLE $PanitaPath 10
-    ${NSD_AddStyle} $PanitaPath ${SS_NOPREFIX}
+    ${NSD_AddStyle} $PanitaPath ${ES_READONLY}
     !insertmacro PANITA_RECT $PanitaPath 0 370 402 44
     SetCtlColors $PanitaPath BABABA 141414
-    ${NSD_CreateButton} 0 0 0 0 "Cambiar carpeta"
+    ${NSD_CreateButton} 0 0 0 0 "Examinar"
     Pop $0
     !insertmacro PANITA_ROLE $0 11
     !insertmacro PANITA_RECT $0 0 430 402 40
@@ -301,7 +309,7 @@ Var PanitaProgressNotice
     Pop $0
     ${If} $0 != error
       StrCpy $INSTDIR $0
-      ${NSD_SetText} $PanitaPath "Carpeta: $INSTDIR"
+      ${NSD_SetText} $PanitaPath "$INSTDIR"
     ${EndIf}
   FunctionEnd
 
@@ -313,15 +321,25 @@ Var PanitaProgressNotice
       Abort
     ${EndIf}
     !insertmacro PANITA_PAGE_LAYOUT $PanitaDialog
+    SetErrorLevel 0
     System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaPhase", p 4)'
     !insertmacro PANITA_BRAND ""
-    !insertmacro PANITA_HEADING "Panita Client está listo" "Ya puedes abrir el launcher y elegir tu próxima aventura."
-    !insertmacro PANITA_CARD "Tus cuentas, mundos y ajustes se conservan al actualizar el launcher." 270 104
+    !insertmacro PANITA_HEADING "¡Todo listo!" "Panita Client se ha instalado correctamente."
+    ${NSD_CreateButton} 0 0 0 0 "Cerrar"
+    Pop $0
+    !insertmacro PANITA_ROLE $0 22
+    ${NSD_OnClick} $0 PanitaFinishClose
     SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Abrir Panita Client"
     SendMessage $mui.Button.Cancel ${WM_SETTEXT} 0 "STR:Cerrar"
     EnableWindow $mui.Button.Cancel 1
     PanitaUi::Apply /NOUNLOAD
     nsDialogs::Show
+  FunctionEnd
+
+  Function PanitaFinishClose
+    Pop $0
+    SetErrorLevel 0
+    SendMessage $HWNDPARENT ${WM_COMMAND} 2 0
   FunctionEnd
 
   Function PanitaFinishLeave
@@ -435,11 +453,11 @@ Var PanitaProgressNotice
   FunctionEnd
 
   Function PanitaProgress
-    !insertmacro PANITA_PROGRESS_LAYOUT "Instalando Panita Client"
+    !insertmacro PANITA_PROGRESS_LAYOUT "Instalando..."
   FunctionEnd
 
   Function un.PanitaProgress
-    !insertmacro PANITA_PROGRESS_LAYOUT "Desinstalando Panita Client"
+    !insertmacro PANITA_PROGRESS_LAYOUT "Desinstalando..."
   FunctionEnd
 
   !insertmacro PANITA_PROGRESS_DONE ""
@@ -465,6 +483,9 @@ Var PanitaProgressNotice
 
 !macro PANITA_GUI_INIT PREFIX
   Function ${PREFIX}PanitaGuiInit
+    !if "${PREFIX}" == ""
+      SetAutoClose true ; Advance successful installation to the custom completion page.
+    !endif
     System::Call 'user32::GetDpiForWindow(p $HWNDPARENT) i .r0'
     StrCpy $PanitaDpi $0
     ${If} $PanitaDpi < 96
@@ -474,7 +495,7 @@ Var PanitaProgressNotice
     System::Call 'user32::GetWindowLongW(p $HWNDPARENT, i -16) i .r0'
     IntOp $0 $0 & 0xFF3BFFFF
     System::Call 'user32::SetWindowLongW(p $HWNDPARENT, i -16, i r0)'
-    IntOp $0 560 * $PanitaDpi
+    IntOp $0 500 * $PanitaDpi
     IntOp $0 $0 / 96
     IntOp $1 504 * $PanitaDpi
     IntOp $1 $1 / 96
@@ -484,13 +505,15 @@ Var PanitaProgressNotice
     CreateFont $PanitaBrandFont "Segoe UI" 11 700
     CreateFont $PanitaBodyFont "Segoe UI" 11 400
     InitPluginsDir
+    File /oname=$PLUGINSDIR\panita-brand.png "${PANITA_BRAND_PNG}"
+    System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "$PLUGINSDIR\panita-brand.png", i 0x40000000, i 0, i 0, i 0, i 0, p $HWNDPARENT, p 0, p 0, p 0) p .r0'
+    System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaBrandImagePath", p r0)'
     File /oname=$PLUGINSDIR\panita-brand.ico "${PANITA_BRAND_ICON}"
     System::Call 'user32::LoadImageW(p 0, w "$PLUGINSDIR\panita-brand.ico", i 1, i 48, i 48, i 0x10) p .r0'
     StrCpy $PanitaIcon $0
     System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaIcon", p $PanitaIcon)'
     System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "v${VERSION}", i 0x40000000, i 0, i 0, i 0, i 0, p $HWNDPARENT, p 0, p 0, p 0) p .r0'
     System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaVersionLabel", p r0)'
-    !insertmacro PANITA_ROLE $0 5
     !if "${PREFIX}" == "un."
       System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaUninstall", p 1)'
     !endif
@@ -511,7 +534,7 @@ Var PanitaProgressNotice
     ${ElseIf} $0 == 3
     ${OrIf} $0 == 4
       SetErrorLevel 0
-      Quit ; Completed setup may close without starting the launcher.
+      Return ; Let NSIS dismiss the custom page and exit its modal loop.
     ${EndIf}
   FunctionEnd
 
@@ -531,7 +554,7 @@ Var PanitaProgressNotice
   ; Brand the native progress page while retaining its actual status/log controls.
   System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "${TITLE}", i 0x50000000, i 0, i 0, i 0, i 0, p $PanitaDialog, p 0, p 0, p 0) p .r0'
   System::Call 'user32::SetPropW(p r0, w "PanitaStageTitle", p 1)'
-  SendMessage $0 ${WM_SETFONT} $PanitaBrandFont 1
+  SendMessage $0 ${WM_SETFONT} $PanitaTitleFont 1
   SetCtlColors $0 F9FFF8 141414
   !insertmacro PANITA_RECT $0 0 4 402 32
   GetDlgItem $0 $PanitaDialog 1006
