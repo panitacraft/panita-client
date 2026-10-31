@@ -1,5 +1,5 @@
 name: Release
-run-name: Release ${{ github.ref_name }} (${{ github.sha }})
+run-name: Release ${{ github.ref_name }}
 
 # A push to develop publishes a beta and a push to master publishes a stable release (AGENTS.md
 # section 8). The committed version decides the tag; an existing tag is never rebuilt. The update
@@ -79,7 +79,7 @@ jobs:
           echo "$TAG: $state"
 
   package:
-    name: Verify and package (${{ matrix.platform }} x64)
+    name: Verify and package ${{ needs.plan.outputs.tag }} (${{ matrix.platform }} x64)
     needs: plan
     # A published tag is never rebuilt. A leftover draft from a failed run is rebuilt.
     if: needs.plan.outputs.release_state != 'published'
@@ -193,7 +193,7 @@ jobs:
           include-hidden-files: false
 
   release:
-    name: Publish the release
+    name: Publish ${{ needs.plan.outputs.tag }}
     needs: [plan, package]
     if: needs.plan.outputs.release_state != 'published' && needs.plan.outputs.dry_run != 'true'
     runs-on: ubuntu-24.04
@@ -247,7 +247,7 @@ jobs:
           fi
 
   rehearse:
-    name: Rehearse publication (dry run)
+    name: Rehearse publishing ${{ needs.plan.outputs.tag }} (dry run)
     needs: [plan, package]
     if: needs.plan.outputs.dry_run == 'true'
     runs-on: ubuntu-24.04
@@ -320,7 +320,7 @@ jobs:
           gh release delete "$PROBE" --yes --cleanup-tag || true
 
   feed:
-    name: Advance the update feeds
+    name: Advance the update feeds for ${{ needs.plan.outputs.tag }}
     needs: [plan, package, release]
     # Runs after a fresh publication, and again for an already published tag so a failed feed step
     # can be retried. It never runs when packaging or publication failed, and never in a dry run.
