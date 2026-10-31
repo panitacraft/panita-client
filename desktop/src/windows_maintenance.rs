@@ -50,6 +50,12 @@ pub(super) fn remove(identifier: &str) -> i32 {
         Ok(None) => {}
         _ => return 2,
     }
+    // End the member's launcher session on the API first; the local copy goes with the profile.
+    if let Ok(root) = data_removal::current_root()
+        && !data_removal::pending(&root).unwrap_or(true)
+    {
+        launcher_core::activation::close_stored_session_blocking(&root);
+    }
     match data_removal::remove_current_profile() {
         Ok(()) => 0,
         Err(_) => 3,
