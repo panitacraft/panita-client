@@ -12,6 +12,7 @@ mod pack_commands;
 mod play_commands;
 mod protocol;
 mod settings_commands;
+mod update_commands;
 mod window_commands;
 #[cfg(windows)]
 mod windows_identity;
@@ -26,6 +27,7 @@ struct DesktopState {
     orphaned_callback: bool,
     catalog_fetch: tokio::sync::Mutex<()>,
     plays: Arc<play_commands::PlayController>,
+    launcher_update: Arc<update_commands::UpdateController>,
     window: Mutex<settings_commands::WindowPreferences>,
 }
 
@@ -38,6 +40,8 @@ fn initialize(
     use launcher_core::settings::GlobalSettings;
     use launcher_core::storage::PrivateStore;
 
+    // The update check does not depend on accounts, so a damaged account store cannot hide it.
+    update_commands::start_check(app.clone(), state.launcher_update.clone());
     let result = (|| {
         let mut slot = state
             .accounts
@@ -180,6 +184,10 @@ pub fn run() {
         operation: None,
         event: launcher_core::logging::LogEvent::ApplicationStarted,
     });
+    let plays = Arc::new(play_commands::PlayController::with_logs(
+        process,
+        logs.clone(),
+    ));
     let result = tauri::Builder::default()
         .manage(DesktopState {
             process,
@@ -187,7 +195,12 @@ pub fn run() {
             accounts: Mutex::new(None),
             activation: Mutex::new(None),
             catalog_fetch: tokio::sync::Mutex::new(()),
-            plays: Arc::new(play_commands::PlayController::with_logs(process, logs)),
+            launcher_update: Arc::new(update_commands::UpdateController::new(
+                plays.clone(),
+                logs,
+                process,
+            )),
+            plays,
             window: Mutex::new(settings_commands::WindowPreferences::default()),
             orphaned_callback: std::env::args_os()
                 .skip(1)
@@ -233,6 +246,11 @@ pub fn run() {
             activation_commands::retry_activation_save,
             activation_commands::refresh_activation,
             activation_commands::sign_out_activation,
+            update_commands::launcher_update_status,
+            update_commands::check_launcher_update,
+            update_commands::set_update_channel,
+            update_commands::apply_launcher_update,
+            update_commands::cancel_launcher_update_apply,
             settings_commands::settings_snapshot,
             settings_commands::save_global_settings,
             settings_commands::save_instance_settings,
