@@ -121,10 +121,17 @@ impl ManifestClient {
         if let Some(etag) = validator {
             request = request.header(header::IF_NONE_MATCH, etag);
         }
-        let mut response = request
-            .send()
-            .await
-            .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
+        let started = std::time::Instant::now();
+        let sent = request.send().await;
+        crate::network_log::api_result(
+            "panita-catalog",
+            "GET",
+            "/v1/instances/{id}/versions/{version}/manifest",
+            started,
+            sent.as_ref().map(|reply| reply.status().as_u16()),
+            true,
+        );
+        let mut response = sent.map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
         if response.status() == StatusCode::NOT_MODIFIED {
             if validator.is_none() {
                 return Err(invalid());

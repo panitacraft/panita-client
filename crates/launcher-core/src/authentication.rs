@@ -242,10 +242,24 @@ impl AuthClient {
         request: RequestBuilder,
         stage: Stage,
     ) -> Result<T, CoreError> {
-        let mut response = request
-            .send()
-            .await
-            .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
+        let (service, method, route) = match stage {
+            Stage::Microsoft => ("microsoft", "POST", "/oauth2/v2.0/token"),
+            Stage::Xbox => ("xbox", "POST", "/user/authenticate"),
+            Stage::Xsts => ("xsts", "POST", "/xsts/authorize"),
+            Stage::Minecraft => ("minecraft", "POST", "/authentication/login_with_xbox"),
+            Stage::Profile => ("minecraft", "GET", "/minecraft/profile"),
+        };
+        let started = std::time::Instant::now();
+        let sent = request.send().await;
+        crate::network_log::api_result(
+            service,
+            method,
+            route,
+            started,
+            sent.as_ref().map(|reply| reply.status().as_u16()),
+            true,
+        );
+        let mut response = sent.map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
         let status = response.status();
         if response
             .content_length()

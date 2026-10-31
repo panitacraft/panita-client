@@ -261,7 +261,9 @@ impl PanitaApiClient {
                 device_name: device.name(),
                 device_os: device.os(),
             });
-        let reply = self.send(request).await?;
+        let reply = self
+            .send(request, "POST", "/v1/auth/login-requests", true)
+            .await?;
         if reply.status != StatusCode::CREATED {
             return Err(reply.failure(Operation::CreateRequest));
         }
@@ -286,7 +288,9 @@ impl PanitaApiClient {
             .json(&Body {
                 poll_secret: request.poll_secret().expose(),
             });
-        let reply = self.send(http).await?;
+        let reply = self
+            .send(http, "POST", "/v1/auth/login-requests/{id}/poll", false)
+            .await?;
         if reply.status != StatusCode::OK {
             return Err(reply.failure(Operation::Poll));
         }
@@ -309,7 +313,7 @@ impl PanitaApiClient {
             return Err(ErrorCode::ActivationRequired.into());
         }
         let request = credentials.apply(self.client.get(format!("{}/v1/auth/me", self.base)));
-        let reply = self.send(request).await?;
+        let reply = self.send(request, "GET", "/v1/auth/me", true).await?;
         if reply.status != StatusCode::OK {
             return Err(reply.failure(Operation::Me));
         }
@@ -323,20 +327,39 @@ impl PanitaApiClient {
         }
         let request =
             credentials.apply(self.client.delete(format!("{}/v1/auth/session", self.base)));
-        let reply = self.send(request).await?;
+        let reply = self
+            .send(request, "DELETE", "/v1/auth/session", true)
+            .await?;
         if reply.status == StatusCode::NO_CONTENT {
             return Ok(());
         }
         Err(reply.failure(Operation::SignOut))
     }
 
-    async fn send(&self, request: RequestBuilder) -> Result<Reply, PanitaApiError> {
+    /// `route` is a fixed label for the session log, never the request URL, which
+    /// carries a login request id. Frequent polls pass `log_success = false`.
+    async fn send(
+        &self,
+        request: RequestBuilder,
+        method: &'static str,
+        route: &'static str,
+        log_success: bool,
+    ) -> Result<Reply, PanitaApiError> {
         let network = |_| PanitaApiError::from(ErrorCode::NetworkUnavailable);
-        let mut response = request
+        let started = std::time::Instant::now();
+        let sent = request
             .header(header::ACCEPT, "application/json")
             .send()
-            .await
-            .map_err(network)?;
+            .await;
+        crate::network_log::api_result(
+            "panita-api",
+            method,
+            route,
+            started,
+            sent.as_ref().map(|reply| reply.status().as_u16()),
+            log_success,
+        );
+        let mut response = sent.map_err(network)?;
         let status = response.status();
         let retry_after = retry_after_seconds(
             response

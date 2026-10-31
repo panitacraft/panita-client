@@ -15,6 +15,7 @@ pub mod logging;
 pub mod minecraft;
 pub mod modpack;
 pub mod neoforge;
+pub mod network_log;
 pub mod oauth;
 pub mod operation;
 pub mod panita_api;

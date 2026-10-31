@@ -257,6 +257,8 @@ pub fn run() {
                     .logs
                     .attach_file(&root.join("logs"), state.process, &header);
             }
+            let logs = state.logs.clone();
+            launcher_core::network_log::install(move |level, text| logs.note(level, text));
             Ok(())
         })
         .plugin(tauri_plugin_opener::init())
