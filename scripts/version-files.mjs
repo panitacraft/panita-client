@@ -14,7 +14,7 @@ export const versionTargets = [
   { file: 'crates/launcher-core/Cargo.toml', pattern: new RegExp(String.raw`(^version = ")${VERSION}(")`, 'm') },
   { file: 'Cargo.lock', pattern: new RegExp(String.raw`(name = "launcher-core"\r?\nversion = ")${VERSION}(")`) },
   { file: 'Cargo.lock', pattern: new RegExp(String.raw`(name = "panita-desktop"\r?\nversion = ")${VERSION}(")`) },
-  { file: '.github/workflows/prepare-beta.yml', pattern: new RegExp(String.raw`(default: )${VERSION}($)`, 'm') },
+  { file: '.github/workflows/prepare-beta.yml', pattern: new RegExp(String.raw`(default: )${VERSION}(\r?$)`, 'm') },
   { file: 'desktop/windows/installer-preview.html', pattern: new RegExp(String.raw`(<span class="version">v)${VERSION}(</span>)`) },
 ];
 

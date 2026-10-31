@@ -66,6 +66,23 @@ test('writing a version changes only the version text of every target', async ()
   }
 });
 
+test('CRLF checkouts are read and written like LF ones', async () => {
+  const directory = await fixture();
+  try {
+    const original = await committedVersion(directory);
+    for (const { file } of versionTargets) {
+      const path = join(directory, file);
+      await writeFile(path, (await readFile(path, 'utf8')).replace(/\r?\n/g, '\r\n'));
+    }
+    assert.equal(await committedVersion(directory), original);
+    await writeVersion(directory, '9.8.7-beta.6');
+    assert.equal(await committedVersion(directory), '9.8.7-beta.6');
+    assert.ok((await readFile(join(directory, 'Cargo.lock'), 'utf8')).includes('\r\n'));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('check reports disagreeing files, tag mismatches and channel violations', async () => {
   const directory = await fixture();
   try {
