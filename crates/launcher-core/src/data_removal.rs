@@ -36,6 +36,68 @@ pub fn remove_current_profile() -> Result<(), CoreError> {
     remove_profile(&current_root()?)
 }
 
+/// Folder of the embedded browser's data (cache, cookies, local storage) inside the install
+/// directory. Disposable: nothing in it is player or account data.
+pub const WEB_DATA_FOLDER: &str = "webview";
+/// Where earlier builds kept that data under the local application data directory: a folder
+/// named after the application identifier, then briefly `PanitaClient Core`.
+const LEGACY_WEB_FOLDERS: [&str; 2] = ["com.panitacraft.client", "PanitaClient Core"];
+const LEGACY_WEB_CONTENT: &str = "EBWebView";
+
+#[cfg(windows)]
+pub fn local_root() -> Result<PathBuf, CoreError> {
+    winsafe::SHGetKnownFolderPath(
+        &winsafe::co::KNOWNFOLDERID::LocalAppData,
+        winsafe::co::KF::DEFAULT,
+        None,
+    )
+    .map(PathBuf::from)
+    .map_err(|_| CoreError::new(ErrorCode::StorageUnavailable))
+}
+
+/// Remove the disposable browser data folders: the current one inside `install` and the legacy
+/// ones under `local`. Redirected folders are refused, never followed. Called by the confirmed
+/// full-profile erasure only.
+pub fn remove_web_data_in(install: &Path, local: &Path) -> Result<(), CoreError> {
+    let current = install.join(WEB_DATA_FOLDER);
+    let legacy = LEGACY_WEB_FOLDERS.map(|name| local.join(name));
+    for path in std::iter::once(current).chain(legacy) {
+        match std::fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+            Err(error) => return Err(io(error)),
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(invalid());
+            }
+            Ok(_) => std::fs::remove_dir_all(&path).map_err(io)?,
+        }
+    }
+    Ok(())
+}
+
+/// One-time cleanup of the legacy browser data folders after the move to [`WEB_DATA_FOLDER`].
+/// Removes each only when it holds nothing but the browser's own profile; anything else, a
+/// redirect or a failure leaves it untouched, and the next start tries again.
+pub fn retire_legacy_web_data_in(local: &Path) {
+    for name in LEGACY_WEB_FOLDERS {
+        let path = local.join(name);
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&path) else {
+            continue;
+        };
+        let only_browser_data = entries
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .all(|name| name.is_ok_and(|name| name == LEGACY_WEB_CONTENT));
+        if only_browser_data {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
+}
+
 pub fn pending(root: &Path) -> Result<bool, CoreError> {
     match std::fs::symlink_metadata(root.join(MARKER)) {
         Ok(_) => Ok(true),
@@ -151,7 +213,7 @@ fn remove_profile(root: &Path) -> Result<(), CoreError> {
     )
     .map_err(io)?;
     let name = root.file_name().ok_or_else(invalid)?;
-    let private_lock = match private.open_file(".mutation.lock") {
+    let private_lock = match private.open_data_file(".mutation.lock") {
         Ok(file) => file,
         Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
             private
@@ -251,6 +313,46 @@ mod tests {
         assert!(!fixture.0.exists());
         assert!(sibling.0.join("keep").exists());
         remove_profile(&fixture.0).unwrap_or_else(|_| panic!("synthetic fixture operation"));
+    }
+    #[test]
+    fn web_data_erasure_removes_current_and_legacy_folders_and_preserves_siblings() {
+        let install = Fixture::new();
+        let local = Fixture::new();
+        let folders = [
+            install.0.join(WEB_DATA_FOLDER),
+            local.0.join(LEGACY_WEB_FOLDERS[0]),
+            local.0.join(LEGACY_WEB_FOLDERS[1]),
+        ];
+        for folder in &folders {
+            std::fs::create_dir_all(folder.join("EBWebView/Default"))
+                .unwrap_or_else(|_| panic!("synthetic fixture operation"));
+            std::fs::write(folder.join("EBWebView/Default/Cookies"), b"x")
+                .unwrap_or_else(|_| panic!("synthetic fixture operation"));
+        }
+        install.write("uninstall.exe", b"stays");
+        std::fs::create_dir_all(local.0.join("Other"))
+            .unwrap_or_else(|_| panic!("synthetic fixture operation"));
+        remove_web_data_in(&install.0, &local.0)
+            .unwrap_or_else(|_| panic!("synthetic web data erasure"));
+        assert!(folders.iter().all(|folder| !folder.exists()));
+        assert!(install.0.join("uninstall.exe").exists());
+        assert!(local.0.join("Other").exists());
+        remove_web_data_in(&install.0, &local.0)
+            .unwrap_or_else(|_| panic!("absent folders are fine"));
+    }
+    #[test]
+    fn legacy_web_data_is_retired_only_when_it_is_just_the_browser_profile() {
+        let local = Fixture::new();
+        let [first, second] = LEGACY_WEB_FOLDERS.map(|name| local.0.join(name));
+        std::fs::create_dir_all(first.join("EBWebView"))
+            .unwrap_or_else(|_| panic!("synthetic fixture operation"));
+        std::fs::create_dir_all(second.join("EBWebView"))
+            .unwrap_or_else(|_| panic!("synthetic fixture operation"));
+        std::fs::write(second.join("unexpected.txt"), b"keep")
+            .unwrap_or_else(|_| panic!("synthetic fixture operation"));
+        retire_legacy_web_data_in(&local.0);
+        assert!(!first.exists());
+        assert!(second.join("unexpected.txt").exists());
     }
     #[test]
     fn refuses_busy_writer_before_removing_anything() {

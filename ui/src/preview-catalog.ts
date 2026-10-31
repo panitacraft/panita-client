@@ -2,15 +2,32 @@ export interface CatalogInstance {
   id: string;
   name: string;
   description: string;
+  iconUrl?: string | null;
+  bannerUrl?: string | null;
   minecraftVersion: string | null;
   enabled: boolean;
   availability: 'enabled' | 'disabled' | 'missing' | 'unverified';
-  localState: 'not_installed' | 'installing' | 'installed' | 'update_available' | 'needs_repair' | 'running' | 'failed' | 'cancelled';
+  localState: 'not_installed' | 'installing' | 'installed' | 'awaiting_files' | 'update_available' | 'needs_repair' | 'running' | 'failed' | 'cancelled';
   installedVersion: string | null;
   hasInstallationManifest: boolean;
+  removalPending?: boolean;
   compatible: boolean;
   supported: boolean;
   minLauncherVersion: string | null;
+  source?: PackSource;
+  /** What the installation was made from; for a pack, its recorded pin. */
+  installedSource?: PackSource | null;
+  /** Exact loader from the validated local installation, never inferred from a catalog pin. */
+  installedLoader?: { name: string; version: string } | null;
+}
+
+export interface PackSource {
+  type: string;
+  label?: string | null;
+  loader?: string | null;
+  current_version_id?: string | null;
+  pack_version_id?: string | null;
+  project_id?: string | null;
 }
 
 export interface CatalogOverview {
@@ -40,7 +57,16 @@ const previewInstances: CatalogInstance[] = [
     enabled: false,
     availability: 'disabled',
   },
-  { ...defaults, id: '7fd3f5a0-876d-4ca6-98a2-c4e4bedbbec2', name: 'Modpack de ejemplo', description: 'Vista previa de un tipo de instancia aún no compatible.', minecraftVersion: '1.21.1', enabled: true, supported: false },
+  { ...defaults, id: '7fd3f5a0-876d-4ca6-98a2-c4e4bedbbec2', name: 'Modpack de ejemplo', description: 'Una aventura con mods para jugar con tus amigos.', minecraftVersion: '1.21.1', enabled: true,
+    localState: 'installed', hasInstallationManifest: true,
+    source: { type: 'custom', loader: 'neoforge', label: '1.0', current_version_id: 'preview-pack' },
+    installedSource: { type: 'custom', loader: 'neoforge', label: '1.0', current_version_id: 'preview-pack' },
+    installedLoader: { name: 'neoforge', version: '21.1.264' } },
+  { ...defaults, id: 'aa409cc5-2cc1-46ab-b985-370552355eaa', name: 'Modpack con actualización', description: 'Hay una nueva versión disponible para esta aventura.', minecraftVersion: '1.21.1', enabled: true,
+    localState: 'update_available', hasInstallationManifest: true,
+    source: { type: 'custom', loader: 'neoforge', label: '1.1', current_version_id: '1.1' },
+    installedSource: { type: 'custom', loader: 'neoforge', label: '1.0', current_version_id: '1.0' },
+    installedLoader: { name: 'neoforge', version: '21.1.264' } },
 ];
 
 export async function loadPreviewCatalog(): Promise<CatalogOverview> {

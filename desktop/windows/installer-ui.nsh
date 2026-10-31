@@ -1,9 +1,11 @@
 ; Native presentation only. Installation and upgrade logic remains in installer.nsi.
 !include nsDialogs.nsh
+!define PANITA_BRAND_PNG "${__FILEDIR__}\..\icons\icon.png"
+!define PANITA_BRAND_ICON "${__FILEDIR__}\..\icons\icon.ico"
 !addplugindir /x86-unicode "${__FILEDIR__}\..\..\target\installer-ui"
-!define MUI_BGCOLOR "10231E"
-!define MUI_TEXTCOLOR "EFECE5"
-!define MUI_INSTFILESPAGE_COLORS "EFECE5 1B392E"
+!define MUI_BGCOLOR "141414"
+!define MUI_TEXTCOLOR "F9FFF8"
+!define MUI_INSTFILESPAGE_COLORS "F9FFF8 1B1B1B"
 !define MUI_CUSTOMFUNCTION_GUIINIT PanitaGuiInit
 !define MUI_CUSTOMFUNCTION_UNGUIINIT un.PanitaGuiInit
 !define MUI_CUSTOMFUNCTION_ABORT PanitaUserAbort
@@ -31,7 +33,9 @@ Var PanitaEraseAcknowledgement
 Var PanitaEraseBack
 Var PanitaProgressActive
 Var PanitaProgressNotice
-Var PanitaLaunchAfterSetup
+Var PanitaUpdating
+Var PanitaUninstallOnly
+Var PanitaStageTitle
 
 ; Presentation roles let the plugin measure actual fonts/text instead of keeping
 ; large fixed-height gaps. Values are transient window properties, not disk data.
@@ -64,7 +68,8 @@ Var PanitaLaunchAfterSetup
     System::Call 'user32::IsWindow(p $PanitaDescription) i .r0'
     ${If} $0 != 0
       SendMessage $PanitaDescription ${WM_SETTEXT} 0 "STR:${MESSAGE}"
-      SetCtlColors $PanitaDescription F2CF74 10231E
+      System::Call 'user32::SetPropW(p $PanitaDescription, w "PanitaError", p 1)'
+      SetCtlColors $PanitaDescription FCA5A5 141414
     ${EndIf}
   ${EndIf}
   Pop $0
@@ -162,7 +167,7 @@ Var PanitaLaunchAfterSetup
   System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaPhase", p 0)'
   SendMessage ${HANDLE} ${WM_SETFONT} $PanitaBodyFont 1
   SendMessage $mui.Button.Next ${WM_SETFONT} $PanitaBodyFont 1
-  SetCtlColors ${HANDLE} EFECE5 10231E
+  SetCtlColors ${HANDLE} F9FFF8 141414
   ShowWindow $mui.Header.Text ${SW_HIDE}
   ShowWindow $mui.Header.SubText ${SW_HIDE}
   ShowWindow $mui.Header.Image ${SW_HIDE}
@@ -182,17 +187,20 @@ Var PanitaLaunchAfterSetup
 !macroend
 
 !macro PANITA_BRAND PREFIX
+  ${NSD_CreateLabel} 0 0 0 0 "v${VERSION}"
+  Pop $0
+  !insertmacro PANITA_ROLE $0 5
   ${NSD_CreateIcon} 0 0 32u 32u ""
   Pop $0
   !insertmacro PANITA_ROLE $0 1
-  SetCtlColors $0 EFECE5 10231E
+  SetCtlColors $0 F9FFF8 141414
   SendMessage $0 ${STM_SETICON} $PanitaIcon 0
-  ${NSD_CreateLabel} 0 0 0 0 "Panita Client"
+  ${NSD_CreateLabel} 0 0 0 0 "PANITA CLIENT · v${VERSION}"
   Pop $0
   !insertmacro PANITA_ROLE $0 2
   ${NSD_AddStyle} $0 ${SS_CENTERIMAGE}
   !insertmacro PANITA_RECT $0 64 4 214 40
-  SetCtlColors $0 EFECE5 10231E
+  SetCtlColors $0 F9FFF8 141414
   SendMessage $0 ${WM_SETFONT} $PanitaBrandFont 1
   ${NSD_CreateButton} 0 0 0 0 "Minimizar"
   Pop $0
@@ -202,11 +210,6 @@ Var PanitaLaunchAfterSetup
   Pop $0
   !insertmacro PANITA_ROLE $0 4
   !insertmacro PANITA_RECT $0 350 0 52 28
-  ${NSD_CreateLabel} 0 0 0 0 "Beta · ${VERSION}"
-  Pop $0
-  !insertmacro PANITA_ROLE $0 5
-  !insertmacro PANITA_RECT $0 0 64 402 24
-  SetCtlColors $0 F2CF74 10231E
 !macroend
 
 !macro PANITA_HEADING TITLE DESCRIPTION
@@ -216,13 +219,13 @@ Var PanitaLaunchAfterSetup
   !insertmacro PANITA_ROLE $0 6
   !insertmacro PANITA_RECT $0 0 110 402 72
   SendMessage $0 ${WM_SETFONT} $PanitaTitleFont 1
-  SetCtlColors $0 EFECE5 10231E
+  SetCtlColors $0 F9FFF8 141414
   ${NSD_CreateLabel} 0 0 0 0 "${DESCRIPTION}"
   Pop $0
   StrCpy $PanitaDescription $0
   !insertmacro PANITA_ROLE $0 7
   !insertmacro PANITA_RECT $0 0 190 402 68
-  SetCtlColors $0 C4D0C8 10231E
+  SetCtlColors $0 BABABA 141414
 !macroend
 
 !macro PANITA_CARD TEXT Y HEIGHT
@@ -231,7 +234,7 @@ Var PanitaLaunchAfterSetup
   StrCpy $PanitaCardBackground $0
   !insertmacro PANITA_ROLE $0 8
   !insertmacro PANITA_RECT $0 0 ${Y} 402 ${HEIGHT}
-  SetCtlColors $0 C4D0C8 1B392E
+  SetCtlColors $0 BABABA 1B1B1B
   ${NSD_CreateLabel} 0 0 0 0 "${TEXT}"
   Pop $0
   StrCpy $PanitaCardText $0
@@ -245,7 +248,7 @@ Var PanitaLaunchAfterSetup
   !insertmacro PANITA_RECT $0 16 ${PANITA_CARD_TOP} 370 ${PANITA_CARD_HEIGHT}
   !undef PANITA_CARD_TOP
   !undef PANITA_CARD_HEIGHT
-  SetCtlColors $0 C4D0C8 1B392E
+  SetCtlColors $0 BABABA 1B1B1B
 !macroend
 
 !macro PANITA_UI_FUNCTIONS
@@ -261,22 +264,31 @@ Var PanitaLaunchAfterSetup
     ${EndIf}
     !insertmacro PANITA_PAGE_LAYOUT $PanitaDialog
     !insertmacro PANITA_BRAND ""
+    ; One title and one button label per mode: the same verb names the page, its progress and its end.
     ReadRegStr $0 SHCTX "${UNINSTKEY}" "DisplayVersion"
     ${If} $0 == ""
-      !insertmacro PANITA_HEADING "Todo listo para empezar" "Instala Panita Client y encuentra tu próxima aventura."
+      StrCpy $PanitaUpdating 0
+      !insertmacro PANITA_HEADING "Instalar Panita Client" ""
       SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Instalar"
     ${Else}
-      !insertmacro PANITA_HEADING "Tu próxima aventura continúa" "Actualiza Panita Client. Tus cuentas, ajustes, instancias y mundos se conservarán."
+      StrCpy $PanitaUpdating 1
+      !insertmacro PANITA_HEADING "Actualizar Panita Client" ""
       SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Actualizar"
     ${EndIf}
-    !insertmacro PANITA_CARD "Se instalará para tu usuario. No necesitas instalar Java por separado." 270 82
-    ${NSD_CreateLabel} 0 0 0 0 "Carpeta: $INSTDIR"
+    ${NSD_CreateLabel} 0 0 0 0 "Ubicación de la instalación"
+    Pop $0
+    !insertmacro PANITA_ROLE $0 24
+    SetCtlColors $0 BABABA 141414
+    ${NSD_CreateText} 0 0 0 0 "$INSTDIR"
     Pop $PanitaPath
     !insertmacro PANITA_ROLE $PanitaPath 10
-    ${NSD_AddStyle} $PanitaPath ${SS_NOPREFIX}
+    ; A real read-only edit (EM_SETREADONLY): Windows then asks for static colors, so the text
+    ; sits on the field's own surface. It is not a tab stop, so Tab never highlights its text.
+    SendMessage $PanitaPath ${EM_SETREADONLY} 1 0
+    ${NSD_RemoveStyle} $PanitaPath ${WS_TABSTOP}
     !insertmacro PANITA_RECT $PanitaPath 0 370 402 44
-    SetCtlColors $PanitaPath C4D0C8 10231E
-    ${NSD_CreateButton} 0 0 0 0 "Cambiar carpeta"
+    SetCtlColors $PanitaPath F9FFF8 1B1B1B
+    ${NSD_CreateButton} 0 0 0 0 "Examinar"
     Pop $0
     !insertmacro PANITA_ROLE $0 11
     !insertmacro PANITA_RECT $0 0 430 402 40
@@ -287,7 +299,7 @@ Var PanitaLaunchAfterSetup
     !insertmacro PANITA_RECT $PanitaDesktopCheckbox 0 490 402 28
     ; The themed checkbox ignores custom foreground colors on a dark dialog.
     System::Call 'uxtheme::SetWindowTheme(p $PanitaDesktopCheckbox, w "", w "")'
-    SetCtlColors $PanitaDesktopCheckbox C4D0C8 10231E
+    SetCtlColors $PanitaDesktopCheckbox BABABA 141414
     ${If} $NoShortcutMode != 1
       ${NSD_Check} $PanitaDesktopCheckbox
     ${EndIf}
@@ -306,7 +318,7 @@ Var PanitaLaunchAfterSetup
     Pop $0
     ${If} $0 != error
       StrCpy $INSTDIR $0
-      ${NSD_SetText} $PanitaPath "Carpeta: $INSTDIR"
+      ${NSD_SetText} $PanitaPath "$INSTDIR"
     ${EndIf}
   FunctionEnd
 
@@ -318,27 +330,33 @@ Var PanitaLaunchAfterSetup
       Abort
     ${EndIf}
     !insertmacro PANITA_PAGE_LAYOUT $PanitaDialog
+    SetErrorLevel 0
     System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaPhase", p 4)'
     !insertmacro PANITA_BRAND ""
-    !insertmacro PANITA_HEADING "Panita Client está listo" "Finaliza la instalación. Si quieres, abre el launcher con la opción de abajo."
-    !insertmacro PANITA_CARD "Tus aventuras se mantienen separadas. Las actualizaciones de instancias son siempre opcionales." 270 104
-    ${NSD_CreateCheckbox} 0 0 0 0 "Abrir Panita Client al finalizar"
-    Pop $PanitaLaunchAfterSetup
-    !insertmacro PANITA_ROLE $PanitaLaunchAfterSetup 20
-    SetCtlColors $PanitaLaunchAfterSetup EFECE5 10231E
-    ${NSD_Uncheck} $PanitaLaunchAfterSetup
-    SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Finalizar"
+    ${If} $PanitaUpdating == 1
+      !insertmacro PANITA_HEADING "Actualización completada" ""
+    ${Else}
+      !insertmacro PANITA_HEADING "Instalación completada" ""
+    ${EndIf}
+    ${NSD_CreateButton} 0 0 0 0 "Cerrar"
+    Pop $0
+    !insertmacro PANITA_ROLE $0 22
+    ${NSD_OnClick} $0 PanitaFinishClose
+    SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Abrir Panita Client"
     SendMessage $mui.Button.Cancel ${WM_SETTEXT} 0 "STR:Cerrar"
     EnableWindow $mui.Button.Cancel 1
     PanitaUi::Apply /NOUNLOAD
     nsDialogs::Show
   FunctionEnd
 
+  Function PanitaFinishClose
+    Pop $0
+    SetErrorLevel 0
+    SendMessage $HWNDPARENT ${WM_COMMAND} 2 0
+  FunctionEnd
+
   Function PanitaFinishLeave
-    ${NSD_GetState} $PanitaLaunchAfterSetup $0
-    ${If} $0 == ${BST_CHECKED}
-      Call RunMainBinary
-    ${EndIf}
+    Call RunMainBinary
   FunctionEnd
 
   Function un.PanitaConfirm
@@ -350,30 +368,28 @@ Var PanitaLaunchAfterSetup
     ${EndIf}
     !insertmacro PANITA_PAGE_LAYOUT $PanitaDialog
     !insertmacro PANITA_BRAND "un."
-    !insertmacro PANITA_HEADING "¿Desinstalar Panita Client?" "Se eliminará el launcher de este equipo."
+    !insertmacro PANITA_HEADING "Desinstalar Panita Client" "Tus datos se conservan."
     StrCpy $PanitaRemoveDataWanted 0
     StrCpy $PanitaEraseStage 0
-    !insertmacro PANITA_CARD "Se conservarán todos tus datos, a menos que marques la opción de abajo." 270 82
-    ${NSD_CreateCheckbox} 0 0 0 0 "Eliminar también todos mis datos (irreversible)"
+    ; The card is only for the second, destructive confirmation; it stays hidden here.
+    !insertmacro PANITA_CARD "" 270 82
+    ShowWindow $PanitaCardBackground ${SW_HIDE}
+    ShowWindow $PanitaCardText ${SW_HIDE}
+    ${NSD_CreateCheckbox} 0 0 0 0 "Eliminar también mis datos"
     Pop $PanitaRemoveDataCheckbox
     !insertmacro PANITA_ROLE $PanitaRemoveDataCheckbox 13
     !insertmacro PANITA_RECT $PanitaRemoveDataCheckbox 0 376 402 42
     System::Call 'uxtheme::SetWindowTheme(p $PanitaRemoveDataCheckbox, w "", w "")'
-    SetCtlColors $PanitaRemoveDataCheckbox EFECE5 10231E
+    SetCtlColors $PanitaRemoveDataCheckbox F9FFF8 141414
     ${NSD_Uncheck} $PanitaRemoveDataCheckbox
-    ${NSD_CreateLabel} 0 0 0 0 "%APPDATA%\PanitaClient: cuentas y sesiones guardadas, ajustes, todas las instancias con mundos, capturas y copias de seguridad, descargas de Minecraft y Java, cachés y registros locales."
-    Pop $PanitaDataSummary
-    !insertmacro PANITA_ROLE $PanitaDataSummary 14
-    !insertmacro PANITA_RECT $PanitaDataSummary 0 432 402 104
-    SetCtlColors $PanitaDataSummary C4D0C8 10231E
-    ${NSD_CreateCheckbox} 0 0 0 0 "Entiendo que se eliminarán todos estos datos de forma permanente."
+    ${NSD_CreateCheckbox} 0 0 0 0 "Entiendo que se eliminarán de forma permanente."
     Pop $PanitaEraseAcknowledgement
     !insertmacro PANITA_ROLE $PanitaEraseAcknowledgement 15
     !insertmacro PANITA_RECT $PanitaEraseAcknowledgement 0 450 402 52
-    SetCtlColors $PanitaEraseAcknowledgement EFECE5 10231E
+    SetCtlColors $PanitaEraseAcknowledgement F9FFF8 141414
     ${NSD_OnClick} $PanitaEraseAcknowledgement un.PanitaAcknowledgeErasure
     ShowWindow $PanitaEraseAcknowledgement ${SW_HIDE}
-    ${NSD_CreateButton} 0 0 0 0 "Volver sin eliminar datos"
+    ${NSD_CreateButton} 0 0 0 0 "Volver"
     Pop $PanitaEraseBack
     !insertmacro PANITA_ROLE $PanitaEraseBack 16
     !insertmacro PANITA_RECT $PanitaEraseBack 0 512 402 28
@@ -391,13 +407,16 @@ Var PanitaLaunchAfterSetup
       ${If} $PanitaEraseStage == 0
         StrCpy $PanitaEraseStage 1
         ${NSD_SetText} $PanitaHeading "¿Eliminar todos tus datos?"
-        ${NSD_SetText} $PanitaDescription "Esta acción es permanente y no se puede deshacer. Revisa la carpeta y su contenido antes de confirmar."
-        SetCtlColors $PanitaDescription F2CF74 10231E
-        ${NSD_SetText} $PanitaCardText "$APPDATA\PanitaClient$\r$\n$\r$\nSe eliminará toda esta carpeta: cuentas y sesiones, ajustes, todas las instancias con mundos, capturas, configuraciones y copias de seguridad, descargas de Minecraft y Java, cachés, registros y cualquier otro archivo que contenga."
+        ${NSD_SetText} $PanitaDescription "Esta acción no se puede deshacer."
+        System::Call 'user32::SetPropW(p $PanitaDescription, w "PanitaError", p 1)'
+        SetCtlColors $PanitaDescription FCA5A5 141414
+        ; The full list of what is erased appears only here, where the player confirms it.
+        ${NSD_SetText} $PanitaCardText "$APPDATA\PanitaClient$\r$\n$\r$\nSe eliminará toda la carpeta: cuentas y sesiones, ajustes, instancias con mundos, capturas y copias de seguridad, descargas de Minecraft y Java, cachés y registros."
         !insertmacro PANITA_RECT $PanitaCardBackground 0 270 402 168
         !insertmacro PANITA_RECT $PanitaCardText 16 282 370 144
+        ShowWindow $PanitaCardBackground ${SW_SHOW}
+        ShowWindow $PanitaCardText ${SW_SHOW}
         ShowWindow $PanitaRemoveDataCheckbox ${SW_HIDE}
-        ShowWindow $PanitaDataSummary ${SW_HIDE}
         ${NSD_Uncheck} $PanitaEraseAcknowledgement
         ShowWindow $PanitaEraseAcknowledgement ${SW_SHOW}
         ShowWindow $PanitaEraseBack ${SW_SHOW}
@@ -431,14 +450,13 @@ Var PanitaLaunchAfterSetup
     StrCpy $PanitaRemoveDataWanted 0
     ${NSD_Uncheck} $PanitaRemoveDataCheckbox
     ${NSD_Uncheck} $PanitaEraseAcknowledgement
-    ${NSD_SetText} $PanitaHeading "¿Desinstalar Panita Client?"
-    ${NSD_SetText} $PanitaDescription "Se eliminará el launcher de este equipo."
-    SetCtlColors $PanitaDescription C4D0C8 10231E
-    ${NSD_SetText} $PanitaCardText "Se conservarán todos tus datos, a menos que marques la opción de abajo."
-    !insertmacro PANITA_RECT $PanitaCardBackground 0 270 402 82
-    !insertmacro PANITA_RECT $PanitaCardText 16 284 370 54
+    ${NSD_SetText} $PanitaHeading "Desinstalar Panita Client"
+    ${NSD_SetText} $PanitaDescription "Tus datos se conservan."
+    System::Call 'user32::RemovePropW(p $PanitaDescription, w "PanitaError")'
+    SetCtlColors $PanitaDescription BABABA 141414
+    ShowWindow $PanitaCardBackground ${SW_HIDE}
+    ShowWindow $PanitaCardText ${SW_HIDE}
     ShowWindow $PanitaRemoveDataCheckbox ${SW_SHOW}
-    ShowWindow $PanitaDataSummary ${SW_SHOW}
     ShowWindow $PanitaEraseAcknowledgement ${SW_HIDE}
     ShowWindow $PanitaEraseBack ${SW_HIDE}
     EnableWindow $mui.Button.Next 1
@@ -448,11 +466,25 @@ Var PanitaLaunchAfterSetup
   FunctionEnd
 
   Function PanitaProgress
-    !insertmacro PANITA_PROGRESS_LAYOUT "Instalando Panita Client"
+    ; An existing registration (read before this run rewrites it) or the updater's /UPDATE means
+    ; this run updates. The plugin reads the property for the completion title.
+    ReadRegStr $0 SHCTX "${UNINSTKEY}" "DisplayVersion"
+    ${If} $0 != ""
+    ${OrIf} $UpdateMode == 1
+      StrCpy $PanitaUpdating 1
+    ${EndIf}
+    ${If} $PanitaUpdating == 1
+      System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaUpdating", p 1)'
+      StrCpy $PanitaStageTitle "Actualizando..."
+    ${Else}
+      StrCpy $PanitaStageTitle "Instalando..."
+    ${EndIf}
+    !insertmacro PANITA_PROGRESS_LAYOUT
   FunctionEnd
 
   Function un.PanitaProgress
-    !insertmacro PANITA_PROGRESS_LAYOUT "Desinstalando Panita Client"
+    StrCpy $PanitaStageTitle "Desinstalando..."
+    !insertmacro PANITA_PROGRESS_LAYOUT
   FunctionEnd
 
   !insertmacro PANITA_PROGRESS_DONE ""
@@ -478,6 +510,9 @@ Var PanitaLaunchAfterSetup
 
 !macro PANITA_GUI_INIT PREFIX
   Function ${PREFIX}PanitaGuiInit
+    !if "${PREFIX}" == ""
+      SetAutoClose true ; Advance successful installation to the custom completion page.
+    !endif
     System::Call 'user32::GetDpiForWindow(p $HWNDPARENT) i .r0'
     StrCpy $PanitaDpi $0
     ${If} $PanitaDpi < 96
@@ -487,19 +522,24 @@ Var PanitaLaunchAfterSetup
     System::Call 'user32::GetWindowLongW(p $HWNDPARENT, i -16) i .r0'
     IntOp $0 $0 & 0xFF3BFFFF
     System::Call 'user32::SetWindowLongW(p $HWNDPARENT, i -16, i r0)'
-    IntOp $0 450 * $PanitaDpi
+    IntOp $0 500 * $PanitaDpi
     IntOp $0 $0 / 96
-    IntOp $1 600 * $PanitaDpi
+    IntOp $1 504 * $PanitaDpi
     IntOp $1 $1 / 96
     System::Call 'user32::SetWindowPos(p $HWNDPARENT, p 0, i 0, i 0, i r0, i r1, i 38)'
-    SetCtlColors $HWNDPARENT EFECE5 10231E
+    SetCtlColors $HWNDPARENT F9FFF8 141414
     CreateFont $PanitaTitleFont "Segoe UI" 20 700
-    CreateFont $PanitaBrandFont "Segoe UI" 17 700
+    CreateFont $PanitaBrandFont "Segoe UI" 11 700
     CreateFont $PanitaBodyFont "Segoe UI" 11 400
-    System::Call 'shell32::ExtractIconExW(w "$EXEPATH", i 0, *p .r0, p 0, i 1)'
+    InitPluginsDir
+    File /oname=$PLUGINSDIR\panita-brand.png "${PANITA_BRAND_PNG}"
+    System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "$PLUGINSDIR\panita-brand.png", i 0x40000000, i 0, i 0, i 0, i 0, p $HWNDPARENT, p 0, p 0, p 0) p .r0'
+    System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaBrandImagePath", p r0)'
+    File /oname=$PLUGINSDIR\panita-brand.ico "${PANITA_BRAND_ICON}"
+    System::Call 'user32::LoadImageW(p 0, w "$PLUGINSDIR\panita-brand.ico", i 1, i 48, i 48, i 0x10) p .r0'
     StrCpy $PanitaIcon $0
     System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaIcon", p $PanitaIcon)'
-    System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "Beta · ${VERSION}", i 0x40000000, i 0, i 0, i 0, i 0, p $HWNDPARENT, p 0, p 0, p 0) p .r0'
+    System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "v${VERSION}", i 0x40000000, i 0, i 0, i 0, i 0, p $HWNDPARENT, p 0, p 0, p 0) p .r0'
     System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaVersionLabel", p r0)'
     !if "${PREFIX}" == "un."
       System::Call 'user32::SetPropW(p $HWNDPARENT, w "PanitaUninstall", p 1)'
@@ -521,13 +561,13 @@ Var PanitaLaunchAfterSetup
     ${ElseIf} $0 == 3
     ${OrIf} $0 == 4
       SetErrorLevel 0
-      Quit ; Completed setup may close without starting the launcher.
+      Return ; Let NSIS dismiss the custom page and exit its modal loop.
     ${EndIf}
   FunctionEnd
 
 !macroend
 
-!macro PANITA_PROGRESS_LAYOUT TITLE
+!macro PANITA_PROGRESS_LAYOUT
   FindWindow $PanitaDialog "#32770" "" $HWNDPARENT
   !insertmacro PANITA_PAGE_LAYOUT $PanitaDialog
   StrCpy $PanitaProgressActive 1
@@ -536,21 +576,21 @@ Var PanitaLaunchAfterSetup
   StrCpy $PanitaProgressNotice $0
   !insertmacro PANITA_ROLE $PanitaProgressNotice 17
   SendMessage $PanitaProgressNotice ${WM_SETFONT} $PanitaBodyFont 1
-  SetCtlColors $PanitaProgressNotice F2CF74 10231E
+  SetCtlColors $PanitaProgressNotice FCA5A5 141414
   !insertmacro PANITA_RECT $PanitaProgressNotice 0 70 402 128
   ; Brand the native progress page while retaining its actual status/log controls.
-  System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "${TITLE}", i 0x50000000, i 0, i 0, i 0, i 0, p $PanitaDialog, p 0, p 0, p 0) p .r0'
+  System::Call 'user32::CreateWindowExW(i 0, w "STATIC", w "$PanitaStageTitle", i 0x50000000, i 0, i 0, i 0, i 0, p $PanitaDialog, p 0, p 0, p 0) p .r0'
   System::Call 'user32::SetPropW(p r0, w "PanitaStageTitle", p 1)'
-  SendMessage $0 ${WM_SETFONT} $PanitaBrandFont 1
-  SetCtlColors $0 EFECE5 10231E
+  SendMessage $0 ${WM_SETFONT} $PanitaTitleFont 1
+  SetCtlColors $0 F9FFF8 141414
   !insertmacro PANITA_RECT $0 0 4 402 32
   GetDlgItem $0 $PanitaDialog 1006
-  SetCtlColors $0 C4D0C8 10231E
+  SetCtlColors $0 BABABA 141414
   !insertmacro PANITA_RECT $0 0 48 402 36
   GetDlgItem $0 $PanitaDialog 1004
   System::Call 'uxtheme::SetWindowTheme(p r0, w "", w "")'
-  SendMessage $0 0x409 0 0x74CFF2 ; PBM_SETBARCOLOR, gold COLORREF.
-  SendMessage $0 0x2001 0 0x2E391B ; PBM_SETBKCOLOR.
+  SendMessage $0 0x409 0 0x36A654 ; PBM_SETBARCOLOR, green COLORREF.
+  SendMessage $0 0x2001 0 0x1B1B1B ; PBM_SETBKCOLOR.
   !insertmacro PANITA_RECT $0 0 96 402 10
   GetDlgItem $0 $PanitaDialog 1027
   ShowWindow $0 ${SW_HIDE}
@@ -564,9 +604,9 @@ Var PanitaLaunchAfterSetup
   System::Call 'user32::SetWindowLongW(p r0, i -20, i r1)'
   System::Call 'user32::SetWindowPos(p r0, p 0, i 0, i 0, i 0, i 0, i 39)'
   Pop $1
-  SendMessage $0 0x1001 0 0x2E391B ; LVM_SETBKCOLOR.
-  SendMessage $0 0x1026 0 0x2E391B ; LVM_SETTEXTBKCOLOR.
-  SendMessage $0 0x1024 0 0xE5ECEF ; LVM_SETTEXTCOLOR.
+  SendMessage $0 0x1001 0 0x1B1B1B ; LVM_SETBKCOLOR.
+  SendMessage $0 0x1026 0 0x1B1B1B ; LVM_SETTEXTBKCOLOR.
+  SendMessage $0 0x1024 0 0xF8FFF9 ; LVM_SETTEXTCOLOR.
   !insertmacro PANITA_RECT $0 0 122 402 240
   PanitaUi::Apply /NOUNLOAD
 !macroend

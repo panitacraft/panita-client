@@ -9,8 +9,8 @@ use tokio::io::AsyncReadExt;
 use uuid::Uuid;
 
 use super::download::{
-    Cancellation, DownloadProgress, Downloader, ensure_parent, io, lock, verified_file,
-    verified_planned_file,
+    Cancellation, DownloadProgress, Downloader, MAX_DOWNLOADS, ensure_parent, io, lock, on_disk,
+    planned_size, verified_file, verified_planned_file,
 };
 use super::natives::NativeFile;
 use super::plan::{InstallPlan, PlannedArtifact};
@@ -18,6 +18,7 @@ use super::{Artifact, Platform, invalid};
 use crate::{
     catalog::{CatalogClient, CatalogSource},
     error::{CoreError, ErrorCode},
+    panita_api::PanitaCredentials,
     paths::AppPaths,
     registry::{InstallationRecord, InstallationState, InstanceRegistry},
     storage::map_private_error,
@@ -31,6 +32,8 @@ struct Journal {
     active: bool,
 }
 mod format;
+mod timing;
+use timing::{Stage, Timer};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(try_from = "format::StoredInstalled", into = "format::StoredInstalled")]
@@ -44,6 +47,8 @@ pub struct InstalledLock {
     pub native_files: Vec<NativeFile>,
     /// Missing in older manifests, which retain their original generation path.
     pub native_directory: Option<String>,
+    /// Modpack state; present only for disk schema 5, absent for vanilla installations.
+    pub pack: Option<crate::modpack::state::PackState>,
 }
 
 impl InstalledLock {
@@ -58,14 +63,14 @@ impl InstalledLock {
 
 pub type Progress = Arc<dyn Fn(DownloadProgress) + Send + Sync>;
 
-pub(super) fn metadata_root(paths: &AppPaths, id: Uuid) -> Result<std::path::PathBuf, CoreError> {
+pub(crate) fn metadata_root(paths: &AppPaths, id: Uuid) -> Result<std::path::PathBuf, CoreError> {
     if id.is_nil() {
         return Err(invalid());
     }
     InstanceRegistry::new(paths.clone()).prepare_instance(id)
 }
 
-pub(super) fn read_json<T: serde::de::DeserializeOwned>(
+pub(crate) fn read_json<T: serde::de::DeserializeOwned>(
     root: &std::path::Path,
     name: &str,
 ) -> Result<Option<T>, CoreError> {
@@ -77,7 +82,7 @@ pub(super) fn read_json<T: serde::de::DeserializeOwned>(
     read_json_raw(root, name)
 }
 
-pub(super) fn read_json_raw<T: serde::de::DeserializeOwned>(
+pub(crate) fn read_json_raw<T: serde::de::DeserializeOwned>(
     root: &std::path::Path,
     name: &str,
 ) -> Result<Option<T>, CoreError> {
@@ -99,7 +104,7 @@ pub(super) fn read_json_raw<T: serde::de::DeserializeOwned>(
     }
     Ok(Some(serde_json::from_slice(&bytes).map_err(|_| invalid())?))
 }
-pub(super) fn write_json(
+pub(crate) fn write_json(
     root: &std::path::Path,
     relative: &str,
     value: &impl Serialize,
@@ -113,7 +118,7 @@ pub(super) fn write_json(
     write_json_raw(root, relative, value)
 }
 
-pub(super) fn write_json_raw(
+pub(crate) fn write_json_raw(
     root: &std::path::Path,
     relative: &str,
     value: &impl Serialize,
@@ -126,7 +131,7 @@ pub(super) fn write_json_raw(
     // Installation locks are larger than account documents, with a separate 32 MiB bound.
     let store = crate::storage::PrivateStore::open(&AppPaths::new(root)?)?;
     store.with_lock(|_| {
-        let (directory, leaf) = ensure_parent(root, relative)?;
+        let (directory, leaf) = super::download::ensure_private_parent(root, relative)?;
         directory
             .write_atomic_durable(leaf, &bytes)
             .map_err(map_private_error)
@@ -135,11 +140,14 @@ pub(super) fn write_json_raw(
 
 /// A pending journal is conservative: files are retained for verified reuse, but
 /// completion must be retried explicitly. No network access or Java execution occurs.
-pub(super) fn recover_locked(
+pub(crate) fn recover_locked(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
 ) -> Result<(), CoreError> {
+    if crate::modpack::install::recover_locked(paths, id, root)? {
+        return Ok(());
+    }
     if super::maintenance::recover_locked(paths, id, root)? {
         return Ok(());
     }
@@ -156,8 +164,18 @@ pub(super) fn recover_locked(
         return super::transaction::remove(root);
     }
     let registry = InstanceRegistry::new(paths.clone());
+    let mut recovered_state = InstallationState::NeedsRepair;
+    if let Some(installed) = read_json::<InstalledLock>(root, "installed.json")? {
+        super::maintenance::validate_manifest(&installed, id)?;
+        if installed.operation == journal.operation && installed.schema_version == 2 {
+            // A durable pointer is recoverable only after a complete local audit,
+            // including the exact loader generation. Failure retains the intent.
+            verify_manifest(paths, id, root, &installed, &Cancellation::default())?;
+            recovered_state = InstallationState::Installed;
+        }
+    }
     if let Some(mut record) = registry.get(id)? {
-        record.state = InstallationState::NeedsRepair;
+        record.state = recovered_state;
         registry.save_installation(&record)?;
     }
     journal.active = false;
@@ -251,50 +269,105 @@ async fn download_all(
     cancel: &Cancellation,
     progress: Progress,
 ) -> Result<(), CoreError> {
-    let mut missing = 0u64;
+    let required = {
+        let _timer = Timer::new(Stage::Capacity);
+        let paths = paths.clone();
+        let files = plan.artifacts.clone();
+        let cancel = cancel.clone();
+        on_disk(move || {
+            let required = required_cache_space(&paths, &files, &cancel)?;
+            check_capacity(required, fs2::available_space(paths.root()).map_err(io)?)
+        })
+        .await
+    };
+    required?;
+    let _timer = Timer::new(Stage::Cache);
+    // The cache already serializes each parent directory across processes.
+    // Batch those files to amortize private opens, leases and temporary scans.
+    let mut batches = std::collections::BTreeMap::<String, Vec<PlannedArtifact>>::new();
     for file in &plan.artifacts {
         cancel.check()?;
-        let (directory, leaf) = ensure_parent(paths.root(), &file.destination)?;
-        if !verified_planned_file(&directory, &leaf, &file.artifact, file.executable)? {
-            missing = missing
-                .checked_add(file.artifact.size + 4096)
-                .ok_or_else(invalid)?;
-        }
+        let (parent, _) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+        batches
+            .entry(parent.to_owned())
+            .or_default()
+            .push(file.clone());
     }
-    check_capacity(missing, fs2::available_space(paths.root()).map_err(io)?)?;
     let mut workers = tokio::task::JoinSet::new();
-    let mut queue = plan.artifacts.iter();
+    let mut queue = batches.into_values();
+    let worker_cancel = Cancellation::default();
     loop {
-        while workers.len() < 4 {
-            let Some(file) = queue.next().cloned() else {
+        while workers.len() < MAX_DOWNLOADS {
+            let Some(files) = queue.next() else {
                 break;
             };
             let paths = paths.clone();
             let downloader = downloader.clone();
-            let cancel = cancel.clone();
+            let cancel = worker_cancel.clone();
             let progress = progress.clone();
             workers.spawn(async move {
                 downloader
-                    .cache_planned(&paths, &file, &cancel, progress.as_ref())
-                    .await?;
-                executable(&paths, &file)
+                    .cache_batch(&paths, &files, &cancel, progress.as_ref())
+                    .await
             });
         }
-        let Some(result) = workers.join_next().await else {
-            return Ok(());
+        let result = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(CoreError::new(ErrorCode::OperationCancelled)),
+            result = workers.join_next() => match result {
+                Some(result) => result
+                    .map_err(|_| CoreError::new(ErrorCode::StorageUnavailable))
+                    .and_then(|result| result),
+                None => return cancel.check(),
+            },
         };
-        let result = result
-            .map_err(|_| CoreError::new(ErrorCode::StorageUnavailable))
-            .and_then(|result| result);
         if let Err(error) = result {
-            workers.abort_all();
+            // Blocking filesystem jobs cannot be aborted. Cancel transport and
+            // drain every worker before releasing the instance operation lease.
+            worker_cancel.cancel();
             while workers.join_next().await.is_some() {}
             return Err(error);
         }
     }
 }
 
-fn check_capacity(missing: u64, available: u64) -> Result<(), CoreError> {
+fn required_cache_space(
+    paths: &AppPaths,
+    files: &[PlannedArtifact],
+    cancel: &Cancellation,
+) -> Result<u64, CoreError> {
+    let mut parents = std::collections::BTreeMap::new();
+    let mut missing = 0u64;
+    let mut replacements = Vec::new();
+    for file in files {
+        cancel.check()?;
+        let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+        if !parents.contains_key(parent) {
+            parents.insert(
+                parent.to_owned(),
+                ensure_parent(paths.root(), &file.destination)?.0,
+            );
+        }
+        let directory = parents.get(parent).ok_or_else(invalid)?;
+        let bytes = file.artifact.size.checked_add(4096).ok_or_else(invalid)?;
+        if planned_size(directory, leaf, file.executable)? == Some(file.artifact.size) {
+            // Equal sizes are not integrity evidence. Reserve temporary space
+            // for up to eight same-size corrupt files being replaced at once.
+            replacements.push(bytes);
+        } else {
+            missing = missing.checked_add(bytes).ok_or_else(invalid)?;
+        }
+    }
+    replacements.sort_unstable_by(|a, b| b.cmp(a));
+    replacements
+        .into_iter()
+        .take(MAX_DOWNLOADS)
+        .try_fold(missing, |total, bytes| {
+            total.checked_add(bytes).ok_or_else(invalid)
+        })
+}
+
+pub(crate) fn check_capacity(missing: u64, available: u64) -> Result<(), CoreError> {
     if missing
         .checked_add(64 * 1024 * 1024)
         .is_none_or(|required| required > available)
@@ -313,11 +386,16 @@ pub async fn install(
     platform: &Platform,
     cancel: &Cancellation,
     progress: Progress,
+    auth: Option<PanitaCredentials>,
 ) -> Result<InstalledLock, CoreError> {
-    let catalog_client = CatalogClient::new()?;
-    let catalog = tokio::select! {
-        _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
-        result = catalog_client.detail(id) => result?,
+    let _timer = Timer::new(Stage::Total);
+    let catalog_client = CatalogClient::new()?.with_auth(auth);
+    let catalog = {
+        let _timer = Timer::new(Stage::Catalog);
+        tokio::select! {
+            _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
+            result = catalog_client.detail(id) => result?,
+        }
     };
     let registry = InstanceRegistry::new(paths.clone());
     // Retain explicit availability learned here, including a disabled result.
@@ -325,10 +403,8 @@ pub async fn install(
     if !catalog.enabled {
         return Err(CoreError::new(ErrorCode::InstanceDisabled));
     }
-    if catalog.restricted
-        || !catalog.compatible_with(
-            &semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?,
-        )
+    if !catalog
+        .compatible_with(&semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?)
     {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     }
@@ -426,8 +502,14 @@ pub(super) async fn prepare(
     progress: Progress,
 ) -> Result<InstalledLock, CoreError> {
     let downloader = Downloader::new()?;
-    let mut plan = super::plan::resolve(&downloader, version, platform, cancel).await?;
-    plan.allocate_runtime(paths)?;
+    let mut plan = {
+        let _timer = Timer::new(Stage::Metadata);
+        super::plan::resolve(&downloader, version, platform, cancel).await?
+    };
+    {
+        let _timer = Timer::new(Stage::RuntimeReservation);
+        plan.allocate_runtime(paths)?;
+    }
     prepare_recorded(paths, id, operation, platform, plan, cancel, progress).await
 }
 
@@ -444,12 +526,12 @@ fn previous_record_requires_installation(paths: &AppPaths, id: Uuid) -> Result<b
         }))
 }
 
-pub(super) async fn prepare_recorded(
+pub(crate) async fn prepare_recorded(
     paths: &AppPaths,
     id: Uuid,
     operation: Uuid,
     platform: &Platform,
-    plan: InstallPlan,
+    mut plan: InstallPlan,
     cancel: &Cancellation,
     progress: Progress,
 ) -> Result<InstalledLock, CoreError> {
@@ -460,8 +542,25 @@ pub(super) async fn prepare_recorded(
     }
     let downloader = Downloader::new()?;
     download_all(paths, &downloader, &plan, cancel, progress).await?;
-    plan.verify_dependencies(paths)?;
-    verify_java(paths, &plan, platform, cancel).await?;
+    {
+        let _timer = Timer::new(Stage::Dependencies);
+        plan.verify_dependencies(paths)?;
+    }
+    {
+        let _timer = Timer::new(Stage::Java);
+        verify_java(paths, &plan, platform, cancel).await?;
+    }
+    if let Some(loader) = &plan.loader {
+        let _timer = Timer::new(Stage::Loader);
+        match loader.verify(paths, cancel) {
+            Ok(()) => {}
+            Err(error) if error.code() == ErrorCode::ArtifactMismatch => {
+                plan.loader = Some(loader.repair(paths, &plan, cancel).await?);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    let native_timer = Timer::new(Stage::Natives);
     let native_directory = format!("natives/{operation}");
     let native_root = root.join(&native_directory);
     if !plan.version.natives.is_empty() {
@@ -487,6 +586,7 @@ pub(super) async fn prepare_recorded(
             cancel,
         )?);
     }
+    drop(native_timer);
     cancel.check()?;
     let installed = InstalledLock {
         schema_version: 2,
@@ -495,6 +595,7 @@ pub(super) async fn prepare_recorded(
         plan,
         native_files,
         native_directory: Some(native_directory),
+        pack: None,
     };
     Ok(installed)
 }
@@ -508,7 +609,7 @@ pub fn verify_installed(paths: &AppPaths, id: Uuid) -> Result<InstalledLock, Cor
 }
 
 /// Caller must retain this instance's installation lock for the whole audit.
-pub(super) fn verify_under_lock(
+pub(crate) fn verify_under_lock(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
@@ -520,7 +621,7 @@ pub(super) fn verify_under_lock(
 }
 
 /// Cached Play preflight. Installation, repair and recovery use the full audit above.
-pub(super) fn verify_play_under_lock(
+pub(crate) fn verify_play_under_lock(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
@@ -542,7 +643,9 @@ fn read_installed_under_lock(
     cancel.check()?;
     let journal = read_json::<serde_json::Value>(root, "transaction.json")?;
     if journal.is_some_and(|journal| {
-        if journal["schema_version"] == 3 {
+        if journal["schema_version"] == 4 || journal["schema_version"] == 5 {
+            !crate::modpack::install::journal_inactive(journal, id)
+        } else if journal["schema_version"] == 3 {
             !super::maintenance::journal_inactive(journal, id)
         } else if journal["schema_version"] == 2 {
             !super::update::journal_inactive(journal, id)
@@ -563,7 +666,27 @@ fn read_installed_under_lock(
     Ok(installed)
 }
 
-pub(super) fn verify_manifest(
+/// Map `items` on a few threads, keeping their order. `None` means a worker panicked.
+fn parallel<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Option<Vec<R>> {
+    let threads = std::thread::available_parallelism().map_or(2, |count| count.get().min(8));
+    if items.len() < 64 || threads == 1 {
+        return Some(items.iter().map(&work).collect());
+    }
+    let size = items.len().div_ceil(threads);
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = items
+            .chunks(size)
+            .map(|part| scope.spawn(|| part.iter().map(&work).collect::<Vec<_>>()))
+            .collect();
+        let mut results = Vec::with_capacity(items.len());
+        for worker in workers {
+            results.extend(worker.join().ok()?);
+        }
+        Some(results)
+    })
+}
+
+pub(crate) fn verify_manifest(
     paths: &AppPaths,
     id: Uuid,
     root: &std::path::Path,
@@ -591,23 +714,54 @@ fn verify_manifest_inner(
     // unchanged content reads, while every file still crosses the private boundary.
     let mut parents = std::collections::HashMap::new();
     for file in &installed.plan.artifacts {
-        cancel.check()?;
-        let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+        let (parent, _) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
         if !parents.contains_key(parent) {
+            cancel.check()?;
             let (directory, _) = super::download::existing_parent(paths.root(), &file.destination)?
                 .ok_or_else(|| CoreError::new(ErrorCode::ArtifactMismatch))?;
             parents.insert(parent, directory);
         }
+    }
+    // Receipt hits need only metadata, so they are looked up on several threads;
+    // anything else falls through to the sequential full check below.
+    let hits: Vec<Option<bool>> = match cache.as_deref() {
+        Some(cache) => parallel(&installed.plan.artifacts, |file| {
+            cancel.check()?;
+            let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
+            let directory = parents.get(parent).ok_or_else(invalid)?;
+            cache.check(
+                directory,
+                leaf,
+                &format!("managed/{}", file.destination),
+                &file.artifact,
+                file.executable,
+            )
+        })
+        .ok_or_else(|| CoreError::new(ErrorCode::StorageUnavailable))?
+        .into_iter()
+        .collect::<Result<_, _>>()?,
+        None => vec![None; installed.plan.artifacts.len()],
+    };
+    #[cfg(test)]
+    if let Some(cache) = cache.as_deref_mut() {
+        cache.reused += hits.iter().filter(|hit| **hit == Some(true)).count();
+    }
+    for (file, hit) in installed.plan.artifacts.iter().zip(hits) {
+        cancel.check()?;
+        let (parent, leaf) = file.destination.rsplit_once('/').ok_or_else(invalid)?;
         let directory = parents.get(parent).ok_or_else(invalid)?;
-        let matches = match cache.as_deref_mut() {
-            Some(cache) => cache.verify(
+        let matches = match (hit, cache.as_deref_mut()) {
+            (Some(verdict), _) => verdict,
+            (None, Some(cache)) => cache.verify(
                 directory,
                 leaf,
                 &format!("managed/{}", file.destination),
                 &file.artifact,
                 file.executable,
             )?,
-            None => verified_planned_file(directory, leaf, &file.artifact, file.executable)?,
+            (None, None) => {
+                verified_planned_file(directory, leaf, &file.artifact, file.executable)?
+            }
         };
         if !matches {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
@@ -636,6 +790,50 @@ fn verify_manifest_inner(
         };
         if !matches {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+        }
+    }
+    if let Some(pack) = &installed.pack {
+        let game = crate::modpack::gamefs::GameDir::open(&root.join("minecraft"))?;
+        let intact = match cache.as_deref_mut() {
+            Some(cache) => cache.verify_pack(&game, pack, cancel)?,
+            None => crate::modpack::install::verify_files(&game, pack, cancel).is_ok(),
+        };
+        if !intact {
+            return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+        }
+    }
+    if let Some(loader) = &installed.plan.loader {
+        loader.verify_marker(paths)?;
+        match cache {
+            None => loader.verify(paths, cancel)?,
+            Some(cache) => {
+                let directory =
+                    private_fs::PrivateDir::open_data(paths.root().join(loader.directory()))
+                        .map_err(map_private_error)?;
+                for file in loader.files() {
+                    cancel.check()?;
+                    let (parent, leaf) = file
+                        .path
+                        .rsplit_once('/')
+                        .map_or(("", file.path.as_str()), |(parent, leaf)| (parent, leaf));
+                    let key = format!("loader/{}/{}", loader.directory(), file.path);
+                    let matches = if parent.is_empty() {
+                        cache.verify_sha256(
+                            &directory,
+                            leaf,
+                            &key,
+                            &file.artifact(),
+                            &file.sha256,
+                        )?
+                    } else {
+                        let parent = directory.open_dir(parent).map_err(map_private_error)?;
+                        cache.verify_sha256(&parent, leaf, &key, &file.artifact(), &file.sha256)?
+                    };
+                    if !matches {
+                        return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+                    }
+                }
+            }
         }
     }
     Ok(())
@@ -726,6 +924,101 @@ mod tests {
             io(std::io::Error::from(std::io::ErrorKind::StorageFull)).code(),
             ErrorCode::InsufficientSpace
         );
+    }
+
+    #[test]
+    fn capacity_estimate_reserves_missing_files_and_bounded_same_size_replacements() {
+        use sha1::Digest;
+        let paths =
+            AppPaths::new(std::env::temp_dir().join(format!("panita-capacity-{}", Uuid::new_v4())))
+                .unwrap_or_else(|_| panic!("paths"));
+        let mut files = Vec::new();
+        for index in 0..12 {
+            let destination = format!("libraries/capacity/{index}.jar");
+            let (directory, leaf) =
+                ensure_parent(paths.root(), &destination).unwrap_or_else(|_| panic!("directory"));
+            directory
+                .write_atomic_durable(&leaf, b"wrong")
+                .unwrap_or_else(|_| panic!("file"));
+            files.push(PlannedArtifact {
+                destination,
+                executable: false,
+                artifact: Artifact {
+                    url: "https://libraries.minecraft.net/test.jar".into(),
+                    sha1: format!("{:x}", sha1::Sha1::digest(b"right")),
+                    size: 5,
+                    path: None,
+                },
+            });
+        }
+        let cancel = Cancellation::default();
+        assert_eq!(
+            required_cache_space(&paths, &files, &cancel).ok(),
+            Some(8 * (5 + 4096))
+        );
+        let mut absent = files[0].clone();
+        absent.destination = "libraries/capacity/missing.jar".into();
+        files.push(absent);
+        assert_eq!(
+            required_cache_space(&paths, &files, &cancel).ok(),
+            Some(9 * (5 + 4096))
+        );
+        let (directory, leaf) = ensure_parent(paths.root(), &files[0].destination)
+            .unwrap_or_else(|_| panic!("directory"));
+        assert!(
+            !verified_planned_file(&directory, &leaf, &files[0].artifact, false).unwrap_or(true)
+        );
+        cancel.cancel();
+        assert_eq!(
+            required_cache_space(&paths, &files, &cancel)
+                .err()
+                .map(|error| error.code()),
+            Some(ErrorCode::OperationCancelled)
+        );
+        drop(directory);
+        std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+    }
+
+    #[tokio::test]
+    async fn cancelling_cache_workers_drains_disk_work_before_returning() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let (paths, accounts, id) = super::super::play::tests::fixture();
+        drop(accounts);
+        super::super::play::tests::complete_installation(&paths, id);
+        let installed = verify_installed(&paths, id).unwrap_or_else(|_| panic!("installed"));
+        let cancel = Cancellation::default();
+        let progress_count = Arc::new(AtomicUsize::new(0));
+        let count = progress_count.clone();
+        let trigger = cancel.clone();
+        let result = download_all(
+            &paths,
+            &Downloader::new().unwrap_or_else(|_| panic!("downloader")),
+            &installed.plan,
+            &cancel,
+            Arc::new(move |_| {
+                count.fetch_add(1, Ordering::SeqCst);
+                trigger.cancel();
+            }),
+        )
+        .await;
+        assert_eq!(
+            result.err().map(|error| error.code()),
+            Some(ErrorCode::OperationCancelled)
+        );
+        let count = progress_count.load(Ordering::SeqCst);
+        assert!(count > 0);
+        tokio::task::yield_now().await;
+        assert_eq!(progress_count.load(Ordering::SeqCst), count);
+        // All directory leases must be reusable immediately after cancellation.
+        download_all(
+            &paths,
+            &Downloader::new().unwrap_or_else(|_| panic!("downloader")),
+            &installed.plan,
+            &Cancellation::default(),
+            Arc::new(|_| {}),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("retry: {error:?}"));
     }
     fn record(id: Uuid) -> InstallationRecord {
         let catalog = crate::catalog::CatalogInstance {

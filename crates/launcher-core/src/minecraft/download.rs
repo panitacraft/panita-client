@@ -18,12 +18,41 @@ use crate::{
     storage::map_private_error,
 };
 
+pub(crate) const MAX_DOWNLOADS: usize = 8;
+
+/// Keep bounded filesystem work off the async transport workers. Callers must
+/// drain their workers on cancellation instead of abandoning blocking jobs.
+pub(crate) async fn on_disk<T: Send + 'static>(
+    work: impl FnOnce() -> Result<T, CoreError> + Send + 'static,
+) -> Result<T, CoreError> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| CoreError::new(ErrorCode::StorageUnavailable))?
+}
+
+/// Metadata is only a capacity estimate; reuse always requires a full hash.
+pub(crate) fn planned_size(
+    directory: &PrivateDir,
+    name: &str,
+    executable: bool,
+) -> Result<Option<u64>, CoreError> {
+    #[cfg(target_os = "linux")]
+    if executable {
+        return super::executable::size(directory, name);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = executable;
+    match directory.open_file(name) {
+        Ok(file) => Ok(Some(native_file(&file)?.metadata().map_err(io)?.len())),
+        Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(None)
+        }
+        Err(error) => Err(map_private_error(error)),
+    }
+}
+
 pub(crate) fn io(error: std::io::Error) -> CoreError {
-    CoreError::new(match error.kind() {
-        std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
-        std::io::ErrorKind::StorageFull => ErrorCode::InsufficientSpace,
-        _ => ErrorCode::StorageUnavailable,
-    })
+    crate::storage::map_io_error(error)
 }
 
 pub(crate) fn native_file(file: &private_fs::PrivateFile) -> Result<std::fs::File, CoreError> {
@@ -93,8 +122,28 @@ pub(crate) fn ensure_parent(
     root: &Path,
     relative: &str,
 ) -> Result<(PrivateDir, String), CoreError> {
+    ensure_parent_policy(root, relative, false)
+}
+
+pub(crate) fn ensure_private_parent(
+    root: &Path,
+    relative: &str,
+) -> Result<(PrivateDir, String), CoreError> {
+    ensure_parent_policy(root, relative, true)
+}
+
+fn ensure_parent_policy(
+    root: &Path,
+    relative: &str,
+    private: bool,
+) -> Result<(PrivateDir, String), CoreError> {
     safe_path(relative)?;
-    let mut directory = PrivateDir::ensure(root).map_err(map_private_error)?;
+    let mut directory = if private {
+        PrivateDir::ensure(root)
+    } else {
+        PrivateDir::ensure_data(root)
+    }
+    .map_err(map_private_error)?;
     let mut parts = relative.split('/').peekable();
     while let Some(part) = parts.next() {
         if parts.peek().is_none() {
@@ -120,7 +169,7 @@ pub(crate) fn existing_parent(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(invalid)?;
-    match PrivateDir::open(root.join(path.parent().ok_or_else(invalid)?)) {
+    match PrivateDir::open_data(root.join(path.parent().ok_or_else(invalid)?)) {
         Ok(directory) => Ok(Some((directory, leaf.into()))),
         Err(private_fs::Error::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
             Ok(None)
@@ -138,6 +187,40 @@ pub(crate) struct ArtifactLock {
 
 /// Nonblocking coordination for directory migration and local audits.
 pub(crate) fn try_lock(root: &Path, relative: &str) -> Result<Option<ArtifactLock>, CoreError> {
+    try_lock_inner(root, relative, false)
+}
+pub(crate) fn try_lock_for_erasure(root: &Path) -> Result<Option<ArtifactLock>, CoreError> {
+    try_lock_inner(root, ".installation.lock", true)
+}
+fn check_instance_root(
+    root: &Path,
+    directory: &PrivateDir,
+    relative: &str,
+    erasing: bool,
+) -> Result<(), CoreError> {
+    if relative == ".installation.lock" {
+        use cap_fs_ext::MetadataExt;
+        let original = super::directory_capability(directory)?
+            .dir_metadata()
+            .map_err(io)?;
+        let current = PrivateDir::open(root).map_err(map_private_error)?;
+        let current = super::directory_capability(&current)?
+            .dir_metadata()
+            .map_err(io)?;
+        if original.dev() != current.dev() || original.ino() != current.ino() {
+            return Err(super::invalid());
+        }
+        if !erasing && crate::registry::erasure::blocks_root(root)? {
+            return Err(CoreError::new(ErrorCode::OperationBusy));
+        }
+    }
+    Ok(())
+}
+fn try_lock_inner(
+    root: &Path,
+    relative: &str,
+    erasing: bool,
+) -> Result<Option<ArtifactLock>, CoreError> {
     let (directory, name) = ensure_parent(root, relative)?;
     let source = match directory.open_file(&name) {
         Ok(file) => file,
@@ -159,7 +242,8 @@ pub(crate) fn try_lock(root: &Path, relative: &str) -> Result<Option<ArtifactLoc
     let file = native_file(&source)?;
     match file.try_lock() {
         Ok(()) => {
-            private_fs::verify(&file).map_err(map_private_error)?;
+            private_fs::verify_data(&file).map_err(map_private_error)?;
+            check_instance_root(root, &directory, relative, erasing)?;
             Ok(Some(ArtifactLock {
                 _file: file,
                 _source: source,
@@ -199,7 +283,8 @@ pub(crate) async fn lock(
         cancel.check()?;
         match file.try_lock() {
             Ok(()) => {
-                private_fs::verify(&file).map_err(map_private_error)?;
+                private_fs::verify_data(&file).map_err(map_private_error)?;
+                check_instance_root(root, &directory, relative, false)?;
                 return Ok(ArtifactLock {
                     _file: file,
                     _source: source,
@@ -268,7 +353,7 @@ pub(crate) fn verified_planned_file(
     verified_file(directory, name, artifact)
 }
 
-fn cleanup_partials(directory: &PrivateDir, path: &Path) -> Result<(), CoreError> {
+pub(crate) fn cleanup_partials(directory: &PrivateDir, path: &Path) -> Result<(), CoreError> {
     for entry in std::fs::read_dir(path).map_err(io)? {
         let entry = entry.map_err(io)?;
         let name = entry.file_name();
@@ -371,6 +456,33 @@ struct CacheRequest<'a> {
     relative: &'a str,
     artifact: &'a Artifact,
     executable: bool,
+}
+
+struct CacheDirectory {
+    directory: PrivateDir,
+    // Retain the writer lease inside blocking jobs as well as async transport.
+    _guard: ArtifactLock,
+}
+
+impl CacheRequest<'_> {
+    fn validate(&self) -> Result<(), CoreError> {
+        self.artifact.validate()?;
+        safe_path(self.relative)?;
+        if (self.executable && !self.relative.starts_with("runtime/"))
+            || !["libraries/", "assets/", "versions/", "runtime/"]
+                .iter()
+                .any(|prefix| self.relative.starts_with(prefix))
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    }
+
+    fn parent(&self) -> &str {
+        self.relative
+            .rsplit_once('/')
+            .map_or("", |(parent, _)| parent)
+    }
 }
 
 impl Downloader {
@@ -501,44 +613,123 @@ impl Downloader {
         cancel: &Cancellation,
         progress: &(dyn Fn(DownloadProgress) + Sync),
     ) -> Result<PathBuf, CoreError> {
+        request.validate()?;
+        let directory = Self::cache_directory(paths, &request, cancel).await?;
+        self.cache_in_directory(paths, request, directory, cancel, progress)
+            .await
+    }
+
+    /// One batch owns one parent-directory lease. Other processes use the same
+    /// lock, and no task acquires a second directory lease while holding it.
+    pub(crate) async fn cache_batch(
+        &self,
+        paths: &AppPaths,
+        files: &[super::plan::PlannedArtifact],
+        cancel: &Cancellation,
+        progress: &(dyn Fn(DownloadProgress) + Sync),
+    ) -> Result<(), CoreError> {
+        let first = files.first().ok_or_else(invalid)?;
+        let first = CacheRequest {
+            relative: &first.destination,
+            artifact: &first.artifact,
+            executable: first.executable,
+        };
+        for file in files {
+            let request = CacheRequest {
+                relative: &file.destination,
+                artifact: &file.artifact,
+                executable: file.executable,
+            };
+            request.validate()?;
+            if request.parent() != first.parent() {
+                return Err(invalid());
+            }
+        }
+        let directory = Self::cache_directory(paths, &first, cancel).await?;
+        for file in files {
+            self.cache_in_directory(
+                paths,
+                CacheRequest {
+                    relative: &file.destination,
+                    artifact: &file.artifact,
+                    executable: file.executable,
+                },
+                directory.clone(),
+                cancel,
+                progress,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn cache_directory(
+        paths: &AppPaths,
+        request: &CacheRequest<'_>,
+        cancel: &Cancellation,
+    ) -> Result<Arc<CacheDirectory>, CoreError> {
+        let key = format!(
+            "{:x}",
+            Sha1::digest(request.parent().to_ascii_lowercase().as_bytes())
+        );
+        let guard = lock(paths.root(), &format!(".artifact-locks/{key}.lock"), cancel).await?;
+        let paths = paths.clone();
+        let relative = request.relative.to_owned();
+        let cancel = cancel.clone();
+        on_disk(move || {
+            cancel.check()?;
+            let (directory, _) = ensure_parent(paths.root(), &relative)?;
+            let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
+            cleanup_partials(&directory, &paths.root().join(parent))?;
+            Ok(Arc::new(CacheDirectory {
+                directory,
+                _guard: guard,
+            }))
+        })
+        .await
+    }
+
+    async fn cache_in_directory(
+        &self,
+        paths: &AppPaths,
+        request: CacheRequest<'_>,
+        context: Arc<CacheDirectory>,
+        cancel: &Cancellation,
+        progress: &(dyn Fn(DownloadProgress) + Sync),
+    ) -> Result<PathBuf, CoreError> {
         let CacheRequest {
             relative,
             artifact,
             executable,
         } = request;
-        artifact.validate()?;
-        safe_path(relative)?;
-        if executable && !relative.starts_with("runtime/") {
-            return Err(invalid());
-        }
-        if !["libraries/", "assets/", "versions/", "runtime/"]
-            .iter()
-            .any(|prefix| relative.starts_with(prefix))
-        {
-            return Err(invalid());
-        }
-        // A parent-directory lock also protects stale atomic-temporary cleanup.
-        let parent = relative.rsplit_once('/').map_or("", |(parent, _)| parent);
-        let key = format!("{:x}", Sha1::digest(parent.to_ascii_lowercase().as_bytes()));
-        let _guard = lock(paths.root(), &format!(".artifact-locks/{key}.lock"), cancel).await?;
-        let (directory, name) = ensure_parent(paths.root(), relative)?;
-        cleanup_partials(&directory, &paths.root().join(parent))?;
-        cancel.check()?;
-        if verified_planned_file(&directory, &name, artifact, executable)? {
-            #[cfg(target_os = "linux")]
-            if executable {
-                super::executable::enable(&directory, &name)?;
-            }
-            progress(DownloadProgress {
-                bytes: artifact.size,
-                total: artifact.size,
-                reused: true,
-            });
-            return Ok(paths.root().join(relative));
-        }
-        if let Some(alias) = legacy_alias(relative, artifact)?
-            && import_verified(paths, &alias, &directory, &name, artifact, cancel)?
-        {
+        let name = relative.rsplit('/').next().ok_or_else(invalid)?.to_owned();
+        let reused = {
+            let context = context.clone();
+            let paths = paths.clone();
+            let relative = relative.to_owned();
+            let name = name.clone();
+            let artifact = artifact.clone();
+            let cancel = cancel.clone();
+            on_disk(move || {
+                cancel.check()?;
+                let directory = &context.directory;
+                let reused = if verified_planned_file(directory, &name, &artifact, executable)? {
+                    #[cfg(target_os = "linux")]
+                    if executable {
+                        super::executable::enable(directory, &name)?;
+                    }
+                    true
+                } else if let Some(alias) = legacy_alias(&relative, &artifact)? {
+                    import_verified(&paths, &alias, directory, &name, &artifact, &cancel)?
+                } else {
+                    false
+                };
+                cancel.check()?;
+                Ok(reused)
+            })
+            .await?
+        };
+        if reused {
             progress(DownloadProgress {
                 bytes: artifact.size,
                 total: artifact.size,
@@ -559,9 +750,19 @@ impl Downloader {
         } else {
             name.clone()
         };
-        let mut output = directory
-            .atomic_durable(&target)
-            .map_err(map_private_error)?;
+        let mut output = {
+            let context = context.clone();
+            let target = target.clone();
+            let cancel = cancel.clone();
+            on_disk(move || {
+                cancel.check()?;
+                context
+                    .directory
+                    .atomic_durable(&target)
+                    .map_err(map_private_error)
+            })
+            .await?
+        };
         let mut hash = Sha1::new();
         let mut count = 0u64;
         loop {
@@ -588,11 +789,18 @@ impl Downloader {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
         cancel.check()?;
-        output.commit().map_err(map_private_error)?;
-        #[cfg(target_os = "linux")]
-        if staged {
-            super::executable::publish(&directory, &target, &name)?;
-        }
+        let cancellation = cancel.clone();
+        on_disk(move || {
+            let _context = context;
+            cancellation.check()?;
+            output.commit().map_err(map_private_error)?;
+            #[cfg(target_os = "linux")]
+            if staged {
+                super::executable::publish(&_context.directory, &target, &name)?;
+            }
+            Ok(())
+        })
+        .await?;
         Ok(paths.root().join(relative))
     }
 }
@@ -626,6 +834,8 @@ mod tests {
             let handle = std::thread::spawn(move || {
                 while !flag.load(Ordering::SeqCst) {
                     if let Ok((mut socket, _)) = listener.accept() {
+                        // Windows accept inherits the listener's nonblocking mode.
+                        assert!(socket.set_nonblocking(false).is_ok());
                         let _ = socket.set_read_timeout(Some(Duration::from_secs(2)));
                         let mut request = Vec::new();
                         while !request.ends_with(b"\r\n\r\n") && request.len() < 16 * 1024 {
@@ -691,9 +901,112 @@ mod tests {
         .unwrap_or_else(|_| panic!("paths"))
     }
 
+    #[tokio::test]
+    async fn batches_reuse_verified_files_repair_same_size_corruption_and_scan_once() {
+        let bytes = b"verified";
+        let server = Server::new(bytes.to_vec(), bytes.len(), Duration::ZERO);
+        let downloader = server.downloader();
+        let paths = paths();
+        let files: Vec<_> = (0..12)
+            .map(|index| super::super::plan::PlannedArtifact {
+                destination: format!("libraries/batch/{index}.jar"),
+                artifact: artifact(bytes),
+                executable: false,
+            })
+            .collect();
+        let cancel = Cancellation::default();
+        // Competing operations must use one shared lease and download each file once.
+        let (first, second) = tokio::join!(
+            downloader.cache_batch(&paths, &files, &cancel, &|_| {}),
+            downloader.cache_batch(&paths, &files, &cancel, &|_| {})
+        );
+        assert!(first.is_ok() && second.is_ok(), "{first:?}, {second:?}");
+        assert_eq!(server.requests.load(Ordering::SeqCst), 12);
+        let (directory, name) = ensure_parent(paths.root(), &files[0].destination)
+            .unwrap_or_else(|_| panic!("directory"));
+        directory
+            .write_atomic_durable(&name, b"tampered")
+            .unwrap_or_else(|_| panic!("same-size corruption"));
+        let stale = format!(".private-fs-{}.tmp", uuid::Uuid::new_v4().simple());
+        let scanned = AtomicBool::new(false);
+        let reused = AtomicUsize::new(0);
+        downloader
+            .cache_batch(&paths, &files, &cancel, &|progress| {
+                if progress.bytes == progress.total && progress.reused {
+                    reused.fetch_add(1, Ordering::SeqCst);
+                }
+                if !scanned.swap(true, Ordering::SeqCst) {
+                    // A later batch must scan again, but this batch must not rescan
+                    // the directory for each subsequent artifact.
+                    directory
+                        .write_atomic_durable(&stale, b"abandoned")
+                        .unwrap_or_else(|_| panic!("partial"));
+                }
+            })
+            .await
+            .unwrap_or_else(|error| panic!("batch: {error:?}"));
+        assert_eq!(server.requests.load(Ordering::SeqCst), 13);
+        assert_eq!(reused.load(Ordering::SeqCst), 11);
+        assert!(paths.root().join("libraries/batch").join(&stale).exists());
+        assert!(verified_file(&directory, &name, &files[0].artifact).unwrap_or(false));
+        downloader
+            .cache_batch(&paths, &files, &cancel, &|_| {})
+            .await
+            .unwrap_or_else(|_| panic!("reuse"));
+        assert!(!paths.root().join("libraries/batch").join(stale).exists());
+        assert_eq!(server.requests.load(Ordering::SeqCst), 13);
+    }
+
+    #[tokio::test]
+    async fn cancelled_batches_release_the_lease_and_reject_mixed_or_unsafe_parents() {
+        let bytes = b"verified";
+        let server = Server::new(bytes.to_vec(), bytes.len(), Duration::ZERO);
+        let downloader = server.downloader();
+        let paths = paths();
+        let mut files: Vec<_> = ["libraries/batch/a.jar", "libraries/batch/b.jar"]
+            .into_iter()
+            .map(|destination| super::super::plan::PlannedArtifact {
+                destination: destination.into(),
+                artifact: artifact(bytes),
+                executable: false,
+            })
+            .collect();
+        let cancel = Cancellation::default();
+        let result = downloader
+            .cache_batch(&paths, &files, &cancel, &|progress| {
+                if progress.bytes == progress.total {
+                    cancel.cancel();
+                }
+            })
+            .await;
+        assert_eq!(
+            result.err().map(|error| error.code()),
+            Some(ErrorCode::OperationCancelled)
+        );
+        assert_eq!(server.requests.load(Ordering::SeqCst), 1);
+        assert!(!paths.root().join(&files[1].destination).exists());
+        downloader
+            .cache_batch(&paths, &files, &Cancellation::default(), &|_| {})
+            .await
+            .unwrap_or_else(|_| panic!("resume after cancellation"));
+        // Cancellation happened before atomic publication, so retry downloads
+        // the first file again as well as the previously unstarted second file.
+        assert_eq!(server.requests.load(Ordering::SeqCst), 3);
+        for invalid in ["assets/other.jar", "libraries/../outside.jar"] {
+            files[1].destination = invalid.into();
+            assert!(
+                downloader
+                    .cache_batch(&paths, &files, &Cancellation::default(), &|_| {})
+                    .await
+                    .is_err()
+            );
+        }
+        assert_eq!(server.requests.load(Ordering::SeqCst), 3);
+    }
+
     #[cfg(target_os = "linux")]
     #[tokio::test]
-    async fn executable_runtime_download_reuse_and_repair_preserve_protection() {
+    async fn executable_runtime_download_reuse_and_repair_preserve_umask_and_execute_access() {
         use std::os::unix::fs::PermissionsExt;
         let bytes = b"verified runtime executable";
         let server = Server::new(bytes.to_vec(), bytes.len(), Duration::ZERO);
@@ -706,6 +1019,15 @@ mod tests {
         };
         let cancel = Cancellation::default();
         let local = paths.root().join(&file.destination);
+        PrivateDir::ensure_data(paths.root()).unwrap_or_else(|_| panic!("data root"));
+        let probe = paths.root().join("mode-probe");
+        std::fs::write(&probe, b"ordinary permissions").unwrap_or_else(|_| panic!("mode probe"));
+        let expected_mode = (std::fs::metadata(&probe)
+            .unwrap_or_else(|_| panic!("probe metadata"))
+            .permissions()
+            .mode()
+            & 0o7777)
+            | 0o100;
         for _ in 0..2 {
             downloader
                 .cache_planned(&paths, &file, &cancel, &|_| {})
@@ -717,7 +1039,7 @@ mod tests {
                     .permissions()
                     .mode()
                     & 0o7777,
-                0o700
+                expected_mode
             );
             let (directory, leaf) =
                 ensure_parent(paths.root(), &file.destination).unwrap_or_else(|_| panic!("parent"));
@@ -725,7 +1047,10 @@ mod tests {
                 verified_planned_file(&directory, &leaf, &file.artifact, true).unwrap_or(false)
             );
             assert!(
-                directory.open_file(&leaf).is_err(),
+                PrivateDir::open(local.parent().unwrap_or_else(|| panic!("runtime parent")))
+                    .unwrap_or_else(|_| panic!("private metadata view"))
+                    .open_file(&leaf)
+                    .is_err(),
                 "metadata policy must remain 0600"
             );
         }
@@ -759,7 +1084,7 @@ mod tests {
                 .permissions()
                 .mode()
                 & 0o7777,
-            0o700
+            expected_mode
         );
         std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
     }
@@ -939,7 +1264,7 @@ mod tests {
                     0
                 );
             }
-            assert!(private_fs::verify(&guard._file).is_ok());
+            assert!(private_fs::verify_data(&guard._file).is_ok());
         }
         assert!(try_lock(paths.root(), relative).ok().flatten().is_some());
     }

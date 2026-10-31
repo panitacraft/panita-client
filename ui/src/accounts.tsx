@@ -1,4 +1,12 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
+import { MessageText } from './components/message-text';
+import { Check, ChevronDown, Copy, Ellipsis, LoaderCircle, LogIn, LogOut, Plus, RefreshCw, Save, ShieldCheck, UserRound, X } from 'lucide-react';
+import { TransientNotice, useTransientNotice } from './components/transient-notice';
+import { Button } from './components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
+import { AccountDialog } from './components/account-dialog';
+import { MicrosoftIcon, ProfileArtwork } from './components/profile-artwork';
+import minecraft from './assets/brands/minecraft.svg';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { messageForError } from './errors';
@@ -6,20 +14,34 @@ import { invokeAccount, type AccountArguments } from './account-api';
 import { accountFeedback, initialAccountFeedback, type AccountStatus, type AccountsView } from './account-state';
 
 const statusText: Record<AccountStatus, string> = {
-  offline: 'Cuenta sin conexión', waiting_for_browser: 'Esperando al navegador',
-  authenticating: 'Verificando sesión…', ready: 'Sesión disponible',
+  offline: 'No-Premium', waiting_for_browser: 'Esperando al navegador',
+  authenticating: 'Verificando sesión…', ready: 'Sesión verificada',
   sign_in_required: 'Sesión pendiente', error: 'No se pudo verificar la sesión',
 };
 
-export function Accounts() {
+// `suggestedName` only pre-fills the offline name during onboarding; it is never a requirement.
+export function Accounts({ suggestedName = '', onSnapshot, onboarding = false }: { onboarding?: boolean; suggestedName?: string; onSnapshot?: (view: AccountsView | null) => void }) {
   const [{ view, error, notice, busy, blocked, cleanupWarning }, dispatch] = useReducer(accountFeedback, initialAccountFeedback);
   const [attempt, setAttempt] = useState(0);
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(suggestedName);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<'offline' | 'microsoft' | null>(null);
+  const toast = useTransientNotice();
+  useEffect(() => { if (notice) toast.show(notice); }, [notice, toast.show]);
+  const wasPending = useRef(false);
+  useEffect(() => {
+    if (view?.login_pending) { wasPending.current = true; setDialog('microsoft'); }
+    else if (wasPending.current) {
+      wasPending.current = false;
+      if (!view?.login_error) setDialog(null);
+    }
+  }, [view?.login_pending, view?.login_error]);
   const loginStarting = useRef(false);
   const inFlight = useRef(new Set<string>());
   const sequence = useRef(0);
   const desktop = isTauri();
+
+  useEffect(() => { onSnapshot?.(view); }, [view, onSnapshot]);
 
   function accept(next: AccountsView) {
     dispatch({ type: 'snapshot', view: next });
@@ -68,9 +90,10 @@ export function Accounts() {
       }
       if (current !== sequence.current) return;
       if (success) resultNotice = success;
-      if (command === 'add_offline_account') setUsername('');
+      if (command === 'add_offline_account') { setUsername(''); setDialog(null); }
       const next = await invokeAccount('account_snapshot', undefined);
       if (current === sequence.current) accept(next);
+      return true;
     } catch (reason) {
       let shownInRow = false;
       if (command === 'renew_account' || command === 'validate_account') {
@@ -82,6 +105,7 @@ export function Accounts() {
         } catch { /* Preserve the original actionable error if refresh also fails. */ }
       }
       if (!shownInRow) resultError ??= messageForError(reason);
+      return false;
     } finally {
       inFlight.current.delete(key);
       if (command === 'start_microsoft_login') loginStarting.current = false;
@@ -89,58 +113,97 @@ export function Accounts() {
     }
   }
 
-  return <section className="accounts-section" aria-labelledby="accounts-heading">
-    <h2 id="accounts-heading">Tus cuentas</h2>
+  function startLogin(accountId: string | null = null) {
+    toast.clear(); setDialog('microsoft');
+    void act('start_microsoft_login', { accountId });
+  }
+  async function cancelDialog() {
+    if (loginStarting.current) return;
+    if (dialog === 'microsoft' && view?.login_pending) {
+      if (!await act('cancel_microsoft_login', undefined)) return;
+    }
+    setDialog(null); toast.clear();
+  }
+  async function copyLink() {
+    try {
+      const url = await invokeAccount('microsoft_login_link', undefined);
+      await navigator.clipboard.writeText(url);
+      toast.show('Enlace copiado.');
+    } catch { toast.show('No pudimos copiar el enlace. Inténtalo de nuevo.', 'error'); }
+  }
+  const unavailable = !view || view.login_pending || busy === 'start_microsoft_login' || blocked;
+  const choices = <>
+    <Button className="font-semibold" disabled={unavailable} onClick={() => startLogin()}><MicrosoftIcon />Añadir cuenta Microsoft</Button>
+    <Button className="font-semibold" variant="outline" disabled={!view || blocked} onClick={() => { setUsername(suggestedName); setDialog('offline'); }}><UserRound aria-hidden="true" />Añadir cuenta No-Premium</Button>
+  </>;
+  const feedback = <>
+    {error && <p role="alert" className="account-error"><MessageText text={error} /></p>}
+    {view?.login_error && <p role="alert" className="account-error"><MessageText text={messageForError(view.login_error)} /></p>}
+  </>;
+  return <section className={`accounts-section ${onboarding ? 'account-onboarding login-card' : ''}`} aria-labelledby="accounts-heading">
+    {onboarding ? <>
+      <h1 id="accounts-heading" className="account-title"><img src={minecraft} alt="" />Acceder a Minecraft</h1>
+      <p className="login-subtitle">Selecciona el tipo de cuenta</p><div className="account-choices">{choices}</div>
+    </> : <div className="account-section-heading">
+      <h2 id="accounts-heading" className="account-title"><img src={minecraft} alt="" />Perfiles de Minecraft</h2>
+      <DropdownMenu><DropdownMenuTrigger asChild><Button disabled={!view || blocked}><Plus aria-hidden="true" />Añadir<ChevronDown aria-hidden="true" /></Button></DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem disabled={unavailable} onSelect={() => startLogin()}><MicrosoftIcon />Añadir cuenta Microsoft</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => { setUsername(''); setDialog('offline'); }}><UserRound />Añadir cuenta No-Premium</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>}
     {!desktop && <p>La gestión de cuentas está disponible en la aplicación de escritorio.</p>}
-    {error && <p role="alert" className="account-error">{error}</p>}
-    {cleanupWarning && <p role="alert" className="account-error">{cleanupWarning}</p>}
-    {notice && <p role="status">{notice}</p>}
-    {view?.login_error && <p role="alert" className="account-error">{messageForError(view.login_error)}</p>}
+    {!dialog && feedback}
+    {cleanupWarning && <p role="alert" className="account-error"><MessageText text={cleanupWarning} /></p>}
+    {!dialog && !confirming && <TransientNotice notice={toast.notice} />}
     {desktop && !view && !error && <p role="status">Cargando cuentas…</p>}
-    {desktop && !view && error && !blocked && <button type="button" onClick={() => {
-      dispatch({ type: 'start', operation: ++sequence.current, command: 'initialize' });
-      setAttempt(previous => previous + 1);
-    }}>Reintentar</button>}
-    {view && <>
-      {view.login_pending && <div className="login-progress" role="status">
-        <p>Completa el inicio de sesión en tu navegador y permite abrir Panita Client. Cuando vuelvas aquí, puedes cerrar la pestaña del navegador. Puedes cancelar o seleccionar otra cuenta.</p>
-        <button type="button" onClick={() => void act('cancel_microsoft_login', undefined)}>Cancelar inicio de sesión</button>
-      </div>}
-      <div className="account-actions">
-        <button type="button" disabled={view.login_pending || busy === 'start_microsoft_login'} onClick={() => void act('start_microsoft_login', { accountId: null })}>Iniciar sesión con Microsoft</button>
-        <form noValidate onSubmit={event => { event.preventDefault(); void act('add_offline_account', { username }); }}>
-          <label htmlFor="offline-name">Nombre para jugar sin conexión</label>
-          <input id="offline-name" value={username} onChange={event => setUsername(event.target.value)} minLength={3} maxLength={16} pattern="[A-Za-z0-9_]{3,16}" required autoComplete="off" />
-          <button type="submit" disabled={busy === 'add_offline_account'}>Añadir cuenta sin conexión</button>
-        </form>
-      </div>
-      {view.accounts.length === 0 && <p>No has añadido ninguna cuenta.</p>}
-      <ul className="account-list">
-        {view.accounts.map(account => {
-          const id = account.metadata.account_id;
-          const selected = id === view.selected_account_id;
-          return <li key={id} className={selected ? 'selected-account' : undefined}>
-            <div><strong>{account.metadata.username}</strong> <span>{account.metadata.kind === 'microsoft' ? 'Microsoft' : 'Sin conexión'}</span></div>
-            <p>{selected ? 'Cuenta seleccionada · ' : ''}{statusText[account.status]}</p>
-            {account.error && <p role="alert" className="account-error">{messageForError(account.error)}</p>}
-            {!account.persisted && <p>Esta cuenta no se ha guardado. Reintenta guardarla antes de cerrar el cliente.</p>}
-            <div className="account-buttons">
-              <button type="button" aria-pressed={selected} disabled={selected} onClick={() => void act('select_account', { accountId: id })}>Seleccionar</button>
-              {account.metadata.kind === 'microsoft' && <button type="button" disabled={view.login_pending} onClick={() => void act('start_microsoft_login', { accountId: id })}>Volver a iniciar sesión</button>}
-              {selected && account.metadata.kind === 'microsoft' && <button type="button" disabled={view.login_pending || busy === 'renew_account'} onClick={() => void act('renew_account', undefined)}>Reintentar sesión</button>}
-              {!account.persisted && <button type="button" onClick={() => void act('retry_account_save', { accountId: id }, 'La cuenta se guardó correctamente.')}>Reintentar guardado</button>}
-              {selected && account.metadata.kind === 'microsoft' && <button type="button" disabled={view.login_pending || account.status !== 'ready' || busy === 'validate_account'} onClick={() => void act('validate_account', undefined, 'Minecraft autorizó la sesión. Esta comprobación también se realizará al jugar.')}>Comprobar sesión</button>}
-              {confirming === id
-                ? <span role="group" aria-label="Confirmar quitar cuenta">
-                    <span>¿Quitar esta cuenta de este equipo?</span>
-                    <button type="button" onClick={() => { setConfirming(null); void act('remove_account', { accountId: id }); }}>Quitar cuenta</button>
-                    <button type="button" onClick={() => setConfirming(null)}>Conservar</button>
-                  </span>
-                : <button type="button" onClick={() => setConfirming(id)}>Cerrar sesión y quitar cuenta</button>}
-            </div>
-          </li>;
-        })}
-      </ul>
-    </>}
+    {desktop && !view && error && !blocked && <Button onClick={() => { dispatch({ type: 'start', operation: ++sequence.current, command: 'initialize' }); setAttempt(previous => previous + 1); }}>Reintentar</Button>}
+    {view && !onboarding && <ul className="account-list profile-list">
+      {view.accounts.length === 0 && <li>No has añadido ninguna cuenta.</li>}
+      {view.accounts.map(account => {
+        const id = account.metadata.account_id;
+        const selected = id === view.selected_account_id;
+        const microsoft = account.metadata.kind === 'microsoft';
+        return <li key={id} className="profile-row">
+          <ProfileArtwork username={microsoft ? account.metadata.username : 'MHF_Steve'} bust />
+          <div className="profile-info"><div className="profile-name"><strong>{account.metadata.username}</strong>{selected && <span className="active-badge"><Check aria-hidden="true" />Activa</span>}</div>
+            <span className="profile-type">{microsoft ? <MicrosoftIcon /> : <UserRound aria-hidden="true" />}{microsoft ? 'Microsoft' : 'No-Premium'}</span>
+            {microsoft && account.status !== 'ready' && <p className="profile-status">{statusText[account.status]}</p>}
+            {account.error && <p role="alert"><MessageText text={messageForError(account.error)} /></p>}
+            {!account.persisted && <p role="alert">Esta cuenta no se ha guardado. Reintenta guardarla antes de cerrar el cliente.</p>}
+          </div>
+          <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`Opciones de ${account.metadata.username}`}><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem disabled={selected} onSelect={() => void act('select_account', { accountId: id })}><Check />Seleccionar</DropdownMenuItem>
+              {microsoft && <DropdownMenuItem disabled={view.login_pending} onSelect={() => startLogin(id)}><LogIn />Volver a iniciar sesión</DropdownMenuItem>}
+              {selected && microsoft && <DropdownMenuItem disabled={view.login_pending || busy === 'renew_account'} onSelect={() => void act('renew_account', undefined, 'Sesión actualizada.')}><RefreshCw />Reintentar sesión</DropdownMenuItem>}
+              {selected && microsoft && <DropdownMenuItem disabled={view.login_pending || account.status !== 'ready' || busy === 'validate_account'} onSelect={() => void act('validate_account', undefined, 'Sesión de Minecraft verificada.')}><ShieldCheck />Comprobar sesión</DropdownMenuItem>}
+              {!account.persisted && <DropdownMenuItem onSelect={() => void act('retry_account_save', { accountId: id }, 'Cuenta guardada.')}><Save />Reintentar guardado</DropdownMenuItem>}
+              <DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" onSelect={() => setConfirming(id)}><LogOut />Quitar cuenta</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </li>;
+      })}
+    </ul>}
+    {dialog === 'offline' && <AccountDialog title="Nueva cuenta No-Premium" onCancel={() => { if (busy !== 'add_offline_account') setDialog(null); }}>
+      <TransientNotice notice={toast.notice} />
+      <form noValidate onSubmit={event => { event.preventDefault(); void act('add_offline_account', { username }); }}>
+        <label htmlFor="offline-name">Nombre de usuario</label>
+        <input id="offline-name" placeholder="Ej. Steve" value={username} onChange={event => setUsername(event.target.value)} minLength={3} maxLength={16} pattern="[A-Za-z0-9_]{3,16}" required autoComplete="off" autoFocus />
+        {feedback}<div className="account-buttons"><Button type="submit" disabled={busy === 'add_offline_account' || !username.trim()}><Check aria-hidden="true" />Confirmar</Button><Button type="button" variant="outline" disabled={busy === 'add_offline_account'} onClick={() => setDialog(null)}><X aria-hidden="true" />Cancelar</Button></div>
+      </form>
+    </AccountDialog>}
+    {dialog === 'microsoft' && <AccountDialog title="Añadir cuenta Microsoft" onCancel={() => void cancelDialog()}>
+      <p>¿Problemas con el navegador? <button className="text-action" disabled={!view?.login_pending || busy === 'cancel_microsoft_login'} onClick={() => void copyLink()}><Copy aria-hidden="true" />Copiar enlace</button></p>
+      <p className="login-wait" role="status">{view?.login_pending && !view.login_error && <LoaderCircle className="spin" aria-hidden="true" />}Completa el inicio de sesión en tu navegador para volver a Panita Client.</p>
+      {feedback}<TransientNotice notice={toast.notice} />
+      <div className="account-buttons"><Button variant="outline" disabled={busy === 'start_microsoft_login' || busy === 'cancel_microsoft_login'} onClick={() => void cancelDialog()}><X aria-hidden="true" />Cancelar</Button></div>
+    </AccountDialog>}
+    {confirming && <AccountDialog title="Quitar cuenta" onCancel={() => setConfirming(null)}>
+      <TransientNotice notice={toast.notice} />
+      <p>¿Quitar esta cuenta de este equipo? Se eliminará su sesión guardada.</p>
+      <div className="account-buttons"><Button variant="destructive" onClick={() => { const id = confirming; setConfirming(null); void act('remove_account', { accountId: id }); }}><LogOut aria-hidden="true" />Quitar cuenta</Button><Button variant="outline" onClick={() => setConfirming(null)}><X aria-hidden="true" />Cancelar</Button></div>
+    </AccountDialog>}
   </section>;
 }

@@ -244,19 +244,22 @@ Function PageReinstall
   ; Reinstalling the same version
   ${If} $R0 = 0
     StrCpy $R1 "$(alreadyInstalledLong)"
-    StrCpy $R2 "$(addOrReinstall)"
-    StrCpy $R3 "$(uninstallApp)"
+    StrCpy $R2 "Reinstalar"
+    StrCpy $R3 "Desinstalar"
+    StrCpy $PanitaStageTitle "Panita Client ya está instalado"
     !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(chooseMaintenanceOption)"
   ; Upgrading
   ${ElseIf} $R0 = 1
     StrCpy $R1 "$(olderOrUnknownVersionInstalled)"
-    StrCpy $R2 "$(uninstallBeforeInstalling)"
-    StrCpy $R3 "$(dontUninstall)"
+    StrCpy $R2 "Instalación limpia (recomendada)"
+    StrCpy $R3 "Instalación rápida"
+    StrCpy $PanitaStageTitle "Tipo de actualización"
     !insertmacro MUI_HEADER_TEXT "$(alreadyInstalled)" "$(choowHowToInstall)"
   ; Downgrading
   ${ElseIf} $R0 = -1
     StrCpy $R1 "$(newerVersionInstalled)"
     StrCpy $R2 "$(uninstallBeforeInstalling)"
+    StrCpy $PanitaStageTitle "Hay una versión más reciente instalada"
     !if "${ALLOWDOWNGRADES}" == "true"
       StrCpy $R3 "$(dontUninstall)"
     !else
@@ -280,7 +283,7 @@ Function PageReinstall
     Pop $R4
     ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
 
-    ${NSD_CreateLabel} 0 0 100% 24u "Opciones de instalación"
+    ${NSD_CreateLabel} 0 0 100% 24u "$PanitaStageTitle"
     Pop $R1
     !insertmacro PANITA_ROLE $R1 6
     SendMessage $R1 ${WM_SETFONT} $PanitaTitleFont 1
@@ -312,24 +315,25 @@ Function PageReinstall
     !insertmacro PANITA_PAGE_LAYOUT $R4
     System::Call 'uxtheme::SetWindowTheme(p R2, w "", w "")'
     System::Call 'uxtheme::SetWindowTheme(p R3, w "", w "")'
-    SetCtlColors $R1 EFECE5 10231E
-    SetCtlColors $R2 EFECE5 10231E
-    SetCtlColors $R3 EFECE5 10231E
+    SetCtlColors $R1 F9FFF8 141414
+    SetCtlColors $R2 F9FFF8 141414
+    SetCtlColors $R3 F9FFF8 141414
     !insertmacro PANITA_RECT $R1 0 152 402 72
     !insertmacro PANITA_RECT $R2 0 246 402 44
     !insertmacro PANITA_RECT $R3 0 310 402 44
     !insertmacro PANITA_BRAND ""
+    ; The title already says what is installed, so the same-version page needs no sentence.
     ${If} $R0 == 0
-      ${NSD_CreateLabel} 0 0 0 0 "Esta versión ya está instalada. Puedes reinstalar el launcher o desinstalarlo."
+      ${NSD_CreateLabel} 0 0 0 0 ""
     ${ElseIf} $R0 == 1
-      ${NSD_CreateLabel} 0 0 0 0 "Hay una versión anterior instalada. Elige cómo actualizar el launcher. Tus cuentas, ajustes, instancias y mundos se conservarán."
+      ${NSD_CreateLabel} 0 0 0 0 "Tus cuentas, mundos y ajustes se conservan."
     ${Else}
-      ${NSD_CreateLabel} 0 0 0 0 "Hay una versión más reciente instalada. Revisa las opciones disponibles antes de continuar."
+      ${NSD_CreateLabel} 0 0 0 0 "Una versión anterior podría no reconocer tus datos."
     ${EndIf}
     Pop $PanitaDescription
     !insertmacro PANITA_ROLE $PanitaDescription 7
     !insertmacro PANITA_RECT $PanitaDescription 0 72 402 72
-    SetCtlColors $PanitaDescription C4D0C8 10231E
+    SetCtlColors $PanitaDescription BABABA 141414
     SendMessage $mui.Button.Next ${WM_SETTEXT} 0 "STR:Continuar"
     PanitaUi::Apply /NOUNLOAD
     nsDialogs::Show
@@ -365,7 +369,8 @@ Function PageLeaveReinstall
   ${If} $R0 = 0 ; Same version, proceed
     ${If} $R1 = 1              ; User chose to add/reinstall
       Goto reinst_done
-    ${Else}                    ; User chose to uninstall
+    ${Else}                    ; User chose to uninstall, so do not install again afterwards
+      StrCpy $PanitaUninstallOnly 1
       Goto reinst_uninstall
     ${EndIf}
   ${ElseIf} $R0 = 1 ; Upgrading
@@ -394,6 +399,13 @@ Function PageLeaveReinstall
       ReadRegStr $R1 SHCTX "${UNINSTKEY}" "UninstallString"
       ${IfThen} $UpdateMode = 1 ${|} StrCpy $R1 "$R1 /UPDATE" ${|} ; append /UPDATE
       ${IfThen} $PassiveMode = 1 ${|} StrCpy $R1 "$R1 /P" ${|} ; append /P
+      ; A clean upgrade or a downgrade only prepares the folder for the install that follows, so
+      ; the old uninstaller must not show its own confirmation. Silent uninstall keeps all data.
+      ${If} $PassiveMode <> 1
+      ${AndIf} $UpdateMode <> 1
+      ${AndIf} $PanitaUninstallOnly <> 1
+        StrCpy $R1 "$R1 /S"
+      ${EndIf}
       StrCpy $R1 "$R1 _?=$4" ; append uninstall directory
       ExecWait '$R1' $0
     ${EndIf}
@@ -418,6 +430,12 @@ Function PageLeaveReinstall
       ; Other errors? show generic error message and return to select un/reinstall page
       !insertmacro PANITA_REPORT "No se pudo desinstalar la versión anterior. Cierra Panita Client y sus instancias antes de volver a intentarlo."
       Abort
+    ${EndIf}
+
+    ; The player asked only to uninstall: the uninstaller has shown its own completion.
+    ${If} $PanitaUninstallOnly = 1
+      SetErrorLevel 0
+      Quit
     ${EndIf}
   reinst_done:
 FunctionEnd
@@ -787,6 +805,12 @@ Section Uninstall
       SetErrorLevel 3
       Abort
     ${EndIf}
+  ${EndIf}
+
+  ; The embedded browser's disposable data lives inside the install directory. Ordinary
+  ; uninstall removes it; an update keeps it.
+  ${If} $UpdateMode <> 1
+    RMDir /r "$INSTDIR\webview"
   ${EndIf}
 
   ; Delete the app directory and its content from disk

@@ -8,6 +8,7 @@ use super::{
 use crate::{
     catalog::{CatalogClient, CatalogSource},
     error::{CoreError, ErrorCode},
+    panita_api::PanitaCredentials,
     paths::AppPaths,
     registry::{InstallationState, InstanceRegistry},
     storage::map_private_error,
@@ -25,13 +26,16 @@ pub struct MaintenanceOutcome {
 
 /// Presentation hint only: a recognized owned plan may still need artifact repair.
 /// Tombstones allow native cleanup; repair/uninstall also check installation state.
-pub(crate) fn has_installation_manifest(paths: &AppPaths, id: Uuid) -> Result<bool, CoreError> {
+pub(crate) fn installation_manifest(
+    paths: &AppPaths,
+    id: Uuid,
+) -> Result<Option<InstalledLock>, CoreError> {
     let root = paths.instance(id)?;
     let Some(installed) = read_json::<InstalledLock>(&root, "installed.json")? else {
-        return Ok(false);
+        return Ok(None);
     };
     validate_manifest(&installed, id)?;
-    Ok(true)
+    Ok(Some(installed))
 }
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -54,7 +58,7 @@ struct Journal {
     retained_files: u32,
 }
 
-pub(super) fn validate_manifest(manifest: &InstalledLock, id: Uuid) -> Result<(), CoreError> {
+pub(crate) fn validate_manifest(manifest: &InstalledLock, id: Uuid) -> Result<(), CoreError> {
     if !matches!(manifest.schema_version, 2 | 3)
         || manifest.instance_id != id
         || id.is_nil()
@@ -388,6 +392,14 @@ pub fn uninstall(
 ) -> Result<MaintenanceOutcome, CoreError> {
     cancel.check()?;
     let root = install::metadata_root(paths, id)?;
+    // A pack has its own uninstall: it removes only unedited pack content.
+    if crate::modpack::install::is_pack(paths, id)? {
+        let report = crate::modpack::install::uninstall_pack(paths, id, cancel)?;
+        return Ok(MaintenanceOutcome {
+            retained_files: u32::try_from(report.kept).unwrap_or(u32::MAX),
+            native_cleanup: report.native_cleanup,
+        });
+    }
     let _lease = try_lock(&root, ".installation.lock")?
         .ok_or_else(|| CoreError::new(ErrorCode::OperationBusy))?;
     if let Some(native_cleanup) = retry_uninstall_cleanup(paths, id, &root)? {
@@ -399,6 +411,10 @@ pub fn uninstall(
     recover_for_maintenance(paths, id, &root)?;
     let previous = read_json::<InstalledLock>(&root, "installed.json")?.ok_or_else(invalid)?;
     validate_manifest(&previous, id)?;
+    // Modpack uninstall preserves player files and arrives with Phase 12.
+    if previous.pack.is_some() {
+        return Err(CoreError::new(ErrorCode::UnsupportedInstance));
+    }
     let mut journal = Journal {
         schema_version: 3,
         instance_id: id,
@@ -425,8 +441,10 @@ pub async fn repair(
     platform: &Platform,
     cancel: &Cancellation,
     progress: Progress,
+    auth: Option<PanitaCredentials>,
 ) -> Result<MaintenanceOutcome, CoreError> {
-    repair_with_catalog(paths, id, platform, cancel, progress, CatalogClient::new()?).await
+    let catalog = CatalogClient::new()?.with_auth(auth);
+    repair_with_catalog(paths, id, platform, cancel, progress, catalog).await
 }
 
 async fn repair_with_catalog(

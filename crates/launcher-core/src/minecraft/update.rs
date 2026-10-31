@@ -10,6 +10,7 @@ use super::{
 use crate::{
     catalog::{CatalogClient, CatalogSource},
     error::{CoreError, ErrorCode},
+    panita_api::PanitaCredentials,
     paths::AppPaths,
     registry::{InstallationState, InstanceRegistry},
 };
@@ -23,6 +24,9 @@ pub struct UpdateRequest {
     pub from_version: String,
     pub to_version: String,
     pub backup_worlds: bool,
+    /// Packs only: continue past conflicts by moving the player's files aside.
+    #[serde(default)]
+    pub move_aside: bool,
 }
 
 pub struct UpdateOutcome {
@@ -239,17 +243,10 @@ pub async fn update(
     request: UpdateRequest,
     cancel: &Cancellation,
     progress: Progress,
+    auth: Option<PanitaCredentials>,
 ) -> Result<UpdateOutcome, CoreError> {
-    update_with_catalog(
-        paths,
-        id,
-        platform,
-        request,
-        cancel,
-        progress,
-        CatalogClient::new()?,
-    )
-    .await
+    let catalog = CatalogClient::new()?.with_auth(auth);
+    update_with_catalog(paths, id, platform, request, cancel, progress, catalog).await
 }
 
 async fn update_with_catalog(

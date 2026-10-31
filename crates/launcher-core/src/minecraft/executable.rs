@@ -1,4 +1,4 @@
-//! Linux runtime executables are owner-only 0700, distinct from 0600 metadata.
+//! Linux runtime artifacts use ordinary read/execute access, distinct from credentials.
 use super::{Artifact, download::io, invalid, safe_path};
 use crate::error::{CoreError, ErrorCode};
 use private_fs::PrivateDir;
@@ -12,10 +12,7 @@ fn unsafe_permissions() -> CoreError {
 
 fn parent(directory: &PrivateDir) -> Result<(), CoreError> {
     let stat = fs::fstat(directory).map_err(|error| io(error.into()))?;
-    if FileType::from_raw_mode(stat.st_mode) != FileType::Directory
-        || stat.st_uid != rustix::process::geteuid().as_raw()
-        || stat.st_mode & 0o7777 != 0o700
-    {
+    if FileType::from_raw_mode(stat.st_mode) != FileType::Directory {
         return Err(unsafe_permissions());
     }
     Ok(())
@@ -26,11 +23,13 @@ fn verify(directory: &PrivateDir, file: &File, require_execute: bool) -> Result<
     let stat = fs::fstat(file).map_err(|error| io(error.into()))?;
     let mode = stat.st_mode & 0o7777;
     if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile
-        || stat.st_uid != rustix::process::geteuid().as_raw()
         || stat.st_nlink != 1
-        || !(mode == 0o700 || (!require_execute && mode == 0o600))
+        || mode & 0o6000 != 0
     {
         return Err(unsafe_permissions());
+    }
+    if require_execute && mode & 0o111 == 0 {
+        return Err(CoreError::new(ErrorCode::PermissionDenied));
     }
     Ok(())
 }
@@ -54,6 +53,12 @@ fn open(directory: &PrivateDir, name: &str) -> Result<Option<File>, CoreError> {
     let file = File::from(fd);
     verify(directory, &file, false)?;
     Ok(Some(file))
+}
+
+pub(super) fn size(directory: &PrivateDir, name: &str) -> Result<Option<u64>, CoreError> {
+    open(directory, name)?
+        .map(|file| file.metadata().map(|metadata| metadata.len()).map_err(io))
+        .transpose()
 }
 
 pub(super) fn matches(
@@ -83,17 +88,35 @@ pub(super) fn matches(
 
 pub(super) fn require(directory: &PrivateDir, name: &str) -> Result<(), CoreError> {
     let file = open(directory, name)?.ok_or_else(invalid)?;
-    verify(directory, &file, true)
+    verify(directory, &file, true)?;
+    fs::accessat(
+        directory,
+        name,
+        fs::Access::EXEC_OK,
+        fs::AtFlags::EACCESS | fs::AtFlags::SYMLINK_NOFOLLOW,
+    )
+    .map_err(|error| io(error.into()))?;
+    let current = open(directory, name)?.ok_or_else(invalid)?;
+    let before = fs::fstat(&file).map_err(|error| io(error.into()))?;
+    let after = fs::fstat(&current).map_err(|error| io(error.into()))?;
+    if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino) {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 pub(super) fn enable(directory: &PrivateDir, name: &str) -> Result<(), CoreError> {
     let file = open(directory, name)?.ok_or_else(invalid)?;
-    fs::fchmod(&file, Mode::from_raw_mode(0o700)).map_err(|error| io(error.into()))?;
+    if require(directory, name).is_ok() {
+        return Ok(());
+    }
+    let mode = fs::fstat(&file).map_err(|error| io(error.into()))?.st_mode & 0o7777;
+    fs::fchmod(&file, Mode::from_raw_mode(mode | 0o100)).map_err(|error| io(error.into()))?;
     file.sync_all().map_err(io)?;
-    verify(directory, &file, true)
+    require(directory, name)
 }
 
-/// Staging is protected 0600. Replace only a validated runtime artifact, then
+/// Replace only a validated runtime artifact, then
 /// synchronize its execute mode and parent before installation can be committed.
 pub(super) fn publish(directory: &PrivateDir, staging: &str, name: &str) -> Result<(), CoreError> {
     let source = directory
@@ -105,7 +128,8 @@ pub(super) fn publish(directory: &PrivateDir, staging: &str, name: &str) -> Resu
     parent(directory)?;
     fs::renameat(directory, staging, directory, name).map_err(|error| io(error.into()))?;
     let finish = || {
-        fs::fchmod(&file, Mode::from_raw_mode(0o700)).map_err(|error| io(error.into()))?;
+        let mode = fs::fstat(&file).map_err(|error| io(error.into()))?.st_mode & 0o7777;
+        fs::fchmod(&file, Mode::from_raw_mode(mode | 0o100)).map_err(|error| io(error.into()))?;
         file.sync_all().map_err(io)?;
         verify(directory, &file, true)?;
         fs::fsync(directory).map_err(|error| io(error.into()))?;
@@ -115,7 +139,8 @@ pub(super) fn publish(directory: &PrivateDir, staging: &str, name: &str) -> Resu
         if (original.st_dev, original.st_ino) != (current.st_dev, current.st_ino) {
             return Err(invalid());
         }
-        verify(directory, &published, true)
+        verify(directory, &published, true)?;
+        require(directory, name)
     };
     finish().map_err(|_: CoreError| CoreError::new(ErrorCode::StorageCommitUncertain))
 }
@@ -126,7 +151,8 @@ mod tests {
     use std::os::unix::fs::{PermissionsExt, symlink};
 
     #[test]
-    fn runtime_access_rejects_links_public_modes_and_missing_execute_permission() {
+    fn runtime_access_accepts_ordinary_modes_but_rejects_links_privileged_bits_and_missing_execute()
+    {
         let root =
             std::env::temp_dir().join(format!("panita-runtime-mode-{}", uuid::Uuid::new_v4()));
         let directory = PrivateDir::ensure(&root).unwrap_or_else(|_| panic!("private root"));
@@ -144,12 +170,15 @@ mod tests {
         std::fs::remove_file(root.join("alias")).unwrap_or_else(|_| panic!("remove alias"));
         std::fs::set_permissions(root.join("java"), std::fs::Permissions::from_mode(0o755))
             .unwrap_or_else(|_| panic!("mode fixture"));
-        assert!(open(&directory, "java").is_err());
+        assert!(require(&directory, "java").is_ok());
+        std::fs::set_permissions(root.join("java"), std::fs::Permissions::from_mode(0o4755))
+            .unwrap_or_else(|_| panic!("privileged mode fixture"));
+        assert!(require(&directory, "java").is_err());
         std::fs::set_permissions(root.join("java"), std::fs::Permissions::from_mode(0o700))
             .unwrap_or_else(|_| panic!("mode fixture"));
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755))
             .unwrap_or_else(|_| panic!("parent mode fixture"));
-        assert!(open(&directory, "java").is_err());
+        assert!(require(&directory, "java").is_ok());
         std::fs::remove_dir_all(&root).unwrap_or_else(|_| panic!("cleanup"));
     }
 }

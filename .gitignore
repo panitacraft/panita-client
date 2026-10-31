@@ -21,4 +21,6 @@
 **/accounts.json
 **/accounts.json.*
 **/pending-account-removals.json
+**/panita-session.json
+**/panita-session.json.*
 **/.private-fs-*.tmp

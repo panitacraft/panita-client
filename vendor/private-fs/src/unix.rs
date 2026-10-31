@@ -52,11 +52,12 @@ enum Resolver {
 }
 
 #[derive(Debug)]
-/// A verified private directory retained as a capability, independent of its name.
+/// A verified directory capability with an explicit private/ordinary file policy.
 pub struct PrivateDir {
     fd: OwnedFd,
     id: Identity,
     resolver: Resolver,
+    private_files: bool,
 }
 #[derive(Debug)]
 /// A verified regular file. Native-handle operations are the caller's responsibility.
@@ -64,6 +65,7 @@ pub struct PrivateFile {
     file: File,
     id: Identity,
     links: u64,
+    private: bool,
 }
 
 fn permission_error(expected: impl Into<u32>, actual: impl Into<u32>) -> Error {
@@ -82,6 +84,63 @@ fn link_error(links: impl Into<u64>) -> Error {
 }
 fn validate(fd: impl AsFd, directory: bool, expected_id: Option<Identity>) -> Result<Identity> {
     validate_links(fd, directory, expected_id, 1)
+}
+
+/// Data access follows the kernel's access checks, retaining object and link
+/// identity without imposing private ownership or exact modes.
+#[cfg(target_os = "linux")]
+fn validate_data_stat(
+    s: &fs::Stat,
+    directory: bool,
+    expected: Option<Identity>,
+    links: u64,
+) -> Result<Identity> {
+    if expected.is_some_and(|id| id != identity(s)) {
+        return Err(Error::IdentityChanged);
+    }
+    let kind = if directory {
+        FileType::Directory
+    } else {
+        FileType::RegularFile
+    };
+    if FileType::from_raw_mode(s.st_mode) != kind {
+        return Err(Error::WrongObjectKind);
+    }
+    if !directory && link_count(s.st_nlink) != links {
+        if links == 0 {
+            return Err(Error::UnexpectedLinkCount {
+                expected: 0,
+                actual: link_count(s.st_nlink),
+            });
+        }
+        return Err(link_error(s.st_nlink));
+    }
+    Ok(identity(s))
+}
+
+fn validate_directory(fd: impl AsFd, expected: Option<Identity>) -> Result<Identity> {
+    #[cfg(target_os = "linux")]
+    {
+        validate_data_stat(&fs::fstat(fd)?, true, expected, 1)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        validate(fd, true, expected)
+    }
+}
+
+fn validate_file(
+    fd: impl AsFd,
+    expected: Option<Identity>,
+    links: u64,
+    private: bool,
+) -> Result<Identity> {
+    #[cfg(target_os = "linux")]
+    if !private {
+        return validate_data_stat(&fs::fstat(fd)?, false, expected, links);
+    }
+    let _ = private;
+    validate_links(fd, false, expected, links)
 }
 fn validate_links(
     fd: impl AsFd,
@@ -242,8 +301,13 @@ fn harden(fd: impl AsFd, directory: bool, id: Identity) -> Result<()> {
     validate(fd, directory, Some(id)).map(|_| ())
 }
 impl PrivateDir {
-    /// Explicitly restore private access on this retained capability.
+    /// Validate Linux directories without permission changes; harden macOS directories.
     pub fn harden(&self) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            self.check_private()
+        }
+        #[cfg(not(target_os = "linux"))]
         harden(&self.fd, true, self.id)
     }
     /// Open and verify a root. Every ancestor is resolved without following links.
@@ -255,6 +319,33 @@ impl PrivateDir {
         Self::acquire(path.as_ref(), true, Resolver::Auto)
     }
     fn acquire(path: &Path, create: bool, resolver: Resolver) -> Result<Self> {
+        Self::acquire_policy(path, create, resolver, true)
+    }
+    #[cfg(target_os = "linux")]
+    pub fn open_data(path: impl AsRef<Path>) -> Result<Self> {
+        Self::acquire_policy(path.as_ref(), false, Resolver::Auto, false)
+    }
+    #[cfg(target_os = "linux")]
+    pub fn ensure_data(path: impl AsRef<Path>) -> Result<Self> {
+        Self::acquire_policy(path.as_ref(), true, Resolver::Auto, false)
+    }
+    #[cfg(target_os = "linux")]
+    pub fn verify_private_namespace(&self) -> Result<()> {
+        validate_directory(&self.fd, Some(self.id))?;
+        creation_parent(&self.fd)?;
+        let stat = fs::fstat(&self.fd)?;
+        let mode = stat.st_mode & 0o7777;
+        if mode & 0o022 != 0 {
+            return Err(permission_error(mode & !0o022, mode));
+        }
+        Ok(())
+    }
+    fn acquire_policy(
+        path: &Path,
+        create: bool,
+        resolver: Resolver,
+        private_files: bool,
+    ) -> Result<Self> {
         crate::path::validate_component_spelling(path)?;
         if !path.is_absolute() {
             RelativePath::new(path)?;
@@ -329,7 +420,7 @@ impl PrivateDir {
                 )?;
             }
         }
-        Self::directory_at(&parent, leaf, create, false, resolver)
+        Self::directory_at(&parent, leaf, create, false, resolver, private_files)
     }
     fn directory_at(
         parent: impl AsFd,
@@ -337,6 +428,7 @@ impl PrivateDir {
         create: bool,
         exclusive: bool,
         resolver: Resolver,
+        private_files: bool,
     ) -> Result<Self> {
         if create {
             if !exclusive {
@@ -348,17 +440,27 @@ impl PrivateDir {
                     resolver,
                 ) {
                     Ok(fd) => {
-                        let id = validate(&fd, true, None)?;
-                        return Ok(Self { fd, id, resolver });
+                        let id = validate_directory(&fd, None)?;
+                        return Ok(Self {
+                            fd,
+                            id,
+                            resolver,
+                            private_files,
+                        });
                     }
                     Err(Error::Io(e)) if e.kind() == io::ErrorKind::NotFound => (),
                     Err(e) => return Err(e),
                 }
             }
+            #[cfg(not(target_os = "linux"))]
             creation_parent(parent.as_fd())?;
         }
         let created = if create {
-            match fs::mkdirat(parent.as_fd(), name, Mode::from_raw_mode(0o700)) {
+            match fs::mkdirat(
+                parent.as_fd(),
+                name,
+                Mode::from_raw_mode(if private_files { 0o700 } else { 0o777 }),
+            ) {
                 Ok(()) => true,
                 Err(e) if e == rustix::io::Errno::EXIST && !exclusive => false,
                 Err(e) => return Err(e.into()),
@@ -385,13 +487,20 @@ impl PrivateDir {
             resolver,
         )?;
         if let Some(id) = observed {
-            normalize_created(&fd, true, id)?;
+            if private_files {
+                normalize_created(&fd, true, id)?;
+            }
         }
-        let id = validate(&fd, true, observed)?;
-        Ok(Self { fd, id, resolver })
+        let id = validate_directory(&fd, observed)?;
+        Ok(Self {
+            fd,
+            id,
+            resolver,
+            private_files,
+        })
     }
     fn parent<'a>(&self, path: &'a Path) -> Result<(OwnedFd, &'a OsStr)> {
-        validate(&self.fd, true, Some(self.id))?;
+        validate_directory(&self.fd, Some(self.id))?;
         let mut p = RelativePath::new(path)?.0;
         let leaf = p.pop().ok_or(Error::InvalidRelativePath)?;
         let mut parent = rustix::io::fcntl_dupfd_cloexec(&self.fd, 0)?;
@@ -403,19 +512,27 @@ impl PrivateDir {
                 Mode::empty(),
                 self.resolver,
             )?;
-            validate(&parent, true, None)?;
+            validate_directory(&parent, None)?;
         }
         Ok((parent, leaf))
     }
     /// Open an existing regular file for reading, without metadata mutation.
     pub fn open_file(&self, path: impl AsRef<Path>) -> Result<PrivateFile> {
+        self.open_file_policy(path.as_ref(), self.private_files)
+    }
+    #[cfg(target_os = "linux")]
+    pub fn open_data_file(&self, path: impl AsRef<Path>) -> Result<PrivateFile> {
+        self.open_file_policy(path.as_ref(), false)
+    }
+    fn open_file_policy(&self, path: &Path, private: bool) -> Result<PrivateFile> {
         let (parent, leaf) = self.parent(path.as_ref())?;
         let fd = open_component(&parent, leaf, OFlags::RDONLY, Mode::empty(), self.resolver)?;
-        let id = validate(&fd, false, None)?;
+        let id = validate_file(&fd, None, 1, private)?;
         Ok(PrivateFile {
             file: fd.into(),
             id,
             links: 1,
+            private,
         })
     }
     /// Exclusively create a readable and writable file with initial mode 0600.
@@ -427,38 +544,56 @@ impl PrivateDir {
             &parent,
             leaf,
             OFlags::RDWR | OFlags::CREATE | OFlags::EXCL,
-            Mode::from_raw_mode(0o600),
+            Mode::from_raw_mode(if self.private_files { 0o600 } else { 0o666 }),
             self.resolver,
         )?;
         let s = fs::fstat(&fd)?;
         let id = identity(&s);
-        normalize_created(&fd, false, id)?;
-        validate(&fd, false, Some(id))?;
+        if self.private_files {
+            normalize_created(&fd, false, id)?;
+        }
+        validate_file(&fd, Some(id), 1, self.private_files)?;
         Ok(PrivateFile {
             file: fd.into(),
             id,
             links: 1,
+            private: self.private_files,
         })
+    }
+    /// Open an existing private directory relative to this retained capability.
+    pub fn open_dir(&self, path: impl AsRef<Path>) -> Result<Self> {
+        let (parent, leaf) = self.parent(path.as_ref())?;
+        Self::directory_at(
+            parent,
+            leaf,
+            false,
+            false,
+            self.resolver,
+            self.private_files,
+        )
     }
     /// Exclusively create the final directory. Private parents must already exist.
     pub fn create_dir(&self, path: impl AsRef<Path>) -> Result<Self> {
         let (parent, leaf) = self.parent(path.as_ref())?;
-        Self::directory_at(parent, leaf, true, true, self.resolver)
+        Self::directory_at(parent, leaf, true, true, self.resolver, self.private_files)
     }
     /// Create or verify the final directory, without repairing existing entries.
     pub fn ensure_dir(&self, path: impl AsRef<Path>) -> Result<Self> {
         let (parent, leaf) = self.parent(path.as_ref())?;
-        Self::directory_at(parent, leaf, true, false, self.resolver)
+        Self::directory_at(parent, leaf, true, false, self.resolver, self.private_files)
     }
 }
 impl PrivateFile {
-    /// Explicitly restore private access on this retained capability.
+    /// Restore private-file access; ordinary data files are only revalidated.
     pub fn harden(&self) -> Result<()> {
+        if !self.private {
+            return self.verify();
+        }
         harden(&self.file, false, self.id)
     }
     /// Recheck mutable security metadata on the retained descriptor.
     pub fn verify(&self) -> Result<()> {
-        validate_links(&self.file, false, Some(self.id), self.links).map(|_| ())
+        validate_file(&self.file, Some(self.id), self.links, self.private).map(|_| ())
     }
     /// Sync file data with security revalidation; does not sync a parent directory.
     pub fn sync_data(&self) -> Result<()> {
@@ -533,6 +668,10 @@ fn canonical_alias(path: &Path) -> std::path::PathBuf {
 pub(crate) fn verify_existing(file: &File) -> Result<()> {
     validate(file, false, None).map(|_| ())
 }
+#[cfg(target_os = "linux")]
+pub(crate) fn verify_data(file: &File) -> Result<()> {
+    validate_file(file, None, 1, false).map(|_| ())
+}
 pub(crate) fn harden_existing(file: &File) -> Result<()> {
     let id = identity(&fs::fstat(file)?);
     harden(file, false, id)
@@ -540,18 +679,19 @@ pub(crate) fn harden_existing(file: &File) -> Result<()> {
 impl PrivateDir {
     pub(crate) fn atomic_parent(&self, path: &Path) -> Result<(Self, std::ffi::OsString)> {
         let (fd, leaf) = self.parent(path)?;
-        let id = validate(&fd, true, None)?;
+        let id = validate_directory(&fd, None)?;
         Ok((
             Self {
                 fd,
                 id,
                 resolver: self.resolver,
+                private_files: self.private_files,
             },
             leaf.to_os_string(),
         ))
     }
     pub(crate) fn check_private(&self) -> Result<()> {
-        validate(&self.fd, true, Some(self.id)).map(|_| ())
+        validate_directory(&self.fd, Some(self.id)).map(|_| ())
     }
     pub(crate) fn anonymous_temp(&self) -> Result<Option<PrivateFile>> {
         self.check_private()?;
@@ -561,7 +701,7 @@ impl PrivateDir {
                 &self.fd,
                 OsStr::new("."),
                 OFlags::RDWR | OFlags::TMPFILE,
-                Mode::from_raw_mode(0o600),
+                Mode::from_raw_mode(if self.private_files { 0o600 } else { 0o666 }),
                 self.resolver,
             ) {
                 Ok(fd) => fd,
@@ -582,19 +722,22 @@ impl PrivateDir {
             let mut stat = fs::fstat(&fd)?;
             let id = identity(&stat);
             let actual = stat.st_mode & 0o7777;
-            if actual & !0o600 != 0 {
+            if self.private_files && actual & !0o600 != 0 {
                 return Err(permission_error(0o600u32, actual));
             }
-            stat.st_mode = (stat.st_mode & !0o7777) | 0o600;
-            validate_stat_links(&stat, false, Some(id), 0)?;
-            if actual != 0o600 {
-                fs::fchmod(&fd, Mode::from_raw_mode(0o600))?;
+            if self.private_files {
+                stat.st_mode = (stat.st_mode & !0o7777) | 0o600;
+                validate_stat_links(&stat, false, Some(id), 0)?;
+                if actual != 0o600 {
+                    fs::fchmod(&fd, Mode::from_raw_mode(0o600))?;
+                }
             }
-            validate_links(&fd, false, Some(id), 0)?;
+            validate_file(&fd, Some(id), 0, self.private_files)?;
             Ok(Some(PrivateFile {
                 file: fd.into(),
                 id,
                 links: 0,
+                private: self.private_files,
             }))
         }
         #[cfg(not(target_os = "linux"))]

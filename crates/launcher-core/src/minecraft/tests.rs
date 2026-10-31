@@ -182,6 +182,7 @@ fn cache_mapping_preserves_legacy_locks_and_qualifies_asset_index_names() {
     let legacy_index = format!("assets/indexes/{}.json", version.assets.id);
     let index = version.assets.clone();
     let mut plan = InstallPlan {
+        loader: None,
         schema_version: 1,
         version,
         platform: "windows".into(),

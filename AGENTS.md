@@ -7,7 +7,7 @@ This file is the source of truth for how work is done in this project. Every con
 Panita Client is an unofficial, plug-and-play Minecraft launcher for friends. It manages accounts, downloads the required game files and Java, and runs isolated instances from the Panita API catalog.
 
 - The MVP supports at least two independent vanilla instances, Microsoft and explicit offline accounts, and launching to the Minecraft main menu.
-- Prioritize Windows. Design for Linux from the beginning and validate each platform before claiming support. macOS and modpacks are future scope.
+- Prioritize Windows. Design for Linux from the beginning and validate each platform before claiming support. The 0.2 alpha plan includes public custom and pinned Modrinth modpacks, with NeoForge first, on Windows x64 and Ubuntu x64. macOS and other loaders remain later adoption scope.
 - Use Tauri v2 with a Rust core and a React/TypeScript interface. Keep detailed implementation steps in the implementation plan and `docs/`.
 - Follow the latest confirmed decisions. Do not expand scope or change product policies without discussing the proposal with the owner.
 
@@ -37,7 +37,7 @@ Panita Client is an unofficial, plug-and-play Minecraft launcher for friends. It
 ### Branch convention
 
 - Use `develop` as the development branch. Keep `master` as the existing primary branch; do not rename it or change remote defaults without explicit authorization.
-- When a separate task branch is needed, branch from `develop` and use `<type>/<short-description>`, for example `feat/auth-fundamentals`, `fix/session-renewal`, or `docs/development-setup`.
+- Every new phase must use its own new branch from `develop`, using `<type>/<short-description>`, for example `feat/auth-fundamentals`, `fix/session-renewal`, or `docs/development-setup`. Do not implement a phase directly on `develop` or reuse the previous phase's branch. Base each dependent phase on the accepted work integrated into `develop`; integration and pushes retain their authorization requirements. This owner decision applies from 2026-10-27. Exception (owner decision, 2026-10-30): the launcher auto-update and release-channel work of §8 is implemented in one branch, `feat/auto-updater-and-wizard-facelift`, with separate commits per phase.
 - Use the commit types listed below and lowercase, hyphen-separated descriptions. Do not create extra branches without a concrete reason.
 - Branch creation is local unless explicitly authorized otherwise. Pushes, remote branch changes, and GitHub issue mutations require authorization for that scope.
 
@@ -96,9 +96,11 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 - Record resolved versions and managed-file ownership per installation. Share only reusable, verified caches; coordinate writes and cleanup across operations and processes.
 - Use Prism's cached-check strategy as the Play-time reference, approved by the owner on 2026-10-23. Keep full content verification for installation, repair, recovery and explicit audits. Play may reuse protected, manifest-bound verification receipts when expected hashes, sizes and file metadata remain unchanged; unknown or changed files require full hashes. Apply changed-file revalidation to assets as well, rather than Prism's size-only asset reuse. Keep permission, redirected-path, installation-completeness, catalog and authentication checks on every Play. Missing files or detected mismatches still block Play and require explicit Repair. Receipts are disposable and contain no credentials; absent, malformed or outdated receipts require fresh verification. Accept that metadata-preserving corruption can escape the cached check; this is not an anti-malware boundary.
 - Store vanilla clients at `versions/{version}/{version}-{client-hash}.jar`. Store Java at `runtime/java-{major}-{platform}/`, using suffixes such as `-build-2` only when different exact builds need separate directories. Persist and verify the authoritative runtime manifest and artifact hashes; readable names are not proof of identity. Reserve runtime builds under an interprocess writer lock before downloads, reuse matching reservations after interruption, and never adopt unowned directories or overwrite a different build. Existing installation manifests keep resolving their recorded legacy cache paths; do not remove referenced caches during layout changes.
-- Consume the public, read-only Panita API. The launcher does not access Supabase directly or need its database credentials.
+- Use `installed.json` disk schema 5 for modpack installations, approved by the owner on 2026-10-27. It adds the validated pack state (source identity, managed-file ownership with desired and baseline hashes, consumed defaults, skipped configuration and pending manual files) to the exact verified base/loader plan. Vanilla installations remain schema 4. Older builds reject schema 5 and must not operate on it; preserve unknown, corrupt or future data.
+- Keep verified public pack files and configuration archives in the shared pack-content cache `content/{algorithm}/{hash[0..2]}/{hash}-{size}`, approved by the owner on 2026-10-27. The algorithm is the strongest supplied hash (`sha512`, `sha1` for CurseForge and manual imports, `sha256` for configuration archives) and the key adds the exact size. Entries have no file extension and are published only after the exact size and every supplied hash verify. Copy cache entries into instances, hashing again, and never hard-link them; a cache name is a claim, never proof. Coordinate writers with interprocess locks per cache shard directory. Instances are independent of the cache, so it is disposable: an explicit player action may clear it. Name the folder and show its size before confirming. Hold the writer locks, skip or report entries used by an active operation, reject redirected paths, never follow links outside `content/`, and report partial failures honestly. Clearing never touches instances, worlds, other caches (`libraries/`, `assets/`, `versions/`, `runtime/`), accounts or settings, and later installs or repairs download the files again. No automatic garbage collection runs.
+- Consume the Panita API. The public catalog is read-only; Panita activation (§4.5) adds authenticated calls to the API's auth routes, including POST and DELETE. The launcher does not access Supabase directly or need its database credentials.
 - Use exact pinned versions. Vanilla uses the catalog Minecraft version; future Modrinth instances use the pinned pack as their authoritative source.
-- Fetch the catalog at startup. Show disabled entries dimmed, with a lock icon and Spanish status text. Check the specific instance through the API on every Play request; an explicit disabled result blocks installation/launch. Disabled or removed entries must not delete local installations or worlds. Installed vanilla updates are explicit, not automatic.
+- Fetch the catalog at startup. Show disabled entries dimmed, with a lock icon and Spanish status text. Check the specific instance through the API on every Play request; an explicit disabled result blocks installation/launch. Disabled or removed entries must not delete local installations or worlds. On 2026-10-30 the owner makes vanilla version transitions mandatory too: a fresh catalog pin mismatch replaces Play with Update, with explicit confirmation and the default world backup. Updates never install automatically. An unavailable current check keeps the existing warning-confirmed offline fallback.
 - If the catalog API is unreachable, show the last valid cached catalog and an on-load Spanish toast explaining that installed instances remain available. Before each fallback launch, require a warning confirmation because current instance status could not be checked. Permit only complete local vanilla installations; do not bypass a known disabled state, install missing files, or treat an explicit disabled/missing response as a network outage. Microsoft authentication requirements remain independent.
 - Keep the core version-agnostic. Resolve Java and game requirements from authoritative metadata; do not hard-code one Minecraft version, loader, or CPU architecture. Broader compatibility does not expand the MVP automatically.
 
@@ -124,13 +126,26 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
 ### 4.3 Security and data protection
 
 - Do not bundle application secrets, client secrets, database/admin keys, or updater signing private keys. Public OAuth client IDs are not secrets; signing private keys belong in CI secrets.
+- The Panita launcher key (`X-Api-Key`) is a declared public client identifier, approved by the owner on 2026-10-27. A distributed binary can always be searched for it, so nothing may depend on hiding it: accounts are protected by the member's session token and the confirmation from Discord. Inject it at build time from a repository variable, never as a secret, and never treat it as one. The keys of the bot and the mod are real secrets and never ship in the launcher.
 - Treat `accounts.json` as sensitive: anyone able to read it can extract refresh tokens. Never claim it is encrypted or protected against malware running as the same user.
 - Use private application-data paths and platform-appropriate permissions: restricted Windows ACLs and owner-only Unix permissions. Run as a normal user; do not elevate to access accounts.
 - Use schema versions, migrations, and atomic writes. Protect atomic-write temporaries from creation; they may contain refresh tokens and require the same restrictions and cleanup as the account file.
-- Never put credentials or complete account files in logs, frontend payloads, diagnostics, source control, or launcher-generated backups/exports. Redact sensitive headers, arguments, callbacks, and errors.
+- Never put credentials or complete account files in logs, frontend payloads, diagnostics, source control, or launcher-generated backups/exports. Redact sensitive headers, arguments, callbacks, and errors, including `Authorization`, `X-Api-Key` and the Panita session token.
 - Preserve existing valid data on failed writes. Do not silently replace unreadable or corrupt account data with an empty store.
 - Validate network inputs, download hashes, destinations, redirects, and archive paths. Prevent traversal and writes outside intended directories. Apply least-privilege Tauri capabilities and IPC boundaries.
 - Updates, repairs, and uninstall operations must protect worlds and user-edited files. Make destructive removal explicit; do not overwrite user data merely because it differs from a pack default.
+- On 2026-10-29 the owner approved an optional, unchecked-by-default instance
+  uninstall action that permanently erases the selected instance's entire folder,
+  including worlds, screenshots, settings, added mods and backups. Show its exact
+  UUID-resolved folder and require a separate acknowledgement before deletion.
+  Ordinary uninstall continues preserving player data. Exclude active games and
+  mutations, reject redirected paths, use bounded handle-relative traversal and
+  preserve other instances, accounts and shared caches. Keep a validated external
+  `instance-erasures.json` intent with directory identity while cleanup is pending;
+  block reuse of a partially erased instance and require explicit retry, never
+  automatic erasure at startup. Preserve corrupt/future metadata and intents and
+  report partial failures honestly. This exception applies only to the separately
+  confirmed full-instance erasure.
 - On 2026-10-26 the owner authorizes an optional Windows launcher-uninstall
   action that erases the entire current-user `%APPDATA%\PanitaClient` folder.
   Keep it unchecked by default and require a separate explicit confirmation.
@@ -143,6 +158,26 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
   open a partially erased profile or retry erasure automatically at startup.
   This explicitly supersedes data-preservation requirements only for this
   separately confirmed full-profile erasure; all other operations retain them.
+  Owner decision, 2026-10-31: on Windows the launcher's embedded browser data
+  lives in a `webview` folder inside the install directory (set through
+  `desktop/tauri.windows.conf.json`, resolved relative to the executable)
+  instead of a second folder under `%LOCALAPPDATA%` named after the application
+  identifier. It is disposable and holds no account or player data. Ordinary
+  uninstall removes it; updates keep it. The same confirmed erasure also
+  removes it and the legacy `%LOCALAPPDATA%\com.panitacraft.client` and
+  `%LOCALAPPDATA%\PanitaClient Core` folders, refusing redirected folders. At
+  startup the launcher removes each legacy folder only when it holds nothing
+  but the browser's own `EBWebView` profile, and leaves it alone otherwise.
+  The application identifier and the `%APPDATA%\PanitaClient` data path do not
+  change. Before erasing, the uninstaller also closes the saved Panitacraft
+  session on the API, best effort.
+- On 2026-10-30 the owner approves a narrow exception to the normal-user rule for
+  updating the Linux `.deb` launcher package: the signed, verified package is
+  installed through the operating system's `pkexec` prompt only. The launcher
+  never reads, stores or relays an administrator password, never falls back to
+  `sudo` password piping or a launcher-drawn password dialog, and never elevates
+  for accounts, instances or any other operation. If `pkexec` is unavailable or
+  denied, show the manual update-required screen of §8 and preserve all data.
 
 ### 4.4 Data on disk
 
@@ -152,15 +187,19 @@ Use the current user's application-data directory, with platform-specific paths 
 PanitaClient/
 ├─ accounts.json          # sensitive: metadata and Microsoft refresh tokens
 ├─ account-removals.json  # temporary nonsecret pending account-removal recovery
+├─ panita-session.json    # sensitive: Panitacraft session token and a nonsecret member snapshot; hidden on Windows
 ├─ settings.json          # indented disk schema 3; compact, explicit keys
+├─ update-state.json      # nonsecret launcher-update channel and pending requirement (§8)
 ├─ insts-cache.json
+├─ instance-erasures.json # temporary explicit full-instance erasure intents; never auto-retried
 ├─ libraries/             # shared, verified caches
 ├─ assets/
 ├─ versions/
 ├─ runtime/
+├─ content/               # disposable shared pack-file cache; player-clearable
 ├─ instances/{slug}/      # stable readable directory mapped to a catalog UUID
 │  ├─ instance.json       # schema 4: one UUID, catalog/status/source/settings
-│  ├─ installed.json      # schema 4: exact plan and explicit installed/uninstalled status
+│  ├─ installed.json      # schema 4 (vanilla) or 5 (modpack): exact plan and explicit installed/uninstalled status
 │  ├─ verification-cache.json # disposable manifest-bound Play verification receipts
 │  ├─ transaction.json    # pending operation only; legacy install-journal.json remains recoverable
 │  ├─ .installation.lock
@@ -170,7 +209,7 @@ PanitaClient/
 └─ logs/                  # redacted launcher logs
 ```
 
-Do not introduce a separate plaintext keychain-fallback `secrets.json`; the chosen persistence mechanism is `accounts.json`.
+Do not introduce a separate plaintext keychain-fallback `secrets.json`; the chosen persistence mechanisms are `accounts.json` and `panita-session.json`.
 
 ### JSON naming and formatting
 
@@ -193,6 +232,59 @@ Do not introduce a separate plaintext keychain-fallback `secrets.json`; the chos
 This rule was requested by the owner on 2026-10-24. Accounts and catalog caches now
 write `schema`; operation transactions write `type`, with `kind` retained only as
 a supported legacy spelling. Existing numeric format versions remain validated.
+
+### 4.5 Panita activation (2026-10-27)
+
+The owner approved Panita activation on 2026-10-27. Its API contract is
+`launcher-activation-plan.md` in the Panita API repository. It is separate from the
+§7 modpack plan, whose exclusion of Panita login and restricted instances scopes
+that plan only.
+
+- Activation is a community gate, independent of Minecraft authentication. It is
+  not DRM: a modified launcher can skip it, and the real locks are restricted
+  instances (the API) and the server whitelist. Public instances stay playable by
+  any activated launcher. Do not promise users more.
+- The member types their ign or Discord name; the launcher asks the API for a login
+  request, shows the serial (`XXXX-YYYY-ZZZZ`) with the Discord instructions, and
+  polls every 2 to 3 seconds until the member confirms it in Discord, the serial
+  expires (3 minutes) or the login is cancelled. The launcher never talks to
+  Discord and uses neither an embedded webview nor a deep link for this flow. Send
+  the computer name and operating system as informational device text, reduced to
+  a safe alphabet and not editable; never an IP address or a location.
+- States are no session, creating, pending, active and active offline. Show
+  activation first and then, if no Minecraft account is saved, onboarding to add a
+  Microsoft or offline account. A saved Minecraft account never skips activation.
+  Minecraft status and the nickname are only hints, never requirements.
+- Store `panita-session.json` through the same private store, atomic writes,
+  interprocess writer lock and schema validation as `accounts.json`, apart from
+  Minecraft accounts and their removal recovery. It holds the session token in
+  plaintext with restricted permissions and a nonsecret snapshot of the member (the
+  date of birth is never kept). Hide it on Windows after every write as a cosmetic
+  aid only. Never claim it is encrypted or protected against malware running as
+  the same user; the safety net is revocation with `/sessions` in the Discord bot.
+  Preserve a damaged or future file untouched, report it and block activation
+  instead of replacing it. If the write fails after confirmation, keep a
+  memory-only session, say so and offer a retry.
+- A 401 ends an activation only with `details.reason: invalid_token`. `invalid_key`
+  (for example after a key rotation), a 403, a proxy page, a timeout, a 5xx or no
+  network never delete the session. Signing out closes the session on the API as a
+  courtesy and always removes the local copy and the cached catalog; offline it
+  says the session stays open on the server until closed with `/sessions`.
+- An unverified session launches complete installed instances, restricted ones
+  included, with no time limit, keeping the catalog-outage warning confirmation of
+  §4.1. Installing, updating and repairing need a recently verified session. A
+  revocation takes effect when the launcher is next online. Check the session at
+  startup, before Play when it is unverified, on explicit retry and when the window
+  regains focus; do not run an unattended retry loop.
+- Send the key and the session to the catalog: restricted instances are returned
+  only to a request carrying both. Bind the cached catalog to the member's identity
+  and remove it on sign-out or rejection. A 404 for a restricted instance means it
+  is not visible to the member, never a network failure.
+- Ending or rejecting a session cancels launches that have not started and never
+  touches a running game, the hide-on-close supervision or an operation already in
+  flight.
+- Record activation failures in diagnostics as a fixed event with only the error
+  code, never the member name, serial, token or service response.
 
 ## 5. Architecture
 
@@ -218,7 +310,26 @@ panita-client/
 
 - Keep business logic in the UI-independent Rust core. Keep desktop integration thin and UI state separate from account secrets.
 - Closing the launcher window while games run hides it and keeps the owning process supervising those games. Opening the launcher again restores that process and its active-instance controls. Exit automatically after the last game and cancelled pending launch finish if the window remains hidden; keep an open or minimized window alive. Cancel other pending launches when hiding, and preserve the preparation-only close guard. This owner-approved behavior supersedes requiring the launcher window to remain open during gameplay (2026-10-18).
-- The owner requested crash notifications and a separate Minecraft log window on 2026-10-23. Unexpected nonzero game exit restores a hidden launcher and shows a Spanish dialog with its exit code, a bounded redacted crash excerpt, a paged execution-log viewer and an option to open that instance's existing `minecraft/crash-reports/` directory. Requested stops do not produce crash notifications. Missing reports are reported honestly. On 2026-10-24 the owner explicitly approved unlimited Minecraft log entry retention in memory only, superseding the 256-event console ring. Keep all accepted redacted entries for the current/most recent execution of each instance until replaced or the launcher exits; memory use can grow with output. Bound each IPC page and rendered page, and retain per-line size and redaction protections. The log viewer never accepts arbitrary paths or commands, reads account files, persists/exports console output, or exposes credentials. Structured launcher diagnostics remain separate and retain their 256-event limit.
+- The owner requested crash notifications and a separate Minecraft log window on 2026-10-23. Unexpected nonzero game exit restores a hidden launcher and shows a Spanish dialog with its exit code, a bounded redacted crash excerpt, a continuously scrolling execution-log viewer and an option to open that instance's existing `minecraft/crash-reports/` directory. Requested stops do not produce crash notifications. Missing reports are reported honestly. On 2026-10-24 the owner explicitly approved unlimited Minecraft log entry retention in memory only, superseding the 256-event console ring. Keep all accepted redacted entries for the current/most recent execution of each instance until replaced or the launcher exits; memory use can grow with output. Bound each IPC read and rendered window, and retain per-line size and redaction protections. The log viewer never accepts arbitrary paths or commands, reads account files, persists/exports console output, or exposes credentials. Structured launcher diagnostics remain separate and retain their 256-event limit.
+- Owner decision, 2026-10-31: on Windows the launcher shows a notification-area (tray)
+  icon with "Abrir Panita Client" and "Salir"; a left click reopens the window. Three
+  global, off-by-default settings live under `launcher` in `settings.json` (additive keys
+  of disk schema 3; older builds reject them): `close_to_tray` (closing the window hides
+  it and keeps the launcher alive, even with no game), `hide_on_game_start` (the window
+  hides once a game process has started, only while no launch or installation is being
+  prepared) and `reopen_on_game_exit` (the window returns when the last game exits).
+  A launcher hidden this way never exits on its own after the last game; without
+  `close_to_tray` the earlier rule still applies (hidden by close while games run, exit
+  after the last one). "Salir" exits while games run: they are separate processes and keep
+  running, but supervision, stop controls and the log viewer end. It never interrupts a
+  launch or installation in preparation: the window is restored with the usual notice. The
+  preparation-only close guard is unchanged. Without the icon, none of these settings
+  applies. Linux uses the same behavior through `libayatana-appindicator`, which the
+  `.deb` and the Arch package declare as a dependency. The library is loaded at run time
+  and a missing one only means no icon and no settings card: the launcher still starts.
+  Linux shows the menu on any click, because the platform reports no left-click event, and
+  GNOME needs its AppIndicator extension to display the icon. Linux behavior is
+  implemented but unvalidated until tested on Ubuntu x64 (§6). macOS is not covered.
 - Keep storage, networking, and platform integrations testable behind clear boundaries. Avoid abstractions or dependencies without a concrete need.
 - The owner approved Prism as a behavioral reference for live Minecraft logs, formatting and local viewer controls on 2026-10-25. Use scoped change notifications with short burst coalescing, sequential cursor catch-up, Log4j time/level/thread/logger formatting, full retained-history search with bounded scans, wrap/colors, and local clear/restore. Keep the approved unlimited memory-only history, redaction, per-line protections and bounded IPC/rendering. Clear must not delete retained history. Do not add persistence, copying, uploading or export. Implement independently; do not copy Prism source.
 - Keep phased implementation work in the implementation plan and decision documents. Annex A preserves the accepted account-storage decision within this file so these policies remain available without separate documents.
@@ -243,7 +354,7 @@ Updated: 2026-10-24 (temporary completed account-removal markers; authentication
 
 Panita Client persists account metadata and Microsoft refresh tokens in a local, schema-versioned `accounts.json` with restricted filesystem permissions. Refresh tokens are plaintext in this file. This explicitly supersedes the OS credential-store proposal and the subsequent reopened discussion.
 
-Microsoft, Xbox Live, XSTS, and Minecraft access tokens and their expiration metadata remain only in backend memory. Offline accounts have no tokens. Panita never requests or stores Microsoft passwords or MFA codes and never sends credentials to the catalog API or Supabase.
+Microsoft, Xbox Live, XSTS, and Minecraft access tokens and their expiration metadata remain only in backend memory. Offline accounts have no tokens. Panita never requests or stores Microsoft passwords or MFA codes and never sends Microsoft credentials or tokens to the Panita API or Supabase. The Panita session token of §4.5 is a separate credential issued by the Panita API and sent only to it.
 
 The selected design prioritizes automatic session persistence across Windows, Linux, and eventually macOS without requiring a keyring service, a master password, or a remote key service. No custom encryption or API-delivered encryption key is planned. Windows is the first implementation target; each additional platform requires permission and lifecycle validation before support is announced.
 
@@ -315,11 +426,11 @@ Complete Microsoft → Xbox Live → XSTS → Minecraft Services → Java profil
 
 The immutable catalog UUID remains the installation identity. Use a stable, validated slug-derived directory as specified in §4.1, with collision handling and recoverable migration from legacy UUID folders. Catalog renames must not move an installation or change its identity.
 
-Microsoft accounts require successful current Play validation even for installed vanilla. They cannot silently become offline accounts or launch using an expired previously validated profile. Explicit offline accounts may launch fully installed vanilla without connectivity; all required game files, Java, assets, libraries, and natives must be local. Vanilla catalog updates do not force immediate upgrades of installed instances.
+Microsoft accounts require successful current Play validation even for installed vanilla. They cannot silently become offline accounts or launch using an expired previously validated profile. Explicit offline accounts may launch fully installed vanilla without connectivity; all required game files, Java, assets, libraries, and natives must be local. A fresh vanilla catalog pin mismatch requires an explicit update before Play (owner decision, 2026-10-30); the warning-confirmed outage fallback remains available.
 
 Check the specific instance's API status on every Play request. A disabled result blocks the launch workflow; show disabled cards dimmed with a lock and Spanish status text. During catalog API outages, show the last valid cached list and an on-load Spanish toast indicating that installed instances remain available. Require explicit user confirmation of a warning before each fallback launch of a complete local vanilla installation. A previously known disabled state remains blocked. This fallback does not bypass current Microsoft/Minecraft authentication validation, and explicit disabled/missing responses are not outages. Preserve local data in every case.
 
-Future modpack policy remains outside the MVP: require a successful current catalog check and synchronize changed pins before launch. Define allowable CDN cache age and behavior for disabled/deleted records before shipping modpacks. Catalog failures never delete worlds or installations.
+The owner-approved 0.2 alpha scope adds public custom and pinned Modrinth modpacks, prioritizing NeoForge. Check the instance status on each Play request. Modpack updates are mandatory: when the current by-ID response names a newer pack version than the complete installed one, replace Play with an Update action naming the installed and available versions, and do not launch until the update is applied. The update needs current availability, a recently verified Panita session and the explicit version-transition confirmation, with the default world backup, of Annex B. During a catalog or network outage, when the current version cannot be fetched, a complete local modpack may launch after an explicit warning on each request that current status/version could not be verified and the pack may be outdated; an earlier observation of a newer version does not block it, because no update can be fetched offline. Never bypass known disabled/missing results, corrupt/incomplete installations, or current Microsoft authentication requirements. Updates/installations/repair still require current availability checks. Catalog failures never delete worlds or installations. This owner decision on 2026-10-27 restores mandatory pack-pin synchronization for modpacks, replacing the same day's optional-update decision, and supersedes the vanilla-only outage fallback restriction for complete modpacks.
 
 ### Accepted tradeoffs and boundaries
 
@@ -356,9 +467,9 @@ OAuth reference: https://learn.microsoft.com/en-us/entra/identity-platform/v2-oa
 ## Annex B. Maintenance and Desktop Decisions Preserved from the README
 
 These existing decisions and implementation boundaries were consolidated from the
-README on 2026-10-25. They supplement the rules above; they do not authorize Phase 7
-implementation or a release. Historical test counts and individual measurements
-are evidence, not product guarantees.
+README on 2026-10-25. They supplement the rules above; their historical approval
+boundaries do not revoke later explicit owner decisions. Historical test counts
+and individual measurements are evidence, not product guarantees.
 
 ### Updates, repair, and world backups
 
@@ -413,6 +524,25 @@ are evidence, not product guarantees.
   and error codes; download ticks must not flood the viewer. Diagnostics remain
   available when account initialization fails and provide no export or account,
   callback, launch-argument, or raw game-log access.
+- Owner decision, 2026-10-31: write one session log file per launcher process for support:
+  the running session writes `logs/latest.log`, and the next launch renames it to
+  `logs/session-{timestamp}-{id}.log` from its own header, with timestamp, level, the same
+  fixed events and error codes, a header with launcher version, platform and
+  hardware facts (operating system, processor, logical cores, memory, graphics
+  adapter, disk capacity), and redacted free-text notes (game exit codes, settings
+  changes with old and new values, account and Panita activation actions without
+  names or serials), plus network notes: one line per API call to Microsoft, Xbox,
+  Minecraft services and the Panita API with a fixed service and route label,
+  status or failure class and elapsed time (never URLs, bodies or headers; frequent
+  activation polls log only failures), and a line whenever connectivity changes
+  between reachable and unreachable. Redact home paths, URL
+  queries, bearer tokens, JWTs and Panita serials, bound each note to 1 KiB and
+  each file to 5 MiB, and never write credentials, callbacks, account data or raw
+  game output. Create the folder 0700 and files 0600 on Unix. Delete only
+  application-named session files older than 48 hours, at startup, never following
+  links. File failures never affect the launcher. The diagnostics tab may open the
+  fixed logs folder; there is still no upload or arbitrary-path access. This
+  supersedes "no export" only for these local files.
 - Optional support identifiers are random process/session and operation UUIDs.
   They correlate one process or action; they are neither content hashes nor online
   report lookup codes. Clear structured events on process exit.
@@ -439,8 +569,13 @@ are evidence, not product guarantees.
   safe defaults and idle checks. OS-owned security/runtime dialogs are separate.
 
 - On 2026-10-26 the owner requests keeping the beta checklist only in ignored
-  `docs/`, and confirms frameless styling applies to the installer/uninstaller
-  only. Keep the main launcher window decorations. A busy-launcher uninstall
+  `docs/`. On 2026-10-30 the owner extends frameless styling to the main launcher:
+  provide visible accessible window controls and a draggable header on loading,
+  activation, onboarding and library screens. Keep the existing close supervision
+  and preparation guards. The owner expands the rail on 2026-10-30 to at least
+  six visible instances, using additional vertical space before paging. Use a
+  700-pixel minimum window height and one selected account avatar; preserve legacy smaller saved sizes by
+  clamping their restored height. A busy-launcher uninstall
   warning must leave its confirmation screen available for retry, with a final
   idle check before deletion. Do not force-close the supervising launcher.
 
@@ -476,8 +611,134 @@ are evidence, not product guarantees.
   GTK/WebKit runtimes; the previously recorded development tools/packages are
   absent. This inventory does not establish a fresh clean-install baseline or
   qualify the Phase 7 candidate. No package removal or VM reset is authorized.
-- Phase 6 was accepted on 2026-10-25. Its closure is recorded at
-  https://github.com/panitacraft/panita-client/issues/8. Installer polish,
-  clean-machine and advertised-platform qualification, release preparation, and
-  distribution remain Phase 7 work. Do not treat earlier BOX results as fresh
-  Linux native acceptance of the latest Phase 6 changes.
+- Phases 0–7 are accepted and complete; Phase 6 closed on 2026-10-25 and
+  Phase 7 on 2026-10-26. The owner accepts Windows/Linux functional results and
+  teammate-reported clean Windows 11/Ubuntu VM tests. On 2026-10-27 the owner
+  confirms release validation. Preserve these as owner-reported results;
+  historical BOX observations and beta candidate hashes retain their own scope.
+  The current release tag is `v0.1.1-alpha` at this documentation checkpoint.
+  CachyOS installation/game launch remain unverified in the available records;
+  OS code signing remains deferred. The 0.2 plan now includes signed launcher
+  self-update; it is planned, not implemented or qualified at this checkpoint.
+  Later explicit release decisions supersede earlier preparation-only boundaries
+  for their authorized scope. Future pushes, tags, merges and publication still
+  require authorization.
+
+## 7. Post-MVP 0.2 Alpha Decisions (2026-10-27)
+
+- Deliver public custom and pinned Modrinth `.mrpack` installation first, the
+  reference-based interim UI facelift second, and mandatory launcher updates and
+  automatic release management third. NeoForge is the first qualified loader;
+  Fabric, Quilt and Forge adoption follows separately. Do not silently install
+  unsupported packs as vanilla. Restricted instances and Panita account login
+  are outside this plan. Microsoft/offline account policies remain unchanged.
+- For custom packs, use the API's resolved URLs and exact hashes/sizes without
+  provider API keys. Files with permitted URLs download automatically. Explicit
+  manual CurseForge files require verified player import; required missing files
+  block completion and Play. Importing a manual file and re-verifying the pending
+  list are local operations that need no Panita session or connectivity;
+  downloading the remaining files still needs the §4.5 gate. Install optional
+  client files automatically for now.
+- Modpack updates are mandatory (owner decision, 2026-10-27): a newer published
+  pack version replaces Play with Update until applied, except during a catalog or
+  network outage, with the warning described in Annex A. This supersedes the
+  earlier optional-update decision for packs. On 2026-10-30 mandatory pin synchronization also applies to vanilla, with explicit update confirmation and the existing outage fallback.
+- Player-added mods and configuration are permitted and remain player-owned.
+  Preserve them during update, repair and ordinary instance uninstall. Report
+  pack/user destination collisions rather than adopting or overwriting user files.
+  Additional mods are not a guarantee of compatibility. Preserve worlds and all
+  existing user-data protections; separately confirmed full-profile erasure and
+  disposable native cleanup retain their explicit scopes.
+- Apply defaults only to absent, never-consumed paths. Preserve that history so
+  deleted defaults are not recreated on update. Replace managed configuration
+  only when it still matches its recorded installed hash; otherwise keep the
+  entire edited file and report the skipped replacement. A change in one file
+  does not skip other unchanged configuration. Reset to pack requires an explicit
+  player action; do not silently merge arbitrary configuration formats.
+- Each newer published launcher release is mandatory. Automatically download and
+  verify updates; once an update is known and pending, block new game launches
+  until applied. Keep supervision, stop/log controls and safe recovery available.
+  Apply updates only after games and active mutations finish; do not force-close
+  games or interrupt transactions. If update checking is unavailable and no
+  mandatory update is already known, permit use with a warning. A failed check
+  never clears a known pending requirement. Verify updater signatures; private
+  signing keys stay in CI. This does not claim Windows publisher code signing.
+- Release channels follow §8 (owner decision, 2026-10-30): merges to `develop`
+  publish beta releases and merges to `master` publish stable releases. This
+  supersedes the earlier master-only publication rule and the `0.2.x-beta.x`
+  scheme. Keep version allocation serialized, retries idempotent, artifacts
+  immutable and update-feed publication last. Plan/workflow preparation does not
+  itself push, merge, create release tags or publish binaries.
+- Use the annotated launcher layout reference and supplied palette for the
+  interim facelift: dark `#141414`, `#1B1B1B`, `#515151`; light `#F9FFF8`,
+  `#E4FFDA`, `#BABABA`; primary `#54A636`, `#047500`; danger `#B94545` (hover `#D05A5A`, owner decision 2026-10-31). Theme switching is not
+  implied. Use the owner-updated `desktop/icons/source.svg` as the application
+  icon source (2026-10-30); preserve its artwork and colors. Use the
+  background-bearing logo in navigation headers (owner decision, 2026-10-30).
+  Keep Spanish player-facing text, keyboard access, contrast and accessible custom
+  main-window controls and dragging. Final design remains a later plan.
+- Qualify the new installed-product scope on Windows 11 x64 and Ubuntu x64;
+  retain the separate Ubuntu 24.04 build baseline. macOS is outside scope.
+  Earlier MVP results do not qualify new modpack or updater behavior.
+
+## 8. Release Channels, Updates and Versioning (2026-10-30)
+
+Owner decisions of 2026-10-30. They replace the master-only release rule and the
+`0.2.x-beta.x` scheme of §7; the mandatory-update behavior of §7 and Annex A
+still applies to both channels.
+
+### Channels
+
+- A merge to `develop` publishes a **beta** release (`X.Y.Z-beta.N`, GitHub
+  prerelease). A merge to `master` publishes a **stable** release (`X.Y.Z`).
+  Nothing else publishes: pull requests and unmerged branches only run CI.
+- The launcher follows the stable feed by default. Receiving beta versions is an
+  explicit player opt-in. The beta feed also carries every stable release, so a
+  beta player moves to the stable build when it supersedes the beta.
+- Both feeds are static, HTTPS, signed `latest.json` files served as assets of the
+  fixed releases `updater-stable` and `updater-beta`. Do not rely on GitHub's
+  generic latest-release selection, which skips prereleases, and do not call the
+  GitHub REST API from the launcher. The Panita API supplies no update data.
+- One workflow builds from the exact merged commit, tags that commit, uploads
+  installers, signatures and checksums, and advances the feed last. A feed update
+  must carry a strictly greater version than the current feed. Retries are
+  idempotent: an existing tag is never rebuilt or replaced. Published binaries are
+  immutable; a bad release is superseded by a forward fix.
+- Updater signatures are mandatory and distinct from Windows publisher code
+  signing. Only the verification public key ships; the private key and its password
+  stay in CI secrets. The launcher accepts only artifact URLs under this
+  repository's release assets and only a version newer than the running one.
+- Update delivery by package: Windows NSIS (Windows 10 and 11, one installer) and
+  Linux AppImage update in place; the Linux `.deb` updates through the system
+  package manager (see §4.3 exception). Packages the updater cannot own, such as
+  the Arch/CachyOS package, show the Spanish update-required screen with a link
+  to the release instead of attempting an install. Existing installations without
+  an updater need one manual install; do not claim automatic upgrade from them.
+- Apply updates only when no supervised game and no active mutation exists, as
+  required by §7. Keep a durable pending-update requirement that a failed check or
+  a restart never clears.
+
+### Versioning
+
+- The committed version is the single authority across `package.json`,
+  `ui/package.json`, both Cargo manifests and `Cargo.lock`, the Tauri
+  configurations and installer preview. CI verifies that they agree and that a
+  release tag equals the committed version; it never rewrites it and never creates
+  version commits. Commits keep the owner as sole author.
+- `develop` carries `X.Y.Z-beta.N`, where `X.Y.Z` is the next stable version.
+  `master` carries `X.Y.Z` with no suffix. The format stays compatible with
+  `scripts/release-version.mjs`.
+- Every change that ships in the application binary updates the version by
+  magnitude: a breaking change (`!`) raises the major number, `feat` the minor
+  number, and `fix`, `perf` or shipped `refactor` the patch number. `docs`,
+  `test`, `style`, `chore` and `ops` without binary effect do not change it.
+- Derive the minimum base from the last stable tag and the magnitude. If the
+  current base already satisfies it, increment `N`; otherwise start the new base
+  at `-beta.1`. Promotion to stable removes the suffix in a
+  `client, build: release X.Y.Z` commit on `develop` before the pull request to
+  `master`.
+- The agent states the intended resulting version when it starts a task, accepts
+  the owner's override, and applies it once with `scripts/bump-version.mjs` in a
+  separate `client, build: bump version to X.Y.Z[-beta.N]` commit immediately
+  before the final commit of the change. Parallel branches may collide on the
+  number; re-derive it at merge time.

@@ -67,6 +67,7 @@ struct State {
     flights: HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>,
 }
 
+#[derive(Clone)]
 pub(crate) struct PlaySelection {
     controller: Uuid,
     id: Uuid,
@@ -266,9 +267,39 @@ impl AccountController {
         Ok(launch)
     }
 
+    pub fn login_link(&self) -> Result<String, CoreError> {
+        self.state()?.pending.authorization_url()
+    }
+
+    pub fn pending_login_link(&self, operation: Uuid) -> Result<String, CoreError> {
+        let state = self.state()?;
+        if state
+            .interactive
+            .is_none_or(|ticket| ticket.operation.value() != operation)
+        {
+            return Err(CoreError::new(ErrorCode::OperationCancelled));
+        }
+        state.pending.authorization_url()
+    }
+
     pub fn cancel_login(&self) -> Result<(), CoreError> {
         invalidate(&mut *self.state()?);
         Ok(())
+    }
+
+    /// A delayed opener failure must not cancel a newer login or an exchange
+    /// whose callback already arrived while the opener was still running.
+    pub fn cancel_pending_login(&self, operation: Uuid) -> Result<bool, CoreError> {
+        let mut state = self.state()?;
+        if state
+            .interactive
+            .is_some_and(|ticket| ticket.operation.value() == operation)
+            && state.pending.is_active()
+        {
+            invalidate(&mut state);
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     pub fn expire_login(&self) -> Result<bool, CoreError> {
@@ -854,6 +885,9 @@ fn is_storage_error(code: ErrorCode) -> bool {
     matches!(
         code,
         ErrorCode::StorageUnavailable
+            | ErrorCode::StorageReadOnly
+            | ErrorCode::StorageBusy
+            | ErrorCode::InsufficientSpace
             | ErrorCode::StorageCommitUncertain
             | ErrorCode::PermissionDenied
             | ErrorCode::UnsafePermissions
@@ -1126,6 +1160,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn late_browser_failure_cannot_cancel_a_newer_login() {
+        let (client, task) = mock_client(Vec::new());
+        let (paths, controller, id) = saved_microsoft(client);
+        let first = controller
+            .begin_login(Some(id))
+            .unwrap_or_else(|_| panic!("login"));
+        assert!(controller.cancel_login().is_ok());
+        let second = controller
+            .begin_login(Some(id))
+            .unwrap_or_else(|_| panic!("login"));
+        assert!(matches!(
+            controller.cancel_pending_login(first.operation_id),
+            Ok(false)
+        ));
+        assert!(
+            controller
+                .view()
+                .unwrap_or_else(|_| panic!("view"))
+                .login_pending
+        );
+        assert!(matches!(
+            controller.cancel_pending_login(second.operation_id),
+            Ok(true)
+        ));
+        assert!(
+            !controller
+                .view()
+                .unwrap_or_else(|_| panic!("view"))
+                .login_pending
+        );
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn copy_links_only_follow_the_current_pending_operation() {
+        let (client, task) = mock_client(Vec::new());
+        let paths =
+            AppPaths::new(std::env::temp_dir().join(format!("panita-link-{}", Uuid::new_v4())))
+                .unwrap_or_else(|_| panic!("path"));
+        let repository =
+            AccountRepository::new(PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store")));
+        let controller =
+            AccountController::with_client(repository, ProcessSessionId::new(), client)
+                .unwrap_or_else(|error| panic!("controller: {:?}", error.code()));
+        let first = controller
+            .begin_login(None)
+            .unwrap_or_else(|_| panic!("login"));
+        assert_eq!(
+            controller
+                .pending_login_link(first.operation_id)
+                .ok()
+                .as_ref(),
+            Some(&first.browser_url)
+        );
+        assert!(controller.cancel_login().is_ok());
+        assert!(controller.login_link().is_err());
+        let second = controller
+            .begin_login(None)
+            .unwrap_or_else(|_| panic!("login"));
+        assert!(controller.pending_login_link(first.operation_id).is_err());
+        assert_eq!(
+            controller
+                .pending_login_link(second.operation_id)
+                .ok()
+                .as_ref(),
+            Some(&second.browser_url)
+        );
+        assert_eq!(
+            controller.login_link().ok().as_ref(),
+            Some(&second.browser_url)
+        );
+        assert!(controller.cancel_login().is_ok());
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
     async fn duplicate_callback_during_exchange_does_not_cancel_valid_login() {
         let (client, task, observed, resume) = gated_client(chain());
         let (paths, controller, id) = saved_microsoft(client);
@@ -1148,6 +1262,10 @@ mod tests {
         let login = tokio::spawn(async move { worker.callback(&first_callback).await });
         assert!(observed.await.is_ok());
         assert!(controller.callback(&callback).await.is_err());
+        assert!(matches!(
+            controller.cancel_pending_login(launch.operation_id),
+            Ok(false)
+        ));
         assert!(
             controller
                 .view()

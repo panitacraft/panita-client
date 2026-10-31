@@ -5,10 +5,26 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { archPackageVersion, releaseVersion } from './release-version.mjs';
-import { verifyBeta } from './verify-beta.mjs';
+import { checkUpdaterSignature, verifyBeta } from './verify-beta.mjs';
+
+/** A signature file shaped like the one the Tauri signer writes. */
+export function signatureFor(version) {
+  const key = Buffer.alloc(64, 7).toString('base64');
+  const trusted = ['trusted comment: timestamp:1', 'file:installer', `version:${version}`].join('\t');
+  const text = ['untrusted comment: signature from tauri secret key', key, trusted, key].join('\n');
+  return Buffer.from(text).toString('base64');
+}
+
+test('updater signatures must be minisign-shaped and name the released version', () => {
+  checkUpdaterSignature(signatureFor('0.2.0-beta.4'), '0.2.0-beta.4');
+  const unrelated = Buffer.from(['hello', 'world'].join('\n')).toString('base64');
+  for (const [text, version] of [[signatureFor('0.2.0-beta.3'), '0.2.0-beta.4'], ['', '0.2.0'], ['not base64!', '0.2.0'], [unrelated, '0.2.0']]) {
+    assert.throws(() => checkUpdaterSignature(text, version), /Invalid updater signature/);
+  }
+});
 
 test('release tags accept stable and prerelease versions and reject unsafe or invalid identities', () => {
-  for (const version of ['0.1.0', '0.1.0-alpha', '0.1.0-beta.1', '1.0.0-rc.2']) {
+  for (const version of ['0.1.0', '0.1.0-alpha', '0.1.0-beta.1', '0.2.0-beta.1', '1.0.0-rc.2']) {
     assert.equal(releaseVersion(`v${version}`), version);
   }
   for (const tag of [undefined, '0.1.0-alpha', 'v01.1.0', 'v1.0', 'v1.0.0-alpha.01', 'v1.0.0+build', 'v../../file', 'v1.0.0\n']) {
@@ -26,9 +42,9 @@ test('Arch package versions preserve stable versions and map prereleases without
 });
 
 for (const platform of ['windows', 'linux']) {
-  for (const release of [true, false]) {
-    for (const withArch of platform === 'linux' && release ? [false, true] : [false]) {
-      test(`${platform} ${release ? 'release' : 'beta'}${withArch ? ' with Arch package' : ''} verification rejects corruption and incorrect provenance`, async () => {
+  for (const [release, loaderValidation] of [[true, false], [false, false], [false, true]]) {
+    for (const withArch of platform === 'linux' && !loaderValidation ? [false, true] : [false]) {
+      test(`${platform} ${loaderValidation ? 'loader validation' : release ? 'release' : 'beta'}${withArch ? ' with Arch package' : ''} verification rejects corruption and incorrect provenance`, async () => {
         const directory = await mkdtemp(join(tmpdir(), 'panita-release-test-'));
         try {
           const version = release ? '0.1.0-alpha' : '0.1.1-beta.8';
@@ -39,20 +55,42 @@ for (const platform of ['windows', 'linux']) {
           if (withArch) formats.push(['.pkg.tar.zst', 'candidate-arch.json', 'archlinux']);
           const sums = [];
           for (const [extension, manifest, distribution = platform] of formats) {
-            const artifact = `panita-client_${version}_${distribution}_x64_unsigned${extension}`;
+            const artifact = `panita-client_${version}_${distribution}_x64_unsigned${loaderValidation ? '_loader-validation' : ''}${extension}`;
             const bytes = `test installer ${extension}`;
             const sha256 = createHash('sha256').update(bytes).digest('hex');
             await writeFile(join(directory, artifact), bytes);
+            if (!loaderValidation && distribution !== 'archlinux') await writeFile(join(directory, `${artifact}.sig`), signatureFor(version));
             await writeFile(join(directory, manifest), JSON.stringify({
-              schema: 1, type: release ? 'unsigned_release_candidate' : 'unsigned_beta_candidate', version, source_revision: revision,
+              schema: 1, type: loaderValidation ? 'unsigned_loader_validation_candidate' : release ? 'unsigned_release_candidate' : 'unsigned_beta_candidate', version, source_revision: revision,
               platform: `${platform}_x64`, artifact, sha256, signed: false, qualification: 'pending',
+              ...(loaderValidation ? { features: ['loader-validation'], distribution: 'internal_validation_only' } : {}),
               ...(distribution === 'archlinux' ? { package_version: `${archPackageVersion(version)}-1` } : {}),
             }));
             sums.push(`${sha256}  ${artifact}`);
           }
           await writeFile(join(directory, 'SHA256SUMS'), `${sums.join('\n')}\n`);
-          const identity = { directory, platform, version, revision, release, withArch };
+          const identity = { directory, platform, version, revision, release, withArch, loaderValidation };
           assert.equal((await verifyBeta(identity)).length, formats.length);
+          if (!loaderValidation) {
+            const signaturePath = join(directory, `panita-client_${version}_${platform}_x64_unsigned${formats[0][0]}.sig`);
+            const signature = await readFile(signaturePath, 'utf8');
+            await rm(signaturePath);
+            await assert.rejects(verifyBeta(identity), /Missing updater signature/);
+            await writeFile(signaturePath, signatureFor('9.9.9'));
+            await assert.rejects(verifyBeta(identity), /Invalid updater signature/);
+            await writeFile(signaturePath, signature);
+          }
+          const primaryPath = join(directory, 'candidate.json');
+          const primary = JSON.parse(await readFile(primaryPath, 'utf8'));
+          await writeFile(primaryPath, JSON.stringify({ ...primary, type: loaderValidation ? 'unsigned_beta_candidate' : 'unsigned_loader_validation_candidate', features: ['loader-validation'] }));
+          await assert.rejects(verifyBeta(identity), /provenance mismatch/);
+          await writeFile(primaryPath, JSON.stringify(primary));
+          if (loaderValidation) {
+            await assert.rejects(verifyBeta({ ...identity, release: true }), /cannot be a release/);
+            await writeFile(primaryPath, JSON.stringify({ ...primary, features: [] }));
+            await assert.rejects(verifyBeta(identity), /validation provenance/);
+            await writeFile(primaryPath, JSON.stringify(primary));
+          }
           await assert.rejects(verifyBeta({ ...identity, revision: 'b'.repeat(40) }), /provenance mismatch/);
           if (withArch) {
             await assert.rejects(verifyBeta({ ...identity, withArch: false }), /checksum list/);
@@ -68,7 +106,7 @@ for (const platform of ['windows', 'linux']) {
             await assert.rejects(verifyBeta(identity));
             return;
           }
-          await writeFile(join(directory, `panita-client_${version}_${platform}_x64_unsigned${formats[0][0]}`), 'corrupt');
+          await writeFile(join(directory, `panita-client_${version}_${platform}_x64_unsigned${loaderValidation ? '_loader-validation' : ''}${formats[0][0]}`), 'corrupt');
           await assert.rejects(verifyBeta(identity), /checksum mismatch/);
         } finally {
           await rm(directory, { recursive: true, force: true });

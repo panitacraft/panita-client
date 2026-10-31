@@ -28,11 +28,22 @@ The launcher handles the downloads and Java setup for you, with a friendly and i
 
 ## Before you play
 
-Panita Client is an **unsigned beta**. Packaged application tests are
-owner-reported as passed on Windows 11 x64 and Ubuntu 26.04.1 x64. The owner
+Panita Client is an **unsigned prerelease**. The agreed MVP phases are complete,
+and the owner confirms release validation on 2026-10-27. Packaged application
+tests are owner-reported as passed on Windows 11 x64 and Ubuntu 26.04.1 x64. The owner
 also confirms teammate testing passed on clean Windows 11 and Ubuntu VMs.
 Other Windows/Linux versions are unqualified; macOS, ARM, Flatpak and modpacks
 are future scope.
+
+The next planned milestone is **0.2 Alpha (MLP)**: public custom and pinned
+Modrinth modpacks with NeoForge first, an interim interface facelift, and
+mandatory signed launcher updates with releases from merged PRs to `master`.
+Each implementation phase uses its own branch from `develop`. These features
+are planned and are not included in the current MVP release. See
+[AGENTS.md](AGENTS.md#7-post-mvp-02-alpha-decisions-2026-10-27) for the accepted policies.
+Tracking runs from [Phase 8 (#13)](https://github.com/panitacraft/panita-client/issues/13)
+through [Phase 16 (#21)](https://github.com/panitacraft/panita-client/issues/21),
+with dependencies and acceptance criteria in each phase issue.
 
 Microsoft accounts need an internet connection each time you start a game.
 Offline accounts can play an already installed instance without Microsoft
@@ -85,13 +96,15 @@ the package contents, AppImage extraction and runtime linkage, and copies both c
 `target/beta/`. It does not install anything on the testing VM. Compilation and
 package inspection do not establish installed-product qualification.
 
-The [manual beta workflow](.github/workflows/prepare-beta.yml) checks and packages
-committed `develop` into temporary Actions artifacts for review. It requires an
-explicit dispatch with the matching beta version, uses read-only repository
-permissions, and does not create releases or tags. Dispatch and publication need
-owner authorization. Each newly built artifact requires its own qualification;
-prior test reports do not certify a different file. Release preparation documents
-remain local under the ignored `docs/` directory.
+The [release workflow](.github/workflows/release.yml) publishes from the committed
+version: a push to `develop` releases a beta (`X.Y.Z-beta.N`) and a push to `master`
+releases a stable version (`X.Y.Z`). It builds the exact pushed commit on Windows and
+Linux, signs the updater packages with the repository's updater key, tags that commit
+and publishes the release, and advances the signed update feeds last (the stable
+release moves both feeds). An already published version is never rebuilt, and a feed
+only moves forward. Each newly built artifact requires its own qualification; prior
+test reports do not certify a different file. Release preparation documents remain
+local under the ignored `docs/` directory.
 
 The [release workflow](.github/workflows/release.yml) runs when a `v*` tag is pushed
 to GitHub. Use a semantic version such as `v0.1.0-alpha`, `v0.1.0-beta.1` or

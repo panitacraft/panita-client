@@ -10,13 +10,39 @@ Do not give an untrusted same-principal actor write access to a private tree.
 
 ## Guarantees
 
-- Files are created exclusively and privately in the creation syscall; directories
-  are private from birth. Unix modes are exactly `0600` / `0700`, including rejection
-  of special bits. The library never changes process umask. A narrower creation
-  mode may be normalized through the newly held descriptor.
-- Unix ownership is the effective UID. Windows ownership is the process TokenUser,
-  with a protected DACL containing exactly one noninheritable full-access user ACE.
-  No extra SYSTEM or administrator grant is inserted.
+- Private files are created exclusively with owner-only permissions in the
+  creation syscall. Linux/Windows ordinary data capabilities use normal OS access
+  and creation permissions. Linux ordinary files/directories request `0666`/`0777`
+  filtered by the process umask and any filesystem ACLs; existing modes are not
+  rewritten. Private Unix files retain exact `0600`; new private-mode directories
+  start at `0700`. Existing Linux directories have no exact-mode requirement.
+  macOS retains its private directory/ACL policy. The library never changes umask.
+  Narrower private-file creation modes may be normalized through the held FD.
+- Private Unix files require the effective UID. Windows private-file ownership is TokenUser.
+  Windows private files have a protected DACL containing exactly one
+  noninheritable full-access user ACE; no extra SYSTEM or administrator grant is
+  inserted into private files. Existing Windows directories do not require an
+  exact owner match. Ordinary data capabilities (`open_data` / `ensure_data`)
+  accept accessible files without private owner/ACL requirements and create
+  files with ordinary inherited permissions. Directories retain ordinary
+  inherited/custom ACLs.
+  Opening a directory retires only the exact legacy Panita protected directory
+  ACL, restoring inheritance. See `PANITA-PATCH.md` for migration guarantees.
+- Callers handling credentials must validate the containing namespace with
+  `verify_private_namespace`. On Windows, its owner must be the current user,
+  SYSTEM or Administrators; applicable allow ACEs must not grant mutation
+  rights to other principals. The check conservatively rejects such grants even
+  if separate deny ACEs could restrict them. Read-only grants are allowed. Unknown effective
+  ACE formats and null DACLs fail closed. This check never rewrites custom ACLs.
+  Panita applies it before account/session reads, writes and removal. Private
+  files and their atomic temporaries still require strict owner-only protection.
+  Ordinary data access retains path, object-kind, hard-link and identity checks;
+  callers retain responsibility for hashes, schemas and writer coordination.
+  Linux credential namespaces require effective-UID/root ownership and no
+  group/other write bits. POSIX ACL write permissions for named users/groups are
+  also limited by the group-class mask represented by those bits. Read-only
+  public directories are allowed; credential files and temporaries remain `0600`.
+  macOS data aliases retain the existing private owner/mode/ACL policy.
 - Relative paths reject roots, prefixes, traversal, interior dots, NULs, and colons
   (including Windows alternate streams). Unix also rejects backslashes. Native
   names are passed without lossy Unicode conversion; filesystem encoding rules
@@ -28,11 +54,12 @@ Do not give an untrusted same-principal actor write access to a private tree.
 - Children are resolved through retained directory descriptors/handles. Redirects
   are rejected, including Linux magic links and Windows reparse points. Linux uses
   `openat2` where available and a secure descriptor walk otherwise. Acquisition
-  ancestors must exist; they are never hardened. Unix directory creation requires
-  a trusted parent owner (effective UID or root) and no group/other namespace write,
-  unless sticky protection applies. macOS additionally requires a current-user
-  parent with empty extended ACL and enforced ownership.
-- Actual objects are checked for kind, ownership, permissions/ACL, identity, and
+  ancestors must exist; they are never hardened. Linux ordinary directory creation
+  follows kernel access checks and binds the observed inode to its opened handle.
+  Credential writers must separately validate their namespace. macOS directory
+  creation retains its trusted-parent, mode, empty-ACL and ownership checks.
+- Actual objects are checked for kind, ownership, identity, and private-file ACLs
+  (macOS also checks directory permissions), as well as
   regular-file hard-link count. Public regular files must have exactly one link.
   Internal anonymous Linux staging is validated separately with zero links.
   Mutable metadata is checked again before/after I/O and at publication boundaries.
@@ -46,7 +73,8 @@ Do not give an untrusted same-principal actor write access to a private tree.
 
 ## Publication and durability
 
-Atomic staging is exclusive and private in the same validated directory. Named
+Atomic staging is exclusive in the same validated directory. Private-file
+staging is owner-only; ordinary data staging follows its platform access policy. Named
 temps have a 128-bit `getrandom` nonce. Publication retains staging identity,
 reopens the destination through the parent capability, and checks identity and
 security again. Readers observe whole old or new objects. Unix rename uses a

@@ -167,6 +167,31 @@ fn installation(controller: &PlayController, instance: Uuid, request: Uuid) -> C
 }
 
 #[test]
+fn a_launcher_update_is_reserved_only_while_idle_and_blocks_new_work() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    assert!(controller.reserve(instance, request).is_ok());
+    controller.update(instance, request, |entry| entry.phase = Phase::Running);
+    // A running game or an active operation defers the update and is not disturbed.
+    assert!(!controller.begin_update_apply());
+    assert_eq!(
+        controller.snapshot().unwrap_or_default()["instances"][0]["phase"],
+        "running"
+    );
+    controller.fail(instance, request, ErrorCode::OperationCancelled);
+    assert!(controller.begin_update_apply());
+    assert_eq!(
+        controller.reserve(Uuid::new_v4(), Uuid::new_v4()).err(),
+        Some(ErrorCode::OperationCancelled)
+    );
+    // A second reservation cannot overlap, and a failed apply releases the launcher.
+    assert!(!controller.begin_update_apply());
+    controller.cancel_update_apply();
+    assert!(controller.reserve(Uuid::new_v4(), Uuid::new_v4()).is_ok());
+}
+
+#[test]
 fn installation_blocks_duplicate_play_and_close_until_worker_finishes() {
     let controller = PlayController::new(ProcessSessionId::new());
     let instance = Uuid::new_v4();
@@ -224,6 +249,12 @@ fn installation_progress_is_bounded_scoped_and_terminal_results_are_authoritativ
             ..progress
         },
     );
+    let partial = controller.snapshot().unwrap_or_else(|_| panic!("snapshot"));
+    assert_eq!(
+        partial["instances"][0]["artifactProgress"],
+        json!({"bytes": 5, "total": 10})
+    );
+    assert_eq!(partial["instances"][0]["receivedFiles"], json!(0));
     controller.installation_progress(instance, request, progress);
     controller.installation_progress(
         instance,
@@ -237,6 +268,10 @@ fn installation_progress_is_bounded_scoped_and_terminal_results_are_authoritativ
     assert_eq!(snapshot["instances"][0]["receivedFiles"], json!(1));
     assert_eq!(snapshot["instances"][0]["reusedFiles"], json!(1));
     assert_eq!(snapshot["instances"][0]["operation"], json!("install"));
+    assert_eq!(
+        snapshot["instances"][0]["artifactProgress"],
+        json!({"bytes": 10, "total": 10})
+    );
     // Cancellation after publication cannot undo a completed manifest.
     assert!(controller.cancel(instance, request).is_ok());
     controller.update(instance, request, |entry| entry.phase = Phase::Installed);
@@ -305,6 +340,86 @@ fn hiding_cancels_pending_work_and_waits_for_its_completion() {
     assert!(!controller.finish_background());
     controller.fail(pending, request, ErrorCode::OperationCancelled);
     assert!(controller.finish_background());
+}
+
+fn tray_mode(close: bool, hide: bool, reopen: bool) -> crate::tray::TrayMode {
+    crate::tray::TrayMode {
+        close_to_tray: close,
+        hide_on_game_start: hide,
+        reopen_on_game_exit: reopen,
+    }
+}
+
+#[test]
+fn closing_to_the_tray_keeps_an_idle_launcher_alive_until_it_is_restored() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    assert!(controller.close_window_with(|| true, tray_mode(true, false, false)));
+    // Nothing is running, yet the launcher must not exit on its own.
+    assert!(!controller.finish_background());
+    assert!(!controller.take_reopen());
+    assert!(controller.restore());
+    assert!(controller.reserve(Uuid::new_v4(), Uuid::new_v4()).is_ok());
+    // Without the option, an idle close still exits.
+    let plain = PlayController::new(ProcessSessionId::new());
+    assert!(!plain.close_window_with(|| panic!("no hide"), tray_mode(false, true, true)));
+    // A failed hide never leaves the launcher hidden: it falls back to closing.
+    let failed = PlayController::new(ProcessSessionId::new());
+    assert!(!failed.close_window_with(|| false, tray_mode(true, false, false)));
+}
+
+#[test]
+fn tray_hidden_launcher_survives_the_last_game_and_reopens_only_when_asked() {
+    for reopen in [false, true] {
+        let controller = PlayController::new(ProcessSessionId::new());
+        let instance = Uuid::new_v4();
+        let request = Uuid::new_v4();
+        assert!(controller.reserve(instance, request).is_ok());
+        controller.update(instance, request, |entry| entry.phase = Phase::Running);
+        assert!(controller.close_window_with(|| true, tray_mode(true, false, reopen)));
+        assert!(!controller.take_reopen());
+        controller.update(instance, request, |entry| entry.phase = Phase::Exited);
+        assert!(!controller.finish_background());
+        assert_eq!(controller.take_reopen(), reopen);
+        // The reopen request is consumed once.
+        assert!(!controller.take_reopen());
+    }
+}
+
+#[test]
+fn hiding_after_game_start_waits_for_a_running_game_and_skips_preparation() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let game = Uuid::new_v4();
+    let other = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    // No running game yet.
+    controller.hide_for_game(|| panic!("nothing runs"), tray_mode(false, true, true));
+    assert!(controller.reserve(game, request).is_ok());
+    controller.update(game, request, |entry| entry.phase = Phase::Running);
+    // Another launch still preparing keeps the window visible.
+    assert!(controller.reserve(other, request).is_ok());
+    controller.hide_for_game(|| panic!("preparation guard"), tray_mode(false, true, true));
+    controller.fail(other, request, ErrorCode::OperationCancelled);
+    controller.hide_for_game(|| true, tray_mode(false, true, true));
+    controller.update(game, request, |entry| entry.phase = Phase::Exited);
+    assert!(!controller.finish_background());
+    assert!(controller.take_reopen());
+}
+
+#[test]
+fn quitting_from_the_tray_leaves_games_running_but_never_interrupts_preparation() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let game = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    assert!(controller.reserve(game, request).is_ok());
+    controller.update(game, request, |entry| entry.phase = Phase::Running);
+    assert!(controller.begin_tray_exit());
+    // The admitted exit passes the exit guard even though a game is running.
+    assert!(controller.allow_close());
+
+    let busy = PlayController::new(ProcessSessionId::new());
+    assert!(busy.reserve(Uuid::new_v4(), request).is_ok());
+    assert!(!busy.begin_tray_exit());
+    assert!(!busy.allow_close());
 }
 
 #[test]
@@ -464,11 +579,19 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
             "exitSuccess",
             "operation",
             "backupRequested",
+            "eraseRequested",
             "backupOperation",
+            "artifactProgress",
             "receivedFiles",
             "reusedFiles",
             "retainedFiles",
             "nativeCleanup",
+            "packProgress",
+            "packAwaiting",
+            "packSkipped",
+            "packConflicts",
+            "packBackedUp",
+            "packReleased",
         ];
         expected.sort_unstable();
         assert_eq!(keys, expected);

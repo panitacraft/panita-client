@@ -10,6 +10,146 @@ struct Fixture {
 }
 
 #[test]
+fn interrupted_loader_pointer_publication_recovers_only_verified_content()
+-> Result<(), Box<dyn std::error::Error>> {
+    for corrupt in [false, true] {
+        let mut fixture = Fixture::new();
+        let loader = crate::neoforge::generation::tests::published_for(
+            &fixture.paths,
+            &fixture.installed.plan.version.id,
+            &fixture.installed.plan.version.java,
+        )?;
+        fixture.installed.plan.schema_version = 2;
+        fixture.installed.plan.loader = Some(loader.clone().into());
+        write_json(&fixture.root, "installed.json", &fixture.installed)?;
+        write_json(
+            &fixture.root,
+            "transaction.json",
+            &serde_json::json!({"schema_version":1,"operation":fixture.installed.operation,"active":true}),
+        )?;
+        let registry = InstanceRegistry::new(fixture.paths.clone());
+        let mut record = registry.get(fixture.id)?.ok_or("record")?;
+        record.state = InstallationState::Installing;
+        registry.save_installation(&record)?;
+        let (directory, leaf) = ensure_parent(&fixture.root, "minecraft/saves/World/level.dat")?;
+        directory.write_atomic_durable(leaf, b"world sentinel")?;
+        if corrupt {
+            std::fs::write(
+                fixture
+                    .paths
+                    .root()
+                    .join(loader.directory())
+                    .join(&loader.files[0].path),
+                b"bad loader input",
+            )?;
+        }
+        let lease = crate::minecraft::process::LaunchLease::acquire(&fixture.paths, fixture.id)?;
+        let result = lease.recover_installation();
+        if corrupt {
+            assert!(result.is_err());
+            assert_eq!(
+                read_json::<serde_json::Value>(&fixture.root, "transaction.json")?
+                    .ok_or("journal")?["active"],
+                true
+            );
+            assert_eq!(
+                registry.get(fixture.id)?.ok_or("record")?.state,
+                InstallationState::Installing
+            );
+        } else {
+            result?;
+            assert!(read_json::<serde_json::Value>(&fixture.root, "transaction.json")?.is_none());
+            assert_eq!(
+                registry.get(fixture.id)?.ok_or("record")?.state,
+                InstallationState::Installed
+            );
+            lease.verify_installation()?;
+        }
+        assert_eq!(
+            std::fs::read(fixture.root.join("minecraft/saves/World/level.dat"))?,
+            b"world sentinel"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn loader_receipts_bind_sha256_and_never_reuse_sha1_only_verification()
+-> Result<(), Box<dyn std::error::Error>> {
+    use sha2::{Digest, Sha256};
+    let fixture = Fixture::new();
+    let file = &fixture.installed.plan.artifacts[1];
+    let (directory, leaf) = ensure_parent(fixture.paths.root(), &file.destination)?;
+    let mut cache = VerificationCache::load(&fixture.root, &fixture.installed)?;
+    assert!(cache.verify(&directory, &leaf, "candidate", &file.artifact, false)?);
+    let wrong = "0".repeat(64);
+    assert!(!cache.verify_sha256(&directory, &leaf, "candidate", &file.artifact, &wrong)?);
+    let expected = format!("{:x}", Sha256::digest(std::fs::read(fixture.client())?));
+    assert!(cache.verify_sha256(&directory, &leaf, "candidate", &file.artifact, &expected)?);
+    assert!(cache.verify_sha256(&directory, &leaf, "candidate", &file.artifact, &expected)?);
+    assert!(!cache.verify_sha256(&directory, &leaf, "candidate", &file.artifact, &wrong)?);
+    Ok(())
+}
+
+#[test]
+fn recorded_loader_state_survives_restart_and_receipts_never_hide_changed_or_missing_content()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = Fixture::new();
+    let loader = crate::neoforge::generation::tests::published_for(
+        &fixture.paths,
+        &fixture.installed.plan.version.id,
+        &fixture.installed.plan.version.java,
+    )?;
+    fixture.installed.plan.schema_version = 2;
+    fixture.installed.plan.loader = Some(loader.clone().into());
+    write_json(&fixture.root, "installed.json", &fixture.installed)?;
+    let loaded = verify_installed(&fixture.paths, fixture.id)?;
+    assert_eq!(
+        loaded.plan.loader.as_ref().map(|loader| loader.version()),
+        Some("21.1.264")
+    );
+    let first = fixture.audit();
+    assert!(first.hashed > loader.files.len());
+    assert_eq!(fixture.audit().hashed, 0);
+    let original = fixture
+        .paths
+        .root()
+        .join(loader.directory())
+        .join(&loader.files[0].path);
+    let mut content = std::fs::read(&original)?;
+    content[0] ^= 1;
+    std::fs::write(&original, &content)?;
+    assert!(
+        verify_play_under_lock(
+            &fixture.paths,
+            fixture.id,
+            &fixture.root,
+            &Cancellation::default()
+        )
+        .is_err()
+    );
+    assert!(verify_installed(&fixture.paths, fixture.id).is_err());
+    std::fs::remove_file(
+        fixture
+            .paths
+            .root()
+            .join(loader.directory())
+            .join("complete.json"),
+    )?;
+    assert_eq!(
+        verify_installed(&fixture.paths, fixture.id)
+            .err()
+            .map(|error| error.code()),
+        Some(ErrorCode::ArtifactMismatch)
+    );
+    let before = std::fs::read(fixture.root.join("installed.json"))?;
+    fixture.installed.plan.schema_version = 1;
+    assert!(fixture.installed.plan.validate().is_err());
+    assert_eq!(std::fs::read(fixture.root.join("installed.json"))?, before);
+    Ok(())
+}
+
+#[test]
 fn compact_installed_manifest_migrates_legacy_and_separates_format_from_status() {
     let fixture = Fixture::new();
     let mut value = serde_json::to_value(&fixture.installed).unwrap_or_else(|_| panic!("manifest"));

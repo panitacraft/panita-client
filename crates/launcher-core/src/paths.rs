@@ -26,6 +26,10 @@ impl AppPaths {
         self.root.join("accounts.json")
     }
 
+    pub fn panita_session(&self) -> PathBuf {
+        self.root.join("panita-session.json")
+    }
+
     pub fn settings(&self) -> PathBuf {
         self.root.join("settings.json")
     }

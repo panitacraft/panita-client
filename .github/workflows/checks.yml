@@ -12,6 +12,9 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
+    env:
+      # A public client identifier, so a repository variable and not a secret.
+      PANITA_LAUNCHER_API_KEY: ${{ vars.PANITA_LAUNCHER_API_KEY }}
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Install Linux system dependencies
@@ -31,6 +34,10 @@ jobs:
           components: rustfmt, clippy
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+      - name: Check version files agree
+        run: node scripts/check-version.mjs
+      - name: Test release and version scripts
+        run: node --test scripts/*.test.mjs
       - name: Check frontend
         run: pnpm build:ui
       - name: Test frontend state
@@ -39,8 +46,22 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Check Rust
         run: cargo check --workspace --locked
+      - name: Prepare private Windows test directory
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $testTemp = Join-Path $env:RUNNER_TEMP 'panita-tests'
+          New-Item -ItemType Directory -Path $testTemp -Force | Out-Null
+          $testSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          & icacls.exe $testTemp '/inheritance:r' '/grant:r' "*${testSid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to prepare the private test directory.' }
+          "TEMP=$testTemp" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TMP=$testTemp" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Test Rust
         run: cargo test --workspace --locked
+      - name: Test patched Windows filesystem dependency
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path vendor/private-fs/Cargo.toml --lib --locked
       - name: Test patched Linux filesystem dependency
         if: runner.os == 'Linux'
         run: |

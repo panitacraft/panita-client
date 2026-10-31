@@ -20,10 +20,13 @@ pub mod play;
 pub mod process;
 pub mod runtime;
 pub mod support;
-mod transaction;
+pub(crate) mod transaction;
 pub mod update;
+#[cfg(feature = "loader-validation")]
+pub mod validation;
 mod verification_cache;
-mod world_backup;
+pub(crate) mod world_backup;
+pub(crate) use world_backup::capability as directory_capability;
 
 pub const VERSION_MANIFEST: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
@@ -35,8 +38,37 @@ pub(crate) fn invalid() -> CoreError {
 
 /// Portable relative paths also reject Windows aliases on Unix hosts.
 pub fn safe_path(path: &str) -> Result<(), CoreError> {
+    checked_path(path, false)
+}
+
+/// Like `safe_path`, for names a pack author chooses. Minecraft resource packs
+/// legitimately carry non-ASCII names, such as the `§` color codes, so any
+/// printable Unicode is accepted. Control and invisible formatting characters are
+/// not: they can disguise a name. Every other rule is unchanged.
+pub fn safe_unicode_path(path: &str) -> Result<(), CoreError> {
+    checked_path(path, true)
+}
+
+/// Characters that render as nothing or reorder text, so two different names
+/// could look identical to the player.
+fn invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{061C}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFC}'
+    )
+}
+
+fn checked_path(path: &str, unicode: bool) -> Result<(), CoreError> {
     if path.is_empty()
-        || !path.is_ascii()
+        || (!unicode && !path.is_ascii())
+        || (unicode && path.chars().any(invisible))
         || path.len() > 2048
         || path.contains(['\\', ':'])
         || path.chars().any(|c| c.is_control())

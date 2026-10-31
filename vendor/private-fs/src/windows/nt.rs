@@ -22,6 +22,80 @@ pub(super) struct Identity {
     id: [u8; 16],
 }
 
+/// Resolve only the DOS drive alias before entering the filesystem. Applying
+/// OBJ_DONT_REPARSE to \\??\\C:\\ can reject the normal Object Manager drive link.
+/// Never relax that flag for filesystem paths or retry a rejected open without it.
+pub(super) fn open_drive_root(drive: u8) -> Result<OwnedHandle> {
+    if !drive.is_ascii_alphabetic() {
+        return Err(Error::InvalidRelativePath);
+    }
+    let name = [u16::from(drive), u16::from(b':'), 0];
+    let mut target = vec![0u16; 32768];
+    // SAFETY: name is terminated and target covers the stated UTF-16 capacity.
+    let length =
+        unsafe { QueryDosDeviceW(name.as_ptr(), target.as_mut_ptr(), target.len() as u32) };
+    if length == 0 {
+        return Err(io::Error::last_os_error().into());
+    }
+    let target = target.get(..length as usize).ok_or(Error::PathRedirect)?;
+    // The first terminated entry is the current mapping; subsequent entries are
+    // historical mappings, not fallback destinations.
+    let end = target
+        .iter()
+        .position(|unit| *unit == 0)
+        .ok_or(Error::PathRedirect)?;
+    let target = String::from_utf16(&target[..end]).map_err(|_| Error::PathRedirect)?;
+    let anchor = device_root(&target)?;
+    open(None, OsStr::new(&anchor), true, FILE_OPEN as u32, None)
+}
+
+fn device_root(target: &str) -> Result<String> {
+    let device = target
+        .strip_prefix(r"\Device\")
+        .ok_or(Error::PathRedirect)?;
+    // Accept one device object only. Reject SUBST, network mappings, chained DOS
+    // aliases and directory suffixes so no filesystem ancestors are skipped.
+    if device.is_empty()
+        || matches!(device, "." | "..")
+        || device.chars().any(|c| matches!(c, '\\' | '/' | ':' | '\0'))
+    {
+        return Err(Error::PathRedirect);
+    }
+    Ok(format!("{target}\\"))
+}
+
+#[cfg(test)]
+mod drive_tests {
+    use super::*;
+
+    #[test]
+    fn device_anchor_excludes_aliases_and_filesystem_suffixes() {
+        assert_eq!(
+            device_root(r"\Device\HarddiskVolume3").unwrap(),
+            r"\Device\HarddiskVolume3\"
+        );
+        for target in [
+            "",
+            r"\??\C:\folder",
+            r"\??\C:",
+            r"\Device\",
+            r"\Device\HarddiskVolume3\folder",
+            r"\Device\HarddiskVolume3\",
+            r"\Device\Mup\server\share",
+            r"\Device\..",
+            r"\Device\.",
+            r"\Device\disk/path",
+            r"\Device\disk:stream",
+            "\\Device\\disk\0tail",
+        ] {
+            assert!(
+                matches!(device_root(target), Err(Error::PathRedirect)),
+                "{target:?}"
+            );
+        }
+    }
+}
+
 pub(super) fn open(
     parent: Option<&OwnedHandle>,
     name: &OsStr,
@@ -30,6 +104,19 @@ pub(super) fn open(
     user: Option<&Sid>,
 ) -> Result<OwnedHandle> {
     open_access(parent, name, directory, disposition, user, None)
+}
+pub(super) fn open_data_file(
+    parent: &OwnedHandle,
+    name: &OsStr,
+    disposition: u32,
+) -> Result<OwnedHandle> {
+    let access = (FILE_READ_ATTRIBUTES | FILE_READ_DATA | SYNCHRONIZE) as u32
+        | if disposition == FILE_OPEN as u32 {
+            0
+        } else {
+            FILE_WRITE_DATA as u32 | 0x0001_0000 // DELETE
+        };
+    open_access(Some(parent), name, false, disposition, None, Some(access))
 }
 fn open_access(
     parent: Option<&OwnedHandle>,
@@ -52,7 +139,17 @@ fn open_access(
         MaximumLength: bytes,
         Buffer: name.as_mut_ptr(),
     };
-    let mut security = user.map(Descriptor::new).transpose()?;
+    // Pin the owner even when the token defaults to Administrators. Directories
+    // inherit their DACL normally; only private files get a protected DACL.
+    let mut security = user
+        .map(|user| {
+            if directory {
+                Descriptor::inheriting_directory(user)
+            } else {
+                Descriptor::new(user)
+            }
+        })
+        .transpose()?;
     let attributes = OBJECT_ATTRIBUTES {
         Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
         RootDirectory: parent.map_or(ptr::null_mut(), |p| p.as_raw_handle()),
@@ -65,7 +162,13 @@ fn open_access(
         SecurityQualityOfService: ptr::null_mut(),
     };
     let creating = disposition != FILE_OPEN as u32;
-    let desired = if creating {
+    let desired = if directory {
+        // Retained directory handles must not hold data or DELETE access:
+        // Windows 10's internal rename-target open can conflict with it even
+        // when our handles share read/write/delete. Directories use normal
+        // inherited ACLs; mutations acquire short-lived handles.
+        (FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE) as u32 | 0x20 // FILE_TRAVERSE
+    } else if creating {
         FILE_ALL_ACCESS as u32
     } else {
         (FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE) as u32
@@ -209,7 +312,9 @@ pub(super) fn validate(
     user: &Sid,
 ) -> Result<Identity> {
     let id = metadata(handle.as_handle(), directory, expected)?;
-    security::verify(handle, user)?;
+    if !directory {
+        security::verify(handle, user)?;
+    }
     Ok(id)
 }
 
@@ -342,11 +447,16 @@ pub(super) fn security_handle(handle: impl AsHandle) -> Result<OwnedHandle> {
 }
 
 /// Change visibility through the retained object, never through its pathname.
-pub(super) fn hide(handle: impl AsHandle, directory: bool, id: Identity, user: &Sid) -> Result<()> {
+pub(super) fn hide(
+    handle: impl AsHandle,
+    directory: bool,
+    id: Identity,
+    _user: &Sid,
+) -> Result<()> {
     const WRITE_ATTRIBUTES: u32 = 0x100;
     const HIDDEN: u32 = 2;
     const BASIC_INFO: FILE_INFO_BY_HANDLE_CLASS = 0;
-    validate(handle.as_handle(), directory, Some(id), user)?;
+    metadata(handle.as_handle(), directory, Some(id))?;
     let owned = handle.as_handle().try_clone_to_owned()?;
     let writable = open_access(
         Some(&owned),
@@ -354,9 +464,9 @@ pub(super) fn hide(handle: impl AsHandle, directory: bool, id: Identity, user: &
         directory,
         FILE_OPEN as u32,
         None,
-        Some((FILE_READ_ATTRIBUTES | READ_CONTROL) as u32 | WRITE_ATTRIBUTES),
+        Some(FILE_READ_ATTRIBUTES as u32 | WRITE_ATTRIBUTES),
     )?;
-    validate(&writable, directory, Some(id), user)?;
+    metadata(&writable, directory, Some(id))?;
     #[repr(C)]
     #[derive(Default)]
     struct BasicInfo {
@@ -383,5 +493,5 @@ pub(super) fn hide(handle: impl AsHandle, directory: bool, id: Identity, user: &
             )
         })?;
     }
-    validate(&writable, directory, Some(id), user).map(|_| ())
+    metadata(&writable, directory, Some(id)).map(|_| ())
 }

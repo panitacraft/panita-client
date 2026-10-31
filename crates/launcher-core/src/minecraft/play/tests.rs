@@ -2,6 +2,20 @@ use super::*;
 use crate::accounts::AccountRepository;
 use crate::registry::InstallationRecord;
 
+#[test]
+fn a_changed_vanilla_pin_requires_an_explicit_update() {
+    let installed = CatalogSource::Vanilla {
+        minecraft_version: "1.21.1".into(),
+    };
+    let current = CatalogSource::Vanilla {
+        minecraft_version: "1.21.2".into(),
+    };
+    assert!(
+        matches!(require_current_source(&installed, &current), Err(error) if error.code() == ErrorCode::UpdateRequired)
+    );
+    assert!(require_current_source(&installed, &installed).is_ok());
+}
+
 fn successful_auth_chain() -> Vec<(&'static str, u16, String)> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -285,6 +299,7 @@ pub(crate) fn complete_installation(paths: &AppPaths, id: Uuid) {
         asset_index_cache_path(&version.assets).unwrap_or_else(|_| panic!("asset path"));
     let runtime_path = format!("{runtime_root}/.runtime-manifest.json");
     let plan = InstallPlan {
+        loader: None,
         schema_version: 1,
         version,
         platform: "windows".into(),
@@ -324,6 +339,7 @@ pub(crate) fn complete_installation(paths: &AppPaths, id: Uuid) {
         plan,
         native_files: vec![],
         native_directory: None,
+        pack: None,
     };
     paths
         .game_directory(id)
@@ -507,6 +523,35 @@ fn catalog_outage_needs_warning_but_missing_disabled_and_bad_data_never_fall_bac
 }
 
 #[tokio::test]
+async fn a_pending_launcher_update_blocks_play_before_any_reservation_or_catalog_request() {
+    let (paths, accounts, id) = fixture();
+    let running = crate::launcher_update::current_version().unwrap_or_else(|_| panic!("version"));
+    let newer = semver::Version::new(running.major + 1, 0, 0);
+    let store = PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store"));
+    assert!(crate::launcher_update::record_check(&store, &running, Some(&newer), 1).is_ok());
+    // No catalog response is queued, so any catalog request would fail this test.
+    let (catalog, server) = crate::catalog::tests::server(vec![]);
+    let result = prepare_with_catalog(
+        paths.clone(),
+        id,
+        accounts.clone(),
+        Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform")),
+        ProcessSessionId::new(),
+        Cancellation::default(),
+        catalog,
+    )
+    .await;
+    assert_eq!(
+        result.err().map(|e| e.code()),
+        Some(ErrorCode::LauncherUpdateRequired)
+    );
+    assert!(server.join().is_ok());
+    assert!(LaunchLease::acquire(&paths, id).is_ok());
+    drop((accounts, store));
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
 async fn explicit_disabled_detail_is_recorded_and_releases_launch_reservation() {
     let (paths, accounts, id) = fixture();
     let mut response = crate::catalog::tests::record();
@@ -676,6 +721,282 @@ async fn microsoft_service_outage_blocks_composed_play_without_transport_retry_o
         .read("accounts.json")
         .unwrap_or_else(|_| panic!("after"));
     assert!(before == after);
+    assert!(LaunchLease::acquire(&paths, id).is_ok());
+    drop(accounts);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+fn pack_catalog(version: Uuid) -> CatalogInstance {
+    CatalogInstance {
+        minecraft_version: Some("1.21.1".into()),
+        source: CatalogSource::Custom {
+            minecraft_version: "1.21.1".into(),
+            loader: "neoforge".into(),
+            current_version_id: Some(version),
+            label: Some("0.2".into()),
+            published_at: Some("2026-10-25T20:54:25Z".into()),
+        },
+        ..local()
+    }
+}
+
+fn pack_detail(version: Uuid) -> String {
+    let mut raw = crate::catalog::tests::record();
+    raw["source_type"] = serde_json::json!("custom");
+    raw["minecraft_version"] = serde_json::json!("1.21.1");
+    raw["loader"] = serde_json::json!("neoforge");
+    raw["current_version_id"] = serde_json::json!(version);
+    raw["current_version_label"] = serde_json::json!("0.2");
+    raw["current_version_published_at"] = serde_json::json!("2026-10-25T20:54:25Z");
+    serde_json::json!({"data": raw}).to_string()
+}
+
+/// Make the fixture's record an installed pack at `installed`, in `state`.
+fn pack_record(paths: &AppPaths, installed: Uuid, state: InstallationState) {
+    let catalog = pack_catalog(installed);
+    InstanceRegistry::new(paths.clone())
+        .save(&InstallationRecord {
+            schema_version: 1,
+            id: catalog.id,
+            directory_name: None,
+            resolved_source: catalog.source.clone(),
+            last_catalog: catalog,
+            state,
+            managed_files: vec![],
+            settings: InstanceSettings::default(),
+        })
+        .unwrap_or_else(|_| panic!("registry"));
+}
+
+async fn pack_play(
+    paths: &AppPaths,
+    accounts: &Arc<AccountController>,
+    id: Uuid,
+    reply: (u16, String),
+) -> Option<ErrorCode> {
+    let (catalog, server) = crate::catalog::tests::server(vec![(reply.0, reply.1, false)]);
+    let result = prepare_with_catalog(
+        paths.clone(),
+        id,
+        accounts.clone(),
+        Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform")),
+        ProcessSessionId::new(),
+        Cancellation::default(),
+        catalog,
+    )
+    .await;
+    assert!(server.join().is_ok());
+    // Every refusal releases the launch reservation.
+    assert!(LaunchLease::acquire(paths, id).is_ok());
+    result.err().map(|error| error.code())
+}
+
+#[tokio::test]
+async fn a_newer_published_pack_version_blocks_play_until_the_player_updates() {
+    let (paths, accounts, id) = fixture();
+    complete_installation(&paths, id);
+    let (installed, newer) = (Uuid::new_v4(), Uuid::new_v4());
+    pack_record(&paths, installed, InstallationState::Installed);
+    // The current response names another published version: update first.
+    assert_eq!(
+        pack_play(&paths, &accounts, id, (200, pack_detail(newer))).await,
+        Some(ErrorCode::UpdateRequired)
+    );
+    // The same version is not blocked by this gate; the installation audit decides
+    // (this fixture has no pack state, so it is refused there instead).
+    assert_eq!(
+        pack_play(&paths, &accounts, id, (200, pack_detail(installed))).await,
+        Some(ErrorCode::UnsupportedInstance)
+    );
+    // When the current version cannot be fetched there is nothing to enforce, so the
+    // launch is not refused for being outdated (the audit still decides).
+    assert_ne!(
+        pack_play(&paths, &accounts, id, (503, "{}".into())).await,
+        Some(ErrorCode::UpdateRequired)
+    );
+    drop(accounts);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
+async fn a_fresh_vanilla_pin_change_blocks_play_but_an_outage_keeps_warning_consent() {
+    let (paths, accounts, id) = fixture();
+    complete_installation(&paths, id);
+    let mut current = crate::catalog::tests::record();
+    current["minecraft_version"] = serde_json::json!("26.2");
+    let reply = serde_json::json!({ "data": current }).to_string();
+    assert_eq!(
+        pack_play(&paths, &accounts, id, (200, reply)).await,
+        Some(ErrorCode::UpdateRequired)
+    );
+    // A known available transition cannot be installed during an outage. The
+    // complete local installation must still reach the warning consent gate.
+    let (catalog, server) = crate::catalog::tests::server(vec![(503, "{}".into(), false)]);
+    let pending = prepare_with_catalog(
+        paths.clone(),
+        id,
+        accounts.clone(),
+        Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform")),
+        ProcessSessionId::new(),
+        Cancellation::default(),
+        catalog,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("prepare: {:?}", error.code()));
+    assert!(pending.catalog_warning_required());
+    assert_eq!(
+        pending.start(None).await.err().map(|error| error.code()),
+        Some(ErrorCode::CatalogConfirmationRequired)
+    );
+    assert!(server.join().is_ok());
+    drop(accounts);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
+async fn a_pack_waiting_for_manual_files_never_reaches_the_installation_audit() {
+    let (paths, accounts, id) = fixture();
+    complete_installation(&paths, id);
+    let version = Uuid::new_v4();
+    pack_record(&paths, version, InstallationState::AwaitingFiles);
+    assert_eq!(
+        pack_play(&paths, &accounts, id, (200, pack_detail(version))).await,
+        Some(ErrorCode::ManualFilesRequired)
+    );
+    // Offline, the manual list still blocks: there is no fallback around missing files.
+    assert_eq!(
+        pack_play(&paths, &accounts, id, (503, "{}".into())).await,
+        Some(ErrorCode::ManualFilesRequired)
+    );
+    drop(accounts);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn only_other_published_pack_versions_require_an_update() {
+    let (old, new) = (Uuid::new_v4(), Uuid::new_v4());
+    let pack = |version| pack_catalog(version).source;
+    assert!(require_current_source(&pack(old), &pack(old)).is_ok());
+    assert_eq!(
+        require_current_source(&pack(old), &pack(new))
+            .err()
+            .map(|e| e.code()),
+        Some(ErrorCode::UpdateRequired)
+    );
+    // An unchanged vanilla pin remains playable too.
+    let vanilla = local().source;
+    assert!(require_current_source(&vanilla, &vanilla).is_ok());
+}
+
+fn modrinth(project: &str, version: &str, loader: Option<&str>) -> CatalogSource {
+    CatalogSource::Modrinth {
+        project_id: project.into(),
+        pack_version_id: version.into(),
+        loader: loader.map(str::to_owned),
+    }
+}
+
+#[test]
+fn a_changed_modrinth_pin_requires_an_update_but_the_same_pin_does_not() {
+    let pin = |version| modrinth("project", version, Some("neoforge"));
+    assert!(require_current_source(&pin("v1"), &pin("v1")).is_ok());
+    let newer = require_current_source(&pin("v1"), &pin("v2"));
+    assert_eq!(
+        newer.err().map(|e| e.code()),
+        Some(ErrorCode::UpdateRequired)
+    );
+    // Another project under the same instance is not the installed pack either.
+    let moved = require_current_source(&pin("v1"), &modrinth("other", "v1", None));
+    assert_eq!(
+        moved.err().map(|e| e.code()),
+        Some(ErrorCode::UpdateRequired)
+    );
+}
+
+fn state_for(source: crate::modpack::state::PackIdentity, loader: &str) -> PackState {
+    PackState {
+        schema: 1,
+        id: Uuid::new_v4(),
+        source,
+        minecraft_version: "1.21.1".into(),
+        loader: loader.into(),
+        loader_version: "21.1.248".into(),
+        files: Vec::new(),
+        consumed_defaults: Default::default(),
+        skipped_configuration: Vec::new(),
+        pending: Vec::new(),
+    }
+}
+
+#[test]
+fn an_installed_pack_must_be_the_one_the_catalog_pins_in_the_same_format() {
+    use crate::modpack::state::PackIdentity;
+    let installed = state_for(
+        PackIdentity::Modrinth {
+            project_id: "project".into(),
+            version_id: "v1".into(),
+            archive_sha512: "a".repeat(128),
+            index_sha256: "b".repeat(64),
+        },
+        "neoforge",
+    );
+    assert!(pack_matches(
+        &modrinth("project", "v1", Some("neoforge")),
+        &installed
+    ));
+    assert!(pack_matches(&modrinth("project", "v1", None), &installed));
+    // Another version, project, loader, or a differently sourced pack is refused.
+    for source in [
+        modrinth("project", "v2", None),
+        modrinth("other", "v1", None),
+        modrinth("project", "v1", Some("fabric")),
+        pack_catalog(Uuid::new_v4()).source,
+        local().source,
+    ] {
+        assert!(!pack_matches(&source, &installed));
+    }
+    let custom = state_for(
+        PackIdentity::Custom {
+            version_id: Uuid::new_v4(),
+            published_at: "2026-10-25T20:54:25Z".into(),
+            label: None,
+        },
+        "neoforge",
+    );
+    assert!(pack_matches(&pack_catalog(Uuid::new_v4()).source, &custom));
+    assert!(!pack_matches(&modrinth("project", "v1", None), &custom));
+    let other_loader = state_for(custom.source.clone(), "fabric");
+    assert!(!pack_matches(
+        &pack_catalog(Uuid::new_v4()).source,
+        &other_loader
+    ));
+}
+
+#[tokio::test]
+async fn account_validation_starts_with_the_audit_only_for_launches_without_a_warning() {
+    let (paths, accounts, id) = fixture();
+    complete_installation(&paths, id);
+    {
+        let attempt = controlled_attempt(&paths, &accounts, id, 200).await;
+        assert!(!attempt.catalog_warning_required());
+        let task = attempt.authorization.as_ref();
+        assert!(task.is_some_and(AuthorizationTask::fresh));
+    }
+    {
+        // A warned attempt validates only after its confirmation.
+        let warned = controlled_attempt(&paths, &accounts, id, 503).await;
+        assert!(warned.catalog_warning_required());
+        assert!(warned.authorization.is_none());
+    }
+    {
+        // A validation that waited too long is repeated instead of trusted.
+        let mut attempt = controlled_attempt(&paths, &accounts, id, 200).await;
+        if let Some(task) = attempt.authorization.as_mut() {
+            task.started =
+                std::time::Instant::now() - AUTHORIZATION_FRESH - std::time::Duration::from_secs(1);
+            assert!(!task.fresh());
+        }
+    }
     assert!(LaunchLease::acquire(&paths, id).is_ok());
     drop(accounts);
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());

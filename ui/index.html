@@ -3,10 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="stylesheet" href="/startup.css" />
     <title>Panita Client</title>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <div id="root">
+      <main id="startup-screen" class="startup-screen" role="status">
+        <h1>Panita Client</h1>
+        <p id="startup-message">Preparando la aplicación…</p>
+        <a href="./">Volver a cargar</a>
+      </main>
+    </div>
+    <script src="/startup.js"></script>
+    <script id="application-entry" type="module" src="/src/main.tsx"></script>
   </body>
 </html>

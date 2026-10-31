@@ -50,9 +50,33 @@ pub(super) fn remove(identifier: &str) -> i32 {
         Ok(None) => {}
         _ => return 2,
     }
-    match data_removal::remove_current_profile() {
-        Ok(()) => 0,
-        Err(_) => 3,
+    // End the member's launcher session on the API first; the local copy goes with the profile.
+    if let Ok(root) = data_removal::current_root()
+        && !data_removal::pending(&root).unwrap_or(true)
+    {
+        launcher_core::activation::close_stored_session_blocking(&root);
+    }
+    if data_removal::remove_current_profile().is_err() {
+        return 3;
+    }
+    // The browser data is disposable; a failure is still reported so the uninstaller can retry.
+    let install = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf));
+    match (install, data_removal::local_root()) {
+        (Some(install), Ok(local)) => match data_removal::remove_web_data_in(&install, &local) {
+            Ok(()) => 0,
+            Err(_) => 3,
+        },
+        _ => 3,
+    }
+}
+
+/// Earlier builds kept the browser data in a folder named after the application identifier.
+/// Retire it before the webview opens the new one; failures are retried on the next start.
+pub(super) fn retire_legacy_web_data() {
+    if let Ok(local) = data_removal::local_root() {
+        data_removal::retire_legacy_web_data_in(&local);
     }
 }
 

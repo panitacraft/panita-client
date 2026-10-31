@@ -62,6 +62,49 @@ pub fn verify(file: &std::fs::File) -> Result<()> {
         })
     }
 }
+
+/// Verify an ordinary file's kind, identity metadata and link count. Windows/Linux
+/// enforces actual handle access without requiring private ownership or ACLs.
+pub fn verify_data(file: &std::fs::File) -> Result<()> {
+    #[cfg(windows)]
+    {
+        windows::verify_data(file)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        unix::verify_data(file)
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        verify(file)
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+impl PrivateDir {
+    /// macOS retains the existing owner-only storage policy.
+    pub fn open_data(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        Self::open(path)
+    }
+    pub fn ensure_data(path: impl AsRef<std::path::Path>) -> Result<Self> {
+        Self::ensure(path)
+    }
+    pub fn open_data_file(&self, path: impl AsRef<std::path::Path>) -> Result<PrivateFile> {
+        self.open_file(path)
+    }
+    pub fn verify_private_namespace(&self) -> Result<()> {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            self.check_private()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            Err(Error::UnsupportedFilesystem {
+                capability: "private namespace validation",
+            })
+        }
+    }
+}
 /// Secure the exact supplied file object without path lookup, then revalidate.
 /// Refuses unexpected owners, object kinds, and link counts. Existing exposure
 /// cannot be undone; this does not adopt the object into a private tree.

@@ -185,7 +185,7 @@ fn walk<W: Write + Seek>(
     Ok(())
 }
 
-pub(super) fn capability(directory: &private_fs::PrivateDir) -> Result<Dir, CoreError> {
+pub(crate) fn capability(directory: &private_fs::PrivateDir) -> Result<Dir, CoreError> {
     #[cfg(windows)]
     {
         use std::os::windows::io::AsHandle;
@@ -204,7 +204,7 @@ pub(super) fn capability(directory: &private_fs::PrivateDir) -> Result<Dir, Core
 
 /// Caller retains the instance operation lock. Never opens launcher/account data.
 /// Partial directories are preserved without a completion receipt after failure.
-pub(super) fn create(
+pub(crate) fn create(
     root: &Path,
     instance_id: Uuid,
     installed_version: &str,

@@ -17,8 +17,8 @@ Missing/inaccessible procfs fails closed. Other link errors are not retried.
 The temporary remains anonymous until linked, private from creation and on the
 same filesystem. Existing temporary/directory validation, linked-inode identity
 and permission checks, file sync, atomic rename, post-publication validation,
-parent sync and uncertain-commit reporting remain in force. Windows code is
-unchanged. No process capabilities or elevated Linux user are required.
+parent sync and uncertain-commit reporting remain in force. No process
+capabilities or elevated Linux user are required.
 
 Regression tests exercise descriptor publication, destination collisions,
 redirected entries, changed permissions and a renamed parent directory. Run
@@ -29,5 +29,229 @@ unchanged.
 
 Reference: https://man7.org/linux/man-pages/man2/link.2.html
 
+Windows drive-root acquisition resolves the current DOS drive mapping with
+`QueryDosDeviceW` before opening the direct `\Device\<device>\` anchor. The
+reported Windows 10 startup failure was `STATUS_REPARSE_POINT_ENCOUNTERED`
+(`0xC000050B`, Win32 4395) at the original `\??\C:\` drive-root open, before
+profile creation. The normal DOS drive alias must be resolved separately from
+filesystem traversal. Only a single direct device name is accepted; SUBST,
+network paths, chained aliases and directory suffixes fail closed. Historical
+device mappings are never tried. The returned handle pins the selected volume;
+subsequent opens do not resolve the drive letter again.
+
+`OBJ_DONT_REPARSE`, `FILE_OPEN_REPARSE_POINT`, handle kind checks, volume ACL
+checks and component-by-component ancestor traversal remain enabled. There is no
+retry with relaxed flags and no permission repair or elevation. Tests cover fresh
+private-store creation/reopening, invalid mapping shapes, and rejection of a
+junction ancestor without creating files at its destination. Run the dependency
+and launcher storage tests on Windows; an installed candidate still needs a
+normal-user clean Windows 10 VM check before calling this report resolved.
+
+Local verification on 2026-10-28: all 51 dependency unit tests pass on Windows 11
+build 26200 outside the execution sandbox; all six launcher storage tests and
+library Clippy with warnings denied pass as well. The sandbox denies the raw
+drive-root access needed by these tests.
+These results do not qualify Windows 10 or a packaged launcher build.
+
+The owner's follow-up probe on Windows 10 22H2 build 19045.3803 passes root
+creation/reopening and directory flushing, but both classic rename and initial
+atomic publication fail with Win32 32 (`ERROR_SHARING_VIOLATION`). Newly ensured
+directories previously retained `FILE_ALL_ACCESS`, including data-write and
+DELETE access, which can conflict with the rename operation's internal target
+directory open. All retained directory handles now request metadata, traversal,
+security-read and synchronization access only, including when creating a private
+directory. The protected owner-only DACL is unchanged. File creation retains its
+write/delete access; explicit directory flush and ACL operations acquire brief
+handle-relative writable handles. No sharing error is ignored or retried with
+weaker publication or durability guarantees.
+
+The regression holds newly created and re-ensured parent/child capabilities
+while opening a writer that shares read access only, then performs a durable
+write. All 52 dependency tests and 404 core tests pass on Windows 11 (one core
+test remains ignored); library Clippy also passes.
+
+On 2026-10-28 the owner returned the updated probe results for commit `bbfbfff`
+on Windows 10 22H2 build 19045.3803. All five checks pass: fresh private-store
+creation/reopening, retained-directory sharing compatibility, classic atomic
+rename, atomic publication/replacement with durable writes, and directory flush.
+This resolves both failures from the previous synthetic probe on that VM.
+Installed-launcher Panita session and Minecraft account save/restart checks
+remain pending; the probe does not establish end-to-end authentication or game
+launch qualification.
+
+References:
+- https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-querydosdevicew
+- https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_object_attributes
+- https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information
+
 Remove this patch only after an upstream release includes an equivalent fix and
 passes the same storage, migration, concurrency and Windows regression checks.
+
+## Windows directory inheritance (2026-10-28 owner decision)
+
+Windows directories now use normal OS permission inheritance, as in Prism's
+ordinary directory-creation approach. Directory capabilities still verify the
+current user's ownership, object identity, filesystem capability and absence of
+reparse points. They no longer require or write a protected owner-only directory
+ACL. Explicit directory hardening validates the object without replacing its ACL.
+Unix behavior is unchanged.
+
+Private files, including account/session documents, coordination files and atomic
+temporaries, retain their explicit protected owner-only descriptors and strict
+validation. Broad inherited directory permissions cannot enter those files.
+
+On opening an existing directory, retire only the exact protected single-user,
+full-control, non-inheritable ACL written by older builds. A handle-relative
+security open enables inheritance and removes that legacy explicit ACL. Windows
+propagates inherited permissions to unprotected descendants, including existing
+player files with empty ACLs. Preserve all other custom directory ACLs. No file
+contents are read, replaced or deleted by migration, and no elevation is used.
+
+Application-profile initialization walks existing directories once under its
+store writer lock (ordinary instance metadata stores never publish the marker), opens each
+child relative to a retained parent, rejects redirected entries and bounds depth
+and directory count. Only a completed walk publishes the protected schema-1
+`directory-permissions.json` marker. Failed walks remain retryable; unknown or
+corrupt markers are preserved and reported. Protected child directories are
+migrated parent first. Root acquisition can retire its own legacy ACL before
+the writer lock is acquired; this operation is idempotent across processes.
+
+Regression coverage includes manually created resource-pack files, recovery of
+an existing empty-ACL JAR, preservation of private synthetic account metadata,
+custom directory ACLs, unchanged junction targets, restart and marker validation.
+Existing historical paragraphs above describe earlier implementations and test
+results; this section supersedes their Windows directory-ACL policy.
+
+Local Windows verification: all 56 dependency tests and 413 core unit tests pass
+(one existing live-catalog integration test is intentionally ignored). The tests
+use synthetic temporary profiles, not real account/session documents. The new
+Windows dependency-test CI step keeps the inheritance regressions in the Windows
+matrix. These results do not qualify an installed build on Windows 10 or Linux;
+Unix permission behavior has not changed.
+Older launcher builds that enforce the former Windows directory ACL contract can
+reject a migrated profile; continue using an updated build after migration.
+
+### Explicit directory ownership with inherited permissions
+
+The initial inheritance change omitted the entire creation security descriptor
+for Windows directories. That also stopped assigning TokenUser as the owner.
+An elevated process can default the owner to Administrators, causing the existing
+owner check to reject newly created directories as unsafe. Windows CI reported
+271 core test failures during storage/registry initialization at that checkpoint.
+
+Directory creation now supplies a descriptor with the owner explicitly set to
+TokenUser, but with no DACL and no DACL-protection flag. Windows still calculates
+ordinary parent inheritance. Private-file descriptors and existing-object owner
+checks remain unchanged; existing foreign-owned directories are never adopted.
+
+Regression coverage checks the owner-only creation descriptor, absence of a DACL
+override, new root/child ownership, ordinary player-file access and private-file
+protection. The existing token-owner comparison test also exercises environments
+where TokenOwner differs from TokenUser. Hosted Windows CI must confirm the fix
+in that environment; local standard-user results alone do not establish it.
+
+Local verification on 2026-10-29: 413 core tests pass with one existing live test
+ignored; all 57 dependency tests pass on the complete rerun. An initial dependency
+run hit an access-denied error in the stress fixture's directory-rename restore;
+that test passed in isolation and on the complete rerun. Core all-target Clippy,
+workspace formatting and focused dependency formatting checks pass.
+
+## Access-based Windows data handling (2026-10-29 owner decision)
+
+Existing Windows game/cache directories no longer require their owner SID to
+equal TokenUser. Ordinary file capabilities explicitly use access-based handling:
+Windows grants the requested read/write/delete access, new files inherit parent
+permissions, and the library does not harden their ACLs. Existing foreign-owned
+directories are preserved; legacy directory migration applies only to the exact
+current-user-owned ACL written by older Panita builds. New directory ownership
+is still assigned consistently, without making that an admission requirement.
+
+Data capabilities retain handle-relative traversal, reparse rejection, object
+kind, identity and single-link checks. Atomic publication and interprocess locks
+remain in use. Panita's artifact readers retain exact hash/size verification and
+manifest-bound verification receipts. Public cache files, loader generations and
+processor outputs use data access; client-owned private metadata retains strict
+file validation. Windows processor outputs no longer require WRITE_DAC merely
+to read and update ordinary files. Unix behavior is unchanged.
+
+Credential files and their atomic temporaries retain protected owner-only ACLs.
+The store additionally validates the parent namespace before reading, writing,
+hiding or removing `accounts.json` or `panita-session.json`. Current-user, SYSTEM
+and administrator owners are trusted, while effective grants allowing other
+principals to mutate the directory are rejected. Read-only grants are permitted.
+Custom ACLs are never silently rewritten by that check. Administrator bypass
+and processes running as the same user remain outside the isolation boundary.
+
+Regression coverage distinguishes an accessible owner mismatch from private-file
+validation, retains redirected-path and hard-link rejection, and verifies that
+credential operations reject a writable-by-others parent without replacing the
+existing credential bytes while ordinary data access remains available.
+
+Local credential tests use a controlled ignored temporary root granting access
+to the current user, SYSTEM and Administrators. The host temporary directory has
+additional sandbox-specific writable principals; accepting those merely to make
+tests pass would weaken the namespace check. The override is limited to the test
+process and does not change the real launcher profile or Windows profile ACLs.
+Windows CI prepares an equivalent private test directory before running Rust
+tests, avoiding dependence on the runner's default temporary-directory ACLs.
+
+This section supersedes earlier requirements in this patch note that every
+Windows directory have exactly the current user as its owner. It does not relax
+credential file privacy, schemas, preservation, atomicity or recovery guarantees.
+Older builds that require protected cache-file ACLs can reject new ordinary
+cache entries; use an updated build after this change. No instance paths or disk
+JSON schemas are changed by the access policy.
+
+Local Windows validation: the full workspace passes 414 core tests, two
+cross-process tests and 26 desktop tests, with one existing live-network test
+ignored. All 59 filesystem dependency tests and 70 frontend tests pass. Workspace
+all-target Clippy, workspace formatting, focused dependency formatting and diff
+checks pass. Hosted CI, Linux compilation and installed-product qualification of
+this access-policy change remain pending.
+
+## Access-based Linux data handling (2026-10-29 owner decision)
+
+The owner extends the access-based policy to Linux. Existing Linux directories
+are checked for kind, identity and safe resolution without an exact owner or
+`0700` requirement. Ordinary data capabilities accept accessible regular files
+without exact ownership or `0600` modes; new data files/directories request
+`0666`/`0777` subject to the existing umask and filesystem ACLs. Existing modes
+and ownership are not rewritten. Directory hardening validates rather than
+changing Linux directory modes. macOS behavior remains unchanged.
+
+Private files and atomic temporaries retain effective-UID ownership and exact
+`0600` permissions. Before account/session access, the store validates that the
+containing directory belongs to the effective UID or root and grants no
+group/other write permissions. Named POSIX ACL writers are constrained by the
+group-class permission mask as well. A readable `0755` parent is acceptable;
+a shared writable credential namespace is rejected without changing its ACLs,
+ownership, modes or existing credential bytes.
+
+Normal and anonymous data staging retain inode/device identity, regular-file
+kind and link-count checks, no-follow traversal, atomic publication and writer
+coordination. Credential staging remains private from creation. The Linux
+proc-descriptor publication fallback is retained. Source data access is not a
+license to follow symlinks, adopt hard-linked files or bypass content verification.
+
+Linux Java uses actual read/execute access rather than exact ownership or `0700`.
+The kernel checks effective-user execute permission. Newly downloaded artifacts
+gain owner-execute while preserving their other creation-mode bits; already
+executable accessible files are not chmodded. Set-user-ID/set-group-ID runtimes,
+redirects and hard links remain rejected. Download hashes and installed plans
+remain authoritative. Processor outputs use ordinary access on Linux/Windows;
+macOS retains its prior policy.
+
+Regression tests cover readable ordinary modes, foreign-owner metadata, normal
+and forced-walk resolution, private-file isolation, unsafe credential namespaces,
+runtime execute rights, privilege bits, repair and failed-download preservation.
+The receipt test explicitly changes timestamps when asserting a rehash, avoiding
+dependence on Linux filesystem clock ticks. This section supersedes previous
+statements in this patch note that Linux data access still requires private modes.
+
+Validation on 2026-10-29: normal-user Debian WSL passes all 55 filesystem tests
+under default and force-walk configurations, 409 core unit tests with one existing
+live test ignored, two cross-process tests, and core all-target Clippy with
+warnings denied. Workspace/dependency formatting and diff checks pass. Windows
+workspace compilation and the shared receipt regression also pass. These are
+source-level results in a separate build environment; BOX was not used for
+development, and installed-product/game-launch qualification remains pending.

@@ -2,17 +2,18 @@
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use reqwest::{Client, StatusCode, header};
+use reqwest::{Client, RequestBuilder, StatusCode, header};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::{CoreError, ErrorCode};
+use crate::panita_api::PanitaCredentials;
 use crate::storage::PrivateStore;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
 
-const BASE: &str = "https://api.panitacraft.com";
+pub(crate) const BASE: &str = "https://api.panitacraft.com";
 const MAX_BODY: usize = 512 * 1024;
 const MAX_RECORDS: usize = 1000;
 const CACHE_FILE: &str = "insts-cache.json";
@@ -29,6 +30,19 @@ fn read_cache(store: &PrivateStore) -> Result<Option<Vec<u8>>, CoreError> {
     })
 }
 
+/// A member's catalog can include restricted entries, so no copy of it outlives
+/// the session it was fetched with. Every cache spelling is attempted.
+pub(crate) fn purge_cache(store: &PrivateStore) -> Result<(), CoreError> {
+    store.with_lock(|transaction| {
+        let mut result = Ok(());
+        for name in [CACHE_FILE, PREVIOUS_CACHE_FILE, LEGACY_CACHE_FILE] {
+            let removed = transaction.remove_verified_file(name);
+            result = result.and(removed);
+        }
+        result
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CatalogSource {
@@ -40,9 +54,64 @@ pub enum CatalogSource {
         pack_version_id: String,
         loader: Option<String>,
     },
+    Custom {
+        minecraft_version: String,
+        loader: String,
+        current_version_id: Option<Uuid>,
+        label: Option<String>,
+        published_at: Option<String>,
+    },
     Unsupported {
         source_type: String,
     },
+}
+
+impl CatalogSource {
+    /// Whether two sources name the same pinned content. A pack's label, date or
+    /// informational loader may differ between a catalog answer and an installation.
+    pub fn same_pin(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Custom {
+                    current_version_id: left,
+                    ..
+                },
+                Self::Custom {
+                    current_version_id: right,
+                    ..
+                },
+            ) => left == right,
+            (
+                Self::Modrinth {
+                    project_id: left_project,
+                    pack_version_id: left,
+                    ..
+                },
+                Self::Modrinth {
+                    project_id: right_project,
+                    pack_version_id: right,
+                    ..
+                },
+            ) => left_project == right_project && left == right,
+            _ => self == other,
+        }
+    }
+
+    /// The sources this launcher can install: vanilla, published NeoForge custom
+    /// packs and pinned Modrinth packs. A Modrinth pin's loader is informational;
+    /// its index decides whether the pack is really supported when it installs.
+    pub fn installable(&self) -> bool {
+        match self {
+            Self::Vanilla { .. } => true,
+            Self::Custom {
+                loader,
+                current_version_id: Some(_),
+                ..
+            } => loader == "neoforge",
+            Self::Modrinth { loader, .. } => loader.as_deref().is_none_or(crate::loader::supported),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -82,6 +151,9 @@ struct RawInstance {
     modrinth_project_id: Option<String>,
     pack_version_id: Option<String>,
     loader: Option<String>,
+    current_version_id: Option<Uuid>,
+    current_version_label: Option<String>,
+    current_version_published_at: Option<String>,
 }
 
 fn invalid() -> CoreError {
@@ -143,6 +215,13 @@ impl TryFrom<RawInstance> for CatalogInstance {
                 return Err(invalid());
             }
         }
+        if raw.source_type != "custom"
+            && (raw.current_version_id.is_some()
+                || raw.current_version_label.is_some()
+                || raw.current_version_published_at.is_some())
+        {
+            return Err(invalid());
+        }
         let source = match raw.source_type.as_str() {
             "vanilla" => {
                 if raw.modrinth_project_id.is_some()
@@ -160,9 +239,7 @@ impl TryFrom<RawInstance> for CatalogInstance {
                 let pack_version_id = raw.pack_version_id.ok_or_else(invalid)?;
                 if !pin(&project_id)
                     || !pin(&pack_version_id)
-                    || raw.loader.as_deref().is_some_and(|loader| {
-                        !matches!(loader, "fabric" | "quilt" | "forge" | "neoforge")
-                    })
+                    || raw.loader.as_deref().is_some_and(|loader| !pin(loader))
                 {
                     return Err(invalid());
                 }
@@ -170,6 +247,35 @@ impl TryFrom<RawInstance> for CatalogInstance {
                     project_id,
                     pack_version_id,
                     loader: raw.loader,
+                }
+            }
+            "custom" => {
+                let loader = raw.loader.ok_or_else(invalid)?;
+                if raw.modrinth_project_id.is_some()
+                    || raw.pack_version_id.is_some()
+                    || !pin(&loader)
+                    || raw.current_version_id.is_some_and(|id| id.is_nil())
+                    || raw
+                        .current_version_label
+                        .as_deref()
+                        .is_some_and(|label| !bounded_text(label, 32))
+                    || raw
+                        .current_version_published_at
+                        .as_deref()
+                        .is_some_and(|date| chrono::DateTime::parse_from_rfc3339(date).is_err())
+                    || (raw.enabled && raw.current_version_id.is_none())
+                    || (raw.current_version_id.is_some()
+                        != raw.current_version_published_at.is_some())
+                    || (raw.current_version_id.is_none() && raw.current_version_label.is_some())
+                {
+                    return Err(invalid());
+                }
+                CatalogSource::Custom {
+                    minecraft_version: raw.minecraft_version.clone().ok_or_else(invalid)?,
+                    loader,
+                    current_version_id: raw.current_version_id,
+                    label: raw.current_version_label,
+                    published_at: raw.current_version_published_at,
                 }
             }
             _ if bounded_text(&raw.source_type, 64) => CatalogSource::Unsupported {
@@ -214,13 +320,30 @@ impl CatalogInstance {
                 Some(pack_version_id.clone()),
                 loader.clone(),
             ),
+            CatalogSource::Custom {
+                minecraft_version,
+                loader,
+                ..
+            } if Some(minecraft_version) == self.minecraft_version.as_ref() => {
+                ("custom".to_owned(), None, None, Some(loader.clone()))
+            }
             CatalogSource::Unsupported { source_type }
-                if !matches!(source_type.as_str(), "vanilla" | "modrinth") =>
+                if !matches!(source_type.as_str(), "vanilla" | "modrinth" | "custom") =>
             {
                 (source_type.clone(), None, None, None)
             }
             _ => return Err(invalid()),
         };
+        let (current_version_id, current_version_label, current_version_published_at) =
+            match &self.source {
+                CatalogSource::Custom {
+                    current_version_id,
+                    label,
+                    published_at,
+                    ..
+                } => (*current_version_id, label.clone(), published_at.clone()),
+                _ => (None, None, None),
+            };
         Self::try_from(RawInstance {
             id: self.id,
             slug: self.slug.clone(),
@@ -238,6 +361,9 @@ impl CatalogInstance {
             modrinth_project_id: project,
             pack_version_id: pack,
             loader,
+            current_version_id,
+            current_version_label,
+            current_version_published_at,
         })?;
         Ok(())
     }
@@ -256,10 +382,8 @@ impl CatalogInstance {
         if !self.enabled {
             return Err(CoreError::new(ErrorCode::InstanceDisabled));
         }
-        if !self.compatible_with(client)
-            || !matches!(self.source, CatalogSource::Vanilla { .. })
-            || self.restricted
-        {
+        // A restricted entry only reaches a member the API allows; it needs no extra gate here.
+        if !self.compatible_with(client) || !self.source.installable() {
             return Err(CoreError::new(ErrorCode::UnsupportedInstance));
         }
         Ok(())
@@ -374,6 +498,16 @@ pub struct CatalogSnapshot {
 pub struct CatalogClient {
     client: Client,
     base: String,
+    /// Launcher key and member session. Restricted instances are only returned
+    /// to a request that carries both.
+    auth: Option<PanitaCredentials>,
+}
+
+#[cfg(test)]
+impl CatalogClient {
+    pub(crate) fn test_transport(self) -> (Client, String) {
+        (self.client, self.base)
+    }
 }
 
 impl CatalogClient {
@@ -389,11 +523,35 @@ impl CatalogClient {
         Ok(Self {
             client,
             base: BASE.to_owned(),
+            auth: None,
         })
     }
 
+    /// `None` reaches only the public catalog. The desktop always passes the
+    /// member's credentials, which is what makes restricted instances visible.
+    pub fn with_auth(mut self, auth: impl Into<Option<PanitaCredentials>>) -> Self {
+        self.auth = auth.into();
+        self
+    }
+
+    fn authorize(&self, request: RequestBuilder) -> RequestBuilder {
+        match &self.auth {
+            Some(auth) => auth.apply(request),
+            None => request,
+        }
+    }
+
+    /// A cached list belongs to the identity it was fetched for: a member's list
+    /// can include restricted entries and is never served to anyone else.
     fn representation(&self) -> String {
-        format!("{}/v1/instances|accept:application/json", self.base)
+        let identity = self.auth.as_ref().and_then(PanitaCredentials::identity);
+        match identity {
+            Some(id) => format!(
+                "{}/v1/instances|accept:application/json|identity:{id}",
+                self.base
+            ),
+            None => format!("{}/v1/instances|accept:application/json", self.base),
+        }
     }
 
     pub async fn refresh(&self, store: &PrivateStore) -> Result<CatalogSnapshot, CoreError> {
@@ -403,20 +561,31 @@ impl CatalogClient {
             .transpose();
         let cache_invalid = cached.is_err();
         let cached = cached.ok().flatten();
-        let mut request = self
-            .client
-            .get(format!("{}/v1/instances", self.base))
-            .header(header::ACCEPT, "application/json");
+        let mut request = self.authorize(
+            self.client
+                .get(format!("{}/v1/instances", self.base))
+                .header(header::ACCEPT, "application/json"),
+        );
         if let Some(etag) = cached.as_ref().and_then(|cache| cache.etag.as_ref()) {
             request = request.header(header::IF_NONE_MATCH, etag);
         }
         let fetched = async {
-            let response = request
-                .send()
-                .await
-                .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
+            let started = std::time::Instant::now();
+            let sent = request.send().await;
+            crate::network_log::api_result(
+                "panita-catalog",
+                "GET",
+                "/v1/instances",
+                started,
+                sent.as_ref().map(|reply| reply.status().as_u16()),
+                true,
+            );
+            let response = sent.map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
             if response.status() == StatusCode::NOT_MODIFIED {
                 return cached.ok_or_else(invalid);
+            }
+            if is_unauthorized(response.status()) {
+                return Err(unauthorized(response).await);
             }
             check_status(response.status())?;
             let etag = response
@@ -485,16 +654,30 @@ impl CatalogClient {
     /// Every future Play request must call this, then enforce installation_allowed.
     /// Request revalidation is not a guarantee of origin freshness through a CDN.
     pub async fn detail(&self, id: Uuid) -> Result<CatalogInstance, CoreError> {
-        let response = self
-            .client
-            .get(format!("{}/v1/instances/{id}", self.base))
-            .header(header::ACCEPT, "application/json")
-            .header(header::CACHE_CONTROL, "no-cache")
+        let started = std::time::Instant::now();
+        let sent = self
+            .authorize(
+                self.client
+                    .get(format!("{}/v1/instances/{id}", self.base))
+                    .header(header::ACCEPT, "application/json")
+                    .header(header::CACHE_CONTROL, "no-cache"),
+            )
             .send()
-            .await
-            .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
+            .await;
+        crate::network_log::api_result(
+            "panita-catalog",
+            "GET",
+            "/v1/instances/{id}",
+            started,
+            sent.as_ref().map(|reply| reply.status().as_u16()),
+            true,
+        );
+        let response = sent.map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
         if response.status() == StatusCode::NOT_FOUND {
             return Err(CoreError::new(ErrorCode::InstanceMissing));
+        }
+        if is_unauthorized(response.status()) {
+            return Err(unauthorized(response).await);
         }
         check_status(response.status())?;
         let detail: Detail =
@@ -505,6 +688,26 @@ impl CatalogClient {
         }
         Ok(record)
     }
+}
+
+fn is_unauthorized(status: StatusCode) -> bool {
+    status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN
+}
+
+/// Only `invalid_token` means the session is closed. `invalid_key` (or a 403) is
+/// this launcher's key being refused, and anything else, including a proxy page,
+/// is invalid data. None of them is an outage, so none falls back to the cache.
+async fn unauthorized(response: reqwest::Response) -> CoreError {
+    let status = response.status();
+    let reason = match body(response).await {
+        Ok(bytes) => crate::panita_api::error_reason(&bytes),
+        Err(_) => None,
+    };
+    CoreError::new(match (status.as_u16(), reason.as_deref()) {
+        (401, Some("invalid_token")) => ErrorCode::SessionRejected,
+        (401 | 403, Some("invalid_key")) | (403, _) => ErrorCode::ApiKeyRejected,
+        _ => ErrorCode::InvalidData,
+    })
 }
 
 fn check_status(status: StatusCode) -> Result<(), CoreError> {

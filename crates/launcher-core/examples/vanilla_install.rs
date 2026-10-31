@@ -140,6 +140,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &platform,
                 &cancel,
                 progress,
+                // Validation installs read the public catalog.
+                None,
             )
             .await?;
             eprintln!(

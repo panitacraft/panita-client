@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::catalog::{CatalogInstance, CatalogSnapshot, CatalogSource};
 use crate::error::{CoreError, ErrorCode};
+use crate::panita_api::PanitaCredentials;
 use crate::paths::AppPaths;
 use crate::settings::InstanceSettings;
 use crate::storage::PrivateStore;
@@ -15,6 +16,7 @@ use crate::storage::map_private_error;
 
 const RECORD: &str = "instance.json";
 const LEGACY_RECORD: &str = "installation.json";
+pub(crate) mod erasure;
 mod format;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -23,6 +25,8 @@ pub enum InstallationState {
     NotInstalled,
     Installing,
     Installed,
+    /// A modpack is installed except for manual files the player still has to supply.
+    AwaitingFiles,
     UpdateAvailable,
     NeedsRepair,
     Running,
@@ -166,6 +170,7 @@ impl InstanceRegistry {
     /// Caller holds the root mutation lock. Only metadata bearing UUID ownership
     /// is discoverable; arbitrary user folders are never adopted by their slug.
     fn scan(&self) -> Result<Vec<(PathBuf, InstallationRecord)>, CoreError> {
+        let pending = erasure::pending(&self.paths)?;
         let root = self.paths.root().join("instances");
         match std::fs::symlink_metadata(&root) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -175,12 +180,18 @@ impl InstanceRegistry {
         private_fs::PrivateDir::open(&root).map_err(map_private_error)?;
         let mut records = Vec::new();
         let mut ids = std::collections::HashSet::new();
-        for entry in std::fs::read_dir(root).map_err(io)? {
+        for entry in std::fs::read_dir(&root).map_err(io)? {
             let entry = entry.map_err(io)?;
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };
             if !valid_directory_name(&name) {
+                continue;
+            }
+            if pending
+                .iter()
+                .any(|intent| intent.record.directory_name.as_deref() == Some(name.as_str()))
+            {
                 continue;
             }
             let directory = entry.path();
@@ -210,6 +221,17 @@ impl InstanceRegistry {
                 }
                 records.push((directory, record));
             }
+        }
+        for intent in pending {
+            if !ids.insert(intent.record.id) {
+                return Err(invalid());
+            }
+            let mut record = intent.record;
+            record.state = InstallationState::Failed;
+            records.push((
+                root.join(record.directory_name.as_deref().ok_or_else(invalid)?),
+                record,
+            ));
         }
         records.sort_by_key(|(_, record)| record.id);
         Ok(records)
@@ -248,6 +270,12 @@ impl InstanceRegistry {
         directory: PathBuf,
         record: InstallationRecord,
     ) -> Result<(PathBuf, InstallationRecord), CoreError> {
+        if erasure::pending(&self.paths)?
+            .iter()
+            .any(|intent| intent.record.id == record.id)
+        {
+            return Err(CoreError::new(ErrorCode::OperationBusy));
+        }
         if directory.file_name().and_then(|name| name.to_str()) == record.directory_name.as_deref()
         {
             let record = crate::instance_layout::prepare(&directory, record)?;
@@ -467,7 +495,15 @@ impl InstanceRegistry {
             };
             let (directory, previous) = match self.migrate(directory.clone(), previous.clone()) {
                 Ok(migrated) => migrated,
-                Err(error) if error.code() == ErrorCode::OperationBusy => (directory, previous),
+                Err(error) if error.code() == ErrorCode::OperationBusy => {
+                    if erasure::pending(&self.paths)?
+                        .iter()
+                        .any(|intent| intent.record.id == record.id)
+                    {
+                        return Err(error);
+                    }
+                    (directory, previous)
+                }
                 Err(error) => return Err(error),
             };
             if record.directory_name.is_some() && record.directory_name != previous.directory_name {
@@ -536,7 +572,14 @@ impl InstanceRegistry {
     /// Catalog changes update availability, never the assigned directory or pin.
     pub fn remember_catalog(&self, records: &[CatalogInstance]) -> Result<(), CoreError> {
         PrivateStore::open(&self.paths)?.with_lock(|_| {
+            let pending = erasure::pending(&self.paths)?;
             for (directory, installed) in self.scan()? {
+                if pending
+                    .iter()
+                    .any(|intent| intent.record.id == installed.id)
+                {
+                    continue;
+                }
                 let Some(remote) = records.iter().find(|remote| remote.id == installed.id) else {
                     continue;
                 };
@@ -579,13 +622,38 @@ pub enum Availability {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct InstalledLoader {
+    pub name: String,
+    pub version: String,
+}
+
+impl InstalledLoader {
+    /// The caller reads and validates the manifest once before exposing hints.
+    fn from_manifest(installed: &crate::minecraft::install::InstalledLock) -> Option<Self> {
+        if installed.schema_version != 2 {
+            return None;
+        }
+        installed.plan.loader.as_ref().map(|loader| Self {
+            name: loader.kind().to_owned(),
+            version: loader.version().to_owned(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct InstanceView {
     #[serde(flatten)]
     pub catalog: CatalogInstance,
     pub availability: Availability,
     pub local_state: InstallationState,
     pub installed_version: Option<String>,
+    /// What the installation was made from; for a pack, its pin and label.
+    pub installed_source: Option<CatalogSource>,
     pub has_installation_manifest: bool,
+    pub removal_pending: bool,
+    /// Presentation metadata only; no paths, arguments or session data.
+    pub installed_loader: Option<InstalledLoader>,
     pub compatible: bool,
     pub supported: bool,
 }
@@ -599,7 +667,11 @@ pub struct CatalogOverview {
     pub registry_warning: Option<ErrorCode>,
 }
 
-pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError> {
+/// `auth` is the member's credentials: restricted instances are only listed to them.
+pub async fn load_catalog(
+    paths: AppPaths,
+    auth: Option<PanitaCredentials>,
+) -> Result<CatalogOverview, CoreError> {
     let store = PrivateStore::open(&paths)?;
     let registry = InstanceRegistry::new(paths.clone());
     let (mut local, migration_warning) = registry.load_for_overview()?;
@@ -619,7 +691,10 @@ pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError>
         local = registry.load()?;
     }
     let version = Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?;
-    let remote = crate::catalog::CatalogClient::new()?.refresh(&store).await;
+    let remote = crate::catalog::CatalogClient::new()?
+        .with_auth(auth)
+        .refresh(&store)
+        .await;
     let mut overview = match remote {
         Ok(snapshot) => {
             let registry_warning = if snapshot.stale {
@@ -653,14 +728,25 @@ pub async fn load_catalog(paths: AppPaths) -> Result<CatalogOverview, CoreError>
         }
         Err(error) => return Err(error),
     };
+    let pending = erasure::pending(&paths)?;
     if migration_warning.is_none() {
         for view in &mut overview.instances {
+            if pending
+                .iter()
+                .any(|intent| intent.record.id == view.catalog.id)
+            {
+                view.removal_pending = true;
+                view.local_state = InstallationState::Failed;
+                continue;
+            }
             if local.iter().any(|record| record.id == view.catalog.id) {
-                match crate::minecraft::maintenance::has_installation_manifest(
-                    &paths,
-                    view.catalog.id,
-                ) {
-                    Ok(has_manifest) => view.has_installation_manifest = has_manifest,
+                match crate::minecraft::maintenance::installation_manifest(&paths, view.catalog.id)
+                {
+                    Ok(manifest) => {
+                        view.has_installation_manifest = manifest.is_some();
+                        view.installed_loader =
+                            manifest.as_ref().and_then(InstalledLoader::from_manifest);
+                    }
                     Err(error) => {
                         overview.registry_warning.get_or_insert(error.code());
                     }
@@ -725,12 +811,12 @@ fn view(
     client: &Version,
 ) -> InstanceView {
     let compatible = catalog.compatible_with(client);
-    let supported = matches!(catalog.source, CatalogSource::Vanilla { .. }) && !catalog.restricted;
+    let supported = catalog.source.installable();
     let local_state = installed.map_or(InstallationState::NotInstalled, |record| {
         if matches!(
             record.state,
             InstallationState::Installed | InstallationState::UpdateAvailable
-        ) && record.resolved_source != catalog.source
+        ) && !record.resolved_source.same_pin(&catalog.source)
         {
             InstallationState::UpdateAvailable
         } else if record.state == InstallationState::UpdateAvailable {
@@ -748,7 +834,10 @@ fn view(
         availability,
         local_state,
         installed_version,
+        installed_source: installed.map(|record| record.resolved_source.clone()),
         has_installation_manifest: false,
+        removal_pending: false,
+        installed_loader: None,
         compatible,
         supported,
     }

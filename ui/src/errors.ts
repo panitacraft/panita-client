@@ -2,7 +2,7 @@ export type LauncherErrorCode =
   | 'world_backup_unsafe' | 'update_selection_changed'
   | 'invalid_data'
   | 'permission_denied'
-  | 'storage_unavailable'
+  | 'storage_unavailable' | 'storage_read_only' | 'storage_busy'
   | 'storage_commit_uncertain'
   | 'native_cleanup_incomplete'
   | 'network_unavailable' | 'authentication_required' | 'account_not_found'
@@ -13,7 +13,12 @@ export type LauncherErrorCode =
   | 'accounts_file_invalid' | 'callback_not_active' | 'unsafe_permissions'
   | 'instance_disabled' | 'instance_missing' | 'unsupported_instance'
   | 'artifact_mismatch' | 'runtime_unsupported' | 'insufficient_space'
-  | 'process_start_failed' | 'process_control_failed' | 'catalog_confirmation_required';
+  | 'process_start_failed' | 'process_control_failed' | 'loader_processor_failed' | 'loader_processor_timeout' | 'catalog_confirmation_required'
+  | 'activation_required' | 'activation_unavailable' | 'activation_unknown_account'
+  | 'activation_not_activated' | 'activation_rate_limited' | 'activation_expired'
+  | 'activation_consumed' | 'activation_file_invalid' | 'session_rejected' | 'api_key_rejected'
+  | 'manual_files_required' | 'pack_conflict' | 'update_required'
+  | 'launcher_update_required' | 'launcher_update_unsupported' | 'launcher_update_failed';
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
@@ -23,6 +28,8 @@ const messages: Record<LauncherErrorCode, string> = {
   catalog_confirmation_required: 'No pudimos comprobar el estado actual de esta instancia. Confirma la advertencia para jugar con la instalación local.',
   process_start_failed: 'No pudimos iniciar Minecraft. Revisa la instalación e inténtalo de nuevo.',
   process_control_failed: 'No pudimos confirmar el estado de Minecraft. Revisa si sigue abierto antes de intentarlo de nuevo.',
+  loader_processor_failed: 'No pudimos preparar NeoForge. La instalación anterior se conserva. Inténtalo de nuevo.',
+  loader_processor_timeout: 'NeoForge tardó demasiado en prepararse. La instalación anterior se conserva. Inténtalo de nuevo.',
   insufficient_space: 'No hay suficiente espacio disponible. Libera espacio e inténtalo de nuevo.',
   artifact_mismatch: 'Un archivo descargado no coincide con el original. Inténtalo de nuevo.',
   runtime_unsupported: 'No hay un Java compatible disponible para esta versión y plataforma.',
@@ -31,6 +38,8 @@ const messages: Record<LauncherErrorCode, string> = {
   unsupported_instance: 'Esta instancia requiere otra versión o funciones que todavía no están disponibles.',
   invalid_data: 'No pudimos validar los datos recibidos o guardados. Inténtalo de nuevo.',
   permission_denied: 'No pudimos acceder a los datos locales. Revisa los permisos e inténtalo de nuevo.',
+  storage_read_only: 'La unidad está en modo de solo lectura. Comprueba su protección contra escritura e inténtalo de nuevo.',
+  storage_busy: 'El sistema indica que un archivo está en uso. Cierra Minecraft u otros programas que usen la carpeta e inténtalo de nuevo.',
   storage_unavailable: 'Los datos locales no están disponibles. Inténtalo de nuevo.',
   storage_commit_uncertain: 'No pudimos confirmar si se guardaron los datos. Reinicia el cliente y compruébalo.',
   network_unavailable: 'No pudimos conectar con el servicio. Revisa tu conexión e inténtalo de nuevo.',
@@ -46,11 +55,27 @@ const messages: Record<LauncherErrorCode, string> = {
   minecraft_not_owned: 'Esta cuenta no tiene un perfil de Minecraft Java disponible. Comprueba tu licencia y crea el perfil.',
   operation_busy: 'Hay una operación de inicio de sesión en curso. Espera o cancélala.',
   operation_cancelled: 'La operación se canceló. Puedes intentarlo de nuevo.',
-  accounts_file_invalid: 'El archivo de cuentas está dañado o pertenece a una versión no compatible. No lo modificamos para proteger tus datos. Cierra el cliente y restaura una copia de accounts.json en la carpeta PanitaClient de tus datos de aplicación, o elimínalo para empezar de nuevo.',
-  unsafe_permissions: 'La carpeta de datos de Panita Client o uno de sus archivos tiene permisos que otros usuarios podrían leer, así que no lo usamos. Restaura los permisos para que solo tu usuario tenga acceso y vuelve a intentarlo.',
+  accounts_file_invalid: 'El archivo de cuentas está dañado o no es compatible. Cierra el cliente y restaura una copia de accounts.json (o elimínalo para empezar de nuevo) en la carpeta PanitaClient de tus datos de aplicación.',
+  unsafe_permissions: 'No pudimos usar un archivo protegido o su carpeta porque sus permisos no son seguros. Revisa que otras cuentas no puedan leerlo ni reemplazarlo y vuelve a intentarlo.',
   callback_not_active: 'Se ignoró un regreso del navegador que ya no estaba activo. Si querías iniciar sesión, vuelve a intentarlo.',
   callback_registration_failed: 'No pudimos configurar el regreso desde el navegador. Reinicia el cliente e inténtalo de nuevo.',
   browser_unavailable: 'No pudimos abrir el navegador del sistema. Revisa tu navegador predeterminado e inténtalo de nuevo.',
+  activation_required: 'Activa Panita Client con tu cuenta de Panitacraft para continuar.',
+  activation_unavailable: 'Esta copia de Panita Client no puede activarse. Instala la versión oficial.',
+  activation_unknown_account: 'No encontramos una cuenta de Panitacraft con ese nombre. Revisa tu nombre de Minecraft o de Discord.',
+  activation_not_activated: 'Tu cuenta de Panitacraft todavía no está activada. Actívala con /register en el servidor de Discord y vuelve a intentarlo.',
+  activation_rate_limited: 'Tienes demasiados códigos pendientes.',
+  activation_expired: 'El código venció. Pide uno nuevo.',
+  activation_consumed: 'Este código ya no es válido. Pide uno nuevo.',
+  activation_file_invalid: 'El archivo de sesión está dañado o no es compatible. Cierra el cliente y elimina panita-session.json (archivo oculto) en la carpeta de los datos de la aplicación.',
+  session_rejected: 'Tu sesión de Panitacraft se cerró. Actívala de nuevo para continuar.',
+  api_key_rejected: 'El servicio rechazó esta versión de Panita Client. Instala la versión más reciente.',
+  manual_files_required: 'Faltan archivos que debes descargar tú mismo. Complétalos para poder jugar.',
+  pack_conflict: 'Ya existen archivos tuyos donde este modpack necesita instalar los suyos. No cambiamos nada: revisa la lista, muévelos o elimínalos y vuelve a instalar.',
+  update_required: 'Actualiza esta instancia antes de jugar.',
+  launcher_update_required: 'Actualiza Panita Client antes de jugar.',
+  launcher_update_unsupported: 'Esta instalación no puede actualizarse sola. Instala la versión nueva desde la página de la versión.',
+  launcher_update_failed: 'No se pudo actualizar Panita Client. Inténtalo de nuevo.',
 };
 
 export function messageForError(error: unknown): string {

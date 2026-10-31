@@ -59,6 +59,30 @@ fn path_text(path: &Path) -> Result<String, CoreError> {
     Ok(text.to_owned())
 }
 
+/// Discord shows the official "Playing Minecraft" status for a Windows `javaw.exe`
+/// whose command line names the vanilla main class. A loader starts another main
+/// class, so it is named in an inert system property, as Fabric's own profile does.
+const DISCORD_MAIN_CLASS: &str = "net.minecraft.client.main.Main";
+const DISCORD_HINT: &str = "-Dpanita.discord= net.minecraft.client.main.Main ";
+
+/// The runtime executable to start. On Windows this is `javaw.exe` when the
+/// verified runtime lists it, which is the process Discord recognizes; it is the
+/// same JVM without a console. Anywhere else, or without it, the recorded
+/// `java` executable is used unchanged.
+fn launch_executable(plan: &super::plan::InstallPlan) -> &str {
+    plan.java_executable
+        .strip_suffix("java.exe")
+        .and_then(|directory| {
+            plan.artifacts.iter().find(|artifact| {
+                artifact.executable
+                    && artifact.destination.strip_prefix(directory) == Some("javaw.exe")
+            })
+        })
+        .map_or(plan.java_executable.as_str(), |artifact| {
+            artifact.destination.as_str()
+        })
+}
+
 /// A limited JVM option grammar prevents user settings from replacing the
 /// classpath, main class, managed heap/native paths, or injecting argument files.
 /// Construct direct process arguments from the installed manifest. Filesystem
@@ -138,12 +162,33 @@ pub fn build_command(
         _ => return Err(CoreError::new(ErrorCode::RuntimeUnsupported)),
     };
     let version = &plan.version;
-    let mut classpath = version
-        .classpath
-        .iter()
-        .map(|artifact| path_text(&paths.root().join(plan.library_path(artifact)?)))
-        .collect::<Result<Vec<_>, CoreError>>()?;
-    classpath.push(path_text(&paths.root().join(plan.client_path()?))?);
+    let loader = plan.loader.as_ref();
+    if loader.is_some()
+        && settings.extra_jvm_args.iter().any(|arg| {
+            matches!(
+                arg.split('=').next().unwrap_or_default(),
+                "-DlibraryDirectory" | "-DignoreList" | "-Djdk.module.path" | "-Djava.module.path"
+            )
+        })
+    {
+        return Err(invalid());
+    }
+    let classpath = match loader {
+        Some(loader) => loader
+            .classpath(paths, plan)?
+            .iter()
+            .map(|path| path_text(path))
+            .collect::<Result<Vec<_>, _>>()?,
+        None => {
+            let mut classpath = version
+                .classpath
+                .iter()
+                .map(|artifact| path_text(&paths.root().join(plan.library_path(artifact)?)))
+                .collect::<Result<Vec<_>, CoreError>>()?;
+            classpath.push(path_text(&paths.root().join(plan.client_path()?))?);
+            classpath
+        }
+    };
     if classpath.iter().any(|path| path.contains(separator)) {
         return Err(invalid());
     }
@@ -159,7 +204,13 @@ pub fn build_command(
         ("auth_xuid".into(), xuid.to_owned()),
         ("user_type".into(), user_type.into()),
         ("user_properties".into(), "{}".into()),
-        ("version_name".into(), version.id.clone()),
+        (
+            "version_name".into(),
+            loader.map_or_else(
+                || version.id.clone(),
+                |loader| loader.profile_id().to_owned(),
+            ),
+        ),
         ("version_type".into(), version.kind.clone()),
         ("game_directory".into(), path_text(game_directory)?),
         (
@@ -170,7 +221,10 @@ pub fn build_command(
         ("natives_directory".into(), path_text(&native_directory)?),
         (
             "library_directory".into(),
-            path_text(&paths.root().join("libraries"))?,
+            path_text(&loader.map_or_else(
+                || paths.root().join("libraries"),
+                |loader| loader.library_directory(paths),
+            ))?,
         ),
         ("classpath".into(), classpath.join(&separator.to_string())),
         ("classpath_separator".into(), separator.to_string()),
@@ -204,7 +258,7 @@ pub fn build_command(
             return Err(invalid());
         }
         let mut command = LaunchCommand {
-            executable: paths.root().join(&plan.java_executable),
+            executable: paths.root().join(launch_executable(plan)),
             directory: game_directory.to_owned(),
             args: arguments(&metadata.jvm, &launch_platform, &replacements)?,
             redactions: if account.kind == AccountKind::Microsoft {
@@ -213,6 +267,11 @@ pub fn build_command(
                 Vec::new()
             },
         };
+        if let Some(loader) = loader {
+            for argument in loader.jvm_arguments() {
+                command.args.push(substitute(argument, &replacements)?);
+            }
+        }
         if let Some(logging) = &version.logging {
             let path = path_text(&paths.root().join(format!(
                 "assets/log_configs/{}-{}",
@@ -225,10 +284,26 @@ pub fn build_command(
         }
         command.args.extend(settings.extra_jvm_args.clone());
         command.args.push(format!("-Xmx{}M", settings.ram_mib));
-        command.args.push(version.main_class.clone());
+        if loader.is_some()
+            && !command
+                .args
+                .iter()
+                .any(|argument| argument.contains(DISCORD_MAIN_CLASS))
+        {
+            command.args.push(DISCORD_HINT.to_owned());
+        }
+        command.args.push(loader.map_or_else(
+            || version.main_class.clone(),
+            |loader| loader.main_class().to_owned(),
+        ));
         command
             .args
             .extend(arguments(&metadata.game, &launch_platform, &replacements)?);
+        if let Some(loader) = loader {
+            for argument in loader.game_arguments() {
+                command.args.push(substitute(argument, &replacements)?);
+            }
+        }
         if command.args.len() > 4096
             || command
                 .args

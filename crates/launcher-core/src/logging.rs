@@ -1,10 +1,13 @@
 use serde::Serialize;
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::error::ErrorCode;
 use crate::operation::{OperationId, ProcessSessionId};
+use crate::session_log::{self, Level, SessionFile};
 
 const MAX_EVENTS: usize = 256;
 
@@ -36,14 +39,43 @@ pub enum WorkflowPhase {
     Cancelled,
 }
 
+/// Fixed browser launch stages; never include URLs or native error messages.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrowserLaunchEvent {
+    DispatchFailed,
+    ContextUnavailable,
+    GioFailed,
+    SystemOpenerFailed,
+    SystemOpenerTimedOut,
+    FallbackSucceeded,
+}
+
+impl BrowserLaunchEvent {
+    fn name(self) -> &'static str {
+        match self {
+            Self::DispatchFailed => "browser_dispatch_failed",
+            Self::ContextUnavailable => "browser_context_unavailable",
+            Self::GioFailed => "browser_gio_failed",
+            Self::SystemOpenerFailed => "browser_system_opener_failed",
+            Self::SystemOpenerTimedOut => "browser_system_opener_timed_out",
+            Self::FallbackSucceeded => "browser_fallback_succeeded",
+        }
+    }
+}
+
 /// Events contain only fixed identifiers and error codes. There is no API for
 /// arbitrary messages, request URLs, account data, or token-bearing errors.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LogEvent {
     ApplicationStarted,
+    BrowserLaunch(BrowserLaunchEvent),
     OperationCancelled,
     StorageFailure(ErrorCode),
     CatalogFailure(ErrorCode),
+    /// A Panita activation step failed or the session ended. Never the account,
+    /// serial, token or service response, only the fixed error code.
+    ActivationFailure(ErrorCode),
+    LauncherUpdateFailure(ErrorCode),
     WorkflowChanged {
         request: Uuid,
         workflow: Workflow,
@@ -57,6 +89,8 @@ pub enum LogEvent {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiagnosticRecord {
+    /// Milliseconds since the Unix epoch when the event was recorded.
+    at: u64,
     process_session_id: Uuid,
     operation_id: Option<Uuid>,
     event: &'static str,
@@ -81,7 +115,15 @@ pub struct LogRecord {
 
 #[derive(Default)]
 pub struct BoundedLog {
-    records: Mutex<VecDeque<LogRecord>>,
+    records: Mutex<VecDeque<(SystemTime, LogRecord)>>,
+    file: Mutex<Option<SessionFile>>,
+}
+
+fn name_of(value: &impl Serialize) -> String {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::String(text)) => text,
+        _ => String::from("unknown"),
+    }
 }
 
 impl BoundedLog {
@@ -93,10 +135,119 @@ impl BoundedLog {
         if records.len() == MAX_EVENTS {
             records.pop_front();
         }
-        records.push_back(record);
+        records.push_back((SystemTime::now(), record));
+        drop(records);
+        let view = Self::view_of(record);
+        self.write_file(Self::level_of(&view, &record), &Self::describe(&view));
+    }
+
+    /// Start this process's log file in `directory`, replaying events already held
+    /// in memory. On failure in-memory diagnostics keep working.
+    pub fn attach_file(
+        &self,
+        directory: &Path,
+        process: ProcessSessionId,
+        header: &[String],
+    ) -> Option<PathBuf> {
+        let mut file = SessionFile::create(directory, process).ok()?;
+        file.write(
+            Level::Info,
+            &format!("session started process={}", process.value()),
+        );
+        for line in header {
+            file.write(Level::Info, &session_log::redact(line));
+        }
+        for (at, record) in self.timed_snapshot() {
+            let view = Self::view_of(record);
+            file.write_at(at, Self::level_of(&view, &record), &Self::describe(&view));
+        }
+        let path = file.path().to_path_buf();
+        *self
+            .file
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = Some(file);
+        Some(path)
+    }
+
+    /// Record a free-text note in the session file only. The text is redacted and
+    /// bounded; it never enters the in-memory view.
+    pub fn note(&self, level: Level, message: &str) {
+        self.write_file(level, &session_log::redact(message));
+    }
+
+    /// Record a player or client action and its outcome. `what` must be a fixed
+    /// description without account names, serials or other personal data.
+    pub fn action<T>(&self, what: &str, result: &Result<T, ErrorCode>) {
+        match result {
+            Ok(_) => self.note(Level::Info, &format!("{what} ok")),
+            Err(code) => self.note(
+                Level::Warn,
+                &format!("{what} failed error={}", name_of(code)),
+            ),
+        }
+    }
+
+    fn write_file(&self, level: Level, text: &str) {
+        if let Some(file) = self
+            .file
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .as_mut()
+        {
+            file.write(level, text);
+        }
+    }
+
+    fn level_of(view: &DiagnosticRecord, record: &LogRecord) -> Level {
+        if view.error.is_some()
+            && !matches!(
+                record.event,
+                LogEvent::BrowserLaunch(_) | LogEvent::OperationCancelled
+            )
+            || matches!(
+                view.phase,
+                Some(WorkflowPhase::Failed | WorkflowPhase::ExitedWithError)
+            )
+        {
+            Level::Error
+        } else if matches!(
+            view.phase,
+            Some(WorkflowPhase::Warning | WorkflowPhase::Cancelled | WorkflowPhase::Cancelling)
+        ) || matches!(
+            record.event,
+            LogEvent::OperationCancelled | LogEvent::BrowserLaunch(_)
+        ) {
+            Level::Warn
+        } else {
+            Level::Info
+        }
+    }
+
+    fn describe(view: &DiagnosticRecord) -> String {
+        let mut text = view.event.to_owned();
+        if let Some(workflow) = &view.workflow {
+            text.push_str(&format!(" workflow={}", name_of(workflow)));
+        }
+        if let Some(phase) = &view.phase {
+            text.push_str(&format!(" phase={}", name_of(phase)));
+        }
+        if let Some(error) = &view.error {
+            text.push_str(&format!(" error={}", name_of(error)));
+        }
+        if let Some(operation) = view.operation_id {
+            text.push_str(&format!(" operation={operation}"));
+        }
+        text
     }
 
     pub fn snapshot(&self) -> Vec<LogRecord> {
+        self.timed_snapshot()
+            .into_iter()
+            .map(|(_, record)| record)
+            .collect()
+    }
+
+    fn timed_snapshot(&self) -> Vec<(SystemTime, LogRecord)> {
         self.records
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
@@ -107,10 +258,27 @@ impl BoundedLog {
 
     pub fn view(&self) -> DiagnosticSnapshot {
         let records = self
-            .snapshot()
+            .timed_snapshot()
             .into_iter()
-            .map(|record| {
+            .map(|(at, record)| {
+                let mut view = Self::view_of(record);
+                view.at = at
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(0));
+                view
+            })
+            .collect();
+        DiagnosticSnapshot {
+            capacity: MAX_EVENTS,
+            records,
+        }
+    }
+
+    fn view_of(record: LogRecord) -> DiagnosticRecord {
+        {
+            {
                 let mut view = DiagnosticRecord {
+                    at: 0,
                     process_session_id: record.process.value(),
                     operation_id: record.operation.map(OperationId::value),
                     event: "application_started",
@@ -120,6 +288,16 @@ impl BoundedLog {
                 };
                 match record.event {
                     LogEvent::ApplicationStarted => (),
+                    LogEvent::BrowserLaunch(event) => {
+                        view.event = event.name();
+                        if !matches!(
+                            event,
+                            BrowserLaunchEvent::FallbackSucceeded
+                                | BrowserLaunchEvent::ContextUnavailable
+                        ) {
+                            view.error = Some(ErrorCode::BrowserUnavailable);
+                        }
+                    }
                     LogEvent::OperationCancelled => view.event = "operation_cancelled",
                     LogEvent::StorageFailure(code) => {
                         view.event = "storage_failure";
@@ -127,6 +305,14 @@ impl BoundedLog {
                     }
                     LogEvent::CatalogFailure(code) => {
                         view.event = "catalog_failure";
+                        view.error = Some(code);
+                    }
+                    LogEvent::ActivationFailure(code) => {
+                        view.event = "activation_failure";
+                        view.error = Some(code);
+                    }
+                    LogEvent::LauncherUpdateFailure(code) => {
+                        view.event = "launcher_update_failure";
                         view.error = Some(code);
                     }
                     LogEvent::WorkflowChanged {
@@ -143,11 +329,7 @@ impl BoundedLog {
                     }
                 }
                 view
-            })
-            .collect();
-        DiagnosticSnapshot {
-            capacity: MAX_EVENTS,
-            records,
+            }
         }
     }
 }
@@ -155,6 +337,43 @@ impl BoundedLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_diagnostics_contain_only_fixed_stages_and_public_identifiers() {
+        let log = BoundedLog::default();
+        let events = [
+            BrowserLaunchEvent::DispatchFailed,
+            BrowserLaunchEvent::ContextUnavailable,
+            BrowserLaunchEvent::GioFailed,
+            BrowserLaunchEvent::SystemOpenerFailed,
+            BrowserLaunchEvent::SystemOpenerTimedOut,
+            BrowserLaunchEvent::FallbackSucceeded,
+        ];
+        for event in events {
+            log.record(LogRecord {
+                process: ProcessSessionId::new(),
+                operation: None,
+                event: LogEvent::BrowserLaunch(event),
+            });
+        }
+        let value = serde_json::to_value(log.view()).unwrap_or_else(|_| panic!("serialize"));
+        for (index, event) in events.into_iter().enumerate() {
+            let record = &value["records"][index];
+            assert_eq!(record["event"], event.name());
+            assert_eq!(
+                record["error"],
+                if matches!(
+                    event,
+                    BrowserLaunchEvent::FallbackSucceeded | BrowserLaunchEvent::ContextUnavailable
+                ) {
+                    serde_json::Value::Null
+                } else {
+                    serde_json::json!("browser_unavailable")
+                }
+            );
+            assert_eq!(record.as_object().map(|object| object.len()), Some(7));
+        }
+    }
 
     #[test]
     fn ring_keeps_only_the_last_256_structured_events() {
@@ -175,6 +394,22 @@ mod tests {
         let records = log.snapshot();
         assert_eq!(records.len(), MAX_EVENTS);
         assert_ne!(records[0].operation, Some(first));
+    }
+
+    #[test]
+    fn activation_failures_expose_only_a_fixed_event_and_an_error_code() {
+        let log = BoundedLog::default();
+        log.record(LogRecord {
+            process: ProcessSessionId::new(),
+            operation: None,
+            event: LogEvent::ActivationFailure(ErrorCode::SessionRejected),
+        });
+        let value = serde_json::to_value(log.view()).unwrap_or_else(|_| panic!("serialize"));
+        let record = &value["records"][0];
+        assert_eq!(record["event"], "activation_failure");
+        assert_eq!(record["error"], "session_rejected");
+        assert_eq!(record["operationId"], serde_json::Value::Null);
+        assert_eq!(record["workflow"], serde_json::Value::Null);
     }
 
     #[test]
@@ -206,6 +441,7 @@ mod tests {
         assert_eq!(
             keys,
             [
+                "at",
                 "error",
                 "event",
                 "operationId",

@@ -62,8 +62,38 @@ fn snapshot(app: &tauri::AppHandle, instance_id: Option<Uuid>) -> Result<Value, 
         .map_err(|_| ErrorCode::StorageUnavailable)?
         .warning;
     Ok(
-        json!({ "global": global, "instance": instance, "instanceId": instance_id, "windowWarning": warning }),
+        json!({ "global": global, "instance": instance, "instanceId": instance_id, "windowWarning": warning, "trayAvailable": super::tray::available() }),
     )
+}
+
+#[tauri::command]
+pub(super) fn save_tray_preferences(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+    close_to_tray: bool,
+    hide_on_game_start: bool,
+    reopen_on_game_exit: bool,
+) -> Result<(), ErrorCode> {
+    account_commands::controller(&state)?;
+    let (_, store) = store(&app)?;
+    let saved = GlobalSettings::save_tray_preferences(
+        &store,
+        close_to_tray,
+        hide_on_game_start,
+        reopen_on_game_exit,
+    )
+    .map(|_| ())
+    .map_err(|error| error.code());
+    state.logs.action("tray preferences saved", &saved);
+    if saved.is_ok() {
+        state.logs.note(
+            launcher_core::session_log::Level::Info,
+            &format!(
+                "tray preferences changed close_to_tray={close_to_tray}; hide_on_game_start={hide_on_game_start}; reopen_on_game_exit={reopen_on_game_exit}"
+            ),
+        );
+    }
+    saved
 }
 
 #[tauri::command]
@@ -84,9 +114,21 @@ pub(super) fn save_global_settings(
 ) -> Result<(), ErrorCode> {
     account_commands::controller(&state)?;
     let (_, store) = store(&app)?;
-    settings
+    let previous = GlobalSettings::load(&store).ok();
+    let saved = settings
         .save_launch_settings(&store)
-        .map_err(|error| error.code())?;
+        .map_err(|error| error.code());
+    state.logs.action("global settings saved", &saved);
+    saved?;
+    if let Some(previous) = previous {
+        let changes = launcher_core::session_log::changes(&previous, &settings, &["launcher"]);
+        if !changes.is_empty() {
+            state.logs.note(
+                launcher_core::session_log::Level::Info,
+                &format!("global settings changed {}", changes.join("; ")),
+            );
+        }
+    }
     Ok(())
 }
 
@@ -103,9 +145,29 @@ pub(super) fn save_instance_settings(
     settings
         .validate_launch(&global)
         .map_err(|error| error.code())?;
-    InstanceRegistry::new(paths)
+    let registry = InstanceRegistry::new(paths);
+    let previous = registry.load_settings(instance_id).ok();
+    let saved = registry
         .save_settings(instance_id, &settings)
-        .map_err(|error| error.code())
+        .map_err(|error| error.code());
+    state
+        .logs
+        .action(&format!("instance {instance_id} settings saved"), &saved);
+    if saved.is_ok()
+        && let Some(previous) = previous
+    {
+        let changes = launcher_core::session_log::changes(&previous, &settings, &[]);
+        if !changes.is_empty() {
+            state.logs.note(
+                launcher_core::session_log::Level::Info,
+                &format!(
+                    "instance {instance_id} settings changed {}",
+                    changes.join("; ")
+                ),
+            );
+        }
+    }
+    saved
 }
 
 #[tauri::command]
@@ -139,7 +201,7 @@ pub(super) fn restore_window(app: &tauri::AppHandle, settings: &GlobalSettings) 
     drop(memory);
     let warning = if let Some(saved) = &settings.launcher.window {
         let result = window
-            .set_size(tauri::LogicalSize::new(saved.width, saved.height))
+            .set_size(tauri::LogicalSize::new(saved.width, saved.height.max(700)))
             .and_then(|()| {
                 if saved.maximized {
                     window.maximize()

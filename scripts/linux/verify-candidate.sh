@@ -2,7 +2,13 @@
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$root"
-if [[ -n "${RELEASE_TAG:-}" ]]; then
+suffix=
+if [[ "${LOADER_VALIDATION:-}" = 1 ]]; then
+  test -z "${RELEASE_TAG:-}"
+  version=$(node -p "require('./desktop/tauri.beta.conf.json').version")
+  artifact="$root/target/loader-validation/$version/linux"
+  suffix=_loader-validation
+elif [[ -n "${RELEASE_TAG:-}" ]]; then
   version=$(node scripts/release-version.mjs "$RELEASE_TAG")
   artifact="$root/target/releases/$version/linux"
 else
@@ -14,8 +20,8 @@ mkdir -p "$artifact/verification"
 cat /etc/os-release > "$artifact/verification/build-os.txt"
 { rustc --version; cargo --version; node --version; pnpm --version; } > "$artifact/verification/toolchain.txt"
 dpkg-query -W > "$artifact/verification/build-packages.txt"
-package="$artifact/panita-client_${version}_linux_x64_unsigned.deb"
-appimage="$artifact/panita-client_${version}_linux_x64_unsigned.AppImage"
+package="$artifact/panita-client_${version}_linux_x64_unsigned${suffix}.deb"
+appimage="$artifact/panita-client_${version}_linux_x64_unsigned${suffix}.AppImage"
 test -f "$package"
 test -f "$appimage"
 check_dir=$(mktemp -d)

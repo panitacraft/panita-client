@@ -494,6 +494,7 @@ impl LineBuffer {
                 "access_token",
                 "refresh_token",
                 "authorization",
+                "x-api-key",
                 "bearer ",
                 "panitacraft://",
                 "oauth/callback",

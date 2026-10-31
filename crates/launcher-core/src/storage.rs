@@ -10,6 +10,10 @@ use crate::paths::AppPaths;
 const MAX_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const LOCK_NAME: &str = ".mutation.lock";
 
+#[cfg(windows)]
+#[path = "storage_windows.rs"]
+mod windows;
+
 /// A private application-data root. All writers must use `transaction` so
 /// separate launcher processes serialize read-modify-write operations.
 pub struct PrivateStore {
@@ -25,10 +29,12 @@ pub struct StoreTransaction<'a> {
 
 impl StoreTransaction<'_> {
     pub fn read(&self, name: &'static str) -> Result<Option<Vec<u8>>, CoreError> {
+        self.store.check_secret_namespace(name)?;
         read_file(&self.store.root, Path::new(name))
     }
 
     pub fn write(&self, name: &'static str, bytes: &[u8]) -> Result<(), CoreError> {
+        self.store.check_secret_namespace(name)?;
         if bytes.len() as u64 > MAX_DOCUMENT_BYTES {
             return Err(CoreError::new(ErrorCode::InvalidData));
         }
@@ -38,9 +44,22 @@ impl StoreTransaction<'_> {
             .map_err(map_private_error)
     }
 
+    /// Cosmetic only: hide a data file in Explorer without changing its permissions.
+    /// An atomic replacement publishes a new file, so callers repeat this after writing.
+    #[cfg(windows)]
+    pub(crate) fn hide(&self, name: &'static str) -> Result<(), CoreError> {
+        self.store.check_secret_namespace(name)?;
+        self.store
+            .root
+            .open_file(name)
+            .and_then(|file| file.set_hidden())
+            .map_err(map_private_error)
+    }
+
     /// Caller holds the writer lock and validates that this document is retired.
     /// Resolve from the retained private root, rejecting redirects and hard links.
     pub(crate) fn remove_verified_file(&self, name: &'static str) -> Result<(), CoreError> {
+        self.store.check_secret_namespace(name)?;
         if name.is_empty() || name.contains(['/', '\\']) {
             return Err(CoreError::new(ErrorCode::InvalidData));
         }
@@ -83,9 +102,18 @@ impl StoreTransaction<'_> {
 }
 
 impl PrivateStore {
+    /// Open the whole application profile and migrate legacy Windows directory
+    /// permissions. Instance metadata stores must use `open` instead.
+    pub fn open_application(paths: &AppPaths) -> Result<Self, CoreError> {
+        let store = Self::open(paths)?;
+        #[cfg(windows)]
+        windows::migrate(&store)?;
+        Ok(store)
+    }
+
     pub fn open(paths: &AppPaths) -> Result<Self, CoreError> {
         let root = PrivateDir::ensure(paths.root()).map_err(map_private_error)?;
-        match root.open_file(LOCK_NAME) {
+        match root.open_data_file(LOCK_NAME) {
             Ok(_) => (),
             Err(PrivateFsError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 match root.create(LOCK_NAME) {
@@ -93,7 +121,7 @@ impl PrivateStore {
                     Err(PrivateFsError::Io(error))
                         if error.kind() == std::io::ErrorKind::AlreadyExists =>
                     {
-                        root.open_file(LOCK_NAME).map_err(map_private_error)?;
+                        root.open_data_file(LOCK_NAME).map_err(map_private_error)?;
                     }
                     Err(error) => return Err(map_private_error(error)),
                 }
@@ -101,12 +129,12 @@ impl PrivateStore {
             Err(error) => return Err(map_private_error(error)),
         }
         #[cfg(windows)]
-        root.open_file(LOCK_NAME)
+        root.open_data_file(LOCK_NAME)
             .and_then(|file| file.set_hidden())
             .map_err(map_private_error)?;
         #[cfg(windows)]
         {
-            match root.open_file(".installation.lock") {
+            match root.open_data_file(".installation.lock") {
                 Ok(file) => file.set_hidden().map_err(map_private_error)?,
                 Err(PrivateFsError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(map_private_error(error)),
@@ -127,7 +155,19 @@ impl PrivateStore {
     }
 
     pub fn read(&self, name: &'static str) -> Result<Option<Vec<u8>>, CoreError> {
+        self.check_secret_namespace(name)?;
         read_file(&self.root, Path::new(name))
+    }
+
+    fn check_secret_namespace(&self, name: &str) -> Result<(), CoreError> {
+        if name.eq_ignore_ascii_case("accounts.json")
+            || name.eq_ignore_ascii_case("panita-session.json")
+        {
+            self.root
+                .verify_private_namespace()
+                .map_err(map_private_error)?;
+        }
+        Ok(())
     }
 
     /// The closure sees the latest durable bytes while the interprocess lock
@@ -159,9 +199,9 @@ impl PrivateStore {
             .write(true)
             .open(&self.lock_path)
             .map_err(map_io_error)?;
-        private_fs::verify(&file).map_err(map_private_error)?;
+        private_fs::verify_data(&file).map_err(map_private_error)?;
         file.lock().map_err(map_io_error)?;
-        private_fs::verify(&file).map_err(map_private_error)?;
+        private_fs::verify_data(&file).map_err(map_private_error)?;
         Ok(file)
     }
 
@@ -216,10 +256,16 @@ fn read_file(root: &PrivateDir, name: &Path) -> Result<Option<Vec<u8>>, CoreErro
     Ok(Some(bytes))
 }
 
-fn map_io_error(error: std::io::Error) -> CoreError {
+pub(crate) fn map_io_error(error: std::io::Error) -> CoreError {
     let code = match error.kind() {
         std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
-        std::io::ErrorKind::StorageFull => ErrorCode::InsufficientSpace,
+        std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded => {
+            ErrorCode::InsufficientSpace
+        }
+        std::io::ErrorKind::ReadOnlyFilesystem => ErrorCode::StorageReadOnly,
+        std::io::ErrorKind::ResourceBusy | std::io::ErrorKind::ExecutableFileBusy => {
+            ErrorCode::StorageBusy
+        }
         _ => ErrorCode::StorageUnavailable,
     };
     CoreError::new(code)
@@ -235,6 +281,7 @@ pub(crate) fn map_private_error(error: PrivateFsError) -> CoreError {
         PrivateFsError::InsecureAcl
         | PrivateFsError::InsecurePermissions { .. }
         | PrivateFsError::OwnerMismatch
+        | PrivateFsError::UntrustedCreationParent
         | PrivateFsError::WrongOwner { .. } => CoreError::new(ErrorCode::UnsafePermissions),
         _ => CoreError::new(ErrorCode::StorageUnavailable),
     }
@@ -245,9 +292,79 @@ mod tests {
     use super::*;
     use uuid::Uuid;
 
+    #[test]
+    fn storage_error_categories_discard_native_messages() {
+        use std::io::ErrorKind;
+        for (kind, expected) in [
+            (ErrorKind::PermissionDenied, ErrorCode::PermissionDenied),
+            (ErrorKind::StorageFull, ErrorCode::InsufficientSpace),
+            (ErrorKind::QuotaExceeded, ErrorCode::InsufficientSpace),
+            (ErrorKind::ReadOnlyFilesystem, ErrorCode::StorageReadOnly),
+            (ErrorKind::ResourceBusy, ErrorCode::StorageBusy),
+            (ErrorKind::ExecutableFileBusy, ErrorCode::StorageBusy),
+            (ErrorKind::Other, ErrorCode::StorageUnavailable),
+        ] {
+            let failure = map_io_error(std::io::Error::new(kind, "sensitive native message"));
+            assert_eq!(failure.code(), expected);
+            assert!(!format!("{failure:?}").contains("sensitive native message"));
+        }
+    }
+
     fn test_paths() -> AppPaths {
         let path = std::env::temp_dir().join(format!("panita-storage-{}", Uuid::new_v4()));
         AppPaths::new(path).unwrap_or_else(|_| panic!("absolute test path"))
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn credential_namespace_allows_readonly_public_modes_but_blocks_other_writers() {
+        use std::os::unix::fs::PermissionsExt;
+        let paths = test_paths();
+        let store = PrivateStore::open(&paths).unwrap_or_else(|_| panic!("private store"));
+        for name in ["accounts.json", "panita-session.json"] {
+            store
+                .transaction(name, |_| Ok((b"synthetic-private-data".to_vec(), ())))
+                .unwrap_or_else(|_| panic!("private fixture"));
+        }
+        std::fs::set_permissions(paths.root(), std::fs::Permissions::from_mode(0o755))
+            .unwrap_or_else(|_| panic!("read-only public parent"));
+        for name in ["accounts.json", "panita-session.json"] {
+            assert_eq!(
+                store.read(name).ok().flatten().as_deref(),
+                Some(b"synthetic-private-data".as_slice())
+            );
+            assert_eq!(
+                std::fs::metadata(paths.root().join(name))
+                    .unwrap_or_else(|_| panic!("file metadata"))
+                    .permissions()
+                    .mode()
+                    & 0o7777,
+                0o600
+            );
+        }
+        std::fs::set_permissions(paths.root(), std::fs::Permissions::from_mode(0o777))
+            .unwrap_or_else(|_| panic!("unsafe parent"));
+        for name in ["accounts.json", "panita-session.json"] {
+            assert_eq!(
+                store.read(name).err().map(|error| error.code()),
+                Some(ErrorCode::UnsafePermissions)
+            );
+            assert!(
+                store
+                    .transaction(name, |_| Ok((b"replacement".to_vec(), ())))
+                    .is_err()
+            );
+            assert_eq!(
+                std::fs::read(paths.root().join(name)).ok().as_deref(),
+                Some(b"synthetic-private-data".as_slice())
+            );
+        }
+        let data = PrivateDir::open_data(paths.root()).unwrap_or_else(|_| panic!("data access"));
+        data.write_atomic_durable("ordinary.dat", b"ordinary bytes")
+            .unwrap_or_else(|_| panic!("ordinary write"));
+        drop(data);
+        drop(store);
+        std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
     }
 
     #[test]

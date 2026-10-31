@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
-use super::{DesktopState, account_commands};
+use super::{DesktopState, account_commands, activation_commands};
 
 #[derive(Clone, Copy, PartialEq)]
 enum OperationKind {
@@ -49,6 +49,8 @@ enum Phase {
     Preparing,
     Installing,
     Installed,
+    /// A modpack is installed except for manual files the player must supply.
+    AwaitingFiles,
     Uninstalled,
     Warning,
     Starting,
@@ -65,7 +67,7 @@ impl Phase {
         match self {
             Self::Preparing => WorkflowPhase::Preparing,
             Self::Installing => WorkflowPhase::Installing,
-            Self::Installed => WorkflowPhase::Installed,
+            Self::Installed | Self::AwaitingFiles => WorkflowPhase::Installed,
             Self::Uninstalled => WorkflowPhase::Uninstalled,
             Self::Warning => WorkflowPhase::Warning,
             Self::Starting => WorkflowPhase::Starting,
@@ -81,7 +83,12 @@ impl Phase {
     fn active(self) -> bool {
         !matches!(
             self,
-            Self::Installed | Self::Uninstalled | Self::Exited | Self::Failed | Self::Cancelled
+            Self::Installed
+                | Self::AwaitingFiles
+                | Self::Uninstalled
+                | Self::Exited
+                | Self::Failed
+                | Self::Cancelled
         )
     }
     fn text(self) -> &'static str {
@@ -89,6 +96,7 @@ impl Phase {
             Self::Preparing => "preparing",
             Self::Installing => "installing",
             Self::Installed => "installed",
+            Self::AwaitingFiles => "awaiting_files",
             Self::Uninstalled => "uninstalled",
             Self::Warning => "warning",
             Self::Starting => "starting",
@@ -100,6 +108,29 @@ impl Phase {
             Self::Cancelled => "cancelled",
         }
     }
+}
+
+/// What a pack installation left for the player to see: missing manual files,
+/// configuration kept whole, or existing files that blocked the install.
+#[derive(Default)]
+struct PackResult {
+    awaiting: Vec<launcher_core::modpack::manual::PendingFile>,
+    skipped: Vec<String>,
+    conflicts: Vec<launcher_core::modpack::diff::Conflict>,
+    /// Player files an update or repair moved to the permanent pack backups.
+    backed_up: Vec<String>,
+    /// Pack files that stopped being managed and stay as the player's.
+    released: Vec<String>,
+}
+
+fn occupied(paths: Vec<String>) -> Vec<launcher_core::modpack::diff::Conflict> {
+    paths
+        .into_iter()
+        .map(|path| launcher_core::modpack::diff::Conflict {
+            path,
+            reason: launcher_core::modpack::diff::Reason::Occupied,
+        })
+        .collect()
 }
 
 struct Entry {
@@ -115,11 +146,15 @@ struct Entry {
     exit: Option<launcher_core::minecraft::process::GameExit>,
     kind: OperationKind,
     backup_requested: bool,
+    erase_requested: bool,
     backup_operation: Option<Uuid>,
     received_files: u64,
     reused_files: u64,
+    artifact_progress: Option<launcher_core::minecraft::download::DownloadProgress>,
     retained_files: u32,
     native_cleanup: Option<launcher_core::minecraft::native_cache::CleanupReport>,
+    pack_progress: Option<launcher_core::modpack::content::PackProgress>,
+    pack: Option<PackResult>,
     last_progress: std::time::Instant,
     last_logged: Option<(WorkflowPhase, Option<ErrorCode>)>,
 }
@@ -132,6 +167,10 @@ struct State {
     closing: bool,
     close_blocked: bool,
     background: bool,
+    /// Hidden to the notification area: the launcher stays alive after the last game exits.
+    keep_alive: bool,
+    /// The window comes back when the last game exits (notification-area behavior only).
+    reopen_armed: bool,
     entries: HashMap<Uuid, Entry>,
 }
 
@@ -202,6 +241,7 @@ impl PlayController {
         let Ok(mut state) = self.state.lock() else {
             return false;
         };
+        let logs = state.logs.clone();
         let Some(entry) = state
             .entries
             .get_mut(&instance)
@@ -210,6 +250,19 @@ impl PlayController {
             return false;
         };
         let unexpected = !exit.success && !entry.exit_expected;
+        logs.note(
+            if unexpected {
+                launcher_core::session_log::Level::Error
+            } else {
+                launcher_core::session_log::Level::Info
+            },
+            &format!(
+                "game exited code={} unexpected={unexpected} requested_stop={}",
+                exit.code
+                    .map_or_else(|| "none".to_owned(), |code| code.to_string()),
+                entry.exit_expected
+            ),
+        );
         entry.phase = Phase::Exited;
         entry.exit = Some(exit);
         entry.game = None;
@@ -331,11 +384,15 @@ impl PlayController {
                 exit: None,
                 kind,
                 backup_requested: false,
+                erase_requested: false,
                 backup_operation: None,
                 received_files: 0,
                 reused_files: 0,
+                artifact_progress: None,
                 retained_files: 0,
                 native_cleanup: None,
+                pack_progress: None,
+                pack: None,
                 last_progress: std::time::Instant::now(),
                 last_logged: None,
             },
@@ -387,6 +444,9 @@ impl PlayController {
         else {
             return false;
         };
+        if !progress.reused {
+            entry.artifact_progress = Some(progress);
+        }
         if progress.bytes == progress.total {
             if progress.reused {
                 entry.reused_files += 1;
@@ -394,7 +454,7 @@ impl PlayController {
                 entry.received_files += 1;
             }
         }
-        // Progress is per artifact, with up to four concurrent downloads. Do not
+        // Progress is per artifact, with bounded concurrent downloads. Do not
         // sum partial byte counts or describe received files as verified yet.
         let publish = entry.last_progress.elapsed() >= std::time::Duration::from_millis(250);
         if publish {
@@ -402,6 +462,42 @@ impl PlayController {
         }
         state.changed();
         publish
+    }
+
+    /// Pack downloads report whole-install file and byte totals.
+    fn pack_progress(
+        &self,
+        instance: Uuid,
+        request: Uuid,
+        progress: launcher_core::modpack::content::PackProgress,
+    ) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        let Some(entry) = state
+            .entries
+            .get_mut(&instance)
+            .filter(|entry| entry.request == request && entry.phase == Phase::Installing)
+        else {
+            return false;
+        };
+        entry.pack_progress = Some(progress);
+        let publish = entry.last_progress.elapsed() >= std::time::Duration::from_millis(250);
+        if publish {
+            entry.last_progress = std::time::Instant::now();
+        }
+        state.changed();
+        publish
+    }
+
+    /// True while any installation is running; the content cache is then in use.
+    pub(super) fn installing(&self) -> bool {
+        self.state.lock().map_or(true, |state| {
+            state
+                .entries
+                .values()
+                .any(|entry| entry.kind == OperationKind::Install && entry.phase.active())
+        })
     }
 
     pub fn snapshot(&self) -> Result<Value, ErrorCode> {
@@ -421,10 +517,17 @@ impl PlayController {
                     "exitExpected": entry.exit_expected,
                     "consoleError": entry.console_error,
                     "operation": entry.kind.text(),
-                    "backupRequested": entry.backup_requested, "backupOperation": entry.backup_operation,
+                    "backupRequested": entry.backup_requested, "eraseRequested": entry.erase_requested, "backupOperation": entry.backup_operation,
                     "receivedFiles": entry.received_files, "reusedFiles": entry.reused_files,
+                    "artifactProgress": entry.artifact_progress.map(|p| json!({"bytes": p.bytes, "total": p.total})),
                     "retainedFiles": entry.retained_files,
                     "nativeCleanup": entry.native_cleanup,
+                    "packProgress": entry.pack_progress.map(|p| json!({"filesDone": p.files_done, "filesTotal": p.files_total, "bytesDone": p.bytes_done, "bytesTotal": p.bytes_total, "reusedFiles": p.reused_files})),
+                    "packAwaiting": entry.pack.as_ref().map(|p| super::pack_commands::files_json(&p.awaiting)).unwrap_or(json!([])),
+                    "packSkipped": entry.pack.as_ref().map(|p| &p.skipped),
+                    "packConflicts": entry.pack.as_ref().map(|p| &p.conflicts),
+                    "packBackedUp": entry.pack.as_ref().map(|p| &p.backed_up),
+                    "packReleased": entry.pack.as_ref().map(|p| &p.released),
                 })
             })
             .collect();
@@ -442,14 +545,22 @@ impl PlayController {
         // thread. Recheck ownership there rather than using a stale snapshot.
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
-            if handle.state::<DesktopState>().plays.finish_background() {
+            let plays = &handle.state::<DesktopState>().plays;
+            if plays.finish_background() {
                 handle.exit(0);
+            } else if plays.take_reopen() {
+                restore_window(&handle, String::new());
             }
         });
     }
 
     /// Called on the UI thread. A failed hide must never enable hidden shutdown.
+    #[cfg(test)]
     fn close_window(&self, hide: impl FnOnce() -> bool) -> bool {
+        self.close_window_with(hide, super::tray::TrayMode::default())
+    }
+
+    fn close_window_with(&self, hide: impl FnOnce() -> bool, tray: super::tray::TrayMode) -> bool {
         let Ok(mut state) = self.state.lock() else {
             return true;
         };
@@ -460,6 +571,8 @@ impl PlayController {
         {
             if hide() {
                 state.background = true;
+                state.keep_alive = tray.close_to_tray;
+                state.reopen_armed = tray.close_to_tray && tray.reopen_on_game_exit;
                 state.close_blocked = false;
                 state.cancel_pending(true);
             } else {
@@ -471,9 +584,85 @@ impl PlayController {
             state.close_blocked = true;
             state.changed();
             true
+        } else if tray.close_to_tray && !state.closing && hide() {
+            // Nothing is running: the launcher waits in the notification area.
+            state.background = true;
+            state.keep_alive = true;
+            state.reopen_armed = false;
+            state.close_blocked = false;
+            state.changed();
+            true
         } else {
             state.closing = true;
             false
+        }
+    }
+
+    /// Hide to the notification area once a game has started. Only while games are the only
+    /// activity: a launch or installation in preparation keeps the window.
+    pub(super) fn hide_for_game(&self, hide: impl FnOnce() -> bool, tray: super::tray::TrayMode) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        let preparing = state.entries.values().any(|entry| {
+            entry.phase.active() && !matches!(entry.phase, Phase::Running | Phase::Stopping)
+        });
+        let running = state
+            .entries
+            .values()
+            .any(|entry| matches!(entry.phase, Phase::Running));
+        if state.closing || preparing || !running || !hide() {
+            return;
+        }
+        state.background = true;
+        state.keep_alive = true;
+        state.reopen_armed = tray.reopen_on_game_exit;
+        state.close_blocked = false;
+        state.changed();
+    }
+
+    /// True when the window should come back because the last game ended while it was hidden.
+    fn take_reopen(&self) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.background
+            && state.keep_alive
+            && state.reopen_armed
+            && !state.closing
+            && !state.entries.values().any(|entry| entry.phase.active())
+        {
+            state.reopen_armed = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Quit from the notification area. Games are separate processes and keep running; an
+    /// installation or launch in preparation is never interrupted.
+    pub(super) fn begin_tray_exit(&self) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.closing {
+            return true;
+        }
+        let busy = state.entries.values().any(|entry| {
+            entry.phase.active() && !matches!(entry.phase, Phase::Running | Phase::Stopping)
+        });
+        if busy {
+            return false;
+        }
+        state.closing = true;
+        true
+    }
+
+    /// Tell the interface why the launcher did not quit; runs after the window is restored.
+    pub(super) fn report_close_blocked(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.close_blocked = true;
+            state.changed();
         }
     }
 
@@ -485,6 +674,8 @@ impl PlayController {
             return false;
         }
         state.background = false;
+        state.keep_alive = false;
+        state.reopen_armed = false;
         state.close_blocked = false;
         state.changed();
         true
@@ -495,6 +686,7 @@ impl PlayController {
             return false;
         };
         if state.background
+            && !state.keep_alive
             && !state.closing
             && !state.entries.values().any(|entry| entry.phase.active())
         {
@@ -510,6 +702,11 @@ impl PlayController {
         let Ok(mut state) = self.state.lock() else {
             return false;
         };
+        // An exit already admitted (idle close or notification-area quit) proceeds even if
+        // games are still running: they are separate processes.
+        if state.closing {
+            return true;
+        }
         if state.entries.values().any(|entry| entry.phase.active()) {
             state.close_blocked = true;
             state.changed();
@@ -517,6 +714,26 @@ impl PlayController {
         } else {
             state.closing = true;
             true
+        }
+    }
+
+    /// Reserve the launcher for a launcher update. It succeeds only while no game or
+    /// operation is active, and then refuses all new work until the reservation ends.
+    pub(super) fn begin_update_apply(&self) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.closing || state.entries.values().any(|entry| entry.phase.active()) {
+            return false;
+        }
+        state.closing = true;
+        true
+    }
+
+    /// End the reservation after an update could not be applied.
+    pub(super) fn cancel_update_apply(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.closing = false;
         }
     }
 
@@ -629,6 +846,7 @@ async fn start_and_monitor(
                 controller.update(instance, request, |entry| entry.console_error = Some(error));
                 controller.publish(&app);
             }
+            super::tray::hide_after_game_start(&app);
             let mut changes = game.output_changes();
             let result = loop {
                 tokio::select! {
@@ -788,6 +1006,7 @@ fn show_game_log(
     } else {
         tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("index.html".into()))
             .title("Registro de Minecraft — Panita Client")
+            .decorations(false)
             .inner_size(900.0, 600.0)
             .min_inner_size(520.0, 360.0)
             .build()
@@ -855,6 +1074,7 @@ pub(super) fn begin_install(
         request_id,
         OperationKind::Install,
         None,
+        false,
     )
 }
 
@@ -873,6 +1093,7 @@ pub(super) fn begin_update(
         request_id,
         OperationKind::Update,
         Some(update),
+        false,
     )
 }
 
@@ -890,16 +1111,22 @@ pub(super) fn begin_repair(
         request_id,
         OperationKind::Repair,
         None,
+        false,
     )
 }
 
 #[tauri::command]
 pub(super) fn begin_uninstall(
     app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
     state: tauri::State<'_, DesktopState>,
     instance_id: Uuid,
     request_id: Uuid,
+    delete_instance: Option<bool>,
 ) -> Result<(), ErrorCode> {
+    if window.label() != "main" {
+        return Err(ErrorCode::InvalidData);
+    }
     begin_maintenance(
         app,
         state,
@@ -907,6 +1134,7 @@ pub(super) fn begin_uninstall(
         request_id,
         OperationKind::Uninstall,
         None,
+        delete_instance.unwrap_or(false),
     )
 }
 
@@ -944,6 +1172,7 @@ fn begin_maintenance(
     request_id: Uuid,
     kind: OperationKind,
     update: Option<launcher_core::minecraft::update::UpdateRequest>,
+    delete_instance: bool,
 ) -> Result<(), ErrorCode> {
     let platform = if kind == OperationKind::Uninstall {
         None
@@ -958,9 +1187,22 @@ fn begin_maintenance(
     .map_err(|error| error.code())?;
     // Use the same initialized private root as the other desktop workflows.
     account_commands::controller(&state)?;
+    let activation = activation_commands::controller(&state)?;
+    // Installing, updating and repairing need a recently verified session; removing
+    // local files only needs the files.
+    let credentials = if kind == OperationKind::Uninstall {
+        None
+    } else {
+        Some(
+            activation
+                .online_credentials()
+                .map_err(|error| error.code())?,
+        )
+    };
     let controller = state.plays.clone();
     let cancel = controller.reserve_operation(instance_id, request_id, kind)?;
     controller.update(instance_id, request_id, |entry| {
+        entry.erase_requested = delete_instance;
         entry.backup_requested = update.as_ref().is_some_and(|request| request.backup_worlds)
     });
     controller.publish(&app);
@@ -975,6 +1217,7 @@ fn begin_maintenance(
                     matches!(
                         record.state,
                         InstallationState::Installed
+                            | InstallationState::AwaitingFiles
                             | InstallationState::UpdateAvailable
                             | InstallationState::Running
                     )
@@ -985,7 +1228,20 @@ fn begin_maintenance(
             cancel.check().map_err(|error| error.code())?;
             if kind == OperationKind::Uninstall {
                 let outcome = tauri::async_runtime::spawn_blocking(move || {
-                    launcher_core::minecraft::maintenance::uninstall(&paths, instance_id, &cancel)
+                    if delete_instance {
+                        launcher_core::registry::InstanceRegistry::new(paths)
+                            .erase_instance(instance_id, &cancel)?;
+                        Ok(launcher_core::minecraft::maintenance::MaintenanceOutcome {
+                            retained_files: 0,
+                            native_cleanup: None,
+                        })
+                    } else {
+                        launcher_core::minecraft::maintenance::uninstall(
+                            &paths,
+                            instance_id,
+                            &cancel,
+                        )
+                    }
                 })
                 .await
                 .map_err(|_| ErrorCode::StorageCommitUncertain)?
@@ -1000,6 +1256,91 @@ fn begin_maintenance(
                     progress_controller.publish(&progress_app);
                 }
             });
+            let is_pack = launcher_core::modpack::install::is_pack(&paths, instance_id)
+                .map_err(|error| error.code())?;
+            if is_pack && kind != OperationKind::Install {
+                use launcher_core::modpack::install::{
+                    UpdateOutcome, UpdateRequest as PackUpdateRequest, repair_pack, update_pack,
+                };
+                let pack_controller = controller.clone();
+                let pack_app = app.clone();
+                let pack_progress = Arc::new(move |progress| {
+                    if pack_controller.pack_progress(instance_id, request_id, progress) {
+                        pack_controller.publish(&pack_app);
+                    }
+                });
+                if kind == OperationKind::Repair {
+                    let report = repair_pack(
+                        &paths,
+                        instance_id,
+                        platform,
+                        &cancel,
+                        progress,
+                        pack_progress,
+                        credentials.clone(),
+                    )
+                    .await
+                    .map_err(|error| error.code())?;
+                    controller.update(instance_id, request_id, |entry| {
+                        entry.pack = Some(PackResult {
+                            backed_up: report.backed_up,
+                            ..PackResult::default()
+                        });
+                    });
+                    return Ok((None, 0, None));
+                }
+                let update = update.ok_or(ErrorCode::InvalidData)?;
+                let outcome = update_pack(
+                    &paths,
+                    instance_id,
+                    platform,
+                    PackUpdateRequest {
+                        from_version: update.from_version,
+                        to_version: update.to_version,
+                        backup_worlds: update.backup_worlds,
+                        move_aside: update.move_aside,
+                    },
+                    &cancel,
+                    progress,
+                    pack_progress,
+                    credentials.clone(),
+                )
+                .await
+                .map_err(|error| error.code())?;
+                return match outcome {
+                    // Nothing was changed: the player decides, then asks again.
+                    UpdateOutcome::Blocked(blocked) => {
+                        let error = if blocked.conflicts.is_empty() {
+                            ErrorCode::ManualFilesRequired
+                        } else {
+                            ErrorCode::PackConflict
+                        };
+                        controller.update(instance_id, request_id, |entry| {
+                            entry.pack = Some(PackResult {
+                                awaiting: blocked.files,
+                                conflicts: blocked.conflicts,
+                                ..PackResult::default()
+                            });
+                        });
+                        Err(error)
+                    }
+                    UpdateOutcome::Updated(report) => {
+                        controller.update(instance_id, request_id, |entry| {
+                            entry.pack = Some(PackResult {
+                                skipped: report.skipped_configuration,
+                                backed_up: report.backed_up,
+                                released: report.released,
+                                ..PackResult::default()
+                            });
+                        });
+                        Ok((
+                            report.backup.map(|backup| backup.operation),
+                            0,
+                            report.native_cleanup,
+                        ))
+                    }
+                };
+            }
             if kind == OperationKind::Repair {
                 let outcome = launcher_core::minecraft::maintenance::repair(
                     &paths,
@@ -1007,6 +1348,7 @@ fn begin_maintenance(
                     platform,
                     &cancel,
                     progress,
+                    credentials.clone(),
                 )
                 .await
                 .map_err(|error| error.code())?;
@@ -1019,6 +1361,7 @@ fn begin_maintenance(
                     update,
                     &cancel,
                     progress,
+                    credentials.clone(),
                 )
                 .await
                 .map_err(|error| error.code())?;
@@ -1028,15 +1371,46 @@ fn begin_maintenance(
                     Some(outcome.native_cleanup),
                 ))
             } else {
-                launcher_core::minecraft::install::install(
+                use launcher_core::modpack::install::{Installed, Outcome, install_any};
+                let pack_controller = controller.clone();
+                let pack_app = app.clone();
+                let pack_progress = Arc::new(move |progress| {
+                    if pack_controller.pack_progress(instance_id, request_id, progress) {
+                        pack_controller.publish(&pack_app);
+                    }
+                });
+                let installed = install_any(
                     &paths,
                     instance_id,
                     platform,
                     &cancel,
                     progress,
+                    pack_progress,
+                    credentials.clone(),
                 )
                 .await
                 .map_err(|error| error.code())?;
+                match installed {
+                    Installed::Vanilla => {}
+                    Installed::Pack(Outcome::Conflicts(conflicts)) => {
+                        controller.update(instance_id, request_id, |entry| {
+                            entry.pack = Some(PackResult {
+                                conflicts: occupied(conflicts),
+                                ..PackResult::default()
+                            });
+                        });
+                        return Err(ErrorCode::PackConflict);
+                    }
+                    Installed::Pack(Outcome::Installed(report)) => {
+                        controller.update(instance_id, request_id, |entry| {
+                            entry.pack = Some(PackResult {
+                                awaiting: report.awaiting,
+                                skipped: report.skipped_configuration,
+                                ..PackResult::default()
+                            });
+                        });
+                    }
+                }
                 Ok((None, 0, None))
             }
         }
@@ -1048,6 +1422,12 @@ fn begin_maintenance(
                 controller.update(instance_id, request_id, |entry| {
                     entry.phase = if kind == OperationKind::Uninstall {
                         Phase::Uninstalled
+                    } else if entry
+                        .pack
+                        .as_ref()
+                        .is_some_and(|pack| !pack.awaiting.is_empty())
+                    {
+                        Phase::AwaitingFiles
                     } else {
                         Phase::Installed
                     };
@@ -1056,7 +1436,18 @@ fn begin_maintenance(
                     entry.native_cleanup = native_cleanup;
                 })
             }
-            Err(error) => controller.fail(instance_id, request_id, error),
+            Err(error) => {
+                if let Some(credentials) = &credentials {
+                    activation_commands::observe(
+                        &app,
+                        &controller,
+                        &activation,
+                        credentials,
+                        error,
+                    );
+                }
+                controller.fail(instance_id, request_id, error)
+            }
         }
         controller.publish(&app);
     });
@@ -1078,10 +1469,39 @@ pub(super) fn begin_play(
     )
     .map_err(|error| error.code())?;
     let accounts = account_commands::controller(&state)?;
+    // An unverified session still launches installed instances; none at all does not.
+    let activation = activation_commands::controller(&state)?;
+    let credentials = activation
+        .session_credentials()
+        .map_err(|error| error.code())?;
     let controller = state.plays.clone();
     let cancel = controller.reserve(instance_id, request_id)?;
     controller.publish(&app);
     tauri::async_runtime::spawn(async move {
+        // A session that could not be verified gets one check before Play, so a
+        // reconnected launcher recovers without a restart. If the API closed the
+        // session meanwhile, this launch ends here.
+        let credentials = if activation
+            .state()
+            .is_ok_and(|state| state == launcher_core::activation::ActivationState::ActiveOffline)
+        {
+            // Bounded: a network that swallows requests must not stall every launch.
+            if let Ok(Ok(outcome)) =
+                tokio::time::timeout(std::time::Duration::from_secs(5), activation.refresh()).await
+            {
+                activation_commands::after_refresh(&app, &controller, &activation, outcome);
+            }
+            match activation.session_credentials() {
+                Ok(fresh) => fresh,
+                Err(error) => {
+                    controller.fail(instance_id, request_id, error.code());
+                    controller.publish(&app);
+                    return;
+                }
+            }
+        } else {
+            credentials
+        };
         match launcher_core::minecraft::play::prepare_play(
             paths,
             instance_id,
@@ -1089,6 +1509,7 @@ pub(super) fn begin_play(
             platform,
             controller.process,
             cancel.clone(),
+            Some(credentials.clone()),
         )
         .await
         {
@@ -1122,7 +1543,16 @@ pub(super) fn begin_play(
                     return;
                 }
             }
-            Err(error) => controller.fail(instance_id, request_id, error.code()),
+            Err(error) => {
+                activation_commands::observe(
+                    &app,
+                    &controller,
+                    &activation,
+                    &credentials,
+                    error.code(),
+                );
+                controller.fail(instance_id, request_id, error.code())
+            }
         }
         controller.publish(&app);
     });
@@ -1234,7 +1664,8 @@ pub(super) fn prevent_close(app: &tauri::AppHandle) -> bool {
 
 pub(super) fn close_window(window: &tauri::Window) -> bool {
     let controller = &window.state::<DesktopState>().plays;
-    let prevent = controller.close_window(|| window.hide().is_ok());
+    let tray = super::tray::mode(window.app_handle());
+    let prevent = controller.close_window_with(|| window.hide().is_ok(), tray);
     if !prevent {
         // Auxiliary viewers must not keep an idle launcher without its main window.
         for (label, viewer) in window.app_handle().webview_windows() {

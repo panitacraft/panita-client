@@ -78,7 +78,14 @@ pub(crate) fn server(
         .timeout(Duration::from_secs(5))
         .build()
         .unwrap_or_else(|_| panic!("client"));
-    (CatalogClient { client, base }, task)
+    (
+        CatalogClient {
+            client,
+            base,
+            auth: None,
+        },
+        task,
+    )
 }
 
 #[test]
@@ -101,6 +108,83 @@ fn catalog_validation_preserves_text_and_rejects_malformed_records() {
     assert!(parse_list(list(vec![record(), record()]).as_bytes()).is_err());
     assert!(parse_list(br#"{"meta":{"count":1},"data":[]}"#).is_err());
     assert!(parse_list(&vec![b' '; MAX_BODY + 1]).is_err());
+}
+
+#[test]
+fn custom_catalog_pins_round_trip_and_only_published_neoforge_packs_install() {
+    let mut raw = record();
+    raw["source_type"] = json!("custom");
+    raw["loader"] = json!("neoforge");
+    raw["current_version_id"] = json!("04ac0877-11a5-4de2-9a41-a41dbb44f1ee");
+    raw["current_version_label"] = Value::Null;
+    raw["current_version_published_at"] = json!("2026-10-25T20:54:25.192Z");
+    let parsed =
+        parse_list(list(vec![raw.clone()]).as_bytes()).unwrap_or_else(|_| panic!("custom catalog"));
+    assert!(matches!(
+        parsed[0].source,
+        CatalogSource::Custom { label: None, .. }
+    ));
+    assert!(parsed[0].validate().is_ok());
+    // A published NeoForge pack is installable; every other loader stays unsupported.
+    assert!(
+        parsed[0]
+            .installation_allowed(&Version::new(0, 2, 0))
+            .is_ok()
+    );
+    assert!(parsed[0].source.installable());
+    for loader in ["fabric", "forge", "quilt"] {
+        let mut other = raw.clone();
+        other["loader"] = json!(loader);
+        let parsed = parse_list(list(vec![other]).as_bytes()).unwrap_or_else(|_| panic!("loader"));
+        assert_eq!(
+            parsed[0]
+                .installation_allowed(&Version::new(0, 2, 0))
+                .err()
+                .map(|error| error.code()),
+            Some(ErrorCode::UnsupportedInstance),
+            "{loader}"
+        );
+    }
+    let encoded = serde_json::to_vec(&parsed[0]).unwrap_or_else(|_| panic!("encode"));
+    let restored: CatalogInstance =
+        serde_json::from_slice(&encoded).unwrap_or_else(|_| panic!("decode"));
+    assert_eq!(restored, parsed[0]);
+    assert!(restored.validate().is_ok());
+    for (field, value) in [
+        ("minecraft_version", Value::Null),
+        ("loader", Value::Null),
+        ("pack_version_id", json!("unexpected")),
+        ("current_version_id", Value::Null),
+        ("current_version_id", json!(Uuid::nil())),
+        ("current_version_label", json!("x".repeat(33))),
+        ("current_version_published_at", json!("invalid")),
+    ] {
+        let mut bad = raw.clone();
+        bad[field] = value;
+        assert!(parse_list(list(vec![bad]).as_bytes()).is_err(), "{field}");
+    }
+    raw["enabled"] = json!(false);
+    raw["current_version_id"] = Value::Null;
+    raw["current_version_published_at"] = Value::Null;
+    assert!(parse_list(list(vec![raw.clone()]).as_bytes()).is_ok());
+    raw["enabled"] = json!(true);
+    assert!(parse_list(list(vec![raw]).as_bytes()).is_err());
+}
+
+#[test]
+fn future_loader_is_retained_but_never_installed_as_vanilla() {
+    let mut raw = record();
+    raw["source_type"] = json!("modrinth");
+    raw["modrinth_project_id"] = json!("project");
+    raw["pack_version_id"] = json!("pinned");
+    raw["loader"] = json!("future-loader");
+    let parsed = parse_list(list(vec![raw]).as_bytes()).unwrap_or_else(|_| panic!("catalog"));
+    assert!(parsed[0].validate().is_ok());
+    assert!(
+        parsed[0]
+            .installation_allowed(&Version::new(0, 2, 0))
+            .is_err()
+    );
 }
 
 #[test]
@@ -137,12 +221,21 @@ fn catalog_sources_minimum_versions_and_disabled_states_are_not_installable() {
     assert!(parse_list(list(vec![raw.clone()]).as_bytes()).is_err());
     raw["modrinth_project_id"] = json!("fixture");
     raw["pack_version_id"] = json!("pinned");
-    raw["loader"] = json!("fabric");
-    let pack = parse_list(list(vec![raw]).as_bytes())
+    raw["loader"] = json!("liteloader");
+    let pack = parse_list(list(vec![raw.clone()]).as_bytes())
         .unwrap_or_else(|_| panic!("catalog"))
         .remove(0);
     assert!(matches!(pack.source, CatalogSource::Modrinth { .. }));
     assert!(pack.installation_allowed(&Version::new(9, 0, 0)).is_err());
+    // Pinned NeoForge packs install; a missing loader leaves the decision to the index.
+    for loader in [json!("neoforge"), Value::Null] {
+        let mut raw = raw.clone();
+        raw["loader"] = loader;
+        let pack = parse_list(list(vec![raw]).as_bytes())
+            .unwrap_or_else(|_| panic!("catalog"))
+            .remove(0);
+        assert!(pack.installation_allowed(&Version::new(9, 0, 0)).is_ok());
+    }
 }
 
 #[tokio::test]
@@ -378,6 +471,203 @@ async fn catalog_detail_distinguishes_missing_disabled_and_identity_mismatch() {
     );
     assert!(client.detail(Uuid::new_v4()).await.is_err());
     assert!(task.join().is_ok());
+}
+
+/// A catalog client for a signed-in member, served by the activation fixture.
+fn member_server(
+    replies: Vec<crate::panita_api::tests::Canned>,
+    identity: u64,
+) -> (CatalogClient, std::thread::JoinHandle<Vec<String>>) {
+    use crate::panita_api::tests as panita;
+    let (api, task) = panita::server(replies);
+    let (client, base) = api.test_transport();
+    let mut user = crate::panita_session::tests::user();
+    user.id = identity;
+    let session =
+        crate::panita_session::PanitaSession::new(format!("ps_member-{identity}-token"), user, 1)
+            .unwrap_or_else(|_| panic!("session"));
+    (
+        CatalogClient {
+            client,
+            base,
+            auth: Some(panita::credentials().with_session(&session)),
+        },
+        task,
+    )
+}
+
+fn restricted_record() -> Value {
+    let mut raw = record();
+    raw["restricted"] = json!(true);
+    raw
+}
+
+const RECORD_ID: &str = "62d7e99d-fb4e-4167-8732-ce3a334d4a58";
+
+#[tokio::test]
+async fn member_requests_carry_the_key_and_session_while_anonymous_ones_carry_neither() {
+    use crate::panita_api::tests::canned;
+    let (client, task) = member_server(
+        vec![
+            canned(200, list(vec![restricted_record()])),
+            canned(200, json!({"data":restricted_record()}).to_string()),
+        ],
+        42,
+    );
+    let (paths, store) = temporary_store();
+    let catalog = client
+        .refresh(&store)
+        .await
+        .unwrap_or_else(|_| panic!("member list"));
+    assert!(catalog.instances[0].restricted);
+    let id = Uuid::parse_str(RECORD_ID).unwrap_or_else(|_| panic!("id"));
+    assert!(client.detail(id).await.is_ok());
+    let seen = task.join().unwrap_or_else(|_| panic!("fixture"));
+    assert!(seen[0].starts_with("get /v1/instances http/1.1"));
+    assert!(seen[1].starts_with(&format!("get /v1/instances/{RECORD_ID} http/1.1")));
+    for request in &seen {
+        assert!(request.contains("x-api-key: test-key"));
+        assert!(request.contains("authorization: bearer ps_member-42-token"));
+    }
+    drop(store);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+
+    // The public fixture asserts that no anonymous request carries a bearer token.
+    let (anonymous, task) = server(vec![(200, list(vec![record()]), false)]);
+    let (paths, store) = temporary_store();
+    assert!(anonymous.refresh(&store).await.is_ok());
+    assert!(task.join().is_ok());
+    drop(store);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
+async fn unauthorized_answers_are_never_an_outage_and_keep_the_cache() {
+    use crate::panita_api::tests::{canned, failure_json};
+    let (client, task) = member_server(
+        vec![
+            canned(200, list(vec![restricted_record()])),
+            canned(401, failure_json("invalid_token")),
+            canned(401, failure_json("invalid_key")),
+            canned(403, String::new()),
+            canned(401, "<html>proxy</html>".to_owned()),
+            canned(401, failure_json("invalid_token")),
+            canned(401, failure_json("invalid_key")),
+            canned(403, String::new()),
+        ],
+        42,
+    );
+    let (paths, store) = temporary_store();
+    assert!(client.refresh(&store).await.is_ok());
+    let before = store.read(CACHE_FILE).unwrap_or_default();
+    for expected in [
+        ErrorCode::SessionRejected,
+        ErrorCode::ApiKeyRejected,
+        ErrorCode::ApiKeyRejected,
+        ErrorCode::InvalidData,
+    ] {
+        // A cached copy exists, yet none of these may fall back to it as stale.
+        let error = client.refresh(&store).await.err();
+        assert_eq!(error.map(|e| e.code()), Some(expected));
+    }
+    assert_eq!(store.read(CACHE_FILE).unwrap_or_default(), before);
+    let id = Uuid::parse_str(RECORD_ID).unwrap_or_else(|_| panic!("id"));
+    for expected in [
+        ErrorCode::SessionRejected,
+        ErrorCode::ApiKeyRejected,
+        ErrorCode::ApiKeyRejected,
+    ] {
+        assert_eq!(
+            client.detail(id).await.err().map(|e| e.code()),
+            Some(expected)
+        );
+    }
+    assert!(task.join().is_ok());
+    drop(store);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[tokio::test]
+async fn a_cached_member_catalog_is_never_served_to_another_identity() {
+    use crate::panita_api::tests::canned;
+    let (paths, store) = temporary_store();
+    let (first, task) = member_server(
+        vec![
+            canned(200, list(vec![restricted_record()])),
+            canned(503, String::new()),
+            canned(503, String::new()),
+            canned(503, String::new()),
+        ],
+        42,
+    );
+    assert!(first.refresh(&store).await.is_ok());
+    // The cache fingerprint includes the base URL, so every client shares this server.
+    let session = |identity: u64| {
+        let mut user = crate::panita_session::tests::user();
+        user.id = identity;
+        crate::panita_session::PanitaSession::new(format!("ps_member-{identity}-token"), user, 1)
+            .unwrap_or_else(|_| panic!("session"))
+    };
+    let sharing = |auth: Option<PanitaCredentials>| CatalogClient {
+        client: first.client.clone(),
+        base: first.base.clone(),
+        auth,
+    };
+    // The same member can still read their own cache during an outage.
+    let own = sharing(Some(
+        crate::panita_api::tests::credentials().with_session(&session(42)),
+    ));
+    let stale = own
+        .refresh(&store)
+        .await
+        .unwrap_or_else(|_| panic!("own stale cache"));
+    assert!(stale.stale && stale.instances[0].restricted);
+    // Another member, or an anonymous launcher, gets nothing from it.
+    let other = sharing(Some(
+        crate::panita_api::tests::credentials().with_session(&session(43)),
+    ));
+    assert!(other.refresh(&store).await.is_err());
+    assert!(sharing(None).refresh(&store).await.is_err());
+    assert!(task.join().is_ok());
+    drop(store);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn a_restricted_entry_is_installable_because_only_members_receive_it() {
+    let client = Version::new(9, 0, 0);
+    let parsed = parse_list(list(vec![restricted_record()]).as_bytes())
+        .unwrap_or_else(|_| panic!("restricted catalog"));
+    assert!(parsed[0].restricted);
+    assert!(parsed[0].installation_allowed(&client).is_ok());
+    // Restriction never widens what else is blocked.
+    let mut disabled = restricted_record();
+    disabled["enabled"] = json!(false);
+    let mut future = restricted_record();
+    future["source_type"] = json!("something_new");
+    for raw in [disabled, future] {
+        let parsed = parse_list(list(vec![raw]).as_bytes()).unwrap_or_else(|_| panic!("catalog"));
+        assert!(parsed[0].installation_allowed(&client).is_err());
+    }
+}
+
+#[test]
+fn purging_removes_every_cache_spelling_and_tolerates_absence() {
+    let (paths, store) = temporary_store();
+    assert!(purge_cache(&store).is_ok());
+    for name in [CACHE_FILE, PREVIOUS_CACHE_FILE, LEGACY_CACHE_FILE] {
+        assert!(
+            store
+                .transaction(name, |_| Ok((b"{}".to_vec(), ())))
+                .is_ok()
+        );
+    }
+    assert!(purge_cache(&store).is_ok());
+    for name in [CACHE_FILE, PREVIOUS_CACHE_FILE, LEGACY_CACHE_FILE] {
+        assert!(!paths.root().join(name).exists());
+    }
+    drop(store);
+    assert!(std::fs::remove_dir_all(paths.root()).is_ok());
 }
 
 #[tokio::test]

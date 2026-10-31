@@ -88,8 +88,10 @@ fn fixture(id: &str, os: &str) -> (AppPaths, PathBuf, InstalledLock, Platform, A
             java_executable,
             documents: vec![],
             artifacts,
+            loader: None,
         },
         native_files: vec![],
+        pack: None,
         native_directory: None,
     };
     let account = AccountInfo {
@@ -108,6 +110,121 @@ fn value_after<'a>(args: &'a [String], flag: &str) -> &'a str {
         .position(|arg| arg == flag)
         .unwrap_or_else(|| panic!("missing {flag}"));
     &args[index + 1]
+}
+
+#[test]
+fn loader_commands_merge_child_libraries_and_keep_module_arguments_platform_specific()
+-> Result<(), Box<dyn std::error::Error>> {
+    let staged_paths = AppPaths::new(
+        std::env::temp_dir().join(format!("panita-loader-command-{}", Uuid::new_v4())),
+    )?;
+    let loader = crate::neoforge::generation::tests::published(&staged_paths)?;
+    for os in ["windows", "linux"] {
+        let (paths, directory, mut installed, platform, account) = fixture("1.21.1", os);
+        installed.plan.schema_version = 2;
+        installed.plan.loader = Some(loader.clone().into());
+        let command = build_command(
+            &paths,
+            &directory,
+            &installed,
+            &platform,
+            &GlobalSettings::default(),
+            &InstanceSettings::default(),
+            LaunchIdentity {
+                account: &account,
+                minecraft_token: None,
+                xuid: None,
+            },
+        )?;
+        let separator = if os == "windows" { ';' } else { ':' };
+        let cp = value_after(&command.args, "-cp");
+        let entries: Vec<_> = cp.split(separator).collect();
+        let guava = entries
+            .iter()
+            .filter(|entry| entry.contains("guava-32.1.2-jre.jar"))
+            .count();
+        assert_eq!(guava, 1);
+        assert!(entries.iter().all(|entry| !entry.ends_with(&format!(
+            "1.21.1-{}.jar",
+            installed.plan.version.client.sha1
+        ))));
+        assert!(
+            value_after(&command.args, "-p")
+                .contains(&format!("bootstraplauncher-2.0.2.jar{separator}"))
+        );
+        assert_eq!(
+            value_after(&command.args, "--fml.neoForgeVersion"),
+            "21.1.264"
+        );
+        assert_eq!(value_after(&command.args, "--fml.mcVersion"), "1.21.1");
+        assert_eq!(value_after(&command.args, "--version"), "neoforge-21.1.264");
+        let main = command
+            .args
+            .iter()
+            .position(|arg| arg == "cpw.mods.bootstraplauncher.BootstrapLauncher")
+            .ok_or("main")?;
+        let module = command
+            .args
+            .iter()
+            .position(|arg| arg == "-p")
+            .ok_or("module")?;
+        assert!(module < main);
+        // A loader starts another main class, so Discord's detection needs the hint
+        // ahead of it, exactly once.
+        let hint = command
+            .args
+            .iter()
+            .position(|arg| arg == DISCORD_HINT)
+            .ok_or("hint")?;
+        assert!(hint < main);
+        assert_eq!(
+            command
+                .args
+                .iter()
+                .filter(|arg| *arg == DISCORD_HINT)
+                .count(),
+            1
+        );
+        assert_eq!(
+            command
+                .args
+                .iter()
+                .filter(|arg| arg.starts_with("-Xmx"))
+                .count(),
+            1
+        );
+        for option in [
+            "-DlibraryDirectory=C:/unverified",
+            "-Djdk.module.path=C:/unverified",
+        ] {
+            let settings = GlobalSettings {
+                extra_jvm_args: vec![option.into()],
+                ..GlobalSettings::default()
+            };
+            assert!(
+                build_command(
+                    &paths,
+                    &directory,
+                    &installed,
+                    &platform,
+                    &settings,
+                    &InstanceSettings::default(),
+                    LaunchIdentity {
+                        account: &account,
+                        minecraft_token: None,
+                        xuid: None
+                    }
+                )
+                .is_err()
+            );
+        }
+        installed.plan.schema_version = 1;
+        assert!(installed.plan.validate().is_err());
+        installed.plan.schema_version = 2;
+        installed.plan.loader = None;
+        assert!(installed.plan.validate().is_err());
+    }
+    Ok(())
 }
 
 #[test]
@@ -427,4 +544,90 @@ fn legacy_cache_destinations_remain_in_launch_arguments() {
         value_after(&command.args, "-cp")
             .ends_with(&path_text(&paths.root().join(legacy)).unwrap_or_default())
     );
+}
+
+fn built(
+    paths: &AppPaths,
+    directory: &Path,
+    installed: &InstalledLock,
+    platform: &Platform,
+    account: &AccountInfo,
+) -> LaunchCommand {
+    build_command(
+        paths,
+        directory,
+        installed,
+        platform,
+        &GlobalSettings::default(),
+        &InstanceSettings::default(),
+        LaunchIdentity {
+            account,
+            minecraft_token: None,
+            xuid: None,
+        },
+    )
+    .unwrap_or_else(|_| panic!("build"))
+}
+
+fn program(command: &LaunchCommand) -> &str {
+    command
+        .executable
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+}
+
+#[test]
+fn windows_starts_javaw_only_when_the_verified_runtime_lists_it() {
+    let (paths, directory, mut installed, platform, account) = fixture("1.21.1", "windows");
+    assert_eq!(
+        program(&built(&paths, &directory, &installed, &platform, &account)),
+        "java.exe"
+    );
+    let java = installed
+        .plan
+        .artifacts
+        .iter()
+        .find(|artifact| artifact.destination == installed.plan.java_executable)
+        .cloned()
+        .unwrap_or_else(|| panic!("java artifact"));
+    let mut javaw = java.clone();
+    javaw.destination = installed
+        .plan
+        .java_executable
+        .replace("java.exe", "javaw.exe");
+    installed.plan.artifacts.push(javaw);
+    let command = built(&paths, &directory, &installed, &platform, &account);
+    assert_eq!(program(&command), "javaw.exe");
+    assert_eq!(
+        command.executable.parent(),
+        paths.root().join(&installed.plan.java_executable).parent()
+    );
+    // An unmarked file is not trusted as the runtime.
+    if let Some(entry) = installed.plan.artifacts.last_mut() {
+        entry.executable = false;
+    }
+    assert_eq!(
+        program(&built(&paths, &directory, &installed, &platform, &account)),
+        "java.exe"
+    );
+    // Linux keeps its executable.
+    let (paths, directory, installed, platform, account) = fixture("1.21.1", "linux");
+    assert_eq!(
+        program(&built(&paths, &directory, &installed, &platform, &account)),
+        "java"
+    );
+}
+
+#[test]
+fn vanilla_names_the_main_class_without_a_discord_hint() {
+    let (paths, directory, installed, platform, account) = fixture("1.21.1", "windows");
+    let command = built(&paths, &directory, &installed, &platform, &account);
+    assert!(
+        command
+            .args
+            .iter()
+            .any(|arg| arg == "net.minecraft.client.main.Main")
+    );
+    assert!(!command.args.iter().any(|arg| arg == DISCORD_HINT));
 }

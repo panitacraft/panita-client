@@ -127,6 +127,19 @@ pub struct PendingLogin {
 }
 
 impl PendingLogin {
+    /// The outbound authorization link contains no tokens or PKCE verifier.
+    /// Never return a completed, cancelled or expired operation's link.
+    pub fn authorization_url(&self) -> Result<String, CoreError> {
+        let login = self
+            .active
+            .as_ref()
+            .ok_or_else(|| CoreError::new(ErrorCode::OperationCancelled))?;
+        if login.expired() {
+            return Err(CoreError::new(ErrorCode::AuthenticationTimeout));
+        }
+        login.authorization_url()
+    }
+
     pub fn is_active(&self) -> bool {
         self.active.is_some()
     }
@@ -304,6 +317,34 @@ mod tests {
             matches!(pending.accept(&format!("{DEEP_LINK_CALLBACK}?state={state}&error=access_denied")), Err(e) if e.code() == ErrorCode::AuthenticationDenied)
         );
         assert!(pending.active.is_none());
+    }
+
+    #[test]
+    fn fallback_link_is_bound_to_a_live_unconsumed_login() {
+        let (mut pending, state) = setup();
+        let first = pending
+            .authorization_url()
+            .unwrap_or_else(|_| panic!("link"));
+        assert_eq!(pending.authorization_url().ok().as_ref(), Some(&first));
+        assert!(!first.contains("code_verifier"));
+        assert!(!first.contains("access_token"));
+        assert!(
+            pending
+                .accept(&format!("{DEEP_LINK_CALLBACK}?state={state}&code=fixture"))
+                .is_ok()
+        );
+        assert!(pending.authorization_url().is_err());
+
+        let (mut pending, _) = setup();
+        pending.cancel();
+        assert!(pending.authorization_url().is_err());
+        let (mut pending, _) = setup();
+        if let Some(active) = &mut pending.active {
+            active.deadline = Instant::now();
+        }
+        assert!(
+            matches!(pending.authorization_url(), Err(error) if error.code() == ErrorCode::AuthenticationTimeout)
+        );
     }
 
     #[test]

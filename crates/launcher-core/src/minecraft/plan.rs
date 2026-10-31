@@ -42,6 +42,9 @@ pub struct InstallPlan {
     /// Includes the two TLS bootstrap index fingerprints and all resolved metadata.
     pub documents: Vec<DocumentIdentity>,
     pub artifacts: Vec<PlannedArtifact>,
+    /// Exact loader inventory; absent in legacy and current vanilla plans.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loader: Option<crate::loader::LoaderRef>,
 }
 
 #[derive(Deserialize)]
@@ -265,6 +268,7 @@ pub async fn resolve(
         java_executable,
         documents,
         artifacts,
+        loader: None,
     };
     plan.deduplicate()?;
     plan.validate()?;
@@ -382,8 +386,21 @@ impl InstallPlan {
         Ok(())
     }
     pub fn validate(&self) -> Result<(), CoreError> {
-        if self.schema_version != 1 || self.artifacts.len() > 100_000 || self.documents.len() > 20 {
+        if !matches!(
+            (self.schema_version, self.loader.is_some()),
+            (1, false) | (2, true)
+        ) || self.artifacts.len() > 100_000
+            || self.documents.len() > 20
+        {
             return Err(invalid());
+        }
+        if let Some(loader) = &self.loader {
+            loader.validate(&self.version.id)?;
+            if loader.java().major_version != self.version.java.major_version
+                || loader.java().component != self.version.java.component
+            {
+                return Err(invalid());
+            }
         }
         safe_path(&self.java_executable)?;
         safe_path(&self.runtime_root)?;
