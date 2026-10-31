@@ -65,6 +65,7 @@ Var PanitaProgressNotice
     System::Call 'user32::IsWindow(p $PanitaDescription) i .r0'
     ${If} $0 != 0
       SendMessage $PanitaDescription ${WM_SETTEXT} 0 "STR:${MESSAGE}"
+      System::Call 'user32::SetPropW(p $PanitaDescription, w "PanitaError", p 1)'
       SetCtlColors $PanitaDescription FCA5A5 141414
     ${EndIf}
   ${EndIf}
@@ -397,6 +398,7 @@ Var PanitaProgressNotice
         StrCpy $PanitaEraseStage 1
         ${NSD_SetText} $PanitaHeading "¿Eliminar todos tus datos?"
         ${NSD_SetText} $PanitaDescription "Esta acción es permanente y no se puede deshacer. Revisa la carpeta y su contenido antes de confirmar."
+        System::Call 'user32::SetPropW(p $PanitaDescription, w "PanitaError", p 1)'
         SetCtlColors $PanitaDescription FCA5A5 141414
         ${NSD_SetText} $PanitaCardText "$APPDATA\PanitaClient$\r$\n$\r$\nSe eliminará toda esta carpeta: cuentas y sesiones, ajustes, todas las instancias con mundos, capturas, configuraciones y copias de seguridad, descargas de Minecraft y Java, cachés, registros y cualquier otro archivo que contenga."
         !insertmacro PANITA_RECT $PanitaCardBackground 0 270 402 168
@@ -438,6 +440,7 @@ Var PanitaProgressNotice
     ${NSD_Uncheck} $PanitaEraseAcknowledgement
     ${NSD_SetText} $PanitaHeading "¿Desinstalar Panita Client?"
     ${NSD_SetText} $PanitaDescription "Se eliminará el launcher de este equipo."
+    System::Call 'user32::RemovePropW(p $PanitaDescription, w "PanitaError")'
     SetCtlColors $PanitaDescription BABABA 141414
     ${NSD_SetText} $PanitaCardText "Tus cuentas, instancias y mundos se conservarán."
     !insertmacro PANITA_RECT $PanitaCardBackground 0 270 402 82

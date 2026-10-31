@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include "installer-components.h"
 
 namespace {
 constexpr COLORREF background = RGB(20, 20, 20);
@@ -38,7 +39,7 @@ constexpr int shell_width = 500;
 constexpr int content_width = shell_width - 56;
 int shell_height = 460;
 bool details_open;
-using Controls = std::array<HWND, 27>;
+using Controls = std::array<HWND, 28>;
 void apply_presentation(HWND parent);
 HWND header_control(HWND page, const wchar_t* type, const wchar_t* text, int tag, DWORD style);
 int phase() { return static_cast<int>(reinterpret_cast<INT_PTR>(GetPropW(root, L"PanitaPhase"))); }
@@ -110,6 +111,16 @@ void position_header(const Controls& controls) {
   place(controls[5], 202, 8, 104, 24);
   ShowWindow(controls[5], SW_HIDE);
 }
+// All notices share the same inset, icon gutter and measured multiline layout.
+int layout_notice(HWND page, HWND frame, HWND text, int cursor) {
+  if (!frame) frame = header_control(page, L"STATIC", L"", 27, WS_CLIPSIBLINGS);
+  ShowWindow(frame, SW_SHOWNA);
+  const int height = text_height(text, content_width - 60);
+  place(frame, 0, cursor, content_width, height + 32);
+  SetWindowPos(frame, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  place(text, 44, cursor + 16, content_width - 60, height);
+  return cursor + height + 32;
+}
 void compact_page(const Controls& controls) {
   if (!controls[6] || !controls[7]) return;
   HWND page = GetParent(controls[6]);
@@ -123,9 +134,16 @@ void compact_page(const Controls& controls) {
     cursor += height + gap;
   };
   row(6, 12, 34);
-  row(7, 22, 18);
+  HWND warning = controls[27];
+  const bool error = GetPropW(controls[7], L"PanitaError") != nullptr;
+  if (error) {
+    cursor = layout_notice(page, warning, controls[7], cursor) + 22;
+  } else {
+    if (warning) ShowWindow(warning, SW_HIDE);
+    row(7, 22, 18);
+  }
   if (controls[8] && controls[9]) {
-    const int inset = GetPropW(root, L"PanitaUninstall") ? 16 : 44;
+    const int inset = 44;
     const int height = text_height(controls[9], content_width - inset - 16);
     place(controls[8], 0, cursor, content_width, height + 32);
     place(controls[9], inset, cursor + 16, content_width - inset - 16, height);
@@ -177,6 +195,11 @@ void refresh_actions() {
   const bool show_cancel = !failed_close && state == 0;
   ShowWindow(action == cancel ? next : cancel, show_cancel ? SW_SHOWNA : SW_HIDE);
   ShowWindow(action, state == 1 ? SW_HIDE : SW_SHOWNA);
+  if (failed_close) SetWindowTextW(cancel, L"Cerrar");
+  else if (state == 3) {
+    const bool uninstall = GetPropW(root, L"PanitaUninstall") != nullptr;
+    SetWindowTextW(next, uninstall ? L"Cerrar" : L"Continuar");
+  }
   HDC dc = GetDC(action);
   HGDIOBJ previous_font = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(action, WM_GETFONT, 0, 0)));
   RECT measured{};
@@ -192,11 +215,6 @@ void refresh_actions() {
     SetWindowPos(cancel, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
 
-  if (failed_close) SetWindowTextW(cancel, L"Cerrar");
-  else if (state == 3) {
-    const bool uninstall = GetPropW(root, L"PanitaUninstall") != nullptr;
-    SetWindowTextW(next, uninstall ? L"Cerrar" : L"Continuar");
-  }
   if (current_footer != action) {
     current_footer = action;
     if (failed_close) {
@@ -312,15 +330,24 @@ void prepare_log(Controls& controls) {
     controls[21] = header_control(page, L"BUTTON", L"Mostrar detalles", 21, BS_PUSHBUTTON | WS_TABSTOP);
   }
   const bool warning = visible(controls[17]);
-  place(controls[17], 0, 130, content_width, 92);
-  place(GetDlgItem(page, 1006), 0, 140, content_width, 36);
-  place(controls[26], 0, 188, content_width, 10);
-  place(controls[21], 0, warning ? 236 : 220, 170, 34);
-  place(wrapped_log, 0, warning ? 282 : 266, content_width, 120);
+  HWND notice_frame = controls[27];
+  int cursor = 140;
+  if (warning) {
+    cursor = layout_notice(page, notice_frame, controls[17], cursor) + 16;
+  } else if (notice_frame) ShowWindow(notice_frame, SW_HIDE);
+  ShowWindow(GetDlgItem(page, 1006), warning ? SW_HIDE : SW_SHOWNA);
+  ShowWindow(controls[26], warning ? SW_HIDE : SW_SHOWNA);
+  if (!warning) {
+    place(GetDlgItem(page, 1006), 0, cursor, content_width, 36);
+    place(controls[26], 0, cursor + 48, content_width, 10);
+    cursor += 80;
+  }
+  place(controls[21], 0, cursor, 170, 34);
+  place(wrapped_log, 0, cursor + 46, content_width, 120);
   ShowWindow(wrapped_log, details_open ? SW_SHOWNA : SW_HIDE);
   for (HWND child = GetWindow(page, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
     if (GetPropW(child, L"PanitaStageTitle")) place(child, 0, 84, content_width, 34);
-  resize_shell(page, details_open ? (warning ? 418 : 402) : 340);
+  resize_shell(page, details_open ? cursor + 182 : (std::max)(340, cursor + 50));
   sync_log();
 }
 
@@ -345,37 +372,23 @@ void draw_choice(HWND window, HDC dc) {
   const bool enabled = IsWindowEnabled(window) != FALSE;
   const LONG_PTR kind = GetWindowLongPtrW(window, GWL_STYLE) & BS_TYPEMASK;
   const bool radio = kind == BS_RADIOBUTTON || kind == BS_AUTORADIOBUTTON;
-  const COLORREF accent = role(window) == 12 ? RGB(135, 135, 135) : enabled ? accent_color : RGB(135, 135, 135);
+  const COLORREF accent = enabled ? accent_color : RGB(135,135,135);
   RECT box{0, (bounds.bottom - size) / 2, size, (bounds.bottom + size) / 2};
-  HBRUSH fill = CreateSolidBrush(checked && !radio ? accent : card);
-  HPEN outline = CreatePen(PS_SOLID, (std::max)(1, scale(1)), accent);
-  HGDIOBJ old_brush = SelectObject(dc, fill);
-  HGDIOBJ old_outline = SelectObject(dc, outline);
   if (radio) {
-    Ellipse(dc, box.left, box.top, box.right, box.bottom);
+    Gdiplus::Graphics graphics(dc);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    Gdiplus::SolidBrush fill(installer_ui::color(card));
+    Gdiplus::Pen outline(installer_ui::color(accent), static_cast<float>(scale(1)));
+    graphics.FillEllipse(&fill, box.left + 1, box.top + 1, size - 2, size - 2);
+    graphics.DrawEllipse(&outline, box.left + 1, box.top + 1, size - 2, size - 2);
     if (checked) {
-      HBRUSH dot = CreateSolidBrush(accent);
-      SelectObject(dc, dot);
+      Gdiplus::SolidBrush dot(installer_ui::color(accent));
       const int inset = scale(5);
-      Ellipse(dc, box.left + inset, box.top + inset, box.right - inset, box.bottom - inset);
-      SelectObject(dc, fill);
-      DeleteObject(dot);
+      graphics.FillEllipse(&dot, box.left + inset, box.top + inset, size - inset * 2, size - inset * 2);
     }
   } else {
-    Rectangle(dc, box.left, box.top, box.right, box.bottom);
-  }
-  SelectObject(dc, old_brush);
-  SelectObject(dc, old_outline);
-  DeleteObject(fill);
-  DeleteObject(outline);
-  if (checked && !radio) {
-    HPEN pen = CreatePen(PS_SOLID, MulDiv(2, dpi, 96), background);
-    HGDIOBJ old_pen = SelectObject(dc, pen);
-    MoveToEx(dc, size / 4, box.top + size / 2, nullptr);
-    LineTo(dc, size * 4 / 9, box.top + size * 3 / 4);
-    LineTo(dc, size * 4 / 5, box.top + size / 4);
-    SelectObject(dc, old_pen);
-    DeleteObject(pen);
+    installer_ui::surface(dc, box, checked ? accent : card, accent, scale(2));
+    if (checked) installer_ui::icon(dc, installer_ui::Icon::check, box.left, box.top, size, background);
   }
   wchar_t text[256]{};
   GetWindowTextW(window, text, 256);
@@ -441,17 +454,8 @@ void draw_button(const DRAWITEMSTRUCT& item) {
       destructive ? (hover ? RGB(254, 202, 202) : RGB(252, 165, 165)) :
       primary ? (pressed ? RGB(4, 117, 0) : hover ? RGB(101, 182, 71) : accent_color) :
       (hover ? RGB(56, 56, 56) : RGB(27, 27, 27));
-  HBRUSH brush = CreateSolidBrush(fill);
-  HPEN pen = CreatePen(PS_SOLID, 1, primary || chrome || disclosure ? fill : RGB(81, 81, 81));
-  HGDIOBJ old_brush = SelectObject(item.hDC, brush);
-  HGDIOBJ old_pen = SelectObject(item.hDC, pen);
-  const int radius = MulDiv(10, GetDpiForWindow(root), 96);
-  RoundRect(item.hDC, item.rcItem.left, item.rcItem.top, item.rcItem.right,
-            item.rcItem.bottom, radius, radius);
-  SelectObject(item.hDC, old_pen);
-  SelectObject(item.hDC, old_brush);
-  DeleteObject(pen);
-  DeleteObject(brush);
+  installer_ui::surface(item.hDC, item.rcItem, fill,
+      primary || chrome || disclosure ? fill : RGB(81, 81, 81), scale(6));
   wchar_t text[256]{};
   GetWindowTextW(item.hwndItem, text, 256);
   auto font = reinterpret_cast<HFONT>(SendMessageW(item.hwndItem, WM_GETFONT, 0, 0));
@@ -461,20 +465,9 @@ void draw_button(const DRAWITEMSTRUCT& item) {
                                : primary ? background : RGB(249, 255, 248));
   RECT bounds = item.rcItem;
   if (tag == 3 || tag == 4) {
-    const int center_x = (bounds.left + bounds.right) / 2;
-    const int center_y = (bounds.top + bounds.bottom) / 2;
-    const int half = scale(5);
-    HPEN icon_pen = CreatePen(PS_SOLID, (std::max)(1, scale(1)),
-        disabled ? RGB(135, 135, 135) : RGB(249, 255, 248));
-    HGDIOBJ previous_pen = SelectObject(item.hDC, icon_pen);
-    MoveToEx(item.hDC, center_x - half, center_y - (tag == 4 ? half : 0), nullptr);
-    LineTo(item.hDC, center_x + half, center_y + (tag == 4 ? half : 0));
-    if (tag == 4) {
-      MoveToEx(item.hDC, center_x - half, center_y + half, nullptr);
-      LineTo(item.hDC, center_x + half, center_y - half);
-    }
-    SelectObject(item.hDC, previous_pen);
-    DeleteObject(icon_pen);
+    installer_ui::icon(item.hDC, tag == 4 ? installer_ui::Icon::close : installer_ui::Icon::minimize,
+        (bounds.left + bounds.right) / 2 - scale(8), (bounds.top + bounds.bottom) / 2 - scale(8),
+        scale(16), disabled ? RGB(135,135,135) : RGB(249,255,248));
   } else {
     std::wstring label(text);
     label.erase(std::remove(label.begin(), label.end(), L'&'), label.end());
@@ -483,44 +476,15 @@ void draw_button(const DRAWITEMSTRUCT& item) {
       DrawTextW(item.hDC, label.c_str(), -1, &measured, DT_CALCRECT | DT_SINGLELINE | DT_NOPREFIX);
       const int icon_x = (bounds.right - measured.right - scale(26)) / 2;
       const int icon_y = (bounds.top + bounds.bottom) / 2;
-      HPEN icon_pen = CreatePen(PS_SOLID, (std::max)(1, scale(2)),
-          disabled ? RGB(135, 135, 135) : primary ? background : RGB(249, 255, 248));
-      HGDIOBJ previous = SelectObject(item.hDC, icon_pen);
-      const bool close = label == L"Cerrar" || label == L"Cancelar";
-      if (close) {
-        MoveToEx(item.hDC, icon_x, icon_y - scale(5), nullptr);
-        LineTo(item.hDC, icon_x + scale(10), icon_y + scale(5));
-        MoveToEx(item.hDC, icon_x, icon_y + scale(5), nullptr);
-        LineTo(item.hDC, icon_x + scale(10), icon_y - scale(5));
-      } else if (destructive) {
-        MoveToEx(item.hDC, icon_x - scale(1), icon_y - scale(4), nullptr);
-        LineTo(item.hDC, icon_x + scale(11), icon_y - scale(4));
-        MoveToEx(item.hDC, icon_x + scale(2), icon_y - scale(4), nullptr);
-        LineTo(item.hDC, icon_x + scale(2), icon_y + scale(6));
-        LineTo(item.hDC, icon_x + scale(8), icon_y + scale(6));
-        LineTo(item.hDC, icon_x + scale(8), icon_y - scale(4));
-        MoveToEx(item.hDC, icon_x + scale(3), icon_y - scale(7), nullptr);
-        LineTo(item.hDC, icon_x + scale(7), icon_y - scale(7));
-      } else {
-        MoveToEx(item.hDC, icon_x, icon_y, nullptr);
-        LineTo(item.hDC, icon_x + scale(12), icon_y);
-        MoveToEx(item.hDC, icon_x + scale(7), icon_y - scale(5), nullptr);
-        LineTo(item.hDC, icon_x + scale(12), icon_y);
-        LineTo(item.hDC, icon_x + scale(7), icon_y + scale(5));
-      }
-      SelectObject(item.hDC, previous);
-      DeleteObject(icon_pen);
+      const auto glyph = label == L"Cerrar" || label == L"Cancelar" ? installer_ui::Icon::close :
+          destructive ? installer_ui::Icon::trash : installer_ui::Icon::arrow;
+      installer_ui::icon(item.hDC, glyph, icon_x - scale(2), icon_y - scale(8), scale(16),
+          disabled ? RGB(135,135,135) : primary ? background : RGB(249,255,248));
       bounds.left += scale(24);
     }
     if (disclosure) {
-      HPEN chevron = CreatePen(PS_SOLID, (std::max)(1, scale(2)), RGB(186, 186, 186));
-      HGDIOBJ previous = SelectObject(item.hDC, chevron);
-      const int y = (bounds.bottom - bounds.top) / 2;
-      MoveToEx(item.hDC, scale(4), y + (details_open ? scale(3) : -scale(3)), nullptr);
-      LineTo(item.hDC, scale(9), y + (details_open ? -scale(2) : scale(2)));
-      LineTo(item.hDC, scale(14), y + (details_open ? scale(3) : -scale(3)));
-      SelectObject(item.hDC, previous);
-      DeleteObject(chevron);
+      installer_ui::icon(item.hDC, details_open ? installer_ui::Icon::up : installer_ui::Icon::down,
+          scale(1), (bounds.bottom - scale(16)) / 2, scale(16), RGB(186,186,186));
       bounds.left += scale(24);
     }
     DrawTextW(item.hDC, label.c_str(), -1, &bounds, (disclosure ? DT_LEFT : DT_CENTER) | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
@@ -586,22 +550,13 @@ void paint_card(HWND window, HDC dc) {
   RECT bounds{};
   GetClientRect(window, &bounds);
   FillRect(dc, &bounds, background_brush);
-  HPEN pen = CreatePen(PS_SOLID, 1, RGB(56, 56, 56));
-  HGDIOBJ previous_pen = SelectObject(dc, pen);
-  HGDIOBJ previous_brush = SelectObject(dc, log_brush);
-  RoundRect(dc, 0, 0, bounds.right, bounds.bottom, scale(18), scale(18));
-  SelectObject(dc, previous_brush);
-  SelectObject(dc, previous_pen);
-  DeleteObject(pen);
-  if (role(window) == 8 && !GetPropW(root, L"PanitaUninstall")) {
-    Gdiplus::Graphics graphics(dc);
-    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-    Gdiplus::Pen icon(Gdiplus::Color(255,169,229,140), static_cast<Gdiplus::REAL>(scale(1)));
-    const int x=scale(16), y=scale(17), size=scale(16);
-    graphics.DrawEllipse(&icon, x, y, size, size);
-    graphics.DrawLine(&icon, x+size/2, y+size/2, x+size/2, y+size*3/4);
-    graphics.DrawLine(&icon, x+size/2, y+size/4, x+size/2, y+size/4+scale(1));
-  }
+  const bool error = role(window) == 27;
+  installer_ui::surface(dc, bounds, error ? RGB(42,28,28) : card,
+      error ? RGB(107,59,59) : RGB(56,56,56), scale(9));
+  if (role(window) != 25)
+    installer_ui::icon(dc, error ? installer_ui::Icon::error : installer_ui::Icon::info,
+        scale(16), scale(17), scale(16), error ? RGB(252,165,165) : RGB(169,229,140));
+
 }
 
 void paint_progress(HWND window, HDC dc) {
@@ -670,8 +625,46 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
     paint_surface(window, reinterpret_cast<HDC>(wp));
     return TRUE;
   }
+  // Paint controls directly as well as handling WM_DRAWITEM. Native NSIS dialog
+  // procedures can consume owner-draw notifications during page transitions.
+  if (lstrcmpiW(window_class, L"Button") == 0 && !choice_control(window) &&
+      (message == WM_PAINT || message == WM_PRINTCLIENT)) {
+    PAINTSTRUCT paint{};
+    DRAWITEMSTRUCT item{};
+    item.CtlType = ODT_BUTTON;
+    item.hwndItem = window;
+    item.hDC = message == WM_PAINT ? BeginPaint(window, &paint) : reinterpret_cast<HDC>(wp);
+    GetClientRect(window, &item.rcItem);
+    const auto state = SendMessageW(window, BM_GETSTATE, 0, 0);
+    item.itemState = (!IsWindowEnabled(window) ? ODS_DISABLED : 0) |
+        (state & BST_PUSHED ? ODS_SELECTED : 0) | (GetFocus() == window ? ODS_FOCUS : 0) |
+        (SendMessageW(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS ? ODS_NOFOCUSRECT : 0);
+    draw_button(item);
+    if (message == WM_PAINT) EndPaint(window, &paint);
+    return 0;
+  }
+  const int text_role = role(window);
+  if ((text_role == 6 || text_role == 7 || text_role == 9 || text_role == 14 ||
+      text_role == 17 || text_role == 24 || GetPropW(window, L"PanitaStageTitle")) &&
+      (message == WM_PAINT || message == WM_PRINTCLIENT)) {
+    PAINTSTRUCT paint{};
+    HDC dc = message == WM_PAINT ? BeginPaint(window, &paint) : reinterpret_cast<HDC>(wp);
+    RECT bounds{}; GetClientRect(window, &bounds);
+    const bool error = text_role == 17 || GetPropW(window, L"PanitaError");
+    HBRUSH brush = CreateSolidBrush(error ? RGB(42,28,28) : text_role == 9 ? card : background);
+    FillRect(dc, &bounds, brush); DeleteObject(brush);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, error ? RGB(252,165,165) : text_role == 6 || GetPropW(window, L"PanitaStageTitle") ?
+        RGB(249,255,248) : RGB(186,186,186));
+    HGDIOBJ old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
+    const auto text = window_text(window);
+    DrawTextW(dc, text.c_str(), -1, &bounds, DT_WORDBREAK | DT_NOPREFIX);
+    SelectObject(dc, old);
+    if (message == WM_PAINT) EndPaint(window, &paint);
+    return 0;
+  }
   const bool progress = role(window) == 26;
-  if ((role(window) == 2 || role(window) == 5 || role(window) == 8 || role(window) == 25 || progress) && (message == WM_PAINT || message == WM_PRINTCLIENT)) {
+  if ((role(window) == 2 || role(window) == 5 || role(window) == 8 || role(window) == 25 || role(window) == 27 || progress) && (message == WM_PAINT || message == WM_PRINTCLIENT)) {
     PAINTSTRUCT paint{};
     HDC dc = message == WM_PAINT ? BeginPaint(window, &paint) : reinterpret_cast<HDC>(wp);
     if (progress) paint_progress(window, dc);
@@ -873,7 +866,7 @@ BOOL CALLBACK style_child(HWND window, LPARAM) {
     if (kind == BS_PUSHBUTTON || kind == BS_DEFPUSHBUTTON) {
       // Preserve a real BUTTON control: tab navigation, Space, Enter and
       // accessibility remain provided by Windows rather than simulated labels.
-      SetWindowLongPtrW(window, GWL_STYLE, (style & ~BS_TYPEMASK) | BS_OWNERDRAW);
+      SendMessageW(window, BM_SETSTYLE, BS_OWNERDRAW, TRUE);
       InvalidateRect(window, nullptr, TRUE);
     }
   }
