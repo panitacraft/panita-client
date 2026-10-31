@@ -47,7 +47,7 @@ function DiagnosticViewer() {
           <div className="timeline-body">
             <p className="diagnostic-event"><span>{diagnosticText(record)}</span>{problem ? <CircleAlert aria-hidden="true" /> : <CircleCheck aria-hidden="true" />}</p>
             {record.error && <p>{messageForError(record.error)}</p>}
-            <p className="timeline-meta">{record.at > 0 && <time dateTime={new Date(record.at).toISOString()}>{formatTime(record.at)}</time>}
+            <p className="timeline-meta">{record.at > 0 && <time dateTime={new Date(record.at).toISOString()}>Fecha {formatTime(record.at)}</time>}
               <span>Sesión {record.processSessionId}</span>
               {record.operationId && <span>Operación {record.operationId}</span>}
               {record.error && <span>Categoría <code>{record.error}</code></span>}</p>
