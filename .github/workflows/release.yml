@@ -1,9 +1,14 @@
-name: Build release installers
-run-name: Build release installers ${{ github.ref_name }}
+name: Release
+run-name: Release ${{ github.ref_name }} (${{ github.sha }})
 
+# A push to develop publishes a beta and a push to master publishes a stable release (AGENTS.md
+# section 8). The committed version decides the tag; an existing tag is never rebuilt. The update
+# feeds move last, so a partial publication never reaches players. Tags created with GITHUB_TOKEN do
+# not start other workflows, so this one workflow plans, builds, tags and publishes everything.
 on:
   push:
-    tags: ['v*']
+    branches: [develop, master]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,8 +18,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan:
+    name: Plan release
+    if: github.repository == 'panitacraft/panita-client'
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      channel: ${{ steps.plan.outputs.channel }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      feeds: ${{ steps.plan.outputs.feeds }}
+      release_state: ${{ steps.state.outputs.release_state }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.16.0'
+      - name: Derive the release from the committed version
+        id: plan
+        run: node scripts/release-plan.mjs "$GITHUB_REF_NAME"
+      - name: Look for an existing release
+        id: state
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          state=$(gh release view "$TAG" --json isDraft --jq 'if .isDraft then "draft" else "published" end' 2>/dev/null || echo none)
+          echo "release_state=$state" >> "$GITHUB_OUTPUT"
+          echo "$TAG: $state"
+
   package:
     name: Verify and package (${{ matrix.platform }} x64)
+    needs: plan
+    # A published tag is never rebuilt. A leftover draft from a failed run is rebuilt.
+    if: needs.plan.outputs.release_state != 'published'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
@@ -28,17 +70,18 @@ jobs:
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/target/phase-7-build
       CARGO_BUILD_JOBS: 2
-      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_TAG: ${{ needs.plan.outputs.tag }}
       # A public client identifier, so a repository variable and not a secret.
       PANITA_LAUNCHER_API_KEY: ${{ vars.PANITA_LAUNCHER_API_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.16.0'
-      - name: Validate release tag
+      - name: Check the committed version matches the planned release
         id: version
         shell: bash
         run: |
@@ -75,16 +118,16 @@ jobs:
           cargo test --manifest-path vendor/private-fs/Cargo.toml --lib --features force-walk --locked
       - name: Lint Rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Test release packaging contract
+      - name: Test release scripts
         run: node --test scripts/*.test.mjs
-      - name: Build unsigned installers
+      - name: Build installers and updater signatures
         shell: bash
         env:
           # Updater signing only; this is not Windows publisher code signing.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: node scripts/build-beta.mjs --release-tag "$RELEASE_TAG"
-      - name: Verify installer hashes and provenance
+      - name: Verify installer hashes, signatures and provenance
         shell: bash
         run: node scripts/verify-beta.mjs --release-tag "$RELEASE_TAG"
       - name: Inspect Linux packages
@@ -111,8 +154,11 @@ jobs:
           name: release-${{ matrix.platform }}
           path: |
             target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.exe
+            target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.exe.sig
             target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.deb
+            target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.deb.sig
             target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.AppImage
+            target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.AppImage.sig
             target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/*.pkg.tar.zst
             target/releases/${{ steps.version.outputs.version }}/${{ matrix.platform }}/SHA256SUMS
           if-no-files-found: error
@@ -120,9 +166,10 @@ jobs:
           compression-level: 0
           include-hidden-files: false
 
-  publish:
-    name: Attach installers to release
-    needs: package
+  release:
+    name: Publish the release
+    needs: [plan, package]
+    if: needs.plan.outputs.release_state != 'published'
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -130,8 +177,11 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      RELEASE_TAG: ${{ github.ref_name }}
       RUN_ID: ${{ github.run_id }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+      RELEASE_STATE: ${{ needs.plan.outputs.release_state }}
     steps:
       - name: Download both verified platform builds
         run: |
@@ -142,21 +192,77 @@ jobs:
           set -euo pipefail
           (cd installers/windows && sha256sum --check SHA256SUMS)
           (cd installers/linux && sha256sum --check SHA256SUMS)
-          version="${RELEASE_TAG#v}"
           mkdir assets
-          cp "installers/windows/panita-client_${version}_windows_x64_unsigned.exe" assets/
-          cp "installers/linux/panita-client_${version}_linux_x64_unsigned.deb" assets/
-          cp "installers/linux/panita-client_${version}_linux_x64_unsigned.AppImage" assets/
-          cp "installers/linux/panita-client_${version}_archlinux_x64_unsigned.pkg.tar.zst" assets/
+          for file in \
+            "installers/windows/panita-client_${VERSION}_windows_x64_unsigned.exe" \
+            "installers/linux/panita-client_${VERSION}_linux_x64_unsigned.deb" \
+            "installers/linux/panita-client_${VERSION}_linux_x64_unsigned.AppImage"; do
+            cp "$file" "$file.sig" assets/
+          done
+          cp "installers/linux/panita-client_${VERSION}_archlinux_x64_unsigned.pkg.tar.zst" assets/
           cat installers/windows/SHA256SUMS installers/linux/SHA256SUMS > assets/SHA256SUMS
           (cd assets && sha256sum --check SHA256SUMS)
-      - name: Create release if needed and attach installers
+      - name: Publish as a draft, then promote it at the built commit
         run: |
           set -euo pipefail
-          if ! gh release view "$RELEASE_TAG" > /dev/null; then
-            flags=()
-            if [[ "$RELEASE_TAG" == *-* ]]; then flags+=(--prerelease); fi
-            gh release create "$RELEASE_TAG" --verify-tag --title "Panita Client $RELEASE_TAG" --generate-notes "${flags[@]}" assets/*
-          else
-            gh release upload "$RELEASE_TAG" assets/*
+          # A draft left by a failed run has no tag and is safe to replace.
+          if [ "$RELEASE_STATE" = draft ]; then gh release delete "$TAG" --yes; fi
+          flags=(--draft --target "$GITHUB_SHA" --title "Panita Client $TAG" --generate-notes)
+          if [ "$PRERELEASE" = true ]; then flags+=(--prerelease); else flags+=(--latest); fi
+          gh release create "$TAG" "${flags[@]}" assets/*
+          gh release edit "$TAG" --draft=false
+      - name: Confirm the tag identifies the built commit
+        run: |
+          set -euo pipefail
+          tagged=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)
+          if [ "$tagged" != "$GITHUB_SHA" ]; then
+            echo "Tag $TAG identifies $tagged, not the built commit $GITHUB_SHA." >&2
+            exit 1
           fi
+
+  feed:
+    name: Advance the update feeds
+    needs: [plan, package, release]
+    # Runs after a fresh publication, and again for an already published tag so a failed feed step
+    # can be retried. It never runs when packaging or publication failed.
+    if: ${{ !cancelled() && needs.plan.result == 'success' && contains(fromJSON('["success","skipped"]'), needs.package.result) && contains(fromJSON('["success","skipped"]'), needs.release.result) }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    # One feed update at a time across both branches, so runs finishing out of order cannot interleave.
+    concurrency:
+      group: update-feed
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.plan.outputs.tag }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      FEEDS: ${{ needs.plan.outputs.feeds }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.16.0'
+      - name: Read the published signatures
+        run: gh release download "$TAG" --pattern '*.sig' --dir assets
+      - name: Publish each feed that moves forward
+        run: |
+          set -euo pipefail
+          for feed in $FEEDS; do
+            mkdir -p "feeds/$feed"
+            rm -f current.json
+            curl --fail --silent --show-error --location --output current.json \
+              "https://github.com/$GH_REPO/releases/download/$feed/latest.json" || rm -f current.json
+            result=$(GITHUB_OUTPUT= node scripts/release-feed.mjs --version "$VERSION" --dir assets --out "feeds/$feed/latest.json" --current current.json)
+            echo "$feed: $result"
+            if [ "$result" != "advance=true" ]; then continue; fi
+            if ! gh release view "$feed" > /dev/null 2>&1; then
+              gh release create "$feed" --target "$GITHUB_SHA" --prerelease --title "Update feed: $feed" \
+                --notes "Static signed update feed maintained by the release workflow. This is not a release."
+            fi
+            gh release upload "$feed" "feeds/$feed/latest.json" --clobber
+          done
