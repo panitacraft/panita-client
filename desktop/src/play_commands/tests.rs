@@ -167,6 +167,31 @@ fn installation(controller: &PlayController, instance: Uuid, request: Uuid) -> C
 }
 
 #[test]
+fn a_launcher_update_is_reserved_only_while_idle_and_blocks_new_work() {
+    let controller = PlayController::new(ProcessSessionId::new());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    assert!(controller.reserve(instance, request).is_ok());
+    controller.update(instance, request, |entry| entry.phase = Phase::Running);
+    // A running game or an active operation defers the update and is not disturbed.
+    assert!(!controller.begin_update_apply());
+    assert_eq!(
+        controller.snapshot().unwrap_or_default()["instances"][0]["phase"],
+        "running"
+    );
+    controller.fail(instance, request, ErrorCode::OperationCancelled);
+    assert!(controller.begin_update_apply());
+    assert_eq!(
+        controller.reserve(Uuid::new_v4(), Uuid::new_v4()).err(),
+        Some(ErrorCode::OperationCancelled)
+    );
+    // A second reservation cannot overlap, and a failed apply releases the launcher.
+    assert!(!controller.begin_update_apply());
+    controller.cancel_update_apply();
+    assert!(controller.reserve(Uuid::new_v4(), Uuid::new_v4()).is_ok());
+}
+
+#[test]
 fn installation_blocks_duplicate_play_and_close_until_worker_finishes() {
     let controller = PlayController::new(ProcessSessionId::new());
     let instance = Uuid::new_v4();
