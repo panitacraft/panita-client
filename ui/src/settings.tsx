@@ -151,18 +151,18 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
             <p className="resolution-label">Resolución (px)</p><div className="window-dimensions"><div><label htmlFor={prefix + '-width'} className="sr-only">Ancho (px)</label><input aria-label="Ancho de Minecraft (píxeles)" id={prefix + '-width'} type="number" min="320" max="16384" required disabled={instance && draft.inheritWindow} value={draft.width} onChange={event => change({ width: event.target.value })} /></div><span aria-hidden="true">×</span><div><label htmlFor={prefix + '-height'} className="sr-only">Alto (px)</label><input aria-label="Alto de Minecraft (píxeles)" id={prefix + '-height'} type="number" min="240" max="16384" required disabled={instance && draft.inheritWindow} value={draft.height} onChange={event => change({ height: event.target.value })} /></div></div>
             </div>
           </div>
-          {!instance && snapshot.trayAvailable && <div className="settings-card tray-card">
-            <div className="settings-card-heading"><h3><AppWindow aria-hidden="true" />Ventana del launcher</h3></div>
-            <label><input type="checkbox" checked={draft.closeToTray} onChange={event => change({ closeToTray: event.target.checked })} />Al cerrar la ventana, mantener Panita Client en la bandeja del sistema</label>
-            <label><input type="checkbox" checked={draft.hideOnGameStart} onChange={event => change({ hideOnGameStart: event.target.checked })} />Ocultar el launcher en la bandeja al iniciar Minecraft</label>
-            <label><input type="checkbox" checked={draft.reopenOnGameExit} onChange={event => change({ reopenOnGameExit: event.target.checked })} />Volver a mostrar el launcher al cerrar el juego</label>
-          </div>}
           <div className="settings-card console-card">
             <div className="settings-card-heading"><h3><Terminal aria-hidden="true" />Registro del juego</h3>{instance && <InheritToggle name="Registro del juego" checked={draft.inheritConsole} onChange={value => change({ inheritConsole: value })} />}</div>
             <div className={instance && draft.inheritConsole ? 'inherited-content' : undefined}>
             <label><input type="checkbox" checked={draft.showConsole} disabled={instance && draft.inheritConsole} onChange={event => change({ showConsole: event.target.checked })} />Abrir el registro al iniciar Minecraft</label>
             </div>
           </div>
+          {!instance && snapshot.trayAvailable && <div className="settings-card tray-card">
+            <div className="settings-card-heading"><h3><AppWindow aria-hidden="true" />Ventana del launcher</h3></div>
+            <label><input type="checkbox" checked={draft.closeToTray} onChange={event => change({ closeToTray: event.target.checked })} />Al cerrar la ventana, mantener Panita Client en la bandeja del sistema</label>
+            <label><input type="checkbox" checked={draft.hideOnGameStart} onChange={event => change({ hideOnGameStart: event.target.checked })} />Ocultar el launcher en la bandeja al iniciar Minecraft</label>
+            <label><input type="checkbox" checked={draft.reopenOnGameExit} onChange={event => change({ reopenOnGameExit: event.target.checked })} />Volver a mostrar el launcher al cerrar el juego</label>
+          </div>}
         </div>
         <div className="settings-advanced">
           <div className="settings-card-heading"><button type="button" className="advanced-toggle" aria-expanded={advanced} aria-controls={prefix + '-advanced'} onClick={() => setAdvanced(value => !value)}><SlidersHorizontal aria-hidden="true" />Java y argumentos avanzados<ChevronDown className={advanced ? 'expanded' : ''} aria-hidden="true" /></button>
