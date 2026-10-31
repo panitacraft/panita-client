@@ -18,6 +18,9 @@
   --color-ring: #E4FFDA;
   --color-danger: #B94545;
   --color-danger-hover: #D05A5A;
+  --color-danger-soft: #3A1D1D;
+  --color-danger-soft-hover: #4D2626;
+  --color-danger-soft-border: #6B3B3B;
   --color-destructive: #FCA5A5;
   --color-destructive-foreground: #141414;
 }
@@ -481,7 +484,7 @@
   .library-page, .utility-page { animation: panita-page-in 240ms ease-out; }
   .settings-page > div:not([hidden]) { animation: panita-fade-in 200ms ease-out; }
   .instance-detail { animation: panita-fade-in 260ms ease-out; }
-  .artwork-fade { opacity: 0; transition: opacity 1500ms ease, transform 2200ms cubic-bezier(.2, .7, .2, 1); }
+  .artwork-fade { opacity: 0; transition: opacity 2600ms ease-in-out, transform 3600ms cubic-bezier(.2, .7, .2, 1); }
   .banner-image.artwork-fade { transform: scale(1.04); }
   .artwork-fade.is-loaded { opacity: 1; transform: none; }
   .dialog-title { display: flex; align-items: center; gap: 12px; }
@@ -501,4 +504,17 @@
   .indeterminate-bar::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: 4px; background: #54A636; animation: panita-indeterminate 1.4s ease-in-out infinite; }
   :root[data-motion='off'] .indeterminate-bar::after { animation: panita-indeterminate 1.4s ease-in-out infinite !important; }
   @keyframes panita-indeterminate { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+}
+
+@layer components {
+  /* The log viewer's own title bar mirrors the main toolbar, with smaller chrome. */
+  .log-titlebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; padding: 0 12px 0 14px; flex-shrink: 0; background: #1B1B1B; border-bottom: 1px solid #303030; }
+  .log-titlebar button { border: 0; }
+  .log-titlebar-logo { width: 26px; height: 26px; margin-right: 12px; object-fit: contain; }
+  .log-titlebar-title { margin-left: 14px; padding-left: 14px; border-left: 1px solid #515151; color: #BABABA; font-size: 13px; white-space: nowrap; }
+  .log-search-input input { height: 36px; padding-block: 0; }
+  .log-levels legend { padding: 0; }
+  .log-viewport { position: relative; display: flex; flex: 1; min-height: 0; }
+  .log-viewport > .game-log-lines { flex: 1; min-width: 0; }
+  .log-viewport > .log-jump { position: absolute; right: 22px; bottom: 16px; background: #292929; box-shadow: 0 6px 18px #0009; }
 }

@@ -5,6 +5,10 @@ import { usePlaySnapshot } from './play';
 import { messageForError } from './errors';
 import { ArrowDownToLine, ChevronUp, ChevronDown, FileText, FolderOpen, RotateCcw, Search, Trash2, TriangleAlert, X } from 'lucide-react';
 import { Button } from './components/ui/button';
+import { TooltipProvider } from './components/ui/tooltip';
+import { WindowControls } from './components/window-controls';
+import { WindowDragRegion } from './components/window-drag-region';
+import logoBackground from './assets/logo_background.svg';
 import { unacknowledgedCrashes, type GameLogSnapshot } from './game-output-state';
 import { formattedGameLines, displayLogTime, readableGameLines } from './game-log-format';
 import { startGameLogFeed, type GameLogNotice } from './game-log-feed';
@@ -157,18 +161,23 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
     } catch (cause) { if (generation === searchGeneration.current) setSearchNotice(messageForError(cause)); }
     finally { if (generation === searchGeneration.current) setSearching(false); }
   }
-  return <main className="game-log-window">
+  return <TooltipProvider delayDuration={250}><main className="game-log-window">
+    <header className="log-titlebar">
+      <WindowDragRegion><img className="log-titlebar-logo" src={logoBackground} alt="" aria-hidden="true" draggable={false} /><span className="toolbar-brand">PANITA <span>CLIENT</span></span><span className="log-titlebar-title">Registro de Minecraft</span></WindowDragRegion>
+      <WindowControls />
+    </header>
     <header className="log-toolbar">
       <div className="log-filter" role="search" aria-label="Buscar en el historial de Minecraft"><label htmlFor="log-query"><Search aria-hidden="true" />Filtrar mensajes</label><div className="log-search-input"><input id="log-query" placeholder="Buscar en el registro…" value={query} maxLength={256} onChange={event => { searchGeneration.current++; setSearching(false); setQuery(event.target.value); setMatch(null); setSearchNotice(null); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void find(event.shiftKey); } }} /><Button variant="ghost" size="icon" aria-label="Coincidencia anterior" disabled={!query.trim() || searching} onClick={() => void find(true)}><ChevronUp aria-hidden="true" /></Button><Button variant="ghost" size="icon" aria-label="Coincidencia siguiente" disabled={!query.trim() || searching} onClick={() => void find(false)}><ChevronDown aria-hidden="true" /></Button></div></div>
       <fieldset className="log-levels"><legend>Niveles</legend>{['debug', 'info', 'warn', 'error', 'fatal'].map(level => <label key={level}><input type="checkbox" checked={levels.has(level)} onChange={event => setLevels(previous => { const next = new Set(previous); if (event.target.checked) next.add(level); else next.delete(level); return next; })} />{level.toUpperCase()}</label>)}</fieldset>
-      <div className="log-actions"><Button variant="outline" disabled={!snapshot} onClick={clearView}><Trash2 aria-hidden="true" />Limpiar vista</Button>{viewStart > 0 && <Button variant="ghost" aria-label="Restaurar historial" onClick={() => { setViewStart(0); navigate(null); }}><RotateCcw aria-hidden="true" /></Button>}</div>
+      <div className="log-actions"><Button variant="ghost" disabled={!snapshot} onClick={clearView}><Trash2 aria-hidden="true" />Limpiar vista</Button>{viewStart > 0 && <Button variant="ghost" aria-label="Restaurar historial" onClick={() => { setViewStart(0); navigate(null); }}><RotateCcw aria-hidden="true" /></Button>}</div>
     </header>
-    <div className="log-options"><label><input type="checkbox" checked={follow} onChange={event => { setFollow(event.target.checked); setOffset(event.target.checked ? null : snapshot?.offset ?? viewStart); }} />Seguir entradas nuevas</label><label><input type="checkbox" checked={wrap} onChange={event => setWrap(event.target.checked)} />Ajustar líneas</label><label><input type="checkbox" checked={colors} onChange={event => setColors(event.target.checked)} />Colores</label><span>{snapshot?.running ? 'Minecraft en ejecución' : 'Registro de Minecraft'}</span><Button variant="ghost" size="icon" aria-label="Ir al final" onClick={() => navigate(null)}><ArrowDownToLine aria-hidden="true" /></Button></div>
+    <div className="log-options"><label><input type="checkbox" checked={follow} onChange={event => { setFollow(event.target.checked); setOffset(event.target.checked ? null : snapshot?.offset ?? viewStart); }} />Seguir entradas nuevas</label><label><input type="checkbox" checked={wrap} onChange={event => setWrap(event.target.checked)} />Ajustar líneas</label><label><input type="checkbox" checked={colors} onChange={event => setColors(event.target.checked)} />Colores</label><span>{snapshot?.running ? 'Minecraft en ejecución' : 'Registro de Minecraft'}</span></div>
     {searching && <div className="log-feedback" role="status">Buscando en el historial… <button onClick={() => { searchGeneration.current++; setSearching(false); }}>Cancelar búsqueda</button></div>}
     {searchNotice && <div className="log-feedback" role="status">{searchNotice}</div>}
     {error && <div className="log-feedback" role="alert">{error}<Button variant="outline" onClick={() => setRetry(value => value + 1)}>Reintentar</Button></div>}
+    <div className="log-viewport">
     <div ref={list} onScroll={onLogScroll} onWheel={event => { if (event.deltaY < 0 && (list.current?.scrollTop ?? 0) < 60) scrollWindow(true); else if (event.deltaY > 0 && list.current && list.current.scrollTop + list.current.clientHeight >= list.current.scrollHeight - 60 && !follow) scrollWindow(false); }} className={'game-log-lines ' + (wrap ? 'log-wrap ' : 'log-nowrap ') + (colors ? 'log-colored' : '')} tabIndex={0} aria-label="Entradas del registro de Minecraft">
-      {lines.length === 0 && <p className="log-empty">{snapshot ? 'Sin mensajes para mostrar.' : 'Cargando registro…'}</p>}
+      {lines.length === 0 && <p className="log-empty">{snapshot ? 'Sin mensajes para mostrar.' : ''}</p>}
       {lines.map((line, index) => {
         const level = line.metadata?.level?.toLowerCase() ?? (line.stream === 'stderr' ? 'error' : 'normal');
         return <div key={line.sequence ?? index} data-sequence={line.sequence} className={'log-row log-' + level + (line.sequence === selected ? ' log-match' : '')}>
@@ -176,5 +185,7 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
         </div>;
       })}<div ref={end} />
     </div>
-  </main>;
+    <Button variant="ghost" size="icon" className="log-jump" aria-label="Ir al final" title="Ir al final" onClick={() => navigate(null)}><ArrowDownToLine aria-hidden="true" /></Button>
+    </div>
+  </main></TooltipProvider>;
 }

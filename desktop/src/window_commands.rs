@@ -1,5 +1,6 @@
-//! Window controls are restricted to their calling main window. Close requests
-//! retain the shared persistence and game-supervision event handlers.
+//! Window controls are restricted to their calling window, which must be the main
+//! window or one of its Minecraft log viewers. Close requests retain the shared
+//! persistence and game-supervision event handlers.
 use launcher_core::error::ErrorCode;
 
 #[tauri::command]
@@ -7,7 +8,7 @@ pub(super) fn main_window_control(
     window: tauri::WebviewWindow,
     action: String,
 ) -> Result<Option<bool>, ErrorCode> {
-    if window.label() != "main" {
+    if window.label() != "main" && !window.label().starts_with("game-log-") {
         return Err(ErrorCode::InvalidData);
     }
     let failed = |_| ErrorCode::ProcessControlFailed;
