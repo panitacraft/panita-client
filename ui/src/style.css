@@ -141,11 +141,12 @@
   /* The slot keeps one fixed box so the version, the update button and the retry state never shift the sidebar. */
   .rail-version-slot { display: flex; align-items: center; justify-content: center; gap: 3px; width: 66px; height: 26px; flex-shrink: 0; }
   .rail-version-slot .rail-version { line-height: 1.2; }
-  .rail-version-slot.has-retry .rail-version { font-size: 9px; max-width: 46px; text-align: right; }
-  .rail-bottom .rail-retry { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; flex-shrink: 0; border-radius: 5px; background: transparent; color: #ef4444; cursor: pointer; }
+  .rail-version-slot.has-retry { gap: 2px; }
+  .rail-version-slot.has-retry .rail-version { min-width: 0; font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+  .rail-bottom .rail-retry { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; padding: 0; flex-shrink: 0; border-radius: 4px; background: transparent; color: #ef4444; cursor: pointer; }
   .rail-bottom .rail-retry:hover:not(:disabled) { background: #3a1d1d; color: #f87171; }
   .rail-bottom .rail-retry:focus-visible, .rail-bottom .rail-update:focus-visible { outline: 2px solid #E4FFDA; outline-offset: 2px; }
-  .rail-retry svg { width: 13px; height: 13px; }
+  .rail-retry svg { width: 11px; height: 11px; }
   .rail-bottom .rail-update { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 100%; height: 100%; padding: 0; border-radius: 6px; background: #54A636; color: #141414; font-size: 9px; font-weight: 700; line-height: 1; cursor: pointer; }
   .rail-bottom .rail-update:hover:not([aria-disabled='true']) { background: #6cc24a; }
   .rail-bottom .rail-update[aria-disabled='true'] { background: #253b1c; color: #E4FFDA; cursor: progress; }
