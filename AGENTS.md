@@ -176,7 +176,7 @@ PanitaClient/
 ├─ account-removals.json  # temporary nonsecret pending account-removal recovery
 ├─ panita-session.json    # sensitive: Panitacraft session token and a nonsecret member snapshot; hidden on Windows
 ├─ settings.json          # indented disk schema 3; compact, explicit keys
-├─ update-state.json      # nonsecret pending launcher-update requirement (§8); planned
+├─ update-state.json      # nonsecret launcher-update channel and pending requirement (§8)
 ├─ insts-cache.json
 ├─ instance-erasures.json # temporary explicit full-instance erasure intents; never auto-retried
 ├─ libraries/             # shared, verified caches
