@@ -2166,7 +2166,7 @@ dependencies = [
 
 [[package]]
 name = "launcher-core"
-version = "0.3.0-beta.6"
+version = "0.3.0-beta.7"
 dependencies = [
  "base64 0.22.1",
  "cap-fs-ext",
@@ -2749,7 +2749,7 @@ dependencies = [
 
 [[package]]
 name = "panita-desktop"
-version = "0.3.0-beta.6"
+version = "0.3.0-beta.7"
 dependencies = [
  "fs2",
  "gtk",
