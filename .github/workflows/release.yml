@@ -44,6 +44,7 @@ jobs:
         run: |
           version=$(node scripts/release-version.mjs "$RELEASE_TAG")
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          node scripts/check-version.mjs --tag "$RELEASE_TAG"
       - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
         with:
           version: '11.25.0'
@@ -75,7 +76,7 @@ jobs:
       - name: Lint Rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Test release packaging contract
-        run: node --test scripts/release-packaging.test.mjs
+        run: node --test scripts/*.test.mjs
       - name: Build unsigned installers
         shell: bash
         run: node scripts/build-beta.mjs --release-tag "$RELEASE_TAG"

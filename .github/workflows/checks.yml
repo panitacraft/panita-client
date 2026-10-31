@@ -34,6 +34,10 @@ jobs:
           components: rustfmt, clippy
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
+      - name: Check version files agree
+        run: node scripts/check-version.mjs
+      - name: Test release and version scripts
+        run: node --test scripts/*.test.mjs
       - name: Check frontend
         run: pnpm build:ui
       - name: Test frontend state

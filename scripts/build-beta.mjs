@@ -4,6 +4,7 @@ import { createReadStream } from 'node:fs';
 import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkVersion } from './check-version.mjs';
 import { releaseVersion } from './release-version.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,6 +21,8 @@ const release = releaseIndex !== -1;
 const releaseTag = release ? args[releaseIndex + 1] : undefined;
 if (loaderValidation && release) throw new Error('Loader validation builds cannot be release candidates.');
 if (release) {
+  // The committed version is authoritative: every manifest must already carry the tagged version.
+  await checkVersion({ tag: releaseTag });
   config.version = releaseVersion(releaseTag);
   args.splice(releaseIndex, 2);
 } else if (!/^\d+\.\d+\.\d+-beta\.\d+$/.test(config.version)) throw new Error('Expected an explicit beta version.');

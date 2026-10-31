@@ -8,7 +8,9 @@
     "build:ui": "pnpm --dir ui build",
     "check:ui": "pnpm --dir ui check",
     "tauri": "node scripts/tauri.mjs",
-    "build:beta": "node scripts/build-beta.mjs"
+    "build:beta": "node scripts/build-beta.mjs",
+    "version:check": "node scripts/check-version.mjs",
+    "version:bump": "node scripts/bump-version.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.2"
