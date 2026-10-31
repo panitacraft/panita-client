@@ -174,8 +174,8 @@ void compact_page(const Controls& controls) {
     place(controls[16], 0, cursor, 100, 34);
     cursor += 34;
   }
-  row(18, 12, 44, content_width - 28);
-  row(19, 0, 44, content_width - 28);
+  row(18, 2, 34, content_width - 28);
+  row(19, 0, 34, content_width - 28);
   resize_shell(page, cursor + 16);
 }
 
