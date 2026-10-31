@@ -150,7 +150,7 @@
   .rail-bottom .rail-retry:focus-visible, .rail-bottom .rail-update:focus-visible { outline: 2px solid #E4FFDA; outline-offset: 2px; }
   .rail-retry svg { width: 11px; height: 11px; }
   .rail-bottom .rail-update { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 100%; height: 100%; padding: 0; border-radius: 6px; background: #54A636; color: #141414; font-size: 9px; font-weight: 700; line-height: 1; cursor: pointer; }
-  .rail-bottom .rail-update:hover:not([aria-disabled='true']) { background: #E4FFDA; }
+  .rail-bottom .rail-update:hover:not([aria-disabled='true']) { background: #B3FF99; }
   .rail-bottom .rail-update[aria-disabled='true'] { background: #253b1c; color: #E4FFDA; cursor: progress; }
   .rail-bottom .rail-update.is-error { background: #3a1d1d; color: #fecaca; box-shadow: inset 0 0 0 1px #ef4444; cursor: pointer; }
   .rail-bottom .rail-update.is-error[aria-disabled='true'] { cursor: progress; }
