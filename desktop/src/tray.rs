@@ -55,24 +55,41 @@ pub(super) fn hide_after_game_start(app: &tauri::AppHandle) {
     });
 }
 
-#[cfg(windows)]
+/// Create the icon. On Linux the indicator library is loaded at runtime and panics when it is
+/// missing, so a failure there must leave the launcher running without the tray feature.
+#[cfg(any(windows, target_os = "linux"))]
 pub(super) fn install(app: &tauri::AppHandle) {
+    #[cfg(target_os = "linux")]
+    {
+        let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build(app)));
+        if attempt.unwrap_or(false) {
+            INSTALLED.store(true, Ordering::Release);
+        }
+    }
+    #[cfg(windows)]
+    if build(app) {
+        INSTALLED.store(true, Ordering::Release);
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn build(app: &tauri::AppHandle) -> bool {
     use tauri::{
         menu::{Menu, MenuItem},
         tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     };
     let Some(icon) = app.default_window_icon().cloned() else {
-        return;
+        return false;
     };
     let Ok(open) = MenuItem::with_id(app, "tray-open", "Abrir Panita Client", true, None::<&str>)
     else {
-        return;
+        return false;
     };
     let Ok(quit) = MenuItem::with_id(app, "tray-quit", "Salir", true, None::<&str>) else {
-        return;
+        return false;
     };
     let Ok(menu) = Menu::with_items(app, &[&open, &quit]) else {
-        return;
+        return false;
     };
     let built = TrayIconBuilder::with_id("panita-client")
         .icon(icon)
@@ -95,14 +112,12 @@ pub(super) fn install(app: &tauri::AppHandle) {
             }
         })
         .build(app);
-    if built.is_ok() {
-        INSTALLED.store(true, Ordering::Release);
-    }
+    built.is_ok()
 }
 
 /// Quit the launcher. Running games are separate processes and keep running; an installation
 /// or launch still being prepared is not interrupted, so the window comes back to say so.
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 fn quit_launcher(app: &tauri::AppHandle) {
     let plays = app.state::<DesktopState>().plays.clone();
     if plays.begin_tray_exit() {

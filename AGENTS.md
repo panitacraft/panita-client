@@ -324,7 +324,12 @@ panita-client/
   running, but supervision, stop controls and the log viewer end. It never interrupts a
   launch or installation in preparation: the window is restored with the usual notice. The
   preparation-only close guard is unchanged. Without the icon, none of these settings
-  applies. Linux and macOS are not covered until validated.
+  applies. Linux uses the same behavior through `libayatana-appindicator`, which the
+  `.deb` and the Arch package declare as a dependency. The library is loaded at run time
+  and a missing one only means no icon and no settings card: the launcher still starts.
+  Linux shows the menu on any click, because the platform reports no left-click event, and
+  GNOME needs its AppIndicator extension to display the icon. Linux behavior is
+  implemented but unvalidated until tested on Ubuntu x64 (§6). macOS is not covered.
 - Keep storage, networking, and platform integrations testable behind clear boundaries. Avoid abstractions or dependencies without a concrete need.
 - The owner approved Prism as a behavioral reference for live Minecraft logs, formatting and local viewer controls on 2026-10-25. Use scoped change notifications with short burst coalescing, sequential cursor catch-up, Log4j time/level/thread/logger formatting, full retained-history search with bounded scans, wrap/colors, and local clear/restore. Keep the approved unlimited memory-only history, redaction, per-line protections and bounded IPC/rendering. Clear must not delete retained history. Do not add persistence, copying, uploading or export. Implement independently; do not copy Prism source.
 - Keep phased implementation work in the implementation plan and decision documents. Annex A preserves the accepted account-storage decision within this file so these policies remain available without separate documents.
