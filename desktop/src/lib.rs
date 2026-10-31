@@ -13,11 +13,12 @@ mod pack_commands;
 mod play_commands;
 mod protocol;
 mod settings_commands;
+#[cfg(windows)]
+mod tray;
 mod update_commands;
 mod window_commands;
 #[cfg(windows)]
 mod windows_identity;
-#[cfg(windows)]
 mod windows_maintenance;
 
 struct DesktopState {
@@ -246,6 +247,8 @@ pub fn run() {
             play_commands::restore_window(app, cwd);
         }))
         .setup(|app| {
+            #[cfg(windows)]
+            tray::install(app.handle());
             // Session log files are best effort: a failure keeps in-memory diagnostics.
             let state = app.state::<DesktopState>();
             if let Ok(root) = app.path().app_data_dir() {
@@ -311,6 +314,7 @@ pub fn run() {
             settings_commands::settings_snapshot,
             settings_commands::save_global_settings,
             settings_commands::save_instance_settings,
+            settings_commands::save_tray_preferences,
             settings_commands::select_instance,
             account_commands::account_snapshot,
             account_commands::add_offline_account,
