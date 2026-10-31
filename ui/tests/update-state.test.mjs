@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { badgeModel, blocksPlay, channelLocked, previewUpdateView } from '../src/update-state.ts';
+import { badgeModel, blocksPlay, channelLocked } from '../src/update-state.ts';
 
 const describe = code => `Mensaje de ${code}.`;
 const badge = value => badgeModel(value, describe);
@@ -69,12 +69,4 @@ test('the channel cannot change while an update is downloading or applying', () 
   assert.equal(channelLocked(view({ phase: 'applying' })), true);
   assert.equal(channelLocked(view({ phase: 'ready' })), false);
   assert.equal(channelLocked(view()), false);
-});
-
-test('development previews map to states and unknown names to none', () => {
-  assert.equal(previewUpdateView(null), null);
-  assert.equal(previewUpdateView('unknown'), null);
-  assert.equal(previewUpdateView('ready').phase, 'ready');
-  assert.equal(previewUpdateView('required-failed').pendingVersion, '0.2.0-beta.4');
-  assert.equal(previewUpdateView('failed').pendingVersion, null);
 });

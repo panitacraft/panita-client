@@ -66,19 +66,3 @@ export function badgeModel(view: LauncherUpdateView | null, describeError: (code
       return update('update', 'Actualizar', 'retry', `Hay una actualización obligatoria: ${named}. Haz clic para descargarla.`);
   }
 }
-
-/** Development-only sample states for checking the badge in a plain browser. */
-export function previewUpdateView(name: string | null): LauncherUpdateView | null {
-  const base: LauncherUpdateView = { currentVersion: '0.2.0-beta.3', channel: 'stable', phase: 'idle', pendingVersion: null, delivery: 'in_place', releaseUrl: null, progress: null, applyRequested: false, error: null };
-  const required = { pendingVersion: '0.2.0-beta.4' };
-  switch (name) {
-    case 'ready': return { ...base, ...required, phase: 'ready' };
-    case 'waiting': return { ...base, ...required, phase: 'ready', applyRequested: true };
-    case 'downloading': return { ...base, ...required, phase: 'downloading', progress: 42 };
-    case 'applying': return { ...base, ...required, phase: 'applying' };
-    case 'manual': return { ...base, ...required, phase: 'manual', delivery: 'manual' };
-    case 'required-failed': return { ...base, ...required, phase: 'failed', error: 'network_unavailable' };
-    case 'failed': return { ...base, phase: 'failed', error: 'network_unavailable' };
-    default: return null;
-  }
-}

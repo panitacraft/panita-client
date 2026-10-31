@@ -6,7 +6,7 @@ import { Button } from './components/ui/button';
 import { Hint } from './components/hint';
 import { messageForError } from './errors';
 import { invokeUpdate } from './update-api';
-import { badgeModel, channelLocked, previewUpdateView, type BadgeIcon, type LauncherUpdateView, type UpdateAction, type UpdateChannel } from './update-state';
+import { badgeModel, channelLocked, type BadgeIcon, type LauncherUpdateView, type UpdateAction, type UpdateChannel } from './update-state';
 
 const HIGHLIGHT_MS = 3500;
 
@@ -28,8 +28,7 @@ export function useLauncherUpdate() { return useContext(UpdateContext); }
 
 export function LauncherUpdateProvider({ children }: { children: ReactNode }) {
   const desktop = isTauri();
-  // A plain browser has no backend; a development URL such as ?update=ready previews a state.
-  const [view, setView] = useState<LauncherUpdateView | null>(() => !desktop && import.meta.env.DEV ? previewUpdateView(new URLSearchParams(window.location.search).get('update')) : null);
+  const [view, setView] = useState<LauncherUpdateView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [highlighted, setHighlighted] = useState(false);
