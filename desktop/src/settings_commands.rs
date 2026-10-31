@@ -62,8 +62,38 @@ fn snapshot(app: &tauri::AppHandle, instance_id: Option<Uuid>) -> Result<Value, 
         .map_err(|_| ErrorCode::StorageUnavailable)?
         .warning;
     Ok(
-        json!({ "global": global, "instance": instance, "instanceId": instance_id, "windowWarning": warning }),
+        json!({ "global": global, "instance": instance, "instanceId": instance_id, "windowWarning": warning, "trayAvailable": super::tray::available() }),
     )
+}
+
+#[tauri::command]
+pub(super) fn save_tray_preferences(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, DesktopState>,
+    close_to_tray: bool,
+    hide_on_game_start: bool,
+    reopen_on_game_exit: bool,
+) -> Result<(), ErrorCode> {
+    account_commands::controller(&state)?;
+    let (_, store) = store(&app)?;
+    let saved = GlobalSettings::save_tray_preferences(
+        &store,
+        close_to_tray,
+        hide_on_game_start,
+        reopen_on_game_exit,
+    )
+    .map(|_| ())
+    .map_err(|error| error.code());
+    state.logs.action("tray preferences saved", &saved);
+    if saved.is_ok() {
+        state.logs.note(
+            launcher_core::session_log::Level::Info,
+            &format!(
+                "tray preferences changed close_to_tray={close_to_tray}; hide_on_game_start={hide_on_game_start}; reopen_on_game_exit={reopen_on_game_exit}"
+            ),
+        );
+    }
+    saved
 }
 
 #[tauri::command]

@@ -104,6 +104,8 @@ test('activation preserves the full serial, supports copy, and regenerates expir
   });
   const user = userEvent.setup(); mount();
   await user.type(await screen.findByLabelText('IGN o usuario de Discord'), 'Fixture_Player');
+  expect((screen.getByRole('button', { name: 'Continuar' }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(screen.getByRole('checkbox', { name: /Términos de Uso/ }));
   await user.click(screen.getByRole('button', { name: 'Continuar' }));
   expect(await screen.findByLabelText('Código ABCD-EFGH-IJKL')).toBeTruthy();
   expect(screen.getByRole('heading', { name: 'Acceder a Panita Client' })).toBeTruthy();
@@ -126,6 +128,14 @@ test('file names inside an activation error are shown as inline code', async () 
   const file = alert.querySelector('code.inline-code');
   expect(file?.textContent).toBe('panita-session.json');
   expect(alert.textContent).toContain('Cierra el cliente y elimina panita-session.json');
+});
+
+test('the Terms of Use link opens through the fixed backend command', async () => {
+  const implementation = native.invoke.getMockImplementation()!;
+  native.invoke.mockImplementation(async (command: string, ...rest: unknown[]) => command === 'open_terms_of_use' ? undefined : implementation(command, ...rest));
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Términos de Uso' }));
+  expect(native.invoke).toHaveBeenCalledWith('open_terms_of_use', undefined);
 });
 
 test('Panita Bot opens its Discord conversation and a failure says what to do instead', async () => {

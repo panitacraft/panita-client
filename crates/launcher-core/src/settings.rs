@@ -23,6 +23,12 @@ struct SettingsDocument {
 struct LauncherDocument {
     selected_instance: Option<uuid::Uuid>,
     window: Option<LauncherWindow>,
+    #[serde(default)]
+    close_to_tray: bool,
+    #[serde(default)]
+    hide_on_game_start: bool,
+    #[serde(default)]
+    reopen_on_game_exit: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -30,6 +36,15 @@ struct LauncherDocument {
 pub struct LauncherPreferences {
     pub selected_instance_id: Option<uuid::Uuid>,
     pub window: Option<LauncherWindow>,
+    /// Closing the window hides it to the notification area instead of exiting.
+    #[serde(default)]
+    pub close_to_tray: bool,
+    /// The window hides to the notification area once a game has started.
+    #[serde(default)]
+    pub hide_on_game_start: bool,
+    /// The window comes back when the last game exits while it is hidden that way.
+    #[serde(default)]
+    pub reopen_on_game_exit: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -123,6 +138,9 @@ impl GlobalSettings {
                 launcher: LauncherPreferences {
                     selected_instance_id: document.launcher.selected_instance,
                     window: document.launcher.window,
+                    close_to_tray: document.launcher.close_to_tray,
+                    hide_on_game_start: document.launcher.hide_on_game_start,
+                    reopen_on_game_exit: document.launcher.reopen_on_game_exit,
                 },
             };
             settings.validate()?;
@@ -148,6 +166,9 @@ impl GlobalSettings {
             launcher: LauncherDocument {
                 selected_instance: self.launcher.selected_instance_id,
                 window: self.launcher.window.clone(),
+                close_to_tray: self.launcher.close_to_tray,
+                hide_on_game_start: self.launcher.hide_on_game_start,
+                reopen_on_game_exit: self.launcher.reopen_on_game_exit,
             },
         };
         crate::storage_json::pretty(&document).map_err(|_| CoreError::new(ErrorCode::InvalidData))
@@ -209,6 +230,21 @@ impl GlobalSettings {
     ) -> Result<Self, CoreError> {
         Self::update(store, |current| {
             current.launcher.selected_instance_id = id;
+            Ok(())
+        })
+    }
+
+    /// Save the notification-area behavior without touching launch settings or the window.
+    pub fn save_tray_preferences(
+        store: &PrivateStore,
+        close_to_tray: bool,
+        hide_on_game_start: bool,
+        reopen_on_game_exit: bool,
+    ) -> Result<Self, CoreError> {
+        Self::update(store, |current| {
+            current.launcher.close_to_tray = close_to_tray;
+            current.launcher.hide_on_game_start = hide_on_game_start;
+            current.launcher.reopen_on_game_exit = reopen_on_game_exit;
             Ok(())
         })
     }
@@ -389,6 +425,33 @@ mod tests {
     }
 
     #[test]
+    fn tray_preferences_default_off_persist_and_survive_other_saves() {
+        let (_paths, store) = isolated_store();
+        let defaults = GlobalSettings::load(&store).unwrap_or_else(|_| panic!("defaults"));
+        assert!(!defaults.launcher.close_to_tray);
+        assert!(!defaults.launcher.hide_on_game_start);
+        assert!(!defaults.launcher.reopen_on_game_exit);
+        GlobalSettings::save_tray_preferences(&store, true, false, true)
+            .unwrap_or_else(|_| panic!("save tray preferences"));
+        let saved = GlobalSettings::load(&store).unwrap_or_else(|_| panic!("reload"));
+        assert!(saved.launcher.close_to_tray);
+        assert!(!saved.launcher.hide_on_game_start);
+        assert!(saved.launcher.reopen_on_game_exit);
+        // Saving launch settings keeps the stored launcher preferences.
+        saved
+            .save_launch_settings(&store)
+            .unwrap_or_else(|_| panic!("launch save"));
+        GlobalSettings::select_instance(&store, Some(Uuid::new_v4()))
+            .unwrap_or_else(|_| panic!("select"));
+        let after = GlobalSettings::load(&store).unwrap_or_else(|_| panic!("reload"));
+        assert!(after.launcher.close_to_tray && after.launcher.reopen_on_game_exit);
+        // A document written before these keys existed still loads with them off.
+        let old = br#"{"schema": 3, "ram_mib": 4096, "jvm_args": [], "java_path": null, "game_window": {"width": 1280, "height": 720}, "console_on_start": false, "launcher": {"selected_instance": null, "window": null}}"#;
+        let loaded = GlobalSettings::decode(old).unwrap_or_else(|_| panic!("old document"));
+        assert!(!loaded.launcher.close_to_tray);
+    }
+
+    #[test]
     fn disk_settings_are_pretty_compact_and_independent_of_ipc() {
         let (paths, store) = isolated_store();
         let original = GlobalSettings {
@@ -403,6 +466,7 @@ mod tests {
                     height: 600,
                     maximized: true,
                 }),
+                ..LauncherPreferences::default()
             },
             ..GlobalSettings::default()
         };

@@ -13,6 +13,7 @@ mod pack_commands;
 mod play_commands;
 mod protocol;
 mod settings_commands;
+mod tray;
 mod update_commands;
 mod window_commands;
 #[cfg(windows)]
@@ -202,6 +203,8 @@ pub fn run() {
         return;
     }
     #[cfg(windows)]
+    windows_maintenance::retire_legacy_web_data();
+    #[cfg(windows)]
     if !windows_identity::configure(&context.config().identifier) {
         // Cosmetic shell integration must not prevent account or game recovery.
         eprintln!("Windows application identity setup failed");
@@ -244,6 +247,8 @@ pub fn run() {
             play_commands::restore_window(app, cwd);
         }))
         .setup(|app| {
+            #[cfg(any(windows, target_os = "linux"))]
+            tray::install(app.handle());
             // Session log files are best effort: a failure keeps in-memory diagnostics.
             let state = app.state::<DesktopState>();
             if let Ok(root) = app.path().app_data_dir() {
@@ -299,6 +304,7 @@ pub fn run() {
             activation_commands::refresh_activation,
             activation_commands::sign_out_activation,
             activation_commands::open_panita_bot,
+            activation_commands::open_terms_of_use,
             update_commands::launcher_update_status,
             update_commands::check_launcher_update,
             update_commands::set_update_channel,
@@ -308,6 +314,7 @@ pub fn run() {
             settings_commands::settings_snapshot,
             settings_commands::save_global_settings,
             settings_commands::save_instance_settings,
+            settings_commands::save_tray_preferences,
             settings_commands::select_instance,
             account_commands::account_snapshot,
             account_commands::add_offline_account,

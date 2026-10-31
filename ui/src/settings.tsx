@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Save, MemoryStick, Monitor, Terminal, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { Save, MemoryStick, Monitor, Terminal, SlidersHorizontal, ChevronDown, AppWindow } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { settingsApi } from './settings-api';
-import { globalSettingsPayload, instanceSettingsPayload, settingsDraft, updateSettingsDraft, type SettingsDraft, type SettingsSnapshot } from './settings-state';
+import { globalSettingsPayload, instanceSettingsPayload, settingsDraft, trayPreferences, updateSettingsDraft, type SettingsDraft, type SettingsSnapshot } from './settings-state';
 import { messageForError } from './errors';
 
 type Selection = { id: string | null; busy: boolean; error: string | null; warning: string | null; select: (id: string) => Promise<void>; retry: () => void };
@@ -111,6 +111,11 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
         const settings = globalSettingsPayload(draft, snapshot);
         await settingsApi.saveGlobal(settings);
         saved = { ...snapshot, global: { ...snapshot.global, ...settings } };
+        if (snapshot.trayAvailable) {
+          const tray = trayPreferences(draft);
+          await settingsApi.saveTray(tray);
+          saved = { ...saved, global: { ...saved.global, launcher: { ...saved.global.launcher, close_to_tray: tray.closeToTray, hide_on_game_start: tray.hideOnGameStart, reopen_on_game_exit: tray.reopenOnGameExit } } };
+        }
       }
       if (mounted.current) { setSnapshot(saved); setDraft(settingsDraft(saved)); toast.show('Ajustes guardados.'); }
     } catch (cause) {
@@ -152,6 +157,12 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
             <label><input type="checkbox" checked={draft.showConsole} disabled={instance && draft.inheritConsole} onChange={event => change({ showConsole: event.target.checked })} />Abrir el registro al iniciar Minecraft</label>
             </div>
           </div>
+          {!instance && snapshot.trayAvailable && <div className="settings-card tray-card">
+            <div className="settings-card-heading"><h3><AppWindow aria-hidden="true" />Ventana del launcher</h3></div>
+            <label><input type="checkbox" checked={draft.closeToTray} onChange={event => change({ closeToTray: event.target.checked })} />Al cerrar la ventana, mantener Panita Client en la bandeja del sistema</label>
+            <label><input type="checkbox" checked={draft.hideOnGameStart} onChange={event => change({ hideOnGameStart: event.target.checked })} />Ocultar el launcher en la bandeja al iniciar Minecraft</label>
+            <label><input type="checkbox" checked={draft.reopenOnGameExit} onChange={event => change({ reopenOnGameExit: event.target.checked })} />Volver a mostrar el launcher al cerrar el juego</label>
+          </div>}
         </div>
         <div className="settings-advanced">
           <div className="settings-card-heading"><button type="button" className="advanced-toggle" aria-expanded={advanced} aria-controls={prefix + '-advanced'} onClick={() => setAdvanced(value => !value)}><SlidersHorizontal aria-hidden="true" />Java y argumentos avanzados<ChevronDown className={advanced ? 'expanded' : ''} aria-hidden="true" /></button>

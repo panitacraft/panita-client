@@ -158,6 +158,19 @@ BREAKING CHANGE: migrate existing account metadata before loading it.
   open a partially erased profile or retry erasure automatically at startup.
   This explicitly supersedes data-preservation requirements only for this
   separately confirmed full-profile erasure; all other operations retain them.
+  Owner decision, 2026-10-31: on Windows the launcher's embedded browser data
+  lives in a `webview` folder inside the install directory (set through
+  `desktop/tauri.windows.conf.json`, resolved relative to the executable)
+  instead of a second folder under `%LOCALAPPDATA%` named after the application
+  identifier. It is disposable and holds no account or player data. Ordinary
+  uninstall removes it; updates keep it. The same confirmed erasure also
+  removes it and the legacy `%LOCALAPPDATA%\com.panitacraft.client` and
+  `%LOCALAPPDATA%\PanitaClient Core` folders, refusing redirected folders. At
+  startup the launcher removes each legacy folder only when it holds nothing
+  but the browser's own `EBWebView` profile, and leaves it alone otherwise.
+  The application identifier and the `%APPDATA%\PanitaClient` data path do not
+  change. Before erasing, the uninstaller also closes the saved Panitacraft
+  session on the API, best effort.
 - On 2026-10-30 the owner approves a narrow exception to the normal-user rule for
   updating the Linux `.deb` launcher package: the signed, verified package is
   installed through the operating system's `pkexec` prompt only. The launcher
@@ -298,6 +311,25 @@ panita-client/
 - Keep business logic in the UI-independent Rust core. Keep desktop integration thin and UI state separate from account secrets.
 - Closing the launcher window while games run hides it and keeps the owning process supervising those games. Opening the launcher again restores that process and its active-instance controls. Exit automatically after the last game and cancelled pending launch finish if the window remains hidden; keep an open or minimized window alive. Cancel other pending launches when hiding, and preserve the preparation-only close guard. This owner-approved behavior supersedes requiring the launcher window to remain open during gameplay (2026-10-18).
 - The owner requested crash notifications and a separate Minecraft log window on 2026-10-23. Unexpected nonzero game exit restores a hidden launcher and shows a Spanish dialog with its exit code, a bounded redacted crash excerpt, a continuously scrolling execution-log viewer and an option to open that instance's existing `minecraft/crash-reports/` directory. Requested stops do not produce crash notifications. Missing reports are reported honestly. On 2026-10-24 the owner explicitly approved unlimited Minecraft log entry retention in memory only, superseding the 256-event console ring. Keep all accepted redacted entries for the current/most recent execution of each instance until replaced or the launcher exits; memory use can grow with output. Bound each IPC read and rendered window, and retain per-line size and redaction protections. The log viewer never accepts arbitrary paths or commands, reads account files, persists/exports console output, or exposes credentials. Structured launcher diagnostics remain separate and retain their 256-event limit.
+- Owner decision, 2026-10-31: on Windows the launcher shows a notification-area (tray)
+  icon with "Abrir Panita Client" and "Salir"; a left click reopens the window. Three
+  global, off-by-default settings live under `launcher` in `settings.json` (additive keys
+  of disk schema 3; older builds reject them): `close_to_tray` (closing the window hides
+  it and keeps the launcher alive, even with no game), `hide_on_game_start` (the window
+  hides once a game process has started, only while no launch or installation is being
+  prepared) and `reopen_on_game_exit` (the window returns when the last game exits).
+  A launcher hidden this way never exits on its own after the last game; without
+  `close_to_tray` the earlier rule still applies (hidden by close while games run, exit
+  after the last one). "Salir" exits while games run: they are separate processes and keep
+  running, but supervision, stop controls and the log viewer end. It never interrupts a
+  launch or installation in preparation: the window is restored with the usual notice. The
+  preparation-only close guard is unchanged. Without the icon, none of these settings
+  applies. Linux uses the same behavior through `libayatana-appindicator`, which the
+  `.deb` and the Arch package declare as a dependency. The library is loaded at run time
+  and a missing one only means no icon and no settings card: the launcher still starts.
+  Linux shows the menu on any click, because the platform reports no left-click event, and
+  GNOME needs its AppIndicator extension to display the icon. Linux behavior is
+  implemented but unvalidated until tested on Ubuntu x64 (§6). macOS is not covered.
 - Keep storage, networking, and platform integrations testable behind clear boundaries. Avoid abstractions or dependencies without a concrete need.
 - The owner approved Prism as a behavioral reference for live Minecraft logs, formatting and local viewer controls on 2026-10-25. Use scoped change notifications with short burst coalescing, sequential cursor catch-up, Log4j time/level/thread/logger formatting, full retained-history search with bounded scans, wrap/colors, and local clear/restore. Keep the approved unlimited memory-only history, redaction, per-line protections and bounded IPC/rendering. Clear must not delete retained history. Do not add persistence, copying, uploading or export. Implement independently; do not copy Prism source.
 - Keep phased implementation work in the implementation plan and decision documents. Annex A preserves the accepted account-storage decision within this file so these policies remain available without separate documents.

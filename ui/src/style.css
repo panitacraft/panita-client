@@ -161,12 +161,15 @@
   .rail-bottom .rail-retry:hover:not(:disabled) { background: #3a1d1d; color: #f87171; }
   .rail-bottom .rail-retry:focus-visible, .rail-bottom .rail-update:focus-visible { outline: .75px solid #E4FFDA; outline-offset: 2px; }
   .rail-retry svg { width: 11px; height: 11px; }
-  .rail-bottom .rail-update { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 100%; height: 100%; padding: 0; border-radius: 6px; background: #54A636; color: #141414; font-size: 9px; font-weight: 700; line-height: 1; cursor: pointer; }
+  .rail-bottom .rail-update { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 3px; width: 100%; height: 100%; padding: 0 2px; border-radius: 6px; background: #54A636; color: #141414; font-size: 8.5px; font-weight: 700; line-height: 1; white-space: nowrap; cursor: pointer; }
+  .rail-update > span { white-space: nowrap; }
   .rail-bottom .rail-update:hover:not([aria-disabled='true']) { background: #B3FF99; }
   .rail-bottom .rail-update[aria-disabled='true'] { background: #253b1c; color: #E4FFDA; cursor: progress; }
   .rail-bottom .rail-update.is-error { background: #3a1d1d; color: #fecaca; box-shadow: inset 0 0 0 1px #ef4444; cursor: pointer; }
   .rail-bottom .rail-update.is-error[aria-disabled='true'] { cursor: progress; }
-  .rail-update svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .rail-update svg { width: 9px; height: 9px; flex-shrink: 0; }
+  .activation-form .terms-consent { display: flex; align-items: flex-start; justify-content: flex-start; gap: 10px; width: 100%; margin-top: 6px; text-align: left; font-size: 13px; line-height: 1.5; color: #BABABA; }
+  .activation-form .terms-consent input { width: auto; margin: 4px 0 0; flex-shrink: 0; }
   .rail-update.is-highlighted { animation: rail-update-pulse 1s ease-in-out 3; }
   @keyframes rail-update-pulse { 0%, 100% { box-shadow: 0 0 0 0 #54A63600; } 50% { box-shadow: 0 0 0 6px #54A636aa; } }
   @media (prefers-reduced-motion: reduce) { .rail-update.is-highlighted { animation: none; outline: .75px solid #E4FFDA; outline-offset: 2px; } }
@@ -370,6 +373,8 @@
   .window-dimensions > span { padding-bottom: 12px; color: #BABABA; }
   .memory-card { grid-row: span 2; }
   .console-card { grid-column: 2; }
+  .tray-card { grid-column: 1 / -1; }
+  .tray-card label { display: flex; align-items: center; gap: 8px; }
   .settings-advanced { margin-top: 16px; padding: 4px 16px; border: 1px solid #383838; border-radius: 8px; }
   .settings-advanced summary { display: flex; align-items: center; gap: 8px; }
   .settings-save { margin-top: 16px; }
@@ -538,10 +543,10 @@
   /* Published instances zoom their icon on hover instead of changing the background; disabled ones refuse the click. */
   .rail-instance:not(:disabled):hover { background-color: #252525 !important; }
   .rail-instance.is-selected:not(:disabled):hover { background-color: #21351c !important; }
-  .rail-instance .instance-icon { clip-path: inset(0 round 11px); }
+  .rail-instance .instance-icon { clip-path: inset(0 round 5px); }
   .rail-instance .instance-icon, .rail-instance > svg:not(.rail-lock) { transition: transform 200ms ease, clip-path 200ms ease; }
   .rail-instance:not(.is-disabled):hover > svg:not(.rail-lock) { transform: scale(1.12); }
   /* The zoomed image is clipped back to the button's inner box, so the border stays visible. */
-  .rail-instance:not(.is-disabled):hover .instance-icon { transform: scale(1.12); clip-path: inset(5.36% round 10px); }
+  .rail-instance:not(.is-disabled):hover .instance-icon { transform: scale(1.12); clip-path: inset(5.36% round 5px); }
   .rail-instance.is-disabled:not(:disabled) { cursor: not-allowed; }
 }

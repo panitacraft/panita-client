@@ -4,6 +4,10 @@ import { messageForError } from './errors';
 import { packApi } from './pack-api';
 import { playActive } from './play-state';
 import { usePlaySnapshot } from './play';
+import { AccountDialog } from './components/account-dialog';
+import { Button } from './components/ui/button';
+import { Database, Download, FolderOpen, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import {
   cacheRetainedReason, clearSummary, conflictReasonText, conflictSummary, folderHint, importErrorText, manualHeading,
   reasonText, skippedSummary, formatBytes, type CacheReport, type PackFile, type PackList,
@@ -92,6 +96,7 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
   const busyRef = useRef(false);
   const [report, setReport] = useState<CacheReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const toast = useTransientNotice();
 
   async function refresh() {
     try { setSize(await packApi.cacheSize()); } catch (cause) { setError(packImportError(cause)); }
@@ -101,11 +106,16 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
   async function clear() {
     if (busyRef.current) return;
     busyRef.current = true;
-    setBusy(true); setError(null); setQuestion(false);
+    setBusy(true); setError(null); setQuestion(false); setReport(null);
+    toast.show('Limpiando la caché de modpacks…', 'progress');
     try {
-      setReport(await packApi.clearCache());
+      const cleared = await packApi.clearCache();
       await refresh();
+      // Partial results need their explanation on screen; a clean result is just confirmed.
+      if (cleared.retainedEntries > 0) { toast.clear(); setReport(cleared); }
+      else toast.show(`Caché de modpacks limpia (${formatBytes(cleared.removedBytes)} liberados).`);
     } catch (cause) {
+      toast.clear();
       setError(packImportError(cause));
     } finally {
       busyRef.current = false;
@@ -118,15 +128,19 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
     <p>{size === null ? 'Calculando tamaño…' : `Tamaño actual: ${new Intl.NumberFormat('es', { maximumFractionDigits: 1 }).format(size / 1048576)} MB`}</p>
     <p>Guarda archivos compartidos para acelerar futuras descargas. Es completamente seguro vaciarla: tus instancias, mundos y ajustes no se verán afectados.</p>
     <button type="button" disabled={busy || !isTauri() || (size === 0 || size === null)} onClick={() => setQuestion(true)}>Limpiar caché</button>
-    {question && <fieldset className="catalog-notice">
-      <legend>Limpiar la caché de archivos de modpacks</legend>
-      <p>Eliminaremos la carpeta <code>content</code> dentro de la carpeta PanitaClient de tus datos de aplicación ({size === null ? 'tamaño desconocido' : formatBytes(size)}). No tocamos tus instancias, mundos, cuentas ni los archivos de Minecraft y Java.</p>
-      <p>Los archivos se descargarán de nuevo la próxima vez que instales o repares un modpack. No se puede deshacer.</p>
+    {question && <AccountDialog className="update-dialog" titleClassName="dialog-title" onCancel={() => setQuestion(false)}
+      title={<><Database aria-hidden="true" />Limpiar la caché de modpacks</>}>
+      <ul className="update-notes">
+        <li><FolderOpen aria-hidden="true" />Eliminaremos la carpeta <code>content</code> de tus datos de aplicación ({size === null ? 'tamaño desconocido' : formatBytes(size)}).</li>
+        <li><ShieldCheck aria-hidden="true" />No tocamos tus instancias, mundos, cuentas ni los archivos de Minecraft y Java.</li>
+        <li><Download aria-hidden="true" />Los archivos se descargarán de nuevo la próxima vez que instales o repares un modpack.</li>
+        <li className="is-warning"><TriangleAlert aria-hidden="true" />Esta acción no se puede deshacer.</li>
+      </ul>
       <div className="account-buttons">
-        <button type="button" disabled={busy} onClick={() => void clear()}>Confirmar limpieza</button>
-        <button type="button" disabled={busy} onClick={() => setQuestion(false)}>Volver</button>
+        <Button variant="destructive" disabled={busy} onClick={() => void clear()}>Confirmar limpieza</Button>
+        <Button variant="secondary" disabled={busy} onClick={() => setQuestion(false)}>Volver</Button>
       </div>
-    </fieldset>}
+    </AccountDialog>}
     {report && <div role="status">
       <p>{clearSummary(report)}</p>
       {report.details.length > 0 && <details><summary>Por qué se conservaron algunos archivos</summary>
@@ -134,5 +148,6 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
       </details>}
     </div>}
     {error && <p role="alert">{error}</p>}
+    <TransientNotice notice={toast.notice} />
   </section>;
 }

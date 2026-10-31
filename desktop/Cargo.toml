@@ -1,6 +1,6 @@
 [package]
 name = "panita-desktop"
-version = "0.4.0-beta.1"
+version = "1.0.0-beta.1"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 launcher-core = { path = "../crates/launcher-core" }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "=2.7.1"
 uuid = "1"
 serde = { version = "1", features = ["derive"] }

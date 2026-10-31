@@ -4,7 +4,7 @@
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"],
     "linux": {
       "deb": {
-        "depends": ["xdg-utils"],
+        "depends": ["xdg-utils", "libayatana-appindicator3-1"],
         "desktopTemplate": "resources/linux/panita.desktop"
       }
     }

@@ -195,6 +195,7 @@ export function ActivationGate({ children }: { children: ReactNode }) {
 function ActivationScreen() {
   const activation = useActivation();
   const [identifier, setIdentifier] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const toast = useTransientNotice();
   useEffect(() => { if (activation?.notice) toast.show(activation.notice); }, [activation?.notice, toast.show]);
   const view = activation?.view ?? null;
@@ -223,6 +224,11 @@ function ActivationScreen() {
     catch { toast.show('No pudimos abrir Discord. Busca a Panita Bot en tus mensajes directos.', 'error'); }
   }
 
+  async function openTerms() {
+    try { await invokeActivation('open_terms_of_use', undefined); }
+    catch { toast.show('No pudimos abrir el navegador. Visita www.panitacraft.com/terms-of-use.', 'error'); }
+  }
+
   const expired = !pending && !!lastSerial && code === 'activation_expired';
   const help = 'Te damos un código que confirmas desde Discord: envíaselo a Panita Bot por mensaje directo o usa /confirm en el servidor. No necesitas contraseña.';
   return <Shell>
@@ -238,7 +244,8 @@ function ActivationScreen() {
       {view && !pending && !expired && <form className="activation-form" noValidate onSubmit={event => { event.preventDefault(); void activation.start(identifier); }}>
         <label htmlFor="member-identifier">IGN o usuario de Discord</label>
         <div className="identifier-input"><ProfileArtwork username={identifier.trim()} /><input id="member-identifier" placeholder="Ej. Aerosmith_" value={identifier} onChange={event => setIdentifier(event.target.value)} maxLength={100} required autoComplete="off" /></div>
-        <Button type="submit" disabled={starting || identifier.trim().length === 0}>{starting ? 'Generando tu código…' : 'Continuar'}<ArrowRight aria-hidden="true" /></Button>
+        <div className="terms-consent"><input id="accept-terms" type="checkbox" aria-label="He leído y acepto los Términos de Uso de Panitacraft" checked={acceptedTerms} required onChange={event => setAcceptedTerms(event.target.checked)} /><span>He leído y acepto los <button type="button" className="text-action" onClick={() => void openTerms()}>Términos de Uso</button> de Panitacraft.</span></div>
+        <Button type="submit" disabled={starting || !acceptedTerms || identifier.trim().length === 0}>{starting ? 'Generando tu código…' : 'Continuar'}<ArrowRight aria-hidden="true" /></Button>
       </form>}
       {(pending || expired) && serial && <div className={`serial-box ${expired ? 'is-expired' : ''}`}>
         {identifier.trim() && <p className="member-greeting">Hola, <ProfileArtwork username={identifier.trim()} /><strong>{identifier.trim()}</strong></p>}

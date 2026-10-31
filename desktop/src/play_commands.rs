@@ -167,6 +167,10 @@ struct State {
     closing: bool,
     close_blocked: bool,
     background: bool,
+    /// Hidden to the notification area: the launcher stays alive after the last game exits.
+    keep_alive: bool,
+    /// The window comes back when the last game exits (notification-area behavior only).
+    reopen_armed: bool,
     entries: HashMap<Uuid, Entry>,
 }
 
@@ -541,14 +545,22 @@ impl PlayController {
         // thread. Recheck ownership there rather than using a stale snapshot.
         let handle = app.clone();
         let _ = app.run_on_main_thread(move || {
-            if handle.state::<DesktopState>().plays.finish_background() {
+            let plays = &handle.state::<DesktopState>().plays;
+            if plays.finish_background() {
                 handle.exit(0);
+            } else if plays.take_reopen() {
+                restore_window(&handle, String::new());
             }
         });
     }
 
     /// Called on the UI thread. A failed hide must never enable hidden shutdown.
+    #[cfg(test)]
     fn close_window(&self, hide: impl FnOnce() -> bool) -> bool {
+        self.close_window_with(hide, super::tray::TrayMode::default())
+    }
+
+    fn close_window_with(&self, hide: impl FnOnce() -> bool, tray: super::tray::TrayMode) -> bool {
         let Ok(mut state) = self.state.lock() else {
             return true;
         };
@@ -559,6 +571,8 @@ impl PlayController {
         {
             if hide() {
                 state.background = true;
+                state.keep_alive = tray.close_to_tray;
+                state.reopen_armed = tray.close_to_tray && tray.reopen_on_game_exit;
                 state.close_blocked = false;
                 state.cancel_pending(true);
             } else {
@@ -570,9 +584,85 @@ impl PlayController {
             state.close_blocked = true;
             state.changed();
             true
+        } else if tray.close_to_tray && !state.closing && hide() {
+            // Nothing is running: the launcher waits in the notification area.
+            state.background = true;
+            state.keep_alive = true;
+            state.reopen_armed = false;
+            state.close_blocked = false;
+            state.changed();
+            true
         } else {
             state.closing = true;
             false
+        }
+    }
+
+    /// Hide to the notification area once a game has started. Only while games are the only
+    /// activity: a launch or installation in preparation keeps the window.
+    pub(super) fn hide_for_game(&self, hide: impl FnOnce() -> bool, tray: super::tray::TrayMode) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        let preparing = state.entries.values().any(|entry| {
+            entry.phase.active() && !matches!(entry.phase, Phase::Running | Phase::Stopping)
+        });
+        let running = state
+            .entries
+            .values()
+            .any(|entry| matches!(entry.phase, Phase::Running));
+        if state.closing || preparing || !running || !hide() {
+            return;
+        }
+        state.background = true;
+        state.keep_alive = true;
+        state.reopen_armed = tray.reopen_on_game_exit;
+        state.close_blocked = false;
+        state.changed();
+    }
+
+    /// True when the window should come back because the last game ended while it was hidden.
+    fn take_reopen(&self) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.background
+            && state.keep_alive
+            && state.reopen_armed
+            && !state.closing
+            && !state.entries.values().any(|entry| entry.phase.active())
+        {
+            state.reopen_armed = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Quit from the notification area. Games are separate processes and keep running; an
+    /// installation or launch in preparation is never interrupted.
+    pub(super) fn begin_tray_exit(&self) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        if state.closing {
+            return true;
+        }
+        let busy = state.entries.values().any(|entry| {
+            entry.phase.active() && !matches!(entry.phase, Phase::Running | Phase::Stopping)
+        });
+        if busy {
+            return false;
+        }
+        state.closing = true;
+        true
+    }
+
+    /// Tell the interface why the launcher did not quit; runs after the window is restored.
+    pub(super) fn report_close_blocked(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.close_blocked = true;
+            state.changed();
         }
     }
 
@@ -584,6 +674,8 @@ impl PlayController {
             return false;
         }
         state.background = false;
+        state.keep_alive = false;
+        state.reopen_armed = false;
         state.close_blocked = false;
         state.changed();
         true
@@ -594,6 +686,7 @@ impl PlayController {
             return false;
         };
         if state.background
+            && !state.keep_alive
             && !state.closing
             && !state.entries.values().any(|entry| entry.phase.active())
         {
@@ -609,6 +702,11 @@ impl PlayController {
         let Ok(mut state) = self.state.lock() else {
             return false;
         };
+        // An exit already admitted (idle close or notification-area quit) proceeds even if
+        // games are still running: they are separate processes.
+        if state.closing {
+            return true;
+        }
         if state.entries.values().any(|entry| entry.phase.active()) {
             state.close_blocked = true;
             state.changed();
@@ -748,6 +846,7 @@ async fn start_and_monitor(
                 controller.update(instance, request, |entry| entry.console_error = Some(error));
                 controller.publish(&app);
             }
+            super::tray::hide_after_game_start(&app);
             let mut changes = game.output_changes();
             let result = loop {
                 tokio::select! {
@@ -1565,7 +1664,8 @@ pub(super) fn prevent_close(app: &tauri::AppHandle) -> bool {
 
 pub(super) fn close_window(window: &tauri::Window) -> bool {
     let controller = &window.state::<DesktopState>().plays;
-    let prevent = controller.close_window(|| window.hide().is_ok());
+    let tray = super::tray::mode(window.app_handle());
+    let prevent = controller.close_window_with(|| window.hide().is_ok(), tray);
     if !prevent {
         // Auxiliary viewers must not keep an idle launcher without its main window.
         for (label, viewer) in window.app_handle().webview_windows() {

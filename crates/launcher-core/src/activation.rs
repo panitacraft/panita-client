@@ -581,6 +581,32 @@ impl ActivationController {
     }
 }
 
+/// Close the saved Panitacraft session on the API before the profile is erased.
+/// Best effort and bounded by the client timeouts: the local copy is about to be
+/// deleted either way, so every failure, including a missing or damaged session
+/// file, is ignored. Never creates the profile folder.
+pub fn close_stored_session_blocking(root: &std::path::Path) {
+    if !root.is_dir() {
+        return;
+    }
+    let Ok(paths) = crate::paths::AppPaths::new(root) else {
+        return;
+    };
+    let Ok(store) = PrivateStore::open(&paths) else {
+        return;
+    };
+    let Ok(controller) = ActivationController::new(store) else {
+        return;
+    };
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return;
+    };
+    let _ = runtime.block_on(controller.sign_out());
+}
+
 fn same(left: Ticket, right: Ticket) -> bool {
     left.operation == right.operation
 }
