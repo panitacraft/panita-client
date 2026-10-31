@@ -15,7 +15,17 @@ export function compareBase(left, right) {
   return 0;
 }
 
-const format = ({ base, beta }) => `${base.join('.')}${beta === null ? '' : `-beta.${beta}`}`;
+/** Semver order for beta and stable versions: a stable release outranks its own betas. */
+export function compareVersions(left, right) {
+  const a = parseVersion(left);
+  const b = parseVersion(right);
+  const base = compareBase(a.base, b.base);
+  if (base !== 0) return base;
+  if (a.beta === null || b.beta === null) return (a.beta === null ? 1 : 0) - (b.beta === null ? 1 : 0);
+  return a.beta - b.beta;
+}
+
+const format =({ base, beta }) => `${base.join('.')}${beta === null ? '' : `-beta.${beta}`}`;
 
 function raise([major, minor, patch], magnitude) {
   if (magnitude === 'major') return [major + 1, 0, 0];
