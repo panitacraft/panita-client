@@ -51,8 +51,10 @@ const destination = join(root, loaderValidation ? 'target/loader-validation' : r
 console.log(`Unsigned ${loaderValidation ? 'internal loader validation' : release ? 'release' : 'beta'}: ${config.version} (${bundles.map(([bundle]) => bundle).join(', ')})\nSource: ${revision}\nOutput: ${destination}`);
 if (args.includes('--check')) process.exit(0);
 
-// No signing or publication is performed. Tauri retains the existing application identity.
-run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', '--no-sign', '--config', release ? JSON.stringify(config) : join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundles.map(([bundle]) => bundle).join(','), ...(loaderValidation ? ['--features', 'loader-validation'] : []), '--', '--locked']);
+// No OS code signing (the configuration disables it) and no publication is performed. Tauri
+// retains the existing application identity. Updater signing needs TAURI_SIGNING_PRIVATE_KEY
+// and is skipped only for internal loader-validation builds, which are never distributed.
+run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', ...(loaderValidation ? ['--no-sign'] : []), '--config', release ? JSON.stringify(config) : join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundles.map(([bundle]) => bundle).join(','), ...(loaderValidation ? ['--features', 'loader-validation'] : []), '--', '--locked']);
 if (run('git', ['rev-parse', 'HEAD'], true) !== revision
     || run('git', ['status', '--porcelain', '--untracked-files=normal'], true).length > 0) {
   throw new Error('Source changed during compilation. Commit changes and rebuild before preparing a candidate.');
@@ -75,6 +77,11 @@ for (const [bundle, extension] of bundles) {
   const sha256 = hash.digest('hex');
   await copyFile(source, join(destination, name));
   checksums.push(`${sha256}  ${name}`);
+  if (!loaderValidation) {
+    // The signature covers the installer bytes, so it stays valid under the renamed artifact.
+    if (!files.includes(`${expected}.sig`)) throw new Error(`Missing updater signature ${expected}.sig; set TAURI_SIGNING_PRIVATE_KEY.`);
+    await copyFile(join(bundleDirectory, `${expected}.sig`), join(destination, `${name}.sig`));
+  }
   // Preserve the original manifest name for the primary installer.
   const manifest = bundle === 'appimage' ? 'candidate-appimage.json' : 'candidate.json';
   await writeFile(join(destination, manifest), `${JSON.stringify({
