@@ -109,6 +109,38 @@ fn diagnostic_snapshot(
 }
 
 #[tauri::command]
+async fn open_logs_folder(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<bool, launcher_core::error::ErrorCode> {
+    use tauri_plugin_opener::OpenerExt;
+    if window.label() != "main" {
+        return Err(launcher_core::error::ErrorCode::InvalidData);
+    }
+    // Fixed location under the data root; the frontend supplies no path.
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?
+        .join("logs");
+    std::fs::create_dir_all(&directory)
+        .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
+    let opening = tauri::async_runtime::spawn_blocking(move || {
+        app.opener()
+            .open_path(directory.to_string_lossy(), None::<&str>)
+            .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)
+    });
+    // Windows shell integration may keep waiting; report an indeterminate result as opened.
+    match tokio::time::timeout(std::time::Duration::from_secs(5), opening).await {
+        Ok(result) => {
+            result.map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)??;
+            Ok(true)
+        }
+        Err(_) => Ok(true),
+    }
+}
+
+#[tauri::command]
 async fn catalog_snapshot(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
@@ -210,6 +242,24 @@ pub fn run() {
             account_commands::handle_callback(app, args);
             play_commands::restore_window(app, cwd);
         }))
+        .setup(|app| {
+            // Session log files are best effort: a failure keeps in-memory diagnostics.
+            let state = app.state::<DesktopState>();
+            if let Ok(root) = app.path().app_data_dir() {
+                let header = [
+                    format!("launcher version={}", env!("CARGO_PKG_VERSION")),
+                    format!(
+                        "platform os={} arch={}",
+                        std::env::consts::OS,
+                        std::env::consts::ARCH
+                    ),
+                ];
+                state
+                    .logs
+                    .attach_file(&root.join("logs"), state.process, &header);
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         // Used only from Rust commands; no frontend permission is granted to it.
         .plugin(tauri_plugin_dialog::init())
@@ -239,6 +289,7 @@ pub fn run() {
             window_commands::main_window_control,
             initialize,
             diagnostic_snapshot,
+            open_logs_folder,
             catalog_snapshot,
             activation_commands::activation_snapshot,
             activation_commands::start_activation,

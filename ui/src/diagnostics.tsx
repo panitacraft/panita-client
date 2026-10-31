@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, CircleCheck, RefreshCw, Activity } from 'lucide-react';
+import { CircleAlert, CircleCheck, RefreshCw, Activity, FolderOpen } from 'lucide-react';
 import { isTauri } from '@tauri-apps/api/core';
-import { loadDiagnostics } from './diagnostic-api';
+import { loadDiagnostics, openLogsFolder } from './diagnostic-api';
 import { diagnosticText, visibleDiagnosticRecords, type DiagnosticSnapshot } from './diagnostic-state';
 import { messageForError } from './errors';
 
@@ -11,6 +11,7 @@ function DiagnosticViewer() {
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState(false);
+  const [folderError, setFolderError] = useState(false);
   useEffect(() => {
     let active = true;
     setBusy(true);
@@ -25,6 +26,9 @@ function DiagnosticViewer() {
   const visible = errorsOnly ? records.filter(hasProblem) : records;
   return <div aria-busy={busy}>
     <p>Actividad de esta sesión, del evento más reciente al más antiguo. Se conserva hasta cerrar el cliente.</p>
+    <p>Cada sesión también se guarda en un archivo de texto para soporte. Los archivos se eliminan solos después de 48 horas y no incluyen contraseñas ni tokens.</p>
+    <div className="diagnostic-toolbar"><button type="button" disabled={!isTauri()} onClick={() => { setFolderError(false); openLogsFolder().catch(() => setFolderError(true)); }}><FolderOpen aria-hidden="true" />Abrir carpeta de registros</button></div>
+    {folderError && <p role="alert">No pudimos abrir la carpeta de registros.</p>}
     <div className="diagnostic-toolbar"><span><Activity aria-hidden="true" />{snapshot?.records.length ?? 0} {snapshot?.records.length === 1 ? 'evento' : 'eventos'}</span><label><input type="checkbox" checked={errorsOnly} onChange={event => setErrorsOnly(event.target.checked)} />Solo problemas</label>
     <button type="button" disabled={busy || !isTauri()} onClick={() => setAttempt(value => value + 1)}><RefreshCw aria-hidden="true" />Actualizar registro</button></div>
     {busy && <p role="status">Cargando registro…</p>}

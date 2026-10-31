@@ -1,10 +1,12 @@
 use serde::Serialize;
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use uuid::Uuid;
 
 use crate::error::ErrorCode;
 use crate::operation::{OperationId, ProcessSessionId};
+use crate::session_log::{self, Level, SessionFile};
 
 const MAX_EVENTS: usize = 256;
 
@@ -111,6 +113,14 @@ pub struct LogRecord {
 #[derive(Default)]
 pub struct BoundedLog {
     records: Mutex<VecDeque<LogRecord>>,
+    file: Mutex<Option<SessionFile>>,
+}
+
+fn name_of(value: &impl Serialize) -> String {
+    match serde_json::to_value(value) {
+        Ok(serde_json::Value::String(text)) => text,
+        _ => String::from("unknown"),
+    }
 }
 
 impl BoundedLog {
@@ -123,6 +133,96 @@ impl BoundedLog {
             records.pop_front();
         }
         records.push_back(record);
+        drop(records);
+        let view = Self::view_of(record);
+        self.write_file(Self::level_of(&view, &record), &Self::describe(&view));
+    }
+
+    /// Start this process's log file in `directory`, replaying events already held
+    /// in memory. On failure in-memory diagnostics keep working.
+    pub fn attach_file(
+        &self,
+        directory: &Path,
+        process: ProcessSessionId,
+        header: &[String],
+    ) -> Option<PathBuf> {
+        let mut file = SessionFile::create(directory, process).ok()?;
+        file.write(
+            Level::Info,
+            &format!("session started process={}", process.value()),
+        );
+        for line in header {
+            file.write(Level::Info, &session_log::redact(line));
+        }
+        for record in self.snapshot() {
+            let view = Self::view_of(record);
+            file.write(Self::level_of(&view, &record), &Self::describe(&view));
+        }
+        let path = file.path().to_path_buf();
+        *self
+            .file
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = Some(file);
+        Some(path)
+    }
+
+    /// Record a free-text note in the session file only. The text is redacted and
+    /// bounded; it never enters the in-memory view.
+    pub fn note(&self, level: Level, message: &str) {
+        self.write_file(level, &session_log::redact(message));
+    }
+
+    fn write_file(&self, level: Level, text: &str) {
+        if let Some(file) = self
+            .file
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .as_mut()
+        {
+            file.write(level, text);
+        }
+    }
+
+    fn level_of(view: &DiagnosticRecord, record: &LogRecord) -> Level {
+        if view.error.is_some()
+            && !matches!(
+                record.event,
+                LogEvent::BrowserLaunch(_) | LogEvent::OperationCancelled
+            )
+            || matches!(
+                view.phase,
+                Some(WorkflowPhase::Failed | WorkflowPhase::ExitedWithError)
+            )
+        {
+            Level::Error
+        } else if matches!(
+            view.phase,
+            Some(WorkflowPhase::Warning | WorkflowPhase::Cancelled | WorkflowPhase::Cancelling)
+        ) || matches!(
+            record.event,
+            LogEvent::OperationCancelled | LogEvent::BrowserLaunch(_)
+        ) {
+            Level::Warn
+        } else {
+            Level::Info
+        }
+    }
+
+    fn describe(view: &DiagnosticRecord) -> String {
+        let mut text = view.event.to_owned();
+        if let Some(workflow) = &view.workflow {
+            text.push_str(&format!(" workflow={}", name_of(workflow)));
+        }
+        if let Some(phase) = &view.phase {
+            text.push_str(&format!(" phase={}", name_of(phase)));
+        }
+        if let Some(error) = &view.error {
+            text.push_str(&format!(" error={}", name_of(error)));
+        }
+        if let Some(operation) = view.operation_id {
+            text.push_str(&format!(" operation={operation}"));
+        }
+        text
     }
 
     pub fn snapshot(&self) -> Vec<LogRecord> {
@@ -135,10 +235,16 @@ impl BoundedLog {
     }
 
     pub fn view(&self) -> DiagnosticSnapshot {
-        let records = self
-            .snapshot()
-            .into_iter()
-            .map(|record| {
+        let records = self.snapshot().into_iter().map(Self::view_of).collect();
+        DiagnosticSnapshot {
+            capacity: MAX_EVENTS,
+            records,
+        }
+    }
+
+    fn view_of(record: LogRecord) -> DiagnosticRecord {
+        {
+            {
                 let mut view = DiagnosticRecord {
                     process_session_id: record.process.value(),
                     operation_id: record.operation.map(OperationId::value),
@@ -190,11 +296,7 @@ impl BoundedLog {
                     }
                 }
                 view
-            })
-            .collect();
-        DiagnosticSnapshot {
-            capacity: MAX_EVENTS,
-            records,
+            }
         }
     }
 }

@@ -237,6 +237,7 @@ impl PlayController {
         let Ok(mut state) = self.state.lock() else {
             return false;
         };
+        let logs = state.logs.clone();
         let Some(entry) = state
             .entries
             .get_mut(&instance)
@@ -245,6 +246,19 @@ impl PlayController {
             return false;
         };
         let unexpected = !exit.success && !entry.exit_expected;
+        logs.note(
+            if unexpected {
+                launcher_core::session_log::Level::Error
+            } else {
+                launcher_core::session_log::Level::Info
+            },
+            &format!(
+                "game exited code={} unexpected={unexpected} requested_stop={}",
+                exit.code
+                    .map_or_else(|| "none".to_owned(), |code| code.to_string()),
+                entry.exit_expected
+            ),
+        );
         entry.phase = Phase::Exited;
         entry.exit = Some(exit);
         entry.game = None;

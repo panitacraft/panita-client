@@ -21,6 +21,7 @@ pub mod panita_api;
 pub mod panita_session;
 pub mod paths;
 pub mod registry;
+pub mod session_log;
 pub mod sessions;
 pub mod settings;
 pub mod storage;
