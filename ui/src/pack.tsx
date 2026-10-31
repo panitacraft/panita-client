@@ -6,7 +6,7 @@ import { playActive } from './play-state';
 import { usePlaySnapshot } from './play';
 import { AccountDialog } from './components/account-dialog';
 import { Button } from './components/ui/button';
-import { Database, Download, FolderOpen, ShieldCheck, Trash2, TriangleAlert, X } from 'lucide-react';
+import { Database, Download, FolderOpen, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import {
   cacheRetainedReason, clearSummary, conflictReasonText, conflictSummary, folderHint, importErrorText, manualHeading,
@@ -137,8 +137,8 @@ export function CachePanel({ openRequest = 0 }: { openRequest?: number }) {
         <li className="is-warning"><TriangleAlert aria-hidden="true" />Esta acción no se puede deshacer.</li>
       </ul>
       <div className="account-buttons">
-        <Button variant="destructive" disabled={busy} onClick={() => void clear()}><Trash2 aria-hidden="true" />Confirmar limpieza</Button>
-        <Button variant="secondary" disabled={busy} onClick={() => setQuestion(false)}><X aria-hidden="true" />Volver</Button>
+        <Button variant="destructive" disabled={busy} onClick={() => void clear()}>Confirmar limpieza</Button>
+        <Button variant="secondary" disabled={busy} onClick={() => setQuestion(false)}>Volver</Button>
       </div>
     </AccountDialog>}
     {report && <div role="status">
