@@ -1,69 +1,66 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { blocksPlay, channelLocked, primaryUpdateControl, updateNotice } from '../src/update-state.ts';
+import { badgeModel, blocksPlay, channelLocked, previewUpdateView } from '../src/update-state.ts';
 
 const describe = code => `Mensaje de ${code}.`;
-const notice = value => updateNotice(value, describe);
+const badge = value => badgeModel(value, describe);
 const view = (overrides = {}) => ({
   currentVersion: '0.2.0-beta.3', channel: 'stable', phase: 'idle', pendingVersion: null, delivery: 'in_place',
   releaseUrl: null, progress: null, applyRequested: false, error: null, ...overrides,
 });
+const pending = { pendingVersion: '0.2.0-beta.4' };
 
 test('only a known newer release blocks play', () => {
   assert.equal(blocksPlay(null), false);
   assert.equal(blocksPlay(view()), false);
   assert.equal(blocksPlay(view({ phase: 'failed', error: 'network_unavailable' })), false);
-  assert.equal(blocksPlay(view({ pendingVersion: '0.2.0-beta.4' })), true);
+  assert.equal(blocksPlay(view(pending)), true);
 });
 
-test('with nothing pending the notices stay quiet except for an unavailable check', () => {
-  assert.equal(notice(null), null);
-  assert.equal(notice(view()), null);
-  assert.equal(notice(view({ phase: 'checking' })), null);
-  const failed = notice(view({ phase: 'failed', error: 'network_unavailable' }));
-  assert.equal(failed.tone, 'status');
-  assert.match(failed.text, /seguir jugando/);
-  assert.equal(failed.action, 'retry');
+test('with nothing pending the version stays plain, except after a failed check', () => {
+  assert.deepEqual(badge(null), { kind: 'version' });
+  assert.deepEqual(badge(view()), { kind: 'version' });
+  assert.deepEqual(badge(view({ phase: 'checking' })), { kind: 'version' });
+  const failed = badge(view({ phase: 'failed', error: 'network_unavailable' }));
+  assert.equal(failed.kind, 'retry');
+  assert.match(failed.tooltip, /No se pudieron buscar actualizaciones/);
 });
 
-test('a ready update asks for confirmation, then waits for idle and can be cancelled', () => {
-  const ready = notice(view({ phase: 'ready', pendingVersion: '0.2.0-beta.4' }));
-  assert.equal(ready.tone, 'alert');
-  assert.match(ready.text, /0\.2\.0-beta\.4/);
+test('a ready update is a button, then waits for idle and can be cancelled', () => {
+  const ready = badge(view({ phase: 'ready', ...pending }));
+  assert.equal(ready.kind, 'update');
   assert.equal(ready.action, 'apply');
-  const waiting = notice(view({ phase: 'ready', pendingVersion: '0.2.0-beta.4', applyRequested: true }));
-  assert.match(waiting.text, /terminen tus partidas/);
+  assert.equal(ready.label, 'Actualizar');
+  assert.match(ready.tooltip, /0\.2\.0-beta\.4/);
+  const waiting = badge(view({ phase: 'ready', ...pending, applyRequested: true }));
   assert.equal(waiting.action, 'cancel');
-  assert.equal(notice(view({ phase: 'applying', pendingVersion: '0.2.0-beta.4' })).action, null);
+  assert.match(waiting.tooltip, /terminar tus partidas/);
 });
 
-test('download progress, manual packages and failures of a required update are explained', () => {
-  const downloading = notice(view({ phase: 'downloading', pendingVersion: '0.2.0-beta.4', progress: 40 }));
-  assert.match(downloading.text, /40 %/);
-  assert.equal(notice(view({ phase: 'downloading', pendingVersion: '0.2.0-beta.4' })).text.includes('%'), false);
-  const manual = notice(view({ phase: 'manual', pendingVersion: '0.2.0-beta.4', delivery: 'manual' }));
+test('working states have no action and fit a short label', () => {
+  const downloading = badge(view({ phase: 'downloading', ...pending, progress: 42 }));
+  assert.equal(downloading.action, null);
+  assert.equal(downloading.label, '42 %');
+  assert.equal(badge(view({ phase: 'downloading', ...pending })).label, 'Bajando');
+  assert.equal(badge(view({ phase: 'applying', ...pending })).action, null);
+  assert.equal(badge(view({ phase: 'checking', ...pending })).action, null);
+  for (const phase of ['ready', 'downloading', 'checking', 'applying', 'manual', 'failed', 'idle']) {
+    assert.ok(badge(view({ phase, ...pending })).label.length <= 10, phase);
+  }
+});
+
+test('manual packages open the release page and failures of a required update are red', () => {
+  const manual = badge(view({ phase: 'manual', ...pending, delivery: 'manual' }));
   assert.equal(manual.action, 'release_page');
-  assert.match(manual.text, /no puede actualizarse sola/);
-  const failed = notice(view({ phase: 'failed', pendingVersion: '0.2.0-beta.4', error: 'launcher_update_failed' }));
-  assert.equal(failed.tone, 'alert');
-  assert.match(failed.text, /Mensaje de launcher_update_failed./);
-  assert.match(failed.text, /obligatorio actualizar/);
+  assert.match(manual.tooltip, /no puede actualizarse sola/);
+  const failed = badge(view({ phase: 'failed', ...pending, error: 'launcher_update_failed' }));
+  assert.equal(failed.error, true);
   assert.equal(failed.action, 'retry');
-  const stale = notice(view({ phase: 'idle', pendingVersion: '0.2.0-beta.4' }));
+  assert.match(failed.tooltip, /Mensaje de launcher_update_failed\./);
+  assert.match(failed.tooltip, /obligatoria/);
+  const stale = badge(view({ phase: 'idle', ...pending }));
   assert.equal(stale.action, 'retry');
-});
-
-test('the play replacement offers an action only when one can be taken', () => {
-  assert.equal(primaryUpdateControl(null), null);
-  assert.equal(primaryUpdateControl(view()), null);
-  const pending = { pendingVersion: '0.2.0-beta.4' };
-  assert.deepEqual(primaryUpdateControl(view({ ...pending, phase: 'ready' })), { label: 'Actualizar Panita Client', action: 'apply' });
-  assert.equal(primaryUpdateControl(view({ ...pending, phase: 'ready', applyRequested: true })).action, null);
-  assert.equal(primaryUpdateControl(view({ ...pending, phase: 'downloading' })).action, null);
-  assert.equal(primaryUpdateControl(view({ ...pending, phase: 'applying' })).action, null);
-  assert.equal(primaryUpdateControl(view({ ...pending, phase: 'manual' })).action, 'release_page');
-  assert.equal(primaryUpdateControl(view({ ...pending, phase: 'failed' })).action, 'retry');
-  assert.equal(primaryUpdateControl(view({ ...pending, phase: 'idle' })).action, 'retry');
+  assert.equal(stale.error, false);
 });
 
 test('the channel cannot change while an update is downloading or applying', () => {
@@ -72,4 +69,12 @@ test('the channel cannot change while an update is downloading or applying', () 
   assert.equal(channelLocked(view({ phase: 'applying' })), true);
   assert.equal(channelLocked(view({ phase: 'ready' })), false);
   assert.equal(channelLocked(view()), false);
+});
+
+test('development previews map to states and unknown names to none', () => {
+  assert.equal(previewUpdateView(null), null);
+  assert.equal(previewUpdateView('unknown'), null);
+  assert.equal(previewUpdateView('ready').phase, 'ready');
+  assert.equal(previewUpdateView('required-failed').pendingVersion, '0.2.0-beta.4');
+  assert.equal(previewUpdateView('failed').pendingVersion, null);
 });

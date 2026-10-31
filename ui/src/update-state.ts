@@ -15,57 +15,70 @@ export type LauncherUpdateView = {
   error: string | null;
 };
 
-export type UpdateNotice = { tone: 'status' | 'alert'; text: string; action: UpdateAction | null; actionLabel: string | null };
-
 /** A newer release is known, so new game launches are blocked until it is applied. */
 export function blocksPlay(view: LauncherUpdateView | null): boolean {
   return view?.pendingVersion != null;
 }
 
-/** `describeError` turns a backend error code into player-facing Spanish text. */
-export function updateNotice(view: LauncherUpdateView | null, describeError: (code: string | null) => string): UpdateNotice | null {
-  if (!view) return null;
-  const version = view.pendingVersion;
-  const required = version !== null;
-  const named = version ? `Panita Client ${version}` : 'Panita Client';
-  const status = (text: string, action: UpdateAction | null = null, actionLabel: string | null = null): UpdateNotice => ({ tone: 'status', text, action, actionLabel });
-  const alert = (text: string, action: UpdateAction, actionLabel: string): UpdateNotice => ({ tone: 'alert', text, action, actionLabel });
-  switch (view.phase) {
-    case 'checking':
-      return required ? status(`Comprobando la actualización obligatoria ${named}…`) : null;
-    case 'idle':
-      return required ? alert(`Hay una actualización obligatoria: ${named}. Necesitas aplicarla antes de jugar.`, 'retry', 'Buscar actualización') : null;
-    case 'downloading':
-      return status(`Descargando ${named}${view.progress === null ? '' : ` (${view.progress} %)`}…`);
-    case 'ready':
-      return view.applyRequested
-        ? status('La actualización se aplicará cuando terminen tus partidas y operaciones en curso.', 'cancel', 'Cancelar')
-        : alert(`${named} está listo para instalarse. Es obligatorio para poder jugar.`, 'apply', 'Actualizar ahora');
-    case 'applying':
-      return status('Aplicando la actualización. Panita Client se reiniciará.');
-    case 'manual':
-      return alert(`Hay una versión nueva: ${named}. Esta instalación no puede actualizarse sola; instálala desde la página de la versión.`, 'release_page', 'Ver nueva versión');
-    case 'failed':
-      return required
-        ? alert(`${describeError(view.error)} Es obligatorio actualizar para poder jugar.`, 'retry', 'Reintentar')
-        : status('No pudimos comprobar si hay actualizaciones. Puedes seguir jugando.', 'retry', 'Reintentar');
-  }
-}
-
-/** The control that replaces Play while an update is required. */
-export function primaryUpdateControl(view: LauncherUpdateView | null): { label: string; action: UpdateAction | null } | null {
-  if (!blocksPlay(view) || !view) return null;
-  switch (view.phase) {
-    case 'ready': return view.applyRequested ? { label: 'Actualización pendiente…', action: null } : { label: 'Actualizar Panita Client', action: 'apply' };
-    case 'downloading': return { label: 'Descargando actualización…', action: null };
-    case 'checking': return { label: 'Comprobando actualización…', action: null };
-    case 'applying': return { label: 'Actualizando…', action: null };
-    case 'manual': return { label: 'Ver nueva versión', action: 'release_page' };
-    default: return { label: 'Buscar actualización', action: 'retry' };
-  }
-}
-
 /** Switching channels is refused while a download or an application is in progress. */
 export function channelLocked(view: LauncherUpdateView | null): boolean {
   return view === null || view.phase === 'downloading' || view.phase === 'applying';
+}
+
+export type BadgeIcon = 'update' | 'retry' | 'external' | 'busy';
+/**
+ * What the sidebar version element shows. `version` is the plain label, `retry` is the
+ * version with a red retry icon (the check failed and nothing is required), and `update`
+ * is a button that takes the box of the label.
+ */
+export type BadgeModel =
+  | { kind: 'version' }
+  | { kind: 'retry'; tooltip: string }
+  | { kind: 'update'; icon: BadgeIcon; label: string; action: UpdateAction | null; tooltip: string; error: boolean };
+
+/** `describeError` turns a backend error code into player-facing Spanish text. */
+export function badgeModel(view: LauncherUpdateView | null, describeError: (code: string | null) => string): BadgeModel {
+  const pending = view?.pendingVersion ?? null;
+  if (!view || pending === null) {
+    return view?.phase === 'failed'
+      ? { kind: 'retry', tooltip: 'No se pudieron buscar actualizaciones. Haz clic para reintentar.' }
+      : { kind: 'version' };
+  }
+  const named = `Panita Client ${pending}`;
+  const update = (icon: BadgeIcon, label: string, action: UpdateAction | null, tooltip: string, error = false): BadgeModel =>
+    ({ kind: 'update', icon, label, action, tooltip, error });
+  switch (view.phase) {
+    case 'ready':
+      return view.applyRequested
+        ? update('busy', 'Pendiente', 'cancel', 'Se aplicará al terminar tus partidas y operaciones en curso. Haz clic para cancelar.')
+        : update('update', 'Actualizar', 'apply', `Actualizar a ${named}. Es obligatorio para poder jugar.`);
+    case 'downloading':
+      return update('busy', view.progress === null ? 'Bajando' : `${view.progress} %`, null, `Descargando ${named}…`);
+    case 'checking':
+      return update('busy', 'Buscando', null, `Comprobando la actualización obligatoria ${named}…`);
+    case 'applying':
+      return update('busy', 'Aplicando', null, 'Aplicando la actualización. Panita Client se reiniciará.');
+    case 'manual':
+      return update('external', 'Ver nueva', 'release_page', `Hay una versión nueva: ${named}. Esta instalación no puede actualizarse sola; instálala desde la página de la versión.`);
+    case 'failed':
+      return update('retry', 'Reintentar', 'retry', `${describeError(view.error)} La actualización es obligatoria para poder jugar. Haz clic para reintentar.`, true);
+    case 'idle':
+      return update('update', 'Actualizar', 'retry', `Hay una actualización obligatoria: ${named}. Haz clic para descargarla.`);
+  }
+}
+
+/** Development-only sample states for checking the badge in a plain browser. */
+export function previewUpdateView(name: string | null): LauncherUpdateView | null {
+  const base: LauncherUpdateView = { currentVersion: '0.2.0-beta.3', channel: 'stable', phase: 'idle', pendingVersion: null, delivery: 'in_place', releaseUrl: null, progress: null, applyRequested: false, error: null };
+  const required = { pendingVersion: '0.2.0-beta.4' };
+  switch (name) {
+    case 'ready': return { ...base, ...required, phase: 'ready' };
+    case 'waiting': return { ...base, ...required, phase: 'ready', applyRequested: true };
+    case 'downloading': return { ...base, ...required, phase: 'downloading', progress: 42 };
+    case 'applying': return { ...base, ...required, phase: 'applying' };
+    case 'manual': return { ...base, ...required, phase: 'manual', delivery: 'manual' };
+    case 'required-failed': return { ...base, ...required, phase: 'failed', error: 'network_unavailable' };
+    case 'failed': return { ...base, phase: 'failed', error: 'network_unavailable' };
+    default: return null;
+  }
 }
