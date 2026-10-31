@@ -200,6 +200,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // Used only from Rust commands; no frontend permission is granted to it.
         .plugin(tauri_plugin_dialog::init())
+        // Used only from Rust; the webview is granted no updater permission.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .on_window_event(|window, event| {
             if window.label() == "main" {
                 match event {
