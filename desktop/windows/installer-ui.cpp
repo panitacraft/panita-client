@@ -24,6 +24,7 @@ HWND root;
 HFONT body_font;
 HFONT caption_font;
 HFONT option_font;
+HFONT log_font;
 HBRUSH log_brush;
 HBRUSH background_brush;
 HWND detail_source;
@@ -70,8 +71,19 @@ bool visible(HWND window) {
   return window && (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE);
 }
 void place(HWND window, int x, int y, int width, int height) {
-  if (window) SetWindowPos(window, nullptr, scale(x), scale(y), scale(width),
-      scale(height), SWP_NOZORDER | SWP_NOACTIVATE);
+  if (!window) return;
+  RECT current{};
+  GetWindowRect(window, &current);
+  POINT corner{current.left, current.top};
+  ScreenToClient(GetParent(window), &corner);
+  // The 100 ms timer calls this with unchanged values, which must not touch the window at all.
+  if (corner.x == scale(x) && corner.y == scale(y) && current.right - current.left == scale(width) &&
+      current.bottom - current.top == scale(height)) return;
+  SetWindowPos(window, nullptr, scale(x), scale(y), scale(width), scale(height), SWP_NOZORDER | SWP_NOACTIVATE);
+}
+void show(HWND window, bool wanted) {
+  if (window && ((GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE) != 0) != wanted)
+    ShowWindow(window, wanted ? SW_SHOWNA : SW_HIDE);
 }
 std::wstring window_text(HWND window) {
   const int length = (std::min)(GetWindowTextLengthW(window), 1048576);
@@ -206,8 +218,8 @@ void refresh_actions() {
   const bool failed_close = state == 2 && IsWindowEnabled(cancel);
   HWND action = failed_close ? cancel : next;
   const bool show_cancel = !failed_close && state == 0;
-  ShowWindow(action == cancel ? next : cancel, show_cancel ? SW_SHOWNA : SW_HIDE);
-  ShowWindow(action, state == 1 ? SW_HIDE : SW_SHOWNA);
+  show(action == cancel ? next : cancel, show_cancel);
+  show(action, state != 1);
   if (failed_close) set_text(cancel, L"Cerrar");
   else if (state == 3) {
     const bool uninstall = GetPropW(root, L"PanitaUninstall") != nullptr;
@@ -222,10 +234,15 @@ void refresh_actions() {
   ReleaseDC(action, dc);
   const int width = (std::max)(112, MulDiv(measured.right, 96, GetDpiForWindow(root)) + 56);
   place(action, shell_width - 28 - width, shell_height - 68, width, 40);
-  SetWindowPos(action, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-  if (show_cancel) {
-    place(cancel, shell_width - 146 - width, shell_height - 68, 108, 40);
-    SetWindowPos(cancel, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+  if (show_cancel) place(cancel, shell_width - 146 - width, shell_height - 68, 108, 40);
+  // Raising the buttons once per change keeps them from reshuffling every tick.
+  static HWND raised_action;
+  static bool raised_cancel;
+  if (raised_action != action || raised_cancel != show_cancel) {
+    raised_action = action;
+    raised_cancel = show_cancel;
+    SetWindowPos(action, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    if (show_cancel) SetWindowPos(cancel, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   }
 
   if (current_footer != action) {
@@ -327,7 +344,7 @@ void sync_log() {
   const auto lines = SendMessageW(wrapped_log, EM_GETLINECOUNT, 0, 0);
   RECT bounds{};
   GetClientRect(wrapped_log, &bounds);
-  const bool at_bottom = first + bounds.bottom / (std::max)(1, scale(18)) >= lines - 1;
+  const bool at_bottom = first + bounds.bottom / (std::max)(1, scale(16)) >= lines - 1;
   SetWindowTextW(wrapped_log, text.c_str());
   SendMessageW(wrapped_log, EM_LINESCROLL, 0,
       at_bottom ? SendMessageW(wrapped_log, EM_GETLINECOUNT, 0, 0) : first);
@@ -342,7 +359,7 @@ void prepare_log(Controls& controls) {
         0, 0, 0, 0, page, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!wrapped_log) return; // Retain the original details if creation fails.
     SetPropW(wrapped_log, L"PanitaWrappedLog", reinterpret_cast<HANDLE>(1));
-    SendMessageW(wrapped_log, WM_SETFONT, reinterpret_cast<WPARAM>(body_font), TRUE);
+    SendMessageW(wrapped_log, WM_SETFONT, reinterpret_cast<WPARAM>(log_font ? log_font : body_font), TRUE);
     SendMessageW(wrapped_log, EM_SETLIMITTEXT, 1048576, 0);
     SendMessageW(wrapped_log, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
         MAKELPARAM(scale(8), scale(8)));
@@ -380,6 +397,37 @@ void prepare_log(Controls& controls) {
   sync_log();
 }
 
+constexpr UINT_PTR hover_timer = 0x5042;
+std::vector<HWND> hover_animated;
+COLORREF mix(COLORREF from, COLORREF to, int amount) {
+  auto channel = [&](int a, int b) { return a + (b - a) * amount / 100; };
+  return RGB(channel(GetRValue(from), GetRValue(to)), channel(GetGValue(from), GetGValue(to)),
+      channel(GetBValue(from), GetBValue(to)));
+}
+int hover_amount(HWND window) {
+  return static_cast<int>(reinterpret_cast<INT_PTR>(GetPropW(window, L"PanitaHover")));
+}
+void animate_hover(HWND window) {
+  if (!IsWindow(window)) return;
+  if (std::find(hover_animated.begin(), hover_animated.end(), window) == hover_animated.end())
+    hover_animated.push_back(window);
+  SetTimer(root, hover_timer, 16, nullptr);
+}
+// About 110 ms from rest to full hover (15 per 16 ms step), in both directions.
+void step_hover() {
+  for (auto item = hover_animated.begin(); item != hover_animated.end();) {
+    HWND window = *item;
+    if (!IsWindow(window)) { item = hover_animated.erase(item); continue; }
+    const int target = window == hovered_button && IsWindowEnabled(window) ? 100 : 0;
+    int amount = hover_amount(window);
+    amount = amount < target ? (std::min)(target, amount + 15) : (std::max)(target, amount - 15);
+    SetPropW(window, L"PanitaHover", reinterpret_cast<HANDLE>(static_cast<INT_PTR>(amount)));
+    InvalidateRect(window, nullptr, FALSE);
+    item = amount == target ? hover_animated.erase(item) : item + 1;
+  }
+  if (hover_animated.empty()) KillTimer(root, hover_timer);
+}
+
 bool choice_control(HWND window) {
   wchar_t type[32]{};
   GetClassNameW(window, type, 32);
@@ -399,10 +447,10 @@ void draw_choice(HWND window, HDC dc) {
   const int size = MulDiv(role(window) == 12 ? 16 : 18, dpi, 96);
   const bool checked = SendMessageW(window, BM_GETCHECK, 0, 0) == BST_CHECKED;
   const bool enabled = IsWindowEnabled(window) != FALSE;
-  const bool hover = enabled && hovered_button == window;
+  const int amount = enabled ? hover_amount(window) : 0;
   const LONG_PTR kind = GetWindowLongPtrW(window, GWL_STYLE) & BS_TYPEMASK;
   const bool radio = kind == BS_RADIOBUTTON || kind == BS_AUTORADIOBUTTON;
-  const COLORREF accent = !enabled ? RGB(135,135,135) : hover ? RGB(179,255,153) : accent_color;
+  const COLORREF accent = !enabled ? RGB(135,135,135) : mix(accent_color, RGB(179,255,153), amount);
   RECT box{0, (bounds.bottom - size) / 2, size, (bounds.bottom + size) / 2};
   if (radio) {
     Gdiplus::Graphics graphics(dc);
@@ -425,7 +473,7 @@ void draw_choice(HWND window, HDC dc) {
   HGDIOBJ old_font = SelectObject(dc,
       reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
   SetBkMode(dc, TRANSPARENT);
-  SetTextColor(dc, role(window) == 12 && !hover ? RGB(186, 186, 186) : IsWindowEnabled(window) ? RGB(249, 255, 248) : RGB(135, 135, 135));
+  SetTextColor(dc, !enabled ? RGB(135, 135, 135) : role(window) == 12 ? mix(RGB(186, 186, 186), RGB(249, 255, 248), amount) : RGB(249, 255, 248));
   RECT text_bounds = bounds;
   text_bounds.left = size + MulDiv(10, dpi, 96);
   RECT measured = text_bounds;
@@ -527,7 +575,7 @@ void draw_button(const DRAWITEMSTRUCT& item) {
   const bool primary = item.hwndItem == (current_footer ? current_footer : GetDlgItem(root, IDOK));
   const bool disabled = (item.itemState & ODS_DISABLED) != 0;
   const bool pressed = (item.itemState & ODS_SELECTED) != 0;
-  const bool hover = hovered_button == item.hwndItem && !disabled;
+  const int amount = disabled ? 0 : hover_amount(item.hwndItem);
   const int tag = role(item.hwndItem);
   const bool chrome = tag == 3 || tag == 4;
   const bool disclosure = tag == 21;
@@ -536,10 +584,10 @@ void draw_button(const DRAWITEMSTRUCT& item) {
   FillRect(item.hDC, &item.rcItem, base);
   DeleteObject(base);
   const COLORREF fill = disabled ? RGB(42, 42, 42) :
-      chrome ? (hover ? (tag == 4 ? RGB(84, 39, 39) : RGB(48, 48, 48)) : card) :
-      destructive ? (hover ? RGB(254, 202, 202) : RGB(252, 165, 165)) :
-      primary ? (pressed ? RGB(4, 117, 0) : hover ? RGB(179, 255, 153) : accent_color) :
-      (hover ? RGB(56, 56, 56) : RGB(27, 27, 27));
+      chrome ? mix(card, tag == 4 ? RGB(84, 39, 39) : RGB(48, 48, 48), amount) :
+      destructive ? mix(RGB(252, 165, 165), RGB(254, 202, 202), amount) :
+      primary ? (pressed ? RGB(4, 117, 0) : mix(accent_color, RGB(179, 255, 153), amount)) :
+      mix(RGB(27, 27, 27), RGB(56, 56, 56), amount);
   installer_ui::surface(item.hDC, item.rcItem, fill,
       primary || chrome || disclosure ? fill : RGB(81, 81, 81), scale(6));
   wchar_t text[256]{};
@@ -570,8 +618,8 @@ void draw_button(const DRAWITEMSTRUCT& item) {
     }
     if (disclosure) {
       installer_ui::icon(item.hDC, details_open ? installer_ui::Icon::up : installer_ui::Icon::down,
-          scale(1), (bounds.bottom - scale(16)) / 2, scale(16), RGB(186,186,186));
-      bounds.left += scale(24);
+          scale(12), (bounds.top + bounds.bottom - scale(16)) / 2 + scale(1), scale(16), RGB(186,186,186));
+      bounds.left += scale(36);
     }
     DrawTextW(item.hDC, label.c_str(), -1, &bounds, (disclosure ? DT_LEFT : DT_CENTER) | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
   }
@@ -671,6 +719,40 @@ void paint_progress(HWND window, HDC dc) {
   DeleteObject(track);
 }
 
+// Draws into an off-screen bitmap and copies it in one step, so a control is never seen half drawn.
+class Buffered {
+ public:
+  Buffered(HWND window, HDC target) : dc(target), target_(target) {
+    GetClientRect(window, &bounds_);
+    if (bounds_.right <= 0 || bounds_.bottom <= 0) return;
+    memory_ = CreateCompatibleDC(target);
+    bitmap_ = CreateCompatibleBitmap(target, bounds_.right, bounds_.bottom);
+    if (!memory_ || !bitmap_) { release(); return; }
+    previous_ = SelectObject(memory_, bitmap_);
+    dc = memory_;
+  }
+  Buffered(const Buffered&) = delete;
+  Buffered& operator=(const Buffered&) = delete;
+  ~Buffered() { release(); }
+  void flush() {
+    if (memory_) BitBlt(target_, 0, 0, bounds_.right, bounds_.bottom, memory_, 0, 0, SRCCOPY);
+  }
+  HDC dc;
+
+ private:
+  void release() {
+    if (memory_ && previous_) SelectObject(memory_, previous_);
+    if (bitmap_) DeleteObject(bitmap_);
+    if (memory_) DeleteDC(memory_);
+    memory_ = nullptr; bitmap_ = nullptr; previous_ = nullptr;
+  }
+  HDC target_;
+  RECT bounds_{};
+  HDC memory_ = nullptr;
+  HBITMAP bitmap_ = nullptr;
+  HGDIOBJ previous_ = nullptr;
+};
+
 LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
                               UINT_PTR id, DWORD_PTR) {
   if (window == root && message == sync_log_message) {
@@ -679,6 +761,10 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
   }
   if (window == root && message == apply_message) {
     apply_presentation(root);
+    return 0;
+  }
+  if (window == root && message == WM_TIMER && wp == hover_timer) {
+    step_hover();
     return 0;
   }
   if (window == root && message == WM_TIMER && wp == controls_timer) {
@@ -700,9 +786,10 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
   GetClassNameW(window, window_class, 32);
   if (message == WM_MOUSEMOVE && lstrcmpiW(window_class, L"Button") == 0) {
     if (hovered_button != window) {
-      if (IsWindow(hovered_button)) InvalidateRect(hovered_button, nullptr, FALSE);
+      HWND previous = hovered_button;
       hovered_button = window;
-      InvalidateRect(window, nullptr, FALSE);
+      animate_hover(previous);
+      animate_hover(window);
     }
     TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window, 0};
     TrackMouseEvent(&tracking);
@@ -713,12 +800,13 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
   }
   if (message == WM_MOUSELEAVE && hovered_button == window) {
     hovered_button = nullptr;
-    InvalidateRect(window, nullptr, FALSE);
+    animate_hover(window);
   }
   if (message == WM_ERASEBKGND && (window == root || lstrcmpiW(window_class, L"#32770") == 0)) {
     paint_surface(window, reinterpret_cast<HDC>(wp));
     return TRUE;
   }
+  if (message == WM_ERASEBKGND && lstrcmpiW(window_class, L"Button") == 0 && !choice_control(window)) return TRUE;
   // Paint controls directly as well as handling WM_DRAWITEM. Native NSIS dialog
   // procedures can consume owner-draw notifications during page transitions.
   if (lstrcmpiW(window_class, L"Button") == 0 && !choice_control(window) &&
@@ -727,13 +815,16 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
     DRAWITEMSTRUCT item{};
     item.CtlType = ODT_BUTTON;
     item.hwndItem = window;
-    item.hDC = message == WM_PAINT ? BeginPaint(window, &paint) : reinterpret_cast<HDC>(wp);
+    HDC target_dc = message == WM_PAINT ? BeginPaint(window, &paint) : reinterpret_cast<HDC>(wp);
+    Buffered buffer(window, target_dc);
+    item.hDC = buffer.dc;
     GetClientRect(window, &item.rcItem);
     const auto state = SendMessageW(window, BM_GETSTATE, 0, 0);
     item.itemState = (!IsWindowEnabled(window) ? ODS_DISABLED : 0) |
         (state & BST_PUSHED ? ODS_SELECTED : 0) | (GetFocus() == window ? ODS_FOCUS : 0) |
         (SendMessageW(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS ? ODS_NOFOCUSRECT : 0);
     draw_button(item);
+    buffer.flush();
     if (message == WM_PAINT) EndPaint(window, &paint);
     return 0;
   }
@@ -742,7 +833,9 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
       text_role == 17 || text_role == 24 || GetPropW(window, L"PanitaStageTitle")) &&
       (message == WM_PAINT || message == WM_PRINTCLIENT)) {
     PAINTSTRUCT paint{};
-    HDC dc = message == WM_PAINT ? BeginPaint(window, &paint) : reinterpret_cast<HDC>(wp);
+    HDC target_dc = message == WM_PAINT ? BeginPaint(window, &paint) : reinterpret_cast<HDC>(wp);
+    Buffered buffer(window, target_dc);
+    HDC dc = buffer.dc;
     RECT bounds{}; GetClientRect(window, &bounds);
     const bool error = text_role == 17 || GetPropW(window, L"PanitaError");
     HBRUSH brush = CreateSolidBrush(error ? RGB(42,28,28) : text_role == 9 ? card : background);
@@ -754,13 +847,16 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
     const auto text = window_text(window);
     DrawTextW(dc, text.c_str(), -1, &bounds, DT_WORDBREAK | DT_NOPREFIX);
     SelectObject(dc, old);
+    buffer.flush();
     if (message == WM_PAINT) EndPaint(window, &paint);
     return 0;
   }
   const bool progress = role(window) == 26;
   if ((role(window) == 2 || role(window) == 5 || role(window) == 8 || role(window) == 25 || role(window) == 27 || progress) && (message == WM_PAINT || message == WM_PRINTCLIENT)) {
     PAINTSTRUCT paint{};
-    HDC dc = message == WM_PAINT ? BeginPaint(window, &paint) : reinterpret_cast<HDC>(wp);
+    HDC target_dc = message == WM_PAINT ? BeginPaint(window, &paint) : reinterpret_cast<HDC>(wp);
+    Buffered buffer(window, target_dc);
+    HDC dc = buffer.dc;
     if (progress) paint_progress(window, dc);
     else if (role(window) == 2) paint_brand(window, dc);
     else if (role(window) == 5) {
@@ -768,6 +864,7 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
     }
 
     else paint_card(window, dc);
+    buffer.flush();
     if (message == WM_PAINT) EndPaint(window, &paint);
     return 0;
   }
@@ -825,7 +922,7 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
   }
   if (message == WM_CTLCOLORSTATIC && GetPropW(reinterpret_cast<HWND>(lp), L"PanitaWrappedLog")) {
     HDC dc = reinterpret_cast<HDC>(wp);
-    SetTextColor(dc, RGB(249, 255, 248));
+    SetTextColor(dc, RGB(150, 150, 150));
     SetBkColor(dc, card);
     return reinterpret_cast<LRESULT>(log_brush);
   }
@@ -845,8 +942,10 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
   if (choice_control(window)) {
     if (message == WM_PAINT) {
       PAINTSTRUCT paint{};
-      HDC dc = BeginPaint(window, &paint);
-      draw_choice(window, dc);
+      HDC target_dc = BeginPaint(window, &paint);
+      Buffered buffer(window, target_dc);
+      draw_choice(window, buffer.dc);
+      buffer.flush();
       EndPaint(window, &paint);
       return 0;
     }
@@ -910,7 +1009,8 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
       DeleteObject(body_font);
       DeleteObject(caption_font);
       DeleteObject(option_font);
-      body_font = caption_font = option_font = nullptr;
+      if (log_font) DeleteObject(log_font);
+      body_font = caption_font = option_font = log_font = nullptr;
       DeleteObject(log_brush);
       log_brush = nullptr;
       DeleteObject(background_brush);
@@ -920,6 +1020,8 @@ LRESULT CALLBACK presentation(HWND window, UINT message, WPARAM wp, LPARAM lp,
       current_footer = nullptr;
       hovered_button = nullptr;
       details_open = false;
+      KillTimer(root, hover_timer);
+      hover_animated.clear();
       if (tab_hook) UnhookWindowsHookEx(tab_hook);
       tab_hook = nullptr;
     }
@@ -1016,6 +1118,9 @@ void apply_presentation(HWND parent) {
     caption_font = CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE,
         FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    log_font = CreateFontW(-MulDiv(9, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE,
+        FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        CLEARTYPE_QUALITY, FIXED_PITCH, L"Consolas");
     option_font = CreateFontW(-MulDiv(10, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE,
         FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
         CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
