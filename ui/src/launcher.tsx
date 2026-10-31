@@ -14,7 +14,7 @@ import { PlayControls, PlayNotice, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
 import { canInstall, canOpenInstanceOptions, canRepair, canUninstall, isPack, updateTarget } from './library-state';
 import { SettingsPanel, usePreferences } from './settings';
-import { LauncherUpdateNotice, UpdatesPanel } from './update';
+import { UpdatesPanel, VersionBadge } from './update';
 import { DiagnosticsPanel } from './diagnostics';
 import { CachePanel, PackPanel } from './pack';
 import { CrashNotifications } from './game-output';
@@ -130,7 +130,7 @@ export function Launcher() {
           </Hint>}
           {!selectedAccount && <Hint text={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} side="right"><Button variant="ghost" className="rail-account size-10 p-0" aria-label={accountView?.accounts.length ? 'Elegir una cuenta de Minecraft' : 'Añadir una cuenta de Minecraft'} onClick={() => setPage('accounts')}><AccountAvatar metadata={null} /></Button></Hint>}
         </div>
-        <span className="rail-version" title={`Panita Client ${version}`}>v{version}</span>
+        <VersionBadge version={version} />
       </div>
     </aside>
 
@@ -146,7 +146,6 @@ export function Launcher() {
 
       <div id="launcher-content" tabIndex={-1} className="launcher-content">
         <div className="launcher-notices">
-          <LauncherUpdateNotice />
           <PlayNotice names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} />
           {preferences?.error && <div role="alert" className="catalog-notice"><p>{preferences.error}</p><Button variant="secondary" disabled={preferences.busy} onClick={preferences.retry}>Reintentar preferencias</Button></div>}
           {preferences?.warning && <p role="alert">{preferences.warning}</p>}

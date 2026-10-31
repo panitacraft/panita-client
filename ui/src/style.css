@@ -138,6 +138,23 @@
   .rail-bottom button { border: 0; color: #BABABA; }
   .rail-bottom .is-selected { color: #E4FFDA; background: #303b2b; }
   .rail-version { color: #BABABA; font-size: 10px; max-width: 66px; overflow-wrap: anywhere; text-align: center; }
+  /* The slot keeps one fixed box so the version, the update button and the retry state never shift the sidebar. */
+  .rail-version-slot { display: flex; align-items: center; justify-content: center; gap: 3px; width: 66px; height: 26px; flex-shrink: 0; }
+  .rail-version-slot .rail-version { line-height: 1.2; }
+  .rail-version-slot.has-retry .rail-version { font-size: 9px; max-width: 46px; text-align: right; }
+  .rail-bottom .rail-retry { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; flex-shrink: 0; border-radius: 5px; background: transparent; color: #ef4444; cursor: pointer; }
+  .rail-bottom .rail-retry:hover:not(:disabled) { background: #3a1d1d; color: #f87171; }
+  .rail-bottom .rail-retry:focus-visible, .rail-bottom .rail-update:focus-visible { outline: 2px solid #E4FFDA; outline-offset: 2px; }
+  .rail-retry svg { width: 13px; height: 13px; }
+  .rail-bottom .rail-update { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 100%; height: 100%; padding: 0; border-radius: 6px; background: #54A636; color: #141414; font-size: 9px; font-weight: 700; line-height: 1; cursor: pointer; }
+  .rail-bottom .rail-update:hover:not([aria-disabled='true']) { background: #6cc24a; }
+  .rail-bottom .rail-update[aria-disabled='true'] { background: #253b1c; color: #E4FFDA; cursor: progress; }
+  .rail-bottom .rail-update.is-error { background: #3a1d1d; color: #fecaca; box-shadow: inset 0 0 0 1px #ef4444; cursor: pointer; }
+  .rail-bottom .rail-update.is-error[aria-disabled='true'] { cursor: progress; }
+  .rail-update svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .rail-update.is-highlighted { animation: rail-update-pulse 1s ease-in-out 3; }
+  @keyframes rail-update-pulse { 0%, 100% { box-shadow: 0 0 0 0 #54A63600; } 50% { box-shadow: 0 0 0 6px #54A636aa; } }
+  @media (prefers-reduced-motion: reduce) { .rail-update.is-highlighted { animation: none; outline: 2px solid #E4FFDA; outline-offset: 2px; } }
   .rail-accounts { display: flex; align-items: center; flex-direction: column; padding: 2px; flex-shrink: 0; }
   .rail-account { overflow: hidden; border-radius: 8px; flex-shrink: 0; }
   .rail-account.current-account { box-shadow: 0 0 0 2px #54A636; }
@@ -381,6 +398,13 @@
   .inherit-toggle input[role='switch']:checked { background: #3c7928; border-color: #78bd58; }
   .inherit-toggle input[role='switch']:checked::before { transform: translateX(12px); background: #e4ffda; }
   .inherit-toggle input:focus-visible { outline: 2px solid #a9e58c; outline-offset: 3px; }
+  /* A settings row: the text on the left, the control on the right, both centered on the same line. */
+  .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid #333; border-radius: 8px; background: #1B1B1B; }
+  .setting-row .setting-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .setting-row .setting-text strong { font-size: 14px; font-weight: 600; color: #F9FFF8; }
+  .setting-row .setting-text small { font-size: 12px; line-height: 1.4; color: #BABABA; }
+  .setting-row input[role='switch'] { flex-shrink: 0; margin: 0; }
+  .setting-row input[role='switch']:disabled { opacity: .5; cursor: not-allowed; }
   .inherited-content { opacity: .48; background: #0c0c0c; border-radius: 10px; padding: 10px; }
   .resolution-label { margin: 0 0 8px; font-size: 13px; }
   .settings-advanced { padding: 14px 16px; }

@@ -1,16 +1,22 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { RefreshCw } from 'lucide-react';
+import { CircleArrowUp, ExternalLink, LoaderCircle, RefreshCw, RotateCw } from 'lucide-react';
 import { Button } from './components/ui/button';
+import { Hint } from './components/hint';
 import { messageForError } from './errors';
 import { invokeUpdate } from './update-api';
-import { channelLocked, updateNotice, type LauncherUpdateView, type UpdateAction, type UpdateChannel } from './update-state';
+import { badgeModel, channelLocked, previewUpdateView, type BadgeIcon, type LauncherUpdateView, type UpdateAction, type UpdateChannel } from './update-state';
+
+const HIGHLIGHT_MS = 3500;
 
 export type LauncherUpdate = {
   view: LauncherUpdateView | null;
   busy: boolean;
   error: string | null;
+  /** True for a few seconds after the player tries to play while an update is required. */
+  highlighted: boolean;
+  highlight: () => void;
   check: () => Promise<void>;
   setChannel: (channel: UpdateChannel) => Promise<void>;
   perform: (action: UpdateAction) => Promise<void>;
@@ -22,10 +28,14 @@ export function useLauncherUpdate() { return useContext(UpdateContext); }
 
 export function LauncherUpdateProvider({ children }: { children: ReactNode }) {
   const desktop = isTauri();
-  const [view, setView] = useState<LauncherUpdateView | null>(null);
+  // A plain browser has no backend; a development URL such as ?update=ready previews a state.
+  const [view, setView] = useState<LauncherUpdateView | null>(() => !desktop && import.meta.env.DEV ? previewUpdateView(new URLSearchParams(window.location.search).get('update')) : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [highlighted, setHighlighted] = useState(false);
   const busyRef = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
 
   useEffect(() => {
     if (!desktop) return;
@@ -54,8 +64,14 @@ export function LauncherUpdateProvider({ children }: { children: ReactNode }) {
     finally { busyRef.current = false; setBusy(false); }
   }, []);
 
+  const highlight = useCallback(() => {
+    clearTimeout(timer.current);
+    setHighlighted(true);
+    timer.current = setTimeout(() => setHighlighted(false), HIGHLIGHT_MS);
+  }, []);
+
   const value: LauncherUpdate = {
-    view, busy, error,
+    view, busy, error, highlighted, highlight,
     check: () => act(() => invokeUpdate('check_launcher_update', { force: true })),
     setChannel: channel => act(() => invokeUpdate('set_update_channel', { channel })),
     perform: action => {
@@ -70,19 +86,45 @@ export function LauncherUpdateProvider({ children }: { children: ReactNode }) {
   return <UpdateContext.Provider value={value}>{children}</UpdateContext.Provider>;
 }
 
-/** The launcher-wide update notice, shown above the library and the utility pages. */
-export function LauncherUpdateNotice() {
+function BadgeIconView({ icon }: { icon: BadgeIcon }) {
+  switch (icon) {
+    case 'update': return <CircleArrowUp aria-hidden="true" />;
+    case 'retry': return <RotateCw aria-hidden="true" />;
+    case 'external': return <ExternalLink aria-hidden="true" />;
+    case 'busy': return <LoaderCircle className="spin" aria-hidden="true" />;
+  }
+}
+
+/**
+ * The sidebar version. It keeps its box in every state: plain text normally, a button
+ * when an update can be taken, and a red retry icon beside a smaller version after a
+ * failed check. Everything else about an update is explained in its tooltip.
+ */
+export function VersionBadge({ version }: { version: string }) {
   const update = useLauncherUpdate();
-  const notice = updateNotice(update?.view ?? null, messageForError);
-  if (!update || (!notice && !update.error)) return null;
-  const action = notice?.action;
-  return <>
-    {notice && <div className="catalog-notice" role={notice.tone === 'alert' ? 'alert' : 'status'}>
-      <p>{notice.text}</p>
-      {action && notice.actionLabel && <Button variant="secondary" disabled={update.busy} onClick={() => void update.perform(action)}>{notice.actionLabel}</Button>}
-    </div>}
-    {update.error && <p role="alert">{update.error}</p>}
-  </>;
+  const model = badgeModel(update?.view ?? null, messageForError);
+  const label = `Panita Client ${version}`;
+  if (!update || model.kind === 'version') {
+    return <div className="rail-version-slot"><span className="rail-version" title={label}>v{version}</span></div>;
+  }
+  if (model.kind === 'retry') {
+    return <div className="rail-version-slot has-retry">
+      <span className="rail-version" title={label}>v{version}</span>
+      <Hint text={model.tooltip} side="right">
+        <button type="button" className="rail-retry" aria-label="Reintentar la búsqueda de actualizaciones" disabled={update.busy} onClick={() => void update.perform('retry')}><RotateCw aria-hidden="true" /></button>
+      </Hint>
+    </div>;
+  }
+  const action = model.action;
+  return <div className="rail-version-slot">
+    <Hint text={model.tooltip} side="right">
+      <button type="button" className={`rail-update ${model.error ? 'is-error' : ''} ${update.highlighted ? 'is-highlighted' : ''}`}
+        aria-label={`${model.label}: ${model.tooltip}`} aria-disabled={!action || update.busy}
+        onClick={() => { if (action && !update.busy) void update.perform(action); }}>
+        <BadgeIconView icon={model.icon} /><span>{model.label}</span>
+      </button>
+    </Hint>
+  </div>;
 }
 
 export function UpdatesPanel() {
@@ -92,13 +134,16 @@ export function UpdatesPanel() {
   return <section className="settings-section" aria-labelledby="updates-heading">
     <h2 id="updates-heading" className="sr-only">Actualizaciones</h2>
     <p>Versión instalada: <strong>{view?.currentVersion ? `v${view.currentVersion}` : 'desconocida'}</strong></p>
-    <label className="inherit-toggle"><span>Recibir versiones beta</span>
+    <label className="inherit-toggle setting-row">
+      <span className="setting-text">
+        <strong>Recibir versiones beta</strong>
+        <small>{view?.channel === 'beta'
+          ? 'Recibes versiones beta antes que el resto y pueden tener errores. Cuando salga una versión estable más nueva, pasarás a ella.'
+          : 'Recibes solo versiones estables. Si vuelves desde beta, no se instala una versión anterior: conservas la tuya hasta que salga una más nueva.'}</small>
+      </span>
       <input role="switch" aria-label="Recibir versiones beta" type="checkbox" checked={view?.channel === 'beta'} disabled={locked}
         onChange={event => { if (update) void update.setChannel(event.target.checked ? 'beta' : 'stable'); }} />
     </label>
-    <p>{view?.channel === 'beta'
-      ? 'Recibes versiones beta antes que el resto. Pueden tener errores. Al activarse una versión estable más nueva, pasarás a ella.'
-      : 'Recibes solo versiones estables. Al volver desde beta no se instala una versión anterior; seguirás con la tuya hasta que salga una más nueva.'}</p>
     <Button variant="secondary" disabled={!view || update?.busy} onClick={() => void update?.check()}><RefreshCw aria-hidden="true" />Buscar actualizaciones</Button>
     {update?.error && <p role="alert">{update.error}</p>}
   </section>;
