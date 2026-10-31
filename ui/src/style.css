@@ -36,7 +36,7 @@
   button:not(:disabled), summary { cursor: pointer; }
   button:not(:disabled):hover { background: #383838; }
   button:disabled { opacity: .5; cursor: not-allowed; }
-  :where(button, a, input, textarea, select, summary, [tabindex]):focus-visible { outline: 2px solid #E4FFDA; outline-offset: 4px; }
+  :where(button, a, input, textarea, select, summary, [tabindex]):focus-visible { outline: .75px solid #E4FFDA; outline-offset: 4px; }
   button svg, summary svg { width: 18px; height: 18px; flex-shrink: 0; }
   section { max-width: 1100px; margin: 0 auto; padding: 28px 32px; }
   h1 { margin: 0 0 12px; font-size: 30px; font-weight: 700; line-height: 1.15; letter-spacing: -.035em; }
@@ -75,7 +75,7 @@
   .info-button { display: inline-flex; background: transparent; border: 0; padding: 2px; color: #BABABA; }
   .info-button svg { width: 16px; height: 16px; }
   .identifier-input { display: flex; align-items: center; gap: 10px; background: #141414; border: 1px solid #515151; border-radius: 6px; padding: 0 12px; }
-  .identifier-input:focus-within { outline: 2px solid #E4FFDA; outline-offset: 2px; }
+  .identifier-input:focus-within { outline: .75px solid #E4FFDA; outline-offset: 2px; }
   .identifier-input input { border: 0; width: 100%; outline: none; padding-inline: 0; background: transparent; }
   .profile-head { width: 24px; height: 24px; object-fit: contain; image-rendering: pixelated; flex-shrink: 0; }
   .activation-form > button { width: 100%; margin-top: 14px; }
@@ -143,7 +143,7 @@
   .rail-instances { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 64px; padding: 4px 6px; flex-shrink: 0; }
   .rail-nav-control { flex-shrink: 0; border: 0; color: #BABABA; }
   .rail-instance { position: relative; width: 52px; height: 52px; padding: 0; flex-shrink: 0; border: 1px solid #515151; border-radius: 12px; background: #252525; color: #BABABA; }
-  .rail-instance.is-selected { border-color: #54A636; box-shadow: 0 0 0 3px #54A63640; color: #E4FFDA; background: #21351c; }
+  .rail-instance.is-selected { border-color: #54A636; box-shadow: 0 0 0 .75px #54A636; color: #E4FFDA; background: #21351c; }
   .rail-instance.is-disabled { opacity: .6; }
   .instance-icon { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
   .rail-lock { position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px; background: #1B1B1B; border-radius: 4px; padding: 2px; color: #F9FFF8; }
@@ -159,7 +159,7 @@
   .rail-version-slot.has-retry .rail-version { min-width: 0; font-size: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
   .rail-bottom .rail-retry { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; padding: 0; flex-shrink: 0; border-radius: 4px; background: transparent; color: #ef4444; cursor: pointer; }
   .rail-bottom .rail-retry:hover:not(:disabled) { background: #3a1d1d; color: #f87171; }
-  .rail-bottom .rail-retry:focus-visible, .rail-bottom .rail-update:focus-visible { outline: 2px solid #E4FFDA; outline-offset: 2px; }
+  .rail-bottom .rail-retry:focus-visible, .rail-bottom .rail-update:focus-visible { outline: .75px solid #E4FFDA; outline-offset: 2px; }
   .rail-retry svg { width: 11px; height: 11px; }
   .rail-bottom .rail-update { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 100%; height: 100%; padding: 0; border-radius: 6px; background: #54A636; color: #141414; font-size: 9px; font-weight: 700; line-height: 1; cursor: pointer; }
   .rail-bottom .rail-update:hover:not([aria-disabled='true']) { background: #B3FF99; }
@@ -169,10 +169,10 @@
   .rail-update svg { width: 12px; height: 12px; flex-shrink: 0; }
   .rail-update.is-highlighted { animation: rail-update-pulse 1s ease-in-out 3; }
   @keyframes rail-update-pulse { 0%, 100% { box-shadow: 0 0 0 0 #54A63600; } 50% { box-shadow: 0 0 0 6px #54A636aa; } }
-  @media (prefers-reduced-motion: reduce) { .rail-update.is-highlighted { animation: none; outline: 2px solid #E4FFDA; outline-offset: 2px; } }
+  @media (prefers-reduced-motion: reduce) { .rail-update.is-highlighted { animation: none; outline: .75px solid #E4FFDA; outline-offset: 2px; } }
   .rail-accounts { display: flex; align-items: center; flex-direction: column; padding: 2px; flex-shrink: 0; }
   .rail-account { overflow: hidden; border-radius: 8px; flex-shrink: 0; }
-  .rail-account.current-account { box-shadow: 0 0 0 2px #54A636; }
+  .rail-account.current-account { box-shadow: 0 0 0 .75px #54A636; }
   .account-avatar { display: block; width: 100%; height: 100%; object-fit: cover; image-rendering: pixelated; border-radius: inherit; }
   .rail-placeholder { padding: 14px; color: #BABABA; }
   .launcher-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
@@ -233,7 +233,7 @@
   .split-button > .split-trigger { border-radius: 0 7px 7px 0; border: 0; border-left: 1px solid #14141466; flex-shrink: 0; }
   .instance-menu { min-width: 240px; max-width: calc(100vw - 24px); }
   .instance-menu [role='menuitem'] { padding: 10px 12px; gap: 10px; font-size: 13px; }
-  .instance-menu [role='menuitem']:focus { outline: 2px solid #E4FFDA; outline-offset: -2px; }
+  .instance-menu [role='menuitem']:focus { outline: .75px solid #E4FFDA; outline-offset: -2px; }
   .utility-page { max-width: 1000px; margin: 0 auto; padding: 32px; }
   .page-heading { margin-bottom: 28px; }
   .page-heading > button { margin-bottom: 24px; padding-left: 0; border: 0; color: #BABABA; }
@@ -283,7 +283,7 @@
   .game-log-lines.log-colored .log-warn { color: #E9D591; }
   .game-log-lines.log-colored .log-info { color: #E4FFDA; }
   .game-log-lines.log-colored .log-debug, .game-log-lines.log-colored .log-trace { color: #B4C9E9; }
-  .game-log-lines .log-match { outline: 2px solid #E9D591; outline-offset: 1px; background: #383728; }
+  .game-log-lines .log-match { outline: .75px solid #E9D591; outline-offset: 1px; background: #383728; }
   .log-metadata { font-weight: 600; }
   .crash-summary { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
   .activation-form { display: grid; gap: 14px; margin-top: 28px; justify-items: start; }
@@ -407,7 +407,7 @@
   .inherit-toggle input[role='switch']::before { content: ''; display: block; width: 12px; height: 12px; border-radius: 50%; background: #ddd; transition: transform .15s; }
   .inherit-toggle input[role='switch']:checked { background: #3c7928; border-color: #78bd58; }
   .inherit-toggle input[role='switch']:checked::before { transform: translateX(12px); background: #e4ffda; }
-  .inherit-toggle input:focus-visible { outline: 2px solid #a9e58c; outline-offset: 3px; }
+  .inherit-toggle input:focus-visible { outline: .75px solid #a9e58c; outline-offset: 3px; }
   /* A settings row: the text on the left, the control on the right, both centered on the same line. */
   .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid #333; border-radius: 8px; background: #1B1B1B; }
   .setting-row .setting-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
@@ -488,6 +488,8 @@
   .artwork-fade { opacity: 0; }
   .artwork-fade.is-loaded { opacity: 1; animation: panita-artwork-in 2600ms ease-in-out; }
   .banner-image.artwork-fade.is-loaded { animation-name: panita-banner-in; animation-duration: 3000ms; }
+  .artwork-fade.is-loaded.has-played { animation-duration: 1000ms; }
+  .banner-image.artwork-fade.is-loaded.has-played { animation-duration: 1500ms; }
   @keyframes panita-artwork-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes panita-banner-in { from { opacity: 0; transform: scale(1.04); } to { opacity: 1; transform: none; } }
   .dialog-title { display: flex; align-items: center; gap: 12px; }

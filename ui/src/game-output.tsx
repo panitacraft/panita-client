@@ -73,6 +73,7 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
   const [searchNotice, setSearchNotice] = useState<string | null>(null);
   const [match, setMatch] = useState<number | null>(null);
   const [retry, setRetry] = useState(0);
+  const [atBottom, setAtBottom] = useState(true);
   const searchGeneration = useRef(0);
   const list = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
@@ -133,6 +134,7 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
     const element = list.current;
     if (!element || !snapshot) return;
     const bottom = element.scrollHeight - element.clientHeight - element.scrollTop;
+    setAtBottom(bottom < 8);
     if (follow && bottom > 60) { setFollow(false); setOffset(snapshot.offset); }
     if (!follow && element.scrollTop < 60) scrollWindow(true);
     else if (!follow && bottom < 60) scrollWindow(false);
@@ -186,7 +188,7 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
         </div>;
       })}<div ref={end} />
     </div>
-    <Button variant="ghost" size="icon" className="log-jump" aria-label="Ir al final" title="Ir al final" onClick={() => navigate(null)}><ChevronsDown aria-hidden="true" /></Button>
+    {!(atBottom && snapshot && (follow || snapshot.nextOffset >= snapshot.total)) && <Button variant="ghost" size="icon" className="log-jump" aria-label="Ir al final" title="Ir al final" onClick={() => navigate(null)}><ChevronsDown aria-hidden="true" /></Button>}
     </div>
   </main></TooltipProvider>;
 }
