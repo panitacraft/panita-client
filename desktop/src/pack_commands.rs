@@ -172,7 +172,6 @@ pub(super) async fn open_instance_folder(
     instance_id: Uuid,
     folder: String,
 ) -> Result<bool, ErrorCode> {
-    use tauri_plugin_opener::OpenerExt;
     main_only(&window)?;
     let paths = paths(&app)?;
     let directory = blocking(move || {
@@ -197,18 +196,9 @@ pub(super) async fn open_instance_folder(
         Ok(directory)
     })
     .await?;
-    let opening = tauri::async_runtime::spawn_blocking(move || {
-        app.opener()
-            .open_path(directory.to_string_lossy(), None::<&str>)
-            .map_err(|_| ErrorCode::StorageUnavailable)
-    });
-    match tokio::time::timeout(std::time::Duration::from_secs(5), opening).await {
-        Ok(result) => {
-            result.map_err(|_| ErrorCode::StorageUnavailable)??;
-            Ok(true)
-        }
-        Err(_) => Ok(true),
-    }
+    super::folder_opener::open(app, directory)
+        .await
+        .map(|_| true)
 }
 
 /// Readable names for the installed and the available version of a pack, for the
@@ -273,7 +263,6 @@ pub(super) async fn open_pack_folder(
     instance_id: Uuid,
     path: String,
 ) -> Result<bool, ErrorCode> {
-    use tauri_plugin_opener::OpenerExt;
     main_only(&window)?;
     let paths = paths(&app)?;
     let directory = blocking(move || {
@@ -287,19 +276,9 @@ pub(super) async fn open_pack_folder(
         Ok(directory)
     })
     .await?;
-    // The shell may keep waiting after the folder appears; do not block the dialog on it.
-    let opening = tauri::async_runtime::spawn_blocking(move || {
-        app.opener()
-            .open_path(directory.to_string_lossy(), None::<&str>)
-            .map_err(|_| ErrorCode::StorageUnavailable)
-    });
-    match tokio::time::timeout(std::time::Duration::from_secs(5), opening).await {
-        Ok(result) => {
-            result.map_err(|_| ErrorCode::StorageUnavailable)??;
-            Ok(true)
-        }
-        Err(_) => Ok(true),
-    }
+    super::folder_opener::open(app, directory)
+        .await
+        .map(|_| true)
 }
 
 /// Ask the player for a file with the native dialog, then verify and place it. The

@@ -1023,7 +1023,6 @@ pub(super) async fn open_crash_reports(
     instance_id: Uuid,
     request_id: Uuid,
 ) -> Result<Value, ErrorCode> {
-    use tauri_plugin_opener::OpenerExt;
     if window.label() != "main" {
         return Err(ErrorCode::InvalidData);
     }
@@ -1044,20 +1043,15 @@ pub(super) async fn open_crash_reports(
     let Some(directory) = directory else {
         return Ok(json!(false));
     };
-    // Windows shell integration may keep waiting even after Explorer appears.
-    // Keep the runtime and dialog usable, and report an indeterminate result honestly.
-    let opening = tokio::task::spawn_blocking(move || {
-        app.opener()
-            .open_path(directory.to_string_lossy(), None::<&str>)
-            .map_err(|_| ErrorCode::StorageUnavailable)
-    });
-    match tokio::time::timeout(std::time::Duration::from_secs(5), opening).await {
-        Ok(result) => {
-            result.map_err(|_| ErrorCode::StorageUnavailable)??;
-            Ok(json!(true))
-        }
-        Err(_) => Ok(json!("pending")),
-    }
+    super::folder_opener::open(app, directory)
+        .await
+        .map(|opened| {
+            if opened {
+                json!(true)
+            } else {
+                json!("pending")
+            }
+        })
 }
 
 #[tauri::command]
