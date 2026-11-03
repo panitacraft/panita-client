@@ -4,46 +4,48 @@
   <p><em>Ready to play. Ready for another adventure.</em></p>
 </div>
 
-Panita Client is an unofficial Minecraft launcher for the Panitacraft community. Find the
-Panitacraft instances, install the one you want, and play from one place.
+Panita Client is an unofficial, open-source Minecraft launcher made for
+[Panitacraft](https://www.panitacraft.com), a Spanish-speaking Minecraft community of friends.
+Find the Panitacraft instances, install the one you want, and play from one place.
 The launcher handles the downloads and Java setup for you, with a friendly and intuitive interface.
+The interface is in Spanish because the launcher is built for that community.
+
+Download it from the [launcher page](https://www.panitacraft.com/downloads/launcher) or from the
+[GitHub releases](https://github.com/panitacraft/panita-client/releases).
+
+## Project status
+
+Panita Client is in active development and currently runs as a **closed beta** for the
+Panitacraft community. That is why the website does not promote it widely yet and why the
+repository has few stars. Stable releases (`1.x`) are published for members; beta versions are
+an opt-in channel inside the launcher.
+
+Windows 11 x64 and Ubuntu x64 are the tested platforms. Other Windows and Linux versions are
+unqualified; macOS, ARM and Flatpak are future scope.
 
 ## Made for playing together
 
 - **Your adventures, kept separate.** Each instance has its own worlds,
   settings, and screenshots, so one adventure stays separate from another.
+- **Vanilla and modpacks.** Install vanilla instances or pinned modpacks from the
+  Panita catalog, with NeoForge supported first. Mods and settings you add yourself stay yours.
 - **Your choice of account.** Sign in with Microsoft through your browser
   or choose an offline account.
+- **Community activation.** Confirm your membership once through Discord. This is a
+  community gate, not copy protection.
 - **Simple installation.** Pick an instance and let Panita download what
   it needs. You can cancel and try again later.
 - **Settings that fit your computer.** Adjust memory and window size for
   all your instances, or set them differently for each one.
-- **Updates on your terms.** Choose when to update, with world backups
-  enabled by default before changing Minecraft versions.
+- **Updates that keep everyone in sync.** When the catalog moves an instance to a new version,
+  the launcher asks you to update, with world backups enabled by default. The launcher itself
+  updates automatically from signed releases.
 - **Help when something goes wrong.** Repair game files, follow the game
   console, and see error details if Minecraft closes unexpectedly.
 - **Keep playing in the background.** Close the launcher while Minecraft
-  runs and reopen it to return to your game controls. If it stays hidden,
-  the launcher exits after your last game closes.
+  runs and reopen it to return to your game controls.
 
 ## Before you play
-
-Panita Client is an **unsigned prerelease**. The agreed MVP phases are complete,
-and the owner confirms release validation on 2026-10-27. Packaged application
-tests are owner-reported as passed on Windows 11 x64 and Ubuntu 26.04.1 x64. The owner
-also confirms teammate testing passed on clean Windows 11 and Ubuntu VMs.
-Other Windows/Linux versions are unqualified; macOS, ARM, Flatpak and modpacks
-are future scope.
-
-The next planned milestone is **0.2 Alpha (MLP)**: public custom and pinned
-Modrinth modpacks with NeoForge first, an interim interface facelift, and
-mandatory signed launcher updates with releases from merged PRs to `master`.
-Each implementation phase uses its own branch from `develop`. These features
-are planned and are not included in the current MVP release. See
-[AGENTS.md](AGENTS.md#7-post-mvp-02-alpha-decisions-2026-10-27) for the accepted policies.
-Tracking runs from [Phase 8 (#13)](https://github.com/panitacraft/panita-client/issues/13)
-through [Phase 16 (#21)](https://github.com/panitacraft/panita-client/issues/21),
-with dependencies and acceptance criteria in each phase issue.
 
 Microsoft accounts need an internet connection each time you start a game.
 Offline accounts can play an already installed instance without Microsoft
@@ -66,7 +68,25 @@ Returning to an older game version does not undo changes made to a world.
 Microsoft sign-in happens in your browser. Panita never asks for your
 Microsoft password. Saved sign-in information is kept on your computer
 with restricted access, but it is not encrypted. Do not share the launcher's
-account file.
+account files. See the [privacy policy](https://www.panitacraft.com/privacy-policy)
+for what the launcher and the website collect.
+
+## Code signing policy
+
+Windows installers are currently **unsigned**, so Windows SmartScreen can warn that the file is
+not commonly downloaded or that the publisher is unknown. The project is applying for free
+code signing from the [SignPath Foundation](https://signpath.org). The planned
+attribution is: free code signing provided by [SignPath.io](https://about.signpath.io),
+certificate by SignPath Foundation. This applies only after the Foundation approves the project.
+
+Release builds run on GitHub-hosted runners from the public source in this repository.
+Launcher updates are verified separately with an updater signature, which is not Windows
+publisher signing.
+
+Team roles for signing:
+
+- Committers and reviewers: the [Panitacraft maintainers](https://github.com/orgs/panitacraft/people).
+- Approver: [Javithor360](https://github.com/Javithor360).
 
 <details>
 <summary>For contributors</summary>
