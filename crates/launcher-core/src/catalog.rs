@@ -97,7 +97,7 @@ impl CatalogSource {
         }
     }
 
-    /// The sources this launcher can install: vanilla, published NeoForge custom
+    /// The sources this launcher can install: vanilla, published supported custom
     /// packs and pinned Modrinth packs. A Modrinth pin's loader is informational;
     /// its index decides whether the pack is really supported when it installs.
     pub fn installable(&self) -> bool {
@@ -107,7 +107,7 @@ impl CatalogSource {
                 loader,
                 current_version_id: Some(_),
                 ..
-            } => loader == "neoforge",
+            } => crate::loader::supported(loader),
             Self::Modrinth { loader, .. } => loader.as_deref().is_none_or(crate::loader::supported),
             _ => false,
         }

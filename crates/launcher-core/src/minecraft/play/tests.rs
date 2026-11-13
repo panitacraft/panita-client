@@ -972,6 +972,35 @@ fn an_installed_pack_must_be_the_one_the_catalog_pins_in_the_same_format() {
     ));
 }
 
+#[test]
+fn custom_pack_play_requires_a_supported_matching_loader_and_minecraft_pin() {
+    use crate::modpack::state::PackIdentity;
+    for name in ["neoforge", "fabric", "quilt", "forge", "future-loader"] {
+        let version = Uuid::new_v4();
+        let mut source = pack_catalog(version).source;
+        if let CatalogSource::Custom { loader, .. } = &mut source {
+            *loader = name.into();
+        }
+        let mut pack = state_for(
+            PackIdentity::Custom {
+                version_id: version,
+                published_at: "2026-10-25T20:54:25Z".into(),
+                label: None,
+            },
+            name,
+        );
+        assert_eq!(
+            pack_matches(&source, &pack),
+            matches!(name, "neoforge" | "fabric" | "quilt")
+        );
+        pack.loader = "different-loader".into();
+        assert!(!pack_matches(&source, &pack));
+        pack.loader = name.into();
+        pack.minecraft_version = "1.20.1".into();
+        assert!(!pack_matches(&source, &pack));
+    }
+}
+
 #[tokio::test]
 async fn account_validation_starts_with_the_audit_only_for_launches_without_a_warning() {
     let (paths, accounts, id) = fixture();

@@ -28,7 +28,7 @@ unqualified; macOS, ARM and Flatpak are future scope.
 - **Your adventures, kept separate.** Each instance has its own worlds,
   settings, and screenshots, so one adventure stays separate from another.
 - **Vanilla and modpacks.** Install vanilla instances or pinned modpacks from the
-  Panita catalog, with NeoForge supported first. Mods and settings you add yourself stay yours.
+  Panita catalog using NeoForge, Fabric, or Quilt. Mods and settings you add yourself stay yours.
 - **Your choice of account.** Sign in with Microsoft through your browser
   or choose an offline account.
 - **Community activation.** Confirm your membership once through Discord. This is a
