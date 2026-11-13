@@ -628,8 +628,13 @@ and individual measurements are evidence, not product guarantees.
 
 - Deliver public custom and pinned Modrinth `.mrpack` installation first, the
   reference-based interim UI facelift second, and mandatory launcher updates and
-  automatic release management third. NeoForge is the first qualified loader;
-  Fabric, Quilt and Forge adoption follows separately. Do not silently install
+  automatic release management third. NeoForge is the first qualified loader.
+  Custom instances may use every implemented loader: NeoForge, Fabric and Quilt
+  (owner decision, 2026-11-12). Resolve the exact manifest loader and version through
+  the shared loader implementation for install, update, repair and Play. Forge and
+  unknown loaders remain unsupported. Actual custom Fabric/Quilt game launches on
+  Windows and Ubuntu require separate validation; this change does not qualify them.
+  Do not silently install
   unsupported packs as vanilla. Restricted instances and Panita account login
   are outside this plan. Microsoft/offline account policies remain unchanged.
 - For custom packs, use the API's resolved URLs and exact hashes/sizes without

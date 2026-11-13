@@ -159,7 +159,7 @@ fn pack_matches(source: &CatalogSource, pack: &PackState) -> bool {
             },
             PackIdentity::Custom { .. },
         ) => {
-            loader == "neoforge"
+            crate::loader::supported(loader)
                 && pack.loader == *loader
                 && &pack.minecraft_version == minecraft_version
         }
