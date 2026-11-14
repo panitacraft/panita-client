@@ -2,11 +2,13 @@
 use std::path::Path;
 
 const DESKTOP_ID: &str = "panita-client.desktop";
+const CALLBACK_TEST_ID: &str = "panita-client-callback.desktop";
 const PREVIOUS_ID: &str = "Panita Client.desktop";
 const LEGACY_ID: &str = "com.panitacraft.client.desktop";
 const MIME: &str = "x-scheme-handler/panitacraft";
 const OWNED_PREFIX: &str = "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"";
 const OWNED_SUFFIX: &str = "\" %u\nIcon=panita-client\nStartupWMClass=panita-desktop\nTerminal=false\nStartupNotify=true\nMimeType=x-scheme-handler/panitacraft;\nX-PanitaClient-Owner=com.panitacraft.client\n";
+const CALLBACK_TEST_SUFFIX: &str = "\" %u\nIcon=panita-client\nNoDisplay=true\nTerminal=false\nStartupNotify=true\nMimeType=x-scheme-handler/panitacraft;\nX-PanitaClient-Owner=com.panitacraft.client\n";
 const LEGACY_PREFIX: &str = "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"";
 const LEGACY_SUFFIX: &str =
     "\" %u\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/panitacraft;\n";
@@ -49,11 +51,62 @@ fn remove_owned_entry(
         .strip_prefix(prefix)
         .and_then(|rest| rest.strip_suffix(suffix))
         && !executable.is_empty()
+        && Path::new(executable).is_absolute()
         && !executable.contains(['\n', '\r', '\0'])
     {
         std::fs::remove_file(path)?;
     }
     Ok(())
+}
+
+fn canonical_entry_is_owned(directory: &Path, expected: &str) -> bool {
+    std::fs::read_to_string(directory.join(DESKTOP_ID))
+        .ok()
+        .as_deref()
+        == Some(expected)
+}
+
+#[derive(Clone, Copy)]
+struct HandlerQuery<'a> {
+    success: bool,
+    stdout: &'a [u8],
+}
+
+fn xdg_default_is_canonical(query: HandlerQuery<'_>) -> bool {
+    query.success && String::from_utf8_lossy(query.stdout).trim() == DESKTOP_ID
+}
+
+fn gio_default_is_canonical(query: HandlerQuery<'_>) -> bool {
+    if !query.success {
+        return false;
+    }
+    let stdout = String::from_utf8_lossy(query.stdout);
+    let Some(first_line) = stdout.lines().next().map(str::trim) else {
+        return false;
+    };
+    first_line.starts_with("Default application for ")
+        && first_line
+            .rsplit_once(": ")
+            .is_some_and(|(_, handler)| handler.trim() == DESKTOP_ID)
+}
+
+fn is_gnome_desktop(desktop: Option<&str>) -> bool {
+    desktop.is_some_and(|desktop| {
+        desktop
+            .split(':')
+            .any(|component| component.eq_ignore_ascii_case("gnome"))
+    })
+}
+
+fn handler_is_verified(
+    canonical_owned: bool,
+    xdg: HandlerQuery<'_>,
+    desktop: Option<&str>,
+    gio: Option<HandlerQuery<'_>>,
+) -> bool {
+    canonical_owned
+        && (xdg_default_is_canonical(xdg)
+            || (is_gnome_desktop(desktop) && gio.is_some_and(gio_default_is_canonical)))
 }
 
 fn publish_icon(directory: &Path) -> std::io::Result<()> {
@@ -70,7 +123,10 @@ pub(super) fn register(executable: &Path, directory: &Path, icons: &Path) -> Res
     let entry = desktop_entry(executable)?;
     std::fs::create_dir_all(directory).map_err(|_| ())?;
     publish_icon(icons).map_err(|_| ())?;
-    std::fs::write(directory.join(DESKTOP_ID), entry).map_err(|_| ())?;
+    std::fs::write(directory.join(DESKTOP_ID), &entry).map_err(|_| ())?;
+    if !canonical_entry_is_owned(directory, &entry) {
+        return Err(());
+    }
     let status = std::process::Command::new("xdg-mime")
         .args(["default", DESKTOP_ID, MIME])
         .output()
@@ -78,6 +134,14 @@ pub(super) fn register(executable: &Path, directory: &Path, icons: &Path) -> Res
     if !status.status.success() {
         return Err(());
     }
+    // Retire only the exact hidden callback entry used by local acceptance builds.
+    remove_owned_entry(
+        directory,
+        CALLBACK_TEST_ID,
+        OWNED_PREFIX,
+        CALLBACK_TEST_SUFFIX,
+    )
+    .map_err(|_| ())?;
     remove_owned_entry(directory, PREVIOUS_ID, OWNED_PREFIX, OWNED_SUFFIX).map_err(|_| ())?;
     remove_owned_entry(directory, LEGACY_ID, LEGACY_PREFIX, LEGACY_SUFFIX).map_err(|_| ())?;
     // Refresh cached associations when desktop-file-utils is installed.
@@ -89,7 +153,33 @@ pub(super) fn register(executable: &Path, directory: &Path, icons: &Path) -> Res
         .args(["query", "default", MIME])
         .output()
         .map_err(|_| ())?;
-    if !query.status.success() || String::from_utf8_lossy(&query.stdout).trim() != DESKTOP_ID {
+    let xdg = HandlerQuery {
+        success: query.status.success(),
+        stdout: &query.stdout,
+    };
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+    // Ubuntu's xdg-mime query can prefer a stale Added Associations entry even
+    // when GNOME/GIO has the canonical handler as its effective default.
+    let gio_output = if !xdg_default_is_canonical(xdg) && is_gnome_desktop(desktop.as_deref()) {
+        std::process::Command::new("gio")
+            .args(["mime", MIME])
+            .env("LC_ALL", "C")
+            .env("LANG", "C")
+            .output()
+            .ok()
+    } else {
+        None
+    };
+    let gio = gio_output.as_ref().map(|output| HandlerQuery {
+        success: output.status.success(),
+        stdout: &output.stdout,
+    });
+    if !handler_is_verified(
+        canonical_entry_is_owned(directory, &entry),
+        xdg,
+        desktop.as_deref(),
+        gio,
+    ) {
         return Err(());
     }
     Ok(())
@@ -124,18 +214,41 @@ mod tests {
         std::fs::create_dir(&directory).unwrap_or_else(|_| panic!("test directory"));
         let legacy = directory.join(LEGACY_ID);
         let previous = directory.join(PREVIOUS_ID);
+        let callback_test = directory.join(CALLBACK_TEST_ID);
         let canonical = directory.join(DESKTOP_ID);
-        std::fs::write(&canonical, "canonical").unwrap_or_else(|_| panic!("canonical entry"));
+        let test_executable = directory.join("panita-client");
+        let test_executable_text = test_executable
+            .to_str()
+            .unwrap_or_else(|| panic!("test executable path"));
+        let canonical_entry =
+            desktop_entry(&test_executable).unwrap_or_else(|_| panic!("canonical entry content"));
+        std::fs::write(&canonical, &canonical_entry).unwrap_or_else(|_| panic!("canonical entry"));
+        assert!(canonical_entry_is_owned(&directory, &canonical_entry));
         std::fs::write(
             &legacy,
-            format!("{LEGACY_PREFIX}/usr/bin/panita-desktop{LEGACY_SUFFIX}"),
+            format!("{LEGACY_PREFIX}{test_executable_text}{LEGACY_SUFFIX}"),
         )
         .unwrap_or_else(|_| panic!("legacy entry"));
         std::fs::write(
             &previous,
-            format!("{OWNED_PREFIX}/usr/bin/panita-client{OWNED_SUFFIX}"),
+            format!("{OWNED_PREFIX}{test_executable_text}{OWNED_SUFFIX}"),
         )
         .unwrap_or_else(|_| panic!("previous entry"));
+        std::fs::write(
+            &callback_test,
+            format!("{OWNED_PREFIX}{test_executable_text}{CALLBACK_TEST_SUFFIX}"),
+        )
+        .unwrap_or_else(|_| panic!("callback test entry"));
+        assert!(
+            remove_owned_entry(
+                &directory,
+                CALLBACK_TEST_ID,
+                OWNED_PREFIX,
+                CALLBACK_TEST_SUFFIX
+            )
+            .is_ok()
+        );
+        assert!(!callback_test.exists());
         assert!(remove_owned_entry(&directory, LEGACY_ID, LEGACY_PREFIX, LEGACY_SUFFIX).is_ok());
         assert!(!legacy.exists());
         assert!(remove_owned_entry(&directory, PREVIOUS_ID, OWNED_PREFIX, OWNED_SUFFIX).is_ok());
@@ -144,9 +257,24 @@ mod tests {
             .unwrap_or_else(|_| panic!("custom entry"));
         assert!(remove_owned_entry(&directory, LEGACY_ID, LEGACY_PREFIX, LEGACY_SUFFIX).is_ok());
         assert!(legacy.exists());
+        std::fs::write(
+            &callback_test,
+            format!("{OWNED_PREFIX}{test_executable_text}{CALLBACK_TEST_SUFFIX}# edited\n"),
+        )
+        .unwrap_or_else(|_| panic!("edited callback test entry"));
+        assert!(
+            remove_owned_entry(
+                &directory,
+                CALLBACK_TEST_ID,
+                OWNED_PREFIX,
+                CALLBACK_TEST_SUFFIX
+            )
+            .is_ok()
+        );
+        assert!(callback_test.exists());
         assert_eq!(
             std::fs::read_to_string(canonical).ok().as_deref(),
-            Some("canonical")
+            Some(canonical_entry.as_str())
         );
         let icons = directory.join("icons");
         assert!(publish_icon(&icons).is_ok());
@@ -155,5 +283,61 @@ mod tests {
             Some(ICON)
         );
         std::fs::remove_dir_all(directory).unwrap_or_else(|_| panic!("test cleanup"));
+    }
+
+    #[test]
+    fn gnome_uses_gio_when_xdg_mime_reports_a_stale_handler() {
+        let xdg = HandlerQuery {
+            success: true,
+            stdout: b"panita-client-callback.desktop\n",
+        };
+        let gio = HandlerQuery {
+            success: true,
+            stdout: b"Default application for 'x-scheme-handler/panitacraft': panita-client.desktop\nRegistered applications:\n",
+        };
+        assert!(handler_is_verified(
+            true,
+            xdg,
+            Some("ubuntu:GNOME"),
+            Some(gio)
+        ));
+        assert!(!handler_is_verified(
+            false,
+            xdg,
+            Some("ubuntu:GNOME"),
+            Some(gio)
+        ));
+        assert!(!handler_is_verified(true, xdg, Some("KDE"), Some(gio)));
+        assert!(!handler_is_verified(
+            true,
+            xdg,
+            Some("ubuntu:GNOME"),
+            Some(HandlerQuery {
+                success: true,
+                stdout: b"Default application for 'x-scheme-handler/panitacraft': other.desktop\n",
+            })
+        ));
+    }
+
+    #[test]
+    fn xdg_mime_canonical_handler_remains_strictly_verified() {
+        assert!(handler_is_verified(
+            true,
+            HandlerQuery {
+                success: true,
+                stdout: b"panita-client.desktop\n",
+            },
+            None,
+            None
+        ));
+        assert!(!handler_is_verified(
+            true,
+            HandlerQuery {
+                success: true,
+                stdout: b"Panita Client.desktop\n",
+            },
+            None,
+            None
+        ));
     }
 }
