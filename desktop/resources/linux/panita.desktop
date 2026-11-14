@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name={{name}}
+Name=Panita Client
 Exec={{exec}} %u
 Icon={{icon}}
 Terminal=false

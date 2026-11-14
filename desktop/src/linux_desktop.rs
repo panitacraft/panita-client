@@ -10,6 +10,16 @@ pub(super) enum OpenError {
     TimedOut,
 }
 
+/// Keep the packaged Wayland app ID and the established X11 window class stable.
+/// GTK initialization is idempotent; Tauri initializes it again while creating its event loop.
+#[cfg(target_os = "linux")]
+pub(super) fn configure_identity() {
+    gtk::glib::set_prgname(Some("panita-client"));
+    if gtk::init().is_ok() {
+        gtk::gdk::set_program_class("panita-desktop");
+    }
+}
+
 pub(super) fn system_opener(target: &std::ffi::OsStr, appimage: bool) -> Command {
     // Use the host utility, never a helper resolved through AppImage's PATH.
     // The target is one argument, never shell syntax. Keep display/D-Bus/desktop

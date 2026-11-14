@@ -54,12 +54,13 @@ pub fn register(app: &tauri::AppHandle) -> Result<(), ErrorCode> {
         .appimage
         .map(std::path::PathBuf::from)
         .unwrap_or(std::env::current_exe().map_err(|_| ErrorCode::CallbackRegistrationFailed)?);
-    let directory = app
+    let data = app
         .path()
         .data_dir()
-        .map_err(|_| ErrorCode::CallbackRegistrationFailed)?
-        .join("applications");
-    linux_protocol::register(&executable, &directory)
+        .map_err(|_| ErrorCode::CallbackRegistrationFailed)?;
+    let directory = data.join("applications");
+    let icons = data.join("icons/hicolor/512x512/apps");
+    linux_protocol::register(&executable, &directory, &icons)
         .map_err(|_| ErrorCode::CallbackRegistrationFailed)
 }
 

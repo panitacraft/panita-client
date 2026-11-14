@@ -203,6 +203,8 @@ pub fn run() {
     if linux_activation::forward_from_environment(&context.config().identifier) {
         return;
     }
+    #[cfg(target_os = "linux")]
+    linux_desktop::configure_identity();
     let process = launcher_core::operation::ProcessSessionId::new();
     let logs = Arc::new(launcher_core::logging::BoundedLog::default());
     logs.record(launcher_core::logging::LogRecord {

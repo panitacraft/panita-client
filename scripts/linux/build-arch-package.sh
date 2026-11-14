@@ -51,6 +51,12 @@ bsdtar -xf "$package" -C "$work/check"
 cmp "$work/payload/usr/bin/panita-client" "$work/check/usr/bin/panita-client"
 test -x "$work/check/usr/bin/panita-client"
 desktop-file-validate "$work/check/usr/share/applications/"*.desktop
-grep -Fx 'MimeType=x-scheme-handler/panitacraft;' "$work/check/usr/share/applications/"*.desktop
+desktop="$work/check/usr/share/applications/panita-client.desktop"
+test -f "$desktop"
+grep -Fx 'Name=Panita Client' "$desktop"
+grep -Fx 'Icon=panita-client' "$desktop"
+grep -Fx 'StartupWMClass=panita-desktop' "$desktop"
+grep -Fx 'MimeType=x-scheme-handler/panitacraft;' "$desktop"
+test -f "$work/check/usr/share/icons/hicolor/512x512/apps/panita-client.png"
 cp "$package" "$destination"
 printf '%s\n' 'Arch package inspection passed. CachyOS installed-product validation remains pending.'
