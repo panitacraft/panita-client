@@ -262,11 +262,17 @@ fn migrate_files(executable: &Path, directory: &Path, icons: &Path) -> std::io::
 }
 
 #[cfg(target_os = "linux")]
-fn refresh_desktop_database(directory: &Path) {
-    // This optional cache tool runs only after a real change and never gates startup.
-    let _ = std::process::Command::new("update-desktop-database")
+fn refresh_desktop_database(directory: &Path) -> Result<(), ()> {
+    // Absence is supported. A real execution failure is reported by the
+    // background migration, without delaying or preventing window creation.
+    match std::process::Command::new("update-desktop-database")
         .arg(directory)
-        .output();
+        .output()
+    {
+        Ok(output) if output.status.success() => Ok(()),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+        Ok(_) | Err(_) => Err(()),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -275,6 +281,9 @@ fn migrate_handler(directory: &Path, expected: &str) -> Result<(), ()> {
         .args(["query", "default", MIME])
         .output()
         .map_err(|_| ())?;
+    if !query.status.success() {
+        return Err(());
+    }
     let xdg = HandlerQuery {
         success: query.status.success(),
         stdout: &query.stdout,
@@ -338,11 +347,20 @@ fn migrate_handler(directory: &Path, expected: &str) -> Result<(), ()> {
 }
 
 #[cfg(target_os = "linux")]
-pub(super) fn migrate(executable: &Path, directory: &Path, icons: &Path) -> Result<(), ()> {
+pub(super) fn prepare(executable: &Path, directory: &Path, icons: &Path) -> Result<bool, ()> {
     let _guard = INTEGRATION_LOCK.lock().map_err(|_| ())?;
-    let changed = migrate_files(executable, directory, icons).map_err(|_| ())?;
+    migrate_files(executable, directory, icons).map_err(|_| ())
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn finish_migration(
+    executable: &Path,
+    directory: &Path,
+    changed: bool,
+) -> Result<(), ()> {
+    let _guard = INTEGRATION_LOCK.lock().map_err(|_| ())?;
     if changed {
-        refresh_desktop_database(directory);
+        refresh_desktop_database(directory)?;
     }
     let expected = desktop_entry(executable)?;
     migrate_handler(directory, &expected)?;
@@ -354,7 +372,9 @@ pub(super) fn register(executable: &Path, directory: &Path, icons: &Path) -> Res
     let _guard = INTEGRATION_LOCK.lock().map_err(|_| ())?;
     let changed = migrate_files(executable, directory, icons).map_err(|_| ())?;
     if changed {
-        refresh_desktop_database(directory);
+        // The MIME command below remains authoritative for an explicit login
+        // retry; a missing or stale optional desktop cache must not block OAuth.
+        let _ = refresh_desktop_database(directory);
     }
     let entry = desktop_entry(executable)?;
     let status = std::process::Command::new("xdg-mime")
@@ -611,6 +631,52 @@ mod tests {
         );
         assert!(callback_test.is_dir());
 
+        std::fs::remove_dir_all(directory).unwrap_or_else(|_| panic!("test cleanup"));
+    }
+
+    #[test]
+    fn version_1_0_0_appimage_files_migrate_in_place_before_window_creation() {
+        let directory = test_directory("v1-0-0-appimage");
+        let icons = directory.join("icons");
+        // The updater overwrites this exact path; the new process must publish
+        // the same on-disk AppImage path, not its temporary AppDir executable.
+        let appimage = directory.join("Panita Client_1.0.0_amd64.AppImage");
+        let appimage_text = appimage
+            .to_str()
+            .unwrap_or_else(|| panic!("AppImage test path"));
+
+        // 1.0.0 registered this runtime desktop ID and WM_CLASS.
+        std::fs::write(
+            directory.join(PREVIOUS_ID),
+            format!("{OWNED_PREFIX}{appimage_text}{PREVIOUS_OWNED_SUFFIX}"),
+        )
+        .unwrap_or_else(|_| panic!("1.0.0 runtime desktop entry"));
+        // Earlier callback registration could also leave this hidden canonical ID.
+        std::fs::write(
+            directory.join(DESKTOP_ID),
+            format!("{HIDDEN_LEGACY_PREFIX}{appimage_text}{HIDDEN_LEGACY_SUFFIX}"),
+        )
+        .unwrap_or_else(|_| panic!("1.0.0 hidden callback entry"));
+
+        assert!(
+            migrate_files(&appimage, &directory, &icons)
+                .unwrap_or_else(|_| panic!("1.0.0 migration"))
+        );
+        assert!(!directory.join(PREVIOUS_ID).exists());
+        assert_eq!(
+            std::fs::read_to_string(directory.join(DESKTOP_ID))
+                .ok()
+                .as_deref(),
+            desktop_entry(&appimage).ok().as_deref()
+        );
+        assert_eq!(
+            std::fs::read(icons.join(ICON_NAME)).ok().as_deref(),
+            Some(ICON)
+        );
+        assert!(
+            !migrate_files(&appimage, &directory, &icons)
+                .unwrap_or_else(|_| panic!("idempotent post-update migration"))
+        );
         std::fs::remove_dir_all(directory).unwrap_or_else(|_| panic!("test cleanup"));
     }
 

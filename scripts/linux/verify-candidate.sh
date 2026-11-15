@@ -43,10 +43,40 @@ grep -Fx 'Icon=panita-client' "$desktop"
 grep -Fx 'StartupWMClass=com.panitacraft.client' "$desktop"
 grep -Fx 'MimeType=x-scheme-handler/panitacraft;' "$desktop"
 grep -Fx 'X-PanitaClient-Owner=com.panitacraft.client' "$desktop"
-grep -Fq '/usr/share/applications/panita-client.desktop' "$check_dir/control/postinst"
+grep -Fq 'PANITA_DESKTOP_APPLICATIONS_DIR:-/usr/share/applications' "$check_dir/control/postinst"
 grep -Fq 'X-PanitaClient-Owner=com.panitacraft.client' "$check_dir/control/postinst"
 grep -Fq 'StartupWMClass=com.panitacraft.client' "$check_dir/control/postinst"
+grep -Fq 'Panita Client.desktop' "$check_dir/control/postinst"
+grep -Fq 'StartupWMClass=panita-desktop' "$check_dir/control/postinst"
+grep -Fq "^Exec=(/usr/bin/)?panita-client %u$" "$check_dir/control/postinst"
 test ! -e "$check_dir/deb/usr/share/applications/Panita Client.desktop"
+
+# Exercise the exact desktop payload left by a 1.0.0 Debian installation. The
+# test root keeps the maintainer script unprivileged and isolated from the host.
+upgrade_applications="$check_dir/deb-upgrade/usr/share/applications"
+mkdir -p "$upgrade_applications"
+cat > "$upgrade_applications/Panita Client.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Panita Client
+Exec=/usr/bin/panita-client %u
+Icon=panita-client
+Terminal=false
+Categories=Game;
+StartupNotify=true
+StartupWMClass=panita-desktop
+MimeType=x-scheme-handler/panitacraft;
+X-PanitaClient-Owner=com.panitacraft.client
+EOF
+PANITA_DESKTOP_APPLICATIONS_DIR="$upgrade_applications" sh "$check_dir/control/postinst"
+test ! -e "$upgrade_applications/Panita Client.desktop"
+cp "$desktop" "$upgrade_applications/com.panitacraft.client.desktop"
+desktop-file-validate "$upgrade_applications/com.panitacraft.client.desktop"
+
+# An edited file at the historical name is user-owned and must survive.
+printf '%s\n' '[Desktop Entry]' 'Name=Custom launcher' > "$upgrade_applications/Panita Client.desktop"
+PANITA_DESKTOP_APPLICATIONS_DIR="$upgrade_applications" sh "$check_dir/control/postinst"
+grep -Fx 'Name=Custom launcher' "$upgrade_applications/Panita Client.desktop"
 for icon in \
   32x32/apps/panita-client.png \
   64x64/apps/panita-client.png \

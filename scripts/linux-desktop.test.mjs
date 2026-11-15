@@ -54,9 +54,37 @@ test('Linux desktop identity matches the packaged executable and icon theme', as
   assert.match(identity, /set_program_class\("com\.panitacraft\.client"\)/);
   assert.match(protocol, /const DESKTOP_ID: &str = "com\.panitacraft\.client\.desktop";/);
   assert.match(protocol, /Icon=panita-client/);
-  assert.match(desktop, /protocol::migrate_desktop_integration\(app\.handle\(\)\);/);
-  assert.match(protocolBridge, /pub fn migrate_desktop_integration/);
-  assert.match(protocolBridge, /tauri::async_runtime::spawn_blocking/);
+  assert.match(desktop, /protocol::prepare_desktop_integration\(app\.handle\(\)\)/);
+  assert.match(desktop, /protocol::finish_desktop_integration\(pending\)/);
+  assert.match(desktop, /tauri::async_runtime::spawn_blocking/);
+  assert.match(protocolBridge, /pub fn prepare_desktop_integration/);
+  assert.match(protocolBridge, /pub fn finish_desktop_integration/);
+  assert.match(protocolBridge, /linux_protocol::prepare/);
+  assert.match(protocolBridge, /linux_protocol::finish_migration/);
+  assert.match(postInstall, /Panita Client\.desktop/);
+  assert.match(postInstall, /StartupWMClass=panita-desktop/);
+  assert.match(postInstall, /Exec=\(\/usr\/bin\/\)\?panita-client %u/);
+});
+
+test('Linux updater relaunch is sanitized and deferred until final exit', async () => {
+  const updater = await readFile('desktop/src/update_commands.rs', 'utf8');
+  const desktop = await readFile('desktop/src/lib.rs', 'utf8');
+
+  for (const variable of [
+    'APPIMAGE',
+    'APPDIR',
+    'GIO_LAUNCHED_DESKTOP_FILE',
+    'BAMF_DESKTOP_FILE_HINT',
+    'XDG_ACTIVATION_TOKEN',
+    'DESKTOP_STARTUP_ID',
+    'LD_LIBRARY_PATH',
+  ]) {
+    assert.match(updater, new RegExp(`"${variable}"`));
+  }
+  assert.match(updater, /starts_with\("panitacraft:"\)/);
+  assert.match(updater, /app\.exit\(0\)/);
+  assert.match(desktop, /RunEvent::Exit/);
+  assert.match(desktop, /update_commands::relaunch_after_exit\(app\)/);
 });
 
 test('Linux icon inputs contain every configured resolution', async () => {

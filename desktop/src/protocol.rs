@@ -66,13 +66,33 @@ fn linux_paths(
 }
 
 #[cfg(target_os = "linux")]
-pub fn migrate_desktop_integration(app: &tauri::AppHandle) {
-    let Ok((executable, directory, icons)) = linux_paths(app) else {
-        return;
-    };
-    let _ = tauri::async_runtime::spawn_blocking(move || {
-        let _ = linux_protocol::migrate(&executable, &directory, &icons);
-    });
+pub struct PendingDesktopIntegration {
+    executable: std::path::PathBuf,
+    directory: std::path::PathBuf,
+    changed: bool,
+}
+
+/// Publish the canonical launcher identity before GTK maps the first window.
+/// This phase intentionally performs local, idempotent file operations only.
+#[cfg(target_os = "linux")]
+pub fn prepare_desktop_integration(
+    app: &tauri::AppHandle,
+) -> Result<PendingDesktopIntegration, ErrorCode> {
+    let (executable, directory, icons) = linux_paths(app)?;
+    let changed = linux_protocol::prepare(&executable, &directory, &icons)
+        .map_err(|_| ErrorCode::CallbackRegistrationFailed)?;
+    Ok(PendingDesktopIntegration {
+        executable,
+        directory,
+        changed,
+    })
+}
+
+/// Refresh shell caches and migrate a legacy MIME default off the startup path.
+#[cfg(target_os = "linux")]
+pub fn finish_desktop_integration(pending: PendingDesktopIntegration) -> Result<(), ErrorCode> {
+    linux_protocol::finish_migration(&pending.executable, &pending.directory, pending.changed)
+        .map_err(|_| ErrorCode::CallbackRegistrationFailed)
 }
 
 #[cfg(target_os = "linux")]
