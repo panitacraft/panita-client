@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import test from 'node:test';
 
 const readJson = async path => JSON.parse(await readFile(path, 'utf8'));
+const execFileAsync = promisify(execFile);
 
 function pngSize(bytes) {
   assert.deepEqual([...bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
@@ -103,9 +108,26 @@ test('AppImage inspection accepts the bundler-selected root icon size', async ()
   const inspection = await readFile('scripts/linux/verify-candidate.sh', 'utf8');
 
   assert.match(inspection, /test "\$\(readlink squashfs-root\/\.DirIcon\)" = panita-client\.png/);
-  assert.match(inspection, /file "\$appimage_icon" \| grep -Eq ': PNG image data,/);
+  assert.match(inspection, /readlink -e -- "\$appimage_icon"/);
+  assert.match(inspection, /file -L -b -- "\$appimage_icon" \| grep -Eq '\^PNG image data,/);
   assert.doesNotMatch(
     inspection,
     /cmp squashfs-root\/panita-client\.png squashfs-root\/usr\/share\/icons\/hicolor\/512x512/,
   );
+});
+
+test('Linux AppImage icon inspection follows a packaged icon symlink', {
+  skip: process.platform !== 'linux',
+}, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'panita-appimage-icon-'));
+  try {
+    const icon = join(directory, 'panita-client.png');
+    await symlink(resolve('desktop/icons/128x128.png'), icon);
+    const { stdout } = await execFileAsync('file', ['-L', '-b', '--', icon], {
+      env: { ...process.env, LC_ALL: 'C' },
+    });
+    assert.match(stdout, /^PNG image data, 128 x 128,/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

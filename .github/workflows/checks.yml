@@ -13,6 +13,9 @@ jobs:
         os: [windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     env:
+      # Keep standalone manifest builds (including vendor/private-fs) out of the
+      # source tree so the installer clean-worktree guard remains meaningful.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/checks
       # A public client identifier, so a repository variable and not a secret.
       PANITA_LAUNCHER_API_KEY: ${{ vars.PANITA_LAUNCHER_API_KEY }}
     steps:
@@ -21,7 +24,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          sudo apt-get install --no-install-recommends -y build-essential ca-certificates curl wget file git xz-utils pkg-config libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf desktop-file-utils xdg-utils
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.16.0'
@@ -70,4 +73,11 @@ jobs:
       - name: Lint Rust
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Build desktop application
+        if: runner.os != 'Linux' || (github.event_name != 'pull_request' && github.ref != 'refs/heads/develop')
         run: pnpm tauri build --no-bundle
+      - name: Build and inspect real Linux packages
+        if: runner.os == 'Linux' && (github.event_name == 'pull_request' || github.ref == 'refs/heads/develop')
+        shell: bash
+        run: |
+          node scripts/build-beta.mjs --ci-unsigned
+          CI_UNSIGNED=1 bash scripts/linux/verify-candidate.sh
