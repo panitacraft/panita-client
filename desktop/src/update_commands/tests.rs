@@ -64,3 +64,43 @@ fn the_view_exposes_only_fixed_state_names() {
 fn an_unset_runtime_is_idle() {
     assert_eq!(Runtime::default().phase(), Phase::Idle);
 }
+
+#[test]
+fn linux_update_relaunch_targets_the_updated_appimage_without_replaying_callbacks() {
+    let image = std::path::PathBuf::from("/home/player/Panita Client 1.0.0.AppImage");
+    let relaunch = LinuxRelaunch::new(
+        image.clone(),
+        [
+            std::ffi::OsString::from("--background"),
+            std::ffi::OsString::from("panitacraft://oauth/callback#code=private"),
+            std::ffi::OsString::from("PANITACRAFT://oauth/callback#error=private"),
+        ],
+    );
+    assert_eq!(relaunch.program, image);
+    assert_eq!(relaunch.args, [std::ffi::OsString::from("--background")]);
+}
+
+#[test]
+fn linux_update_relaunch_removes_old_desktop_activation_and_appimage_loader_state() {
+    let relaunch = LinuxRelaunch::new(
+        std::path::PathBuf::from("/opt/Panita.AppImage"),
+        std::iter::empty(),
+    );
+    let command = relaunch.command();
+    let removed = command
+        .get_envs()
+        .filter_map(|(name, value)| value.is_none().then(|| name.to_string_lossy().into_owned()))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        removed,
+        LINUX_RELAUNCH_ENVIRONMENT
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect()
+    );
+    // The command inherits the normal session (DISPLAY, WAYLAND_DISPLAY, HOME,
+    // XDG_RUNTIME_DIR, and D-Bus); it clears only the explicit stale allowlist.
+    assert!(!removed.contains("DISPLAY"));
+    assert!(!removed.contains("WAYLAND_DISPLAY"));
+    assert!(!removed.contains("XDG_RUNTIME_DIR"));
+}

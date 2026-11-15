@@ -351,10 +351,14 @@ pub fn run() {
     drop(startup_gate);
     match result {
         Ok(app) => app.run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = event
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event
                 && play_commands::prevent_close(app)
             {
                 api.prevent_exit();
+            }
+            #[cfg(target_os = "linux")]
+            if matches!(event, tauri::RunEvent::Exit) {
+                update_commands::relaunch_after_exit(app);
             }
         }),
         Err(_) => {
