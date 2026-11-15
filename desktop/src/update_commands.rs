@@ -4,6 +4,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(any(target_os = "linux", test))]
+use std::{ffi::OsString, path::PathBuf, process::Command};
 
 use launcher_core::error::ErrorCode;
 use launcher_core::launcher_update::{self, UpdateChannel};
@@ -21,6 +23,78 @@ use crate::play_commands::PlayController;
 const EVENT: &str = "launcher-update-changed";
 const RECHECK: Duration = Duration::from_secs(600);
 const CHECK_TIMEOUT: Duration = Duration::from_secs(20);
+
+#[cfg(any(target_os = "linux", test))]
+const LINUX_RELAUNCH_ENVIRONMENT: &[&str] = &[
+    // Attribution from the desktop entry that launched the old process.
+    "GIO_LAUNCHED_DESKTOP_FILE",
+    "GIO_LAUNCHED_DESKTOP_FILE_PID",
+    "BAMF_DESKTOP_FILE_HINT",
+    "CHROME_DESKTOP",
+    // One-shot compositor/startup activation belongs only to the old process.
+    "XDG_ACTIVATION_TOKEN",
+    "DESKTOP_STARTUP_ID",
+    // Paths and loader overrides exported by the old AppImage runtime/AppRun.
+    "APPIMAGE",
+    "APPDIR",
+    "ARGV0",
+    "OWD",
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "GIO_EXTRA_MODULES",
+    "GIO_MODULE_DIR",
+    "GSETTINGS_SCHEMA_DIR",
+    "GTK_PATH",
+    "GTK_EXE_PREFIX",
+    "GTK_DATA_PREFIX",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GDK_PIXBUF_MODULEDIR",
+];
+
+/// A relaunch is prepared before exit, then spawned from `RunEvent::Exit` after
+/// the single-instance plugin has released its Linux D-Bus ownership.
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug)]
+struct LinuxRelaunch {
+    program: PathBuf,
+    args: Vec<OsString>,
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl LinuxRelaunch {
+    fn new(program: PathBuf, args: impl IntoIterator<Item = OsString>) -> Self {
+        Self {
+            program,
+            args: args
+                .into_iter()
+                .filter(|arg| {
+                    !arg.to_string_lossy()
+                        .to_ascii_lowercase()
+                        .starts_with("panitacraft:")
+                })
+                .collect(),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn from_app(app: &tauri::AppHandle) -> Result<Self, ErrorCode> {
+        let program = app
+            .env()
+            .appimage
+            .map(PathBuf::from)
+            .unwrap_or(std::env::current_exe().map_err(|_| ErrorCode::LauncherUpdateFailed)?);
+        Ok(Self::new(program, app.env().args_os.into_iter().skip(1)))
+    }
+
+    fn command(&self) -> Command {
+        let mut command = Command::new(&self.program);
+        command.args(&self.args);
+        for variable in LINUX_RELAUNCH_ENVIRONMENT {
+            command.env_remove(variable);
+        }
+        command
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -83,6 +157,8 @@ pub(super) struct UpdateController {
     runtime: Mutex<Runtime>,
     work: tokio::sync::Mutex<()>,
     started: AtomicBool,
+    #[cfg(target_os = "linux")]
+    relaunch: Mutex<Option<LinuxRelaunch>>,
 }
 
 impl UpdateController {
@@ -98,6 +174,8 @@ impl UpdateController {
             runtime: Mutex::default(),
             work: tokio::sync::Mutex::new(()),
             started: AtomicBool::new(false),
+            #[cfg(target_os = "linux")]
+            relaunch: Mutex::new(None),
         }
     }
 
@@ -390,7 +468,7 @@ async fn apply(app: tauri::AppHandle, controller: Arc<UpdateController>) {
     // On Windows a successful install exits the process from inside the plugin.
     let outcome = tauri::async_runtime::spawn_blocking(move || install(&update, &bytes)).await;
     match outcome {
-        Ok(Ok(())) => app.restart(),
+        Ok(Ok(())) => restart_after_update(&app, &controller),
         Ok(Err(code)) => {
             controller.plays.cancel_update_apply();
             controller.fail(&app, code);
@@ -399,6 +477,47 @@ async fn apply(app: tauri::AppHandle, controller: Arc<UpdateController>) {
             controller.plays.cancel_update_apply();
             controller.fail(&app, ErrorCode::LauncherUpdateFailed);
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn restart_after_update(app: &tauri::AppHandle, controller: &UpdateController) {
+    match LinuxRelaunch::from_app(app) {
+        Ok(relaunch) => {
+            *controller
+                .relaunch
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(relaunch);
+            // Request an orderly event-loop exit. Tauri dispatches plugin Exit
+            // hooks before the application callback, so the single-instance
+            // D-Bus name is released before `relaunch_after_exit` spawns.
+            app.exit(0);
+        }
+        Err(code) => {
+            controller.plays.cancel_update_apply();
+            controller.fail(app, code);
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn restart_after_update(app: &tauri::AppHandle, _controller: &UpdateController) {
+    app.restart();
+}
+
+/// Called only for the final event-loop Exit event, after plugin exit hooks.
+#[cfg(target_os = "linux")]
+pub(super) fn relaunch_after_exit(app: &tauri::AppHandle) {
+    let controller = app.state::<DesktopState>().launcher_update.clone();
+    let relaunch = controller
+        .relaunch
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take();
+    if let Some(relaunch) = relaunch
+        && relaunch.command().spawn().is_err()
+    {
+        controller.record(ErrorCode::LauncherUpdateFailed);
     }
 }
 

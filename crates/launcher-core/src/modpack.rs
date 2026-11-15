@@ -352,7 +352,7 @@ impl Manifest {
     }
 
     pub fn supported_loader(&self) -> bool {
-        self.loader == "neoforge"
+        crate::loader::supported(&self.loader)
     }
 }
 

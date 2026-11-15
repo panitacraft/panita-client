@@ -1,7 +1,11 @@
 //! Low-level owned-child supervision. Callers must complete Play preflight before
 //! spawning and keep the Tokio runtime alive until the supervised child exits.
 //! This module does not authorize a launch or implement desktop close behavior.
+#[cfg(target_os = "linux")]
+use std::collections::BTreeMap;
 use std::collections::VecDeque;
+#[cfg(any(target_os = "linux", test))]
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
@@ -21,6 +25,417 @@ use crate::registry::InstanceRegistry;
 
 const MAX_LINE: usize = 8192;
 pub const OUTPUT_PAGE_SIZE: usize = 500;
+
+/// Desktop launch context belongs to the launcher process, not to a game it starts.
+/// Some Linux shells use these values while matching a new window to a desktop entry;
+/// allowing them to reach Java can therefore group Minecraft under Panita Client.
+const DESKTOP_IDENTITY_ENVIRONMENT: [&str; 7] = [
+    "GIO_LAUNCHED_DESKTOP_FILE",
+    "GIO_LAUNCHED_DESKTOP_FILE_PID",
+    "BAMF_DESKTOP_FILE_HINT",
+    "CHROME_DESKTOP",
+    "DESKTOP_STARTUP_ID",
+    "XDG_ACTIVATION_TOKEN",
+    "__CFBundleIdentifier",
+];
+
+const JAVA_OPTIONS_ENVIRONMENT: [&str; 3] =
+    ["JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS"];
+
+/// PulseAudio also accepts per-property variables whose names contain dots.
+/// Remove inherited launcher values before publishing Minecraft's aggregate
+/// property list, which also works when the Pulse client is backed by PipeWire.
+#[cfg(any(target_os = "linux", test))]
+const AUDIO_IDENTITY_ENVIRONMENT: [&str; 4] = [
+    "PULSE_PROP_application.name",
+    "PULSE_PROP_application.id",
+    "PULSE_PROP_application.icon_name",
+    "PULSE_PROP_media.role",
+];
+
+#[cfg(any(target_os = "linux", test))]
+const MINECRAFT_PULSE_PROPERTIES: &str = "application.name=Minecraft application.id=com.panitacraft.minecraft application.icon_name=minecraft media.role=game";
+#[cfg(any(target_os = "linux", test))]
+const MINECRAFT_PIPEWIRE_PROPERTIES: &str = "{ application.name = \"Minecraft\" application.id = \"com.panitacraft.minecraft\" application.icon-name = \"minecraft\" media.role = \"Game\" }";
+#[cfg(any(target_os = "linux", test))]
+const MINECRAFT_PIPEWIRE_PROPERTY_BODY: &str = "application.name = \"Minecraft\" application.id = \"com.panitacraft.minecraft\" application.icon-name = \"minecraft\" media.role = \"Game\"";
+
+/// AppImage runtime paths point into the launcher's mounted image. They can make
+/// an independently installed Java load launcher libraries or desktop modules.
+#[cfg(any(target_os = "linux", test))]
+const APPIMAGE_ENVIRONMENT: [&str; 14] = [
+    "APPIMAGE",
+    "APPDIR",
+    "ARGV0",
+    "OWD",
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "GIO_EXTRA_MODULES",
+    "GIO_MODULE_DIR",
+    "GSETTINGS_SCHEMA_DIR",
+    "GTK_PATH",
+    "GTK_EXE_PREFIX",
+    "GTK_DATA_PREFIX",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GDK_PIXBUF_MODULEDIR",
+];
+
+fn sanitize_game_environment(command: &mut tokio::process::Command) {
+    for key in JAVA_OPTIONS_ENVIRONMENT {
+        command.env_remove(key);
+    }
+    for key in DESKTOP_IDENTITY_ENVIRONMENT {
+        command.env_remove(key);
+    }
+    #[cfg(target_os = "linux")]
+    sanitize_appimage_environment(command, std::env::var_os("APPIMAGE").is_some());
+    #[cfg(any(target_os = "linux", test))]
+    {
+        for key in AUDIO_IDENTITY_ENVIRONMENT {
+            command.env_remove(key);
+        }
+        publish_game_audio_identity(command);
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn sanitize_appimage_environment(command: &mut tokio::process::Command, appimage: bool) {
+    if appimage {
+        for key in APPIMAGE_ENVIRONMENT {
+            command.env_remove(key);
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn command_environment_value(command: &tokio::process::Command, key: &str) -> Option<OsString> {
+    match command.as_std().get_envs().find(|(name, _)| *name == key) {
+        Some((_, value)) => value.map(OsStr::to_os_string),
+        None => std::env::var_os(key),
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn append_environment_properties(existing: Option<OsString>, properties: &str) -> OsString {
+    let mut value = existing.unwrap_or_default();
+    if !value.is_empty() {
+        value.push(" ");
+    }
+    value.push(properties);
+    value
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn pipewire_properties(existing: Option<OsString>) -> OsString {
+    let Some(existing) = existing.and_then(|value| value.into_string().ok()) else {
+        return MINECRAFT_PIPEWIRE_PROPERTIES.into();
+    };
+    let trimmed = existing.trim();
+    let Some(body) = trimmed
+        .strip_prefix('{')
+        .and_then(|value| value.strip_suffix('}'))
+    else {
+        return MINECRAFT_PIPEWIRE_PROPERTIES.into();
+    };
+    let body = body.trim();
+    if body.is_empty() {
+        MINECRAFT_PIPEWIRE_PROPERTIES.into()
+    } else {
+        format!("{{ {body} {MINECRAFT_PIPEWIRE_PROPERTY_BODY} }}").into()
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn publish_game_audio_identity(command: &mut tokio::process::Command) {
+    let pulse = append_environment_properties(
+        command_environment_value(command, "PULSE_PROP"),
+        MINECRAFT_PULSE_PROPERTIES,
+    );
+    let pipewire = pipewire_properties(command_environment_value(command, "PIPEWIRE_PROPS"));
+    command
+        .env("PULSE_PROP", pulse)
+        .env("PIPEWIRE_PROPS", pipewire);
+}
+
+#[derive(Debug)]
+enum ProcessControl {
+    #[cfg(not(target_os = "linux"))]
+    Direct,
+    #[cfg(target_os = "linux")]
+    ProcessGroup,
+    #[cfg(target_os = "linux")]
+    SystemdService { systemctl: PathBuf, unit: String },
+}
+
+struct SpawnedGame {
+    child: tokio::process::Child,
+    control: ProcessControl,
+    stdin_guard: Option<tokio::process::ChildStdin>,
+}
+
+struct SupervisedIo {
+    _stdin_guard: Option<tokio::process::ChildStdin>,
+    output: tokio::task::JoinHandle<()>,
+    errors: tokio::task::JoinHandle<()>,
+}
+
+fn configure_process_builder(builder: &mut tokio::process::Command, command: &LaunchCommand) {
+    builder
+        .current_dir(&command.directory)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(false);
+    sanitize_game_environment(builder);
+    #[cfg(windows)]
+    builder.creation_flags(0x08000000);
+}
+
+#[cfg(not(target_os = "linux"))]
+fn spawn_game_process(
+    command: &LaunchCommand,
+    _operation: OperationId,
+) -> Result<SpawnedGame, CoreError> {
+    let mut builder = tokio::process::Command::new(&command.executable);
+    builder.args(&command.args);
+    configure_process_builder(&mut builder, command);
+    let child = builder
+        .spawn()
+        .map_err(|_| CoreError::new(ErrorCode::ProcessStartFailed))?;
+    Ok(SpawnedGame {
+        child,
+        control: ProcessControl::Direct,
+        stdin_guard: None,
+    })
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug)]
+struct SystemdTools {
+    run: PathBuf,
+    control: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+fn fixed_executable(candidates: &[&str]) -> Option<PathBuf> {
+    candidates
+        .iter()
+        .map(PathBuf::from)
+        .find(|candidate| candidate.is_file())
+}
+
+#[cfg(target_os = "linux")]
+fn systemd_version(run: &std::path::Path) -> Option<u32> {
+    let mut command = std::process::Command::new(run);
+    command.arg("--version");
+    if std::env::var_os("APPIMAGE").is_some() {
+        for key in APPIMAGE_ENVIRONMENT {
+            command.env_remove(key);
+        }
+    }
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()
+}
+
+#[cfg(target_os = "linux")]
+fn systemd_tools() -> Option<SystemdTools> {
+    use std::os::unix::fs::FileTypeExt;
+
+    let runtime = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
+    if !runtime.is_absolute()
+        || !std::fs::symlink_metadata(runtime.join("systemd/private"))
+            .ok()
+            .is_some_and(|metadata| metadata.file_type().is_socket())
+    {
+        return None;
+    }
+    let run = fixed_executable(&["/usr/bin/systemd-run", "/bin/systemd-run"])?;
+    let control = fixed_executable(&["/usr/bin/systemctl", "/bin/systemctl"])?;
+    // --pipe, --wait, --same-dir and service type exec are all available here.
+    if systemd_version(&run)? < 240 {
+        return None;
+    }
+    let mut probe = std::process::Command::new(&control);
+    probe
+        .args(["--user", "show-environment"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if std::env::var_os("APPIMAGE").is_some() {
+        for key in APPIMAGE_ENVIRONMENT {
+            probe.env_remove(key);
+        }
+    }
+    if !probe.status().ok()?.success() {
+        return None;
+    }
+    Some(SystemdTools { run, control })
+}
+
+#[cfg(target_os = "linux")]
+fn valid_systemd_environment_name(name: &OsStr) -> bool {
+    let Some(name) = name.to_str() else {
+        return false;
+    };
+    let mut bytes = name.bytes();
+    bytes
+        .next()
+        .is_some_and(|byte| byte == b'_' || byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
+}
+
+#[cfg(target_os = "linux")]
+fn effective_environment_keys(command: &tokio::process::Command) -> Vec<OsString> {
+    let mut environment: BTreeMap<OsString, OsString> = std::env::vars_os()
+        .filter(|(key, value)| {
+            valid_systemd_environment_name(key)
+                && value
+                    .to_str()
+                    .is_some_and(|value| value.chars().all(|character| !character.is_control()))
+        })
+        .collect();
+    for (key, value) in command.as_std().get_envs() {
+        if let Some(value) = value.filter(|value| {
+            value
+                .to_str()
+                .is_some_and(|value| value.chars().all(|character| !character.is_control()))
+        }) && valid_systemd_environment_name(key)
+        {
+            environment.insert(key.to_os_string(), value.to_os_string());
+        } else {
+            environment.remove(key);
+        }
+    }
+    environment.into_keys().collect()
+}
+
+#[cfg(target_os = "linux")]
+fn systemd_escape_argument(value: &OsStr) -> OsString {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+    let bytes = value.as_bytes();
+    let mut escaped = Vec::with_capacity(bytes.len());
+    for byte in bytes {
+        escaped.push(*byte);
+        if *byte == b'$' {
+            escaped.push(b'$');
+        }
+    }
+    OsString::from_vec(escaped)
+}
+
+#[cfg(target_os = "linux")]
+fn systemd_builder(
+    command: &LaunchCommand,
+    operation: OperationId,
+    tools: &SystemdTools,
+) -> (tokio::process::Command, ProcessControl) {
+    let unit = format!("minecraft-{}.service", operation.value().simple());
+    let mut builder = tokio::process::Command::new(&tools.run);
+    configure_process_builder(&mut builder, command);
+    builder.args([
+        "--user",
+        "--quiet",
+        "--wait",
+        "--pipe",
+        "--collect",
+        "--same-dir",
+        "--service-type=exec",
+        "--description=Minecraft",
+    ]);
+    builder.arg(format!("--unit={unit}"));
+    for key in JAVA_OPTIONS_ENVIRONMENT
+        .iter()
+        .chain(DESKTOP_IDENTITY_ENVIRONMENT.iter())
+    {
+        builder.arg(format!("--property=UnsetEnvironment={key}"));
+    }
+    if std::env::var_os("APPIMAGE").is_some() {
+        for key in APPIMAGE_ENVIRONMENT {
+            builder.arg(format!("--property=UnsetEnvironment={key}"));
+        }
+    }
+    for key in effective_environment_keys(&builder) {
+        builder.arg(format!("--setenv={}", key.to_string_lossy()));
+    }
+    builder.arg("--");
+    builder.arg(systemd_escape_argument(command.executable.as_os_str()));
+    builder.args(
+        command
+            .args
+            .iter()
+            .map(|argument| systemd_escape_argument(OsStr::new(argument))),
+    );
+    (
+        builder,
+        ProcessControl::SystemdService {
+            systemctl: tools.control.clone(),
+            unit,
+        },
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn fallback_builder(
+    command: &LaunchCommand,
+) -> Result<(tokio::process::Command, ProcessControl), CoreError> {
+    const SCRIPT: &str = "exec 3<&0; trap '' TERM INT HUP; (trap '' TERM INT HUP; while IFS= read -r line <&3; do :; done; kill -KILL 0) & watchdog=$!; (trap - TERM INT HUP; exec 3<&-; exec \"$@\" </dev/null) & child=$!; wait \"$child\"; status=$?; kill -KILL \"$watchdog\" 2>/dev/null; wait \"$watchdog\" 2>/dev/null; exit \"$status\"";
+
+    let shell = fixed_executable(&["/bin/sh", "/usr/bin/sh"])
+        .ok_or_else(|| CoreError::new(ErrorCode::ProcessStartFailed))?;
+    let mut builder = tokio::process::Command::new(shell);
+    builder
+        .arg("-c")
+        .arg(SCRIPT)
+        .arg("panita-minecraft-runner")
+        .arg(&command.executable)
+        .args(&command.args);
+    configure_process_builder(&mut builder, command);
+    builder.stdin(Stdio::piped()).process_group(0);
+    Ok((builder, ProcessControl::ProcessGroup))
+}
+
+#[cfg(target_os = "linux")]
+fn spawn_game_process(
+    command: &LaunchCommand,
+    operation: OperationId,
+) -> Result<SpawnedGame, CoreError> {
+    if !command.executable.is_file() {
+        return Err(CoreError::new(ErrorCode::ProcessStartFailed));
+    }
+    if let Some(tools) = systemd_tools() {
+        let (mut builder, control) = systemd_builder(command, operation, &tools);
+        if let Ok(child) = builder.spawn() {
+            return Ok(SpawnedGame {
+                child,
+                control,
+                stdin_guard: None,
+            });
+        }
+    }
+    let (mut builder, control) = fallback_builder(command)?;
+    let mut child = builder
+        .spawn()
+        .map_err(|_| CoreError::new(ErrorCode::ProcessStartFailed))?;
+    let stdin_guard = child.stdin.take();
+    if stdin_guard.is_none() {
+        return Err(CoreError::new(ErrorCode::ProcessStartFailed));
+    }
+    Ok(SpawnedGame {
+        child,
+        control,
+        stdin_guard,
+    })
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputStream {
@@ -241,22 +656,11 @@ impl LaunchLease {
         {
             return Err(CoreError::new(ErrorCode::InvalidData));
         }
-        let mut builder = tokio::process::Command::new(&command.executable);
-        builder
-            .args(&command.args)
-            .current_dir(&command.directory)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env_remove("JAVA_TOOL_OPTIONS")
-            .env_remove("_JAVA_OPTIONS")
-            .env_remove("JDK_JAVA_OPTIONS")
-            .kill_on_drop(false);
-        #[cfg(windows)]
-        builder.creation_flags(0x08000000);
-        let mut child = builder
-            .spawn()
-            .map_err(|_| CoreError::new(ErrorCode::ProcessStartFailed))?;
+        let SpawnedGame {
+            mut child,
+            control,
+            stdin_guard,
+        } = spawn_game_process(&command, operation)?;
         let events = Arc::new(Events {
             process,
             operation,
@@ -284,11 +688,16 @@ impl LaunchLease {
         let (complete, exit) = watch::channel(None);
         runtime.spawn(supervise(
             child,
+            control,
             self,
             requests,
             complete,
             events.clone(),
-            (output, errors),
+            SupervisedIo {
+                _stdin_guard: stdin_guard,
+                output,
+                errors,
+            },
         ));
         Ok(RunningGame {
             controls,
@@ -388,11 +797,12 @@ impl RunningGame {
 
 async fn supervise(
     mut child: tokio::process::Child,
+    control: ProcessControl,
     lease: LaunchLease,
     mut controls: mpsc::Receiver<Request>,
     complete: watch::Sender<Option<GameExit>>,
     events: Arc<Events>,
-    pipes: (tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>),
+    pipes: SupervisedIo,
 ) {
     let mut controls_open = true;
     let status = loop {
@@ -408,7 +818,7 @@ async fn supervise(
             },
             request = controls.recv(), if controls_open => {
                 if let Some(request) = request {
-                    let result = stop_child(&mut child, request.force);
+                    let result = stop_child(&mut child, &control, request.force).await;
                     if result == Ok(StopOutcome::Requested) {
                         events.push(if request.force { ProcessEventKind::ForceStopRequested } else { ProcessEventKind::GracefulStopRequested });
                     }
@@ -420,37 +830,137 @@ async fn supervise(
     // Descendants may retain a pipe after the owned child exits. Bound draining
     // without ever keeping the instance busy indefinitely for inherited pipes.
     tokio::join!(
-        drain(pipes.0, OutputStream::Stdout, &events),
-        drain(pipes.1, OutputStream::Stderr, &events)
+        drain(pipes.output, OutputStream::Stdout, &events),
+        drain(pipes.errors, OutputStream::Stderr, &events)
     );
     events.push(ProcessEventKind::Exited(status));
     drop(lease);
     let _ = complete.send(Some(status));
 }
 
-fn stop_child(child: &mut tokio::process::Child, force: bool) -> Result<StopOutcome, ErrorCode> {
-    if force {
-        child
-            .start_kill()
-            .map_err(|_| ErrorCode::ProcessControlFailed)?;
-        return Ok(StopOutcome::Requested);
+async fn stop_child(
+    child: &mut tokio::process::Child,
+    control: &ProcessControl,
+    force: bool,
+) -> Result<StopOutcome, ErrorCode> {
+    if child
+        .try_wait()
+        .map_err(|_| ErrorCode::ProcessControlFailed)?
+        .is_some()
+    {
+        return Ok(StopOutcome::AlreadyExited);
     }
     #[cfg(target_os = "linux")]
     {
-        // The actor owns the unreaped Child; no other task waits or accepts a
-        // caller-supplied PID. An exited unreaped child cannot have its PID reused.
-        let pid = child
-            .id()
-            .and_then(|pid| i32::try_from(pid).ok())
-            .and_then(rustix::process::Pid::from_raw)
-            .ok_or(ErrorCode::ProcessControlFailed)?;
-        rustix::process::kill_process(pid, rustix::process::Signal::TERM)
-            .map_err(|_| ErrorCode::ProcessControlFailed)?;
-        Ok(StopOutcome::Requested)
+        match control {
+            ProcessControl::ProcessGroup => {
+                // The fallback runner is a process-group leader.
+                // The actor owns its unreaped Child, so this PID cannot be reused.
+                let group = child
+                    .id()
+                    .and_then(|pid| i32::try_from(pid).ok())
+                    .and_then(rustix::process::Pid::from_raw)
+                    .ok_or(ErrorCode::ProcessControlFailed)?;
+                let signal = if force {
+                    rustix::process::Signal::KILL
+                } else {
+                    rustix::process::Signal::TERM
+                };
+                rustix::process::kill_process_group(group, signal)
+                    .map_err(|_| ErrorCode::ProcessControlFailed)?;
+                Ok(StopOutcome::Requested)
+            }
+            ProcessControl::SystemdService { systemctl, unit } => {
+                let signal = async {
+                    // systemd-run is already spawned, but the transient unit can
+                    // take a short moment to become addressable over the user bus.
+                    for attempt in 0..20 {
+                        if child
+                            .try_wait()
+                            .map_err(|_| ErrorCode::ProcessControlFailed)?
+                            .is_some()
+                        {
+                            return Ok(StopOutcome::AlreadyExited);
+                        }
+                        let mut inspect = tokio::process::Command::new(systemctl);
+                        inspect
+                            .args(["--user", "show", "--property=MainPID", "--value"])
+                            .arg(unit)
+                            .stdin(Stdio::null())
+                            .stderr(Stdio::null());
+                        if std::env::var_os("APPIMAGE").is_some() {
+                            sanitize_appimage_environment(&mut inspect, true);
+                        }
+                        let main_ready = inspect
+                            .output()
+                            .await
+                            .ok()
+                            .filter(|output| output.status.success())
+                            .and_then(|output| {
+                                String::from_utf8(output.stdout)
+                                    .ok()?
+                                    .trim()
+                                    .parse::<u32>()
+                                    .ok()
+                            })
+                            .is_some_and(|pid| pid != 0);
+                        if !main_ready {
+                            if attempt != 19 {
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                            }
+                            continue;
+                        }
+                        let mut command = tokio::process::Command::new(systemctl);
+                        command
+                            .args(["--user", "kill"])
+                            .arg(if force {
+                                "--kill-whom=all"
+                            } else {
+                                "--kill-whom=main"
+                            })
+                            .arg(if force {
+                                "--signal=KILL"
+                            } else {
+                                "--signal=TERM"
+                            })
+                            .arg(unit)
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null());
+                        if std::env::var_os("APPIMAGE").is_some() {
+                            sanitize_appimage_environment(&mut command, true);
+                        }
+                        if command
+                            .status()
+                            .await
+                            .map_err(|_| ErrorCode::ProcessControlFailed)?
+                            .success()
+                        {
+                            return Ok(StopOutcome::Requested);
+                        }
+                        if attempt != 19 {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        }
+                    }
+                    Err(ErrorCode::ProcessControlFailed)
+                };
+                tokio::time::timeout(Duration::from_secs(3), signal)
+                    .await
+                    .map_err(|_| ErrorCode::ProcessControlFailed)?
+            }
+        }
     }
     #[cfg(not(target_os = "linux"))]
     {
-        Ok(StopOutcome::Unsupported)
+        let _ = control;
+        if force {
+            child
+                .start_kill()
+                .map_err(|_| ErrorCode::ProcessControlFailed)?;
+            Ok(StopOutcome::Requested)
+        } else {
+            Ok(StopOutcome::Unsupported)
+        }
     }
 }
 

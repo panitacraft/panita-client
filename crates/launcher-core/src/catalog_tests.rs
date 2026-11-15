@@ -111,7 +111,7 @@ fn catalog_validation_preserves_text_and_rejects_malformed_records() {
 }
 
 #[test]
-fn custom_catalog_pins_round_trip_and_only_published_neoforge_packs_install() {
+fn custom_catalog_pins_round_trip_and_only_published_supported_packs_install() {
     let mut raw = record();
     raw["source_type"] = json!("custom");
     raw["loader"] = json!("neoforge");
@@ -125,14 +125,33 @@ fn custom_catalog_pins_round_trip_and_only_published_neoforge_packs_install() {
         CatalogSource::Custom { label: None, .. }
     ));
     assert!(parsed[0].validate().is_ok());
-    // A published NeoForge pack is installable; every other loader stays unsupported.
+    // Published packs use the same loader support as installation and Play.
     assert!(
         parsed[0]
             .installation_allowed(&Version::new(0, 2, 0))
             .is_ok()
     );
     assert!(parsed[0].source.installable());
-    for loader in ["fabric", "forge", "quilt"] {
+    for loader in ["fabric", "quilt"] {
+        let mut other = raw.clone();
+        other["loader"] = json!(loader);
+        let parsed = parse_list(list(vec![other]).as_bytes()).unwrap_or_else(|_| panic!("loader"));
+        assert!(
+            parsed[0]
+                .installation_allowed(&Version::new(1, 0, 2))
+                .is_ok()
+        );
+        assert!(parsed[0].source.installable());
+        let mut unpublished = parsed[0].source.clone();
+        if let CatalogSource::Custom {
+            current_version_id, ..
+        } = &mut unpublished
+        {
+            *current_version_id = None;
+        }
+        assert!(!unpublished.installable());
+    }
+    for loader in ["forge", "future-loader"] {
         let mut other = raw.clone();
         other["loader"] = json!(loader);
         let parsed = parse_list(list(vec![other]).as_bytes()).unwrap_or_else(|_| panic!("loader"));

@@ -203,6 +203,8 @@ pub fn run() {
     if linux_activation::forward_from_environment(&context.config().identifier) {
         return;
     }
+    #[cfg(target_os = "linux")]
+    linux_desktop::configure_identity();
     let process = launcher_core::operation::ProcessSessionId::new();
     let logs = Arc::new(launcher_core::logging::BoundedLog::default());
     logs.record(launcher_core::logging::LogRecord {
@@ -237,10 +239,33 @@ pub fn run() {
             play_commands::restore_window(app, cwd);
         }))
         .setup(|app| {
+            let state = app.state::<DesktopState>();
+            #[cfg(target_os = "linux")]
+            match protocol::prepare_desktop_integration(app.handle()) {
+                Ok(pending) => {
+                    let logs = state.logs.clone();
+                    let process = state.process;
+                    drop(tauri::async_runtime::spawn_blocking(move || {
+                        if let Err(code) = protocol::finish_desktop_integration(pending) {
+                            logs.record(launcher_core::logging::LogRecord {
+                                process,
+                                operation: None,
+                                event: launcher_core::logging::LogEvent::DesktopIntegrationFailure(
+                                    code,
+                                ),
+                            });
+                        }
+                    }));
+                }
+                Err(code) => state.logs.record(launcher_core::logging::LogRecord {
+                    process: state.process,
+                    operation: None,
+                    event: launcher_core::logging::LogEvent::DesktopIntegrationFailure(code),
+                }),
+            }
             #[cfg(any(windows, target_os = "linux"))]
             tray::install(app.handle());
             // Session log files are best effort: a failure keeps in-memory diagnostics.
-            let state = app.state::<DesktopState>();
             if let Ok(root) = app.path().app_data_dir() {
                 let _ = std::fs::create_dir_all(&root);
                 let mut header = vec![
@@ -347,10 +372,14 @@ pub fn run() {
     drop(startup_gate);
     match result {
         Ok(app) => app.run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = event
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event
                 && play_commands::prevent_close(app)
             {
                 api.prevent_exit();
+            }
+            #[cfg(target_os = "linux")]
+            if matches!(event, tauri::RunEvent::Exit) {
+                update_commands::relaunch_after_exit(app);
             }
         }),
         Err(_) => {

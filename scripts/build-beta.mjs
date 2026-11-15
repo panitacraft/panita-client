@@ -13,6 +13,7 @@ if (!platform || process.arch !== 'x64') throw new Error('Packaging currently re
 const [os, bundles] = platform;
 const config = JSON.parse(await readFile(join(root, 'desktop/tauri.beta.conf.json'), 'utf8'));
 const baseConfig = JSON.parse(await readFile(join(root, 'desktop/tauri.conf.json'), 'utf8'));
+const platformConfig = JSON.parse(await readFile(join(root, `desktop/tauri.${os}.conf.json`), 'utf8'));
 const args = process.argv.slice(2);
 const loaderValidation = args.includes('--loader-validation');
 if (loaderValidation) args.splice(args.indexOf('--loader-validation'), 1);
@@ -69,7 +70,7 @@ for (const [bundle, extension] of bundles) {
   const bundleDirectory = join(root, 'target/phase-7-build/release/bundle', bundle);
   const expected = bundle === 'nsis'
     ? `Panita Client_${config.version}_x64-setup.exe`
-    : `${config.productName ?? baseConfig.productName}_${config.version}_amd64${extension}`;
+    : `${config.productName ?? platformConfig.productName ?? baseConfig.productName}_${config.version}_amd64${extension}`;
   const files = await readdir(bundleDirectory);
   // Match the exact version to avoid copying an older candidate left by an interrupted build.
   const candidates = files.filter(file => file === expected);

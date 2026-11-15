@@ -1,3 +1,5 @@
 /scripts/linux/*.sh text eol=lf
 /scripts/linux/Dockerfile text eol=lf
+/desktop/resources/linux/*.desktop text eol=lf
+/desktop/resources/linux/*.sh text eol=lf
 /crates/launcher-core/src/neoforge/fixtures/*-version.json -text

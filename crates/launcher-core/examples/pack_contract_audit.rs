@@ -46,10 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let project = metadata["project_id"].as_str().ok_or("missing project")?;
     let version = metadata["id"].as_str().ok_or("missing version")?;
     let artifact = resolve_version(&version_bytes, project, version)?;
-    let index = verified_index(
-        &read(3, launcher_core::modpack::modrinth::MAX_MRPACK_BYTES)?,
-        &artifact,
-    )?;
+    let index = verified_index(&read(3, launcher_core::modpack::MAX_FILE_BYTES)?, &artifact)?;
     println!(
         "Modrinth: {} files, dependencies {:?}",
         index.files.len(),

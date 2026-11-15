@@ -264,6 +264,8 @@ pub(crate) struct Plan {
 
 impl Plan {
     fn custom(manifest: &Manifest) -> Result<Self, CoreError> {
+        let kind = crate::loader::Kind::from_name(&manifest.loader)
+            .ok_or_else(|| CoreError::new(ErrorCode::UnsupportedInstance))?;
         let mut items = Vec::new();
         let mut pending = Vec::new();
         for file in &manifest.files {
@@ -306,7 +308,7 @@ impl Plan {
                 label: manifest.label.clone(),
             },
             minecraft_version: manifest.minecraft_version.clone(),
-            kind: crate::loader::Kind::NeoForge,
+            kind,
             loader: manifest.loader.clone(),
             loader_version: manifest.loader_version.clone(),
             items,

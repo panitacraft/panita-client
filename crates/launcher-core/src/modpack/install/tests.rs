@@ -13,6 +13,37 @@ pub(super) const BASE: &str = "/data/project/versions/version/";
 pub(super) const ARCHIVE: &str =
     "/storage/v1/object/public/modpacks/by-hash/sha256-abc/defaults.zip";
 
+#[test]
+fn custom_plans_preserve_the_exact_supported_loader_pin() {
+    let (id, version, mut document) = crate::modpack::tests::fixture();
+    for (name, pin, expected) in [
+        ("neoforge", "21.1.264", crate::loader::Kind::NeoForge),
+        ("fabric", "0.16.10", crate::loader::Kind::Fabric),
+        ("quilt", "0.28.0", crate::loader::Kind::Quilt),
+    ] {
+        document["data"]["loader"] = json!(name);
+        document["data"]["loader_version"] = json!(pin);
+        let manifest = Manifest::parse(document.to_string().as_bytes(), id, version)
+            .unwrap_or_else(|_| panic!("manifest"));
+        assert!(manifest.supported_loader());
+        let plan = Plan::custom(&manifest).unwrap_or_else(|_| panic!("plan"));
+        assert_eq!(plan.kind, expected);
+        assert_eq!(plan.loader, name);
+        assert_eq!(plan.loader_version, pin);
+        assert_eq!(plan.minecraft_version, manifest.minecraft_version);
+        assert_eq!(plan.items.len(), 1);
+    }
+    for name in ["forge", "future-loader"] {
+        document["data"]["loader"] = json!(name);
+        let manifest = Manifest::parse(document.to_string().as_bytes(), id, version)
+            .unwrap_or_else(|_| panic!("manifest"));
+        assert!(!manifest.supported_loader());
+        assert_eq!(
+            Plan::custom(&manifest).err().map(|error| error.code()),
+            Some(ErrorCode::UnsupportedInstance)
+        );
+    }
+}
 pub(super) struct World {
     pub(super) paths: AppPaths,
     pub(super) id: Uuid,

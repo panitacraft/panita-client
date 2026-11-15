@@ -8,7 +8,6 @@ use sha2::{Digest, Sha512};
 use std::io::Read;
 use std::time::Duration;
 
-pub const MAX_MRPACK_BYTES: u64 = 128 * 1024 * 1024;
 const API: &str = "https://api.modrinth.com";
 
 /// Public Modrinth version metadata. It sends no credentials and follows no
@@ -182,7 +181,6 @@ pub fn resolve_version(
         || selected.hashes.sha1.is_none()
         || selected.hashes.sha512.is_none()
         || selected.size == 0
-        || selected.size > MAX_MRPACK_BYTES
         || parts[2] != project
         || parts[4] != version
     {
@@ -198,8 +196,7 @@ pub fn resolve_version(
 pub fn verified_index(bytes: &[u8], artifact: &PackArtifact) -> Result<MrpackIndex, CoreError> {
     artifact.hashes.validate()?;
     download_url(&artifact.url, &Origin::Modrinth)?;
-    if artifact.size > MAX_MRPACK_BYTES
-        || bytes.len() as u64 != artifact.size
+    if bytes.len() as u64 != artifact.size
         || artifact.hashes.sha512.as_ref() != Some(&format!("{:x}", Sha512::digest(bytes)))
         || artifact.hashes.sha1.as_ref() != Some(&format!("{:x}", Sha1::digest(bytes)))
     {
@@ -332,6 +329,17 @@ mod tests {
         let metadata = json!({"id":"version", "project_id":"project", "status":"listed", "date_published":"2026-10-25T20:54:25Z", "files":[{"filename":"pack.mrpack", "primary":true,"url":"https://cdn.modrinth.com/data/project/versions/version/pack.mrpack", "size":bytes.len(), "hashes":{"sha1":format!("{:x}",Sha1::digest(&bytes)), "sha512":format!("{:x}",Sha512::digest(&bytes))}}]});
         let artifact = resolve_version(metadata.to_string().as_bytes(), "project", "version")
             .unwrap_or_else(|_| panic!("version"));
+        let mut large_metadata = metadata.clone();
+        large_metadata["files"][0]["size"] = json!(128 * 1024 * 1024 + 1_u64);
+        let large = resolve_version(large_metadata.to_string().as_bytes(), "project", "version")
+            .unwrap_or_else(|_| panic!("archive above the former size cap"));
+        assert_eq!(large.size, 128 * 1024 * 1024 + 1);
+        assert!(
+            super::super::transfer::Expected::file(&large.hashes, large.size)
+                .validate()
+                .is_ok()
+        );
+        assert!(verified_index(&bytes, &large).is_err());
         let parsed = verified_index(&bytes, &artifact).unwrap_or_else(|_| panic!("index"));
         assert_eq!(parsed.version_id, "internal-label");
         assert_eq!(
