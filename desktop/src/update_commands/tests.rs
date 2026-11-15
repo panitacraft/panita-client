@@ -89,7 +89,8 @@ fn linux_update_relaunch_removes_old_desktop_activation_and_appimage_loader_stat
     let command = relaunch.command();
     let removed = command
         .get_envs()
-        .filter_map(|(name, value)| value.is_none().then(|| name.to_string_lossy().into_owned()))
+        .filter(|(_, value)| value.is_none())
+        .map(|(name, _)| name.to_string_lossy().into_owned())
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         removed,

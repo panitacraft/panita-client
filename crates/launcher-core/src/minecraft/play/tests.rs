@@ -96,6 +96,22 @@ async fn controlled_attempt(
     pending
 }
 
+async fn assert_failed_process_boundary(result: Result<RunningGame, CoreError>) {
+    match result {
+        Err(error) => assert_eq!(error.code(), ErrorCode::ProcessStartFailed),
+        Ok(game) => {
+            // Linux launches through systemd-run or the owned fallback runner.
+            // Those supervisors can start successfully before the deliberately
+            // invalid Java fixture exits, unlike a direct process spawn.
+            let exit = tokio::time::timeout(std::time::Duration::from_secs(10), game.wait())
+                .await
+                .unwrap_or_else(|_| panic!("synthetic Java did not exit"))
+                .unwrap_or_else(|_| panic!("synthetic Java could not be supervised"));
+            assert!(!exit.success);
+        }
+    }
+}
+
 async fn controlled_profile_rejection(final_status: u16, expected: ErrorCode) {
     let mut replies = successful_auth_chain();
     replies.push(("/profile", 401, r#"{"secret":"fixture-error-body"}"#.into()));
@@ -122,13 +138,16 @@ async fn controlled_profile_rejection(final_status: u16, expected: ErrorCode) {
     assert!(std::fs::write(&marker, b"preserve player data").is_ok());
     let pending = controlled_attempt(&paths, &accounts, instance, 200).await;
     assert!(!pending.catalog_warning_required());
-    let error = pending
-        .start(None)
-        .await
-        .err()
-        .unwrap_or_else(|| panic!("synthetic Java must never execute"));
-    assert_eq!(error.code(), expected);
-    assert!(!format!("{error:?}").contains("fixture-error-body"));
+    let result = pending.start(None).await;
+    if expected == ErrorCode::ProcessStartFailed {
+        assert_failed_process_boundary(result).await;
+    } else {
+        let error = result
+            .err()
+            .unwrap_or_else(|| panic!("authentication rejection must block launch"));
+        assert_eq!(error.code(), expected);
+        assert!(!format!("{error:?}").contains("fixture-error-body"));
+    }
     // The strict server consumes exactly one rejected validation, one renewal
     // chain and one retry. Extra requests cannot turn this into a passing case.
     assert!(server.join().is_ok());
@@ -197,14 +216,7 @@ async fn controlled_catalog_only_outage_requires_fresh_warning_and_still_validat
     let confirmation = third.operation_id();
     // Positive control: authentication stays available during catalog failure.
     // A valid warning reaches the invalid-Java sentinel, never a real game.
-    assert_eq!(
-        third
-            .start(Some(confirmation))
-            .await
-            .err()
-            .map(|error| error.code()),
-        Some(ErrorCode::ProcessStartFailed)
-    );
+    assert_failed_process_boundary(third.start(Some(confirmation)).await).await;
     assert!(server.join().is_ok());
     assert!(LaunchLease::acquire(&paths, instance).is_ok());
     drop(accounts);
@@ -406,14 +418,14 @@ async fn complete_offline_attempt_requires_new_warning_confirmation_every_time()
             previous
         };
         let result = pending.start(confirmation).await;
-        assert_eq!(
-            result.err().map(|e| e.code()),
-            Some(if attempt == 2 {
-                ErrorCode::ProcessStartFailed
-            } else {
-                ErrorCode::CatalogConfirmationRequired
-            })
-        );
+        if attempt == 2 {
+            assert_failed_process_boundary(result).await;
+        } else {
+            assert_eq!(
+                result.err().map(|error| error.code()),
+                Some(ErrorCode::CatalogConfirmationRequired)
+            );
+        }
         previous = Some(current);
         assert!(LaunchLease::acquire(&paths, id).is_ok());
     }
