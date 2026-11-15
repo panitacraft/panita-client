@@ -13,6 +13,9 @@ jobs:
         os: [windows-latest, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     env:
+      # Keep standalone manifest builds (including vendor/private-fs) out of the
+      # source tree so the installer clean-worktree guard remains meaningful.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target/checks
       # A public client identifier, so a repository variable and not a secret.
       PANITA_LAUNCHER_API_KEY: ${{ vars.PANITA_LAUNCHER_API_KEY }}
     steps:

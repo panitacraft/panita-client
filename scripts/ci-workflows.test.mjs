@@ -41,6 +41,16 @@ test('CI tests the patched filesystem dependency on both operating systems', asy
   }
 });
 
+test('PR CI keeps every Rust build output under the ignored root target directory', async () => {
+  const workflow = await readFile('.github/workflows/checks.yml', 'utf8');
+
+  assert.match(
+    workflow,
+    /env:\r?\n\s+# Keep standalone manifest builds[\s\S]*?CARGO_TARGET_DIR: \$\{\{ github\.workspace \}\}\/target\/checks/,
+  );
+  assert.doesNotMatch(workflow, /vendor\/private-fs\/target/);
+});
+
 test('Linux release packaging runs the candidate regression inspection', async () => {
   const workflow = await readFile('.github/workflows/release.yml', 'utf8');
   assert.match(
@@ -65,5 +75,6 @@ test('Ubuntu PR and develop CI build and inspect real unsigned Linux packages', 
   assert.match(workflow, /patchelf desktop-file-utils xdg-utils/);
   assert.match(builder, /loaderValidation \|\| ciUnsigned \? \['--no-sign'\]/);
   assert.match(builder, /if \(!loaderValidation && !ciUnsigned\)/);
+  assert.match(builder, /installer candidate:\\n\$\{dirty\}/);
   assert.match(inspection, /artifact="\$root\/target\/ci\/\$version\/linux"/);
 });

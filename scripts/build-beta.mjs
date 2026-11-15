@@ -48,8 +48,8 @@ function run(command, commandArgs, capture = false) {
 }
 
 const revision = run('git', ['rev-parse', 'HEAD'], true);
-const dirty = run('git', ['status', '--porcelain', '--untracked-files=normal'], true).length > 0;
-if (dirty) throw new Error('Commit task changes before producing an installer candidate.');
+const dirty = run('git', ['status', '--porcelain', '--untracked-files=normal'], true);
+if (dirty) throw new Error(`Commit task changes before producing an installer candidate:\n${dirty}`);
 if (release) {
   // The tag is created at the built commit when the release is published, so it may not exist
   // yet. If it does exist it must already identify this exact commit.
@@ -65,9 +65,9 @@ if (args.includes('--check')) process.exit(0);
 // and is skipped for internal loader-validation and ephemeral CI-validation builds, which are
 // never distributed.
 run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', ...(loaderValidation || ciUnsigned ? ['--no-sign'] : []), '--config', release ? JSON.stringify(config) : join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundles.map(([bundle]) => bundle).join(','), ...(loaderValidation ? ['--features', 'loader-validation'] : []), '--', '--locked']);
-if (run('git', ['rev-parse', 'HEAD'], true) !== revision
-    || run('git', ['status', '--porcelain', '--untracked-files=normal'], true).length > 0) {
-  throw new Error('Source changed during compilation. Commit changes and rebuild before preparing a candidate.');
+const compiledStatus = run('git', ['status', '--porcelain', '--untracked-files=normal'], true);
+if (run('git', ['rev-parse', 'HEAD'], true) !== revision || compiledStatus) {
+  throw new Error(`Source changed during compilation. Commit changes and rebuild before preparing a candidate.${compiledStatus ? `\n${compiledStatus}` : ''}`);
 }
 const checksums = [];
 await mkdir(destination, { recursive: true });
