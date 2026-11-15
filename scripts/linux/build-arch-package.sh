@@ -24,6 +24,15 @@ fi
 dpkg-deb --extract "$deb" "$work/payload"
 test -x "$work/payload/usr/bin/panita-client"
 desktop-file-validate "$work/payload/usr/share/applications/"*.desktop
+# Debian removes Tauri's product-name entry in postinst. Arch packages do not
+# execute that script, so mirror the installed Debian payload before packaging.
+generated_desktop="$work/payload/usr/share/applications/panita-client.desktop"
+canonical_desktop="$work/payload/usr/share/applications/com.panitacraft.client.desktop"
+test -f "$generated_desktop"
+test -f "$canonical_desktop"
+grep -Fx 'StartupWMClass=com.panitacraft.client' "$generated_desktop"
+grep -Fx 'X-PanitaClient-Owner=com.panitacraft.client' "$generated_desktop"
+rm -f -- "$generated_desktop"
 install -Dm644 "$root/LICENSE" "$work/payload/usr/share/licenses/panita-client/LICENSE"
 tar -cf "$work/payload.tar" -C "$work/payload" usr
 cp "$root/scripts/linux/arch/PKGBUILD" "$work/PKGBUILD"
@@ -45,18 +54,26 @@ grep -Fx 'arch = x86_64' "$work/pkginfo"
 grep -Fx 'depend = webkit2gtk-4.1' "$work/pkginfo"
 bsdtar -tf "$package" > "$work/contents"
 grep -Fx 'usr/bin/panita-client' "$work/contents"
+grep -Fx 'usr/share/applications/com.panitacraft.client.desktop' "$work/contents"
+if grep -Fxq 'usr/share/applications/panita-client.desktop' "$work/contents"; then
+  echo 'Legacy desktop entry remained in the Arch payload' >&2
+  exit 1
+fi
 grep -Fx 'usr/share/licenses/panita-client/LICENSE' "$work/contents"
 mkdir "$work/check"
 bsdtar -xf "$package" -C "$work/check"
 cmp "$work/payload/usr/bin/panita-client" "$work/check/usr/bin/panita-client"
 test -x "$work/check/usr/bin/panita-client"
 desktop-file-validate "$work/check/usr/share/applications/"*.desktop
-desktop="$work/check/usr/share/applications/panita-client.desktop"
+desktop="$work/check/usr/share/applications/com.panitacraft.client.desktop"
 test -f "$desktop"
+test ! -e "$work/check/usr/share/applications/panita-client.desktop"
 grep -Fx 'Name=Panita Client' "$desktop"
+grep -Fx 'Exec=/usr/bin/panita-client %u' "$desktop"
 grep -Fx 'Icon=panita-client' "$desktop"
-grep -Fx 'StartupWMClass=panita-desktop' "$desktop"
+grep -Fx 'StartupWMClass=com.panitacraft.client' "$desktop"
 grep -Fx 'MimeType=x-scheme-handler/panitacraft;' "$desktop"
+grep -Fx 'X-PanitaClient-Owner=com.panitacraft.client' "$desktop"
 test -f "$work/check/usr/share/icons/hicolor/512x512/apps/panita-client.png"
 cp "$package" "$destination"
 printf '%s\n' 'Arch package inspection passed. CachyOS installed-product validation remains pending.'

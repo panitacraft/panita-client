@@ -29,14 +29,23 @@ trap 'rm -rf -- "$check_dir"' EXIT
 dpkg-deb --info "$package" > "$artifact/verification/package-info.txt"
 dpkg-deb --contents "$package" > "$artifact/verification/package-files.txt"
 dpkg-deb --extract "$package" "$check_dir/deb"
-desktop="$check_dir/deb/usr/share/applications/panita-client.desktop"
+dpkg-deb --control "$package" "$check_dir/control"
+generated_desktop="$check_dir/deb/usr/share/applications/panita-client.desktop"
+desktop="$check_dir/deb/usr/share/applications/com.panitacraft.client.desktop"
+test -f "$generated_desktop"
 test -f "$desktop"
-desktop-file-validate "$desktop"
+desktop-file-validate "$generated_desktop" "$desktop"
+grep -Fx 'StartupWMClass=com.panitacraft.client' "$generated_desktop"
+grep -Fx 'X-PanitaClient-Owner=com.panitacraft.client' "$generated_desktop"
 grep -Fx 'Name=Panita Client' "$desktop"
-grep -Fx 'Exec=panita-client %u' "$desktop"
+grep -Fx 'Exec=/usr/bin/panita-client %u' "$desktop"
 grep -Fx 'Icon=panita-client' "$desktop"
-grep -Fx 'StartupWMClass=panita-desktop' "$desktop"
+grep -Fx 'StartupWMClass=com.panitacraft.client' "$desktop"
 grep -Fx 'MimeType=x-scheme-handler/panitacraft;' "$desktop"
+grep -Fx 'X-PanitaClient-Owner=com.panitacraft.client' "$desktop"
+grep -Fq '/usr/share/applications/panita-client.desktop' "$check_dir/control/postinst"
+grep -Fq 'X-PanitaClient-Owner=com.panitacraft.client' "$check_dir/control/postinst"
+grep -Fq 'StartupWMClass=com.panitacraft.client' "$check_dir/control/postinst"
 test ! -e "$check_dir/deb/usr/share/applications/Panita Client.desktop"
 for icon in \
   32x32/apps/panita-client.png \
@@ -64,8 +73,12 @@ test "$(readlink squashfs-root/.DirIcon)" = panita-client.png
 desktop-file-validate squashfs-root/panita-client.desktop
 grep -Fx 'Name=Panita Client' squashfs-root/panita-client.desktop
 grep -Fx 'Icon=panita-client' squashfs-root/panita-client.desktop
-grep -Fx 'StartupWMClass=panita-desktop' squashfs-root/panita-client.desktop
+grep -Fx 'StartupWMClass=com.panitacraft.client' squashfs-root/panita-client.desktop
 test -f squashfs-root/usr/share/applications/panita-client.desktop
+test -f squashfs-root/usr/share/applications/com.panitacraft.client.desktop
+desktop-file-validate squashfs-root/usr/share/applications/com.panitacraft.client.desktop
+grep -Fx 'Exec=/usr/bin/panita-client %u' squashfs-root/usr/share/applications/com.panitacraft.client.desktop
+grep -Fx 'StartupWMClass=com.panitacraft.client' squashfs-root/usr/share/applications/com.panitacraft.client.desktop
 test -f squashfs-root/usr/share/icons/hicolor/512x512/apps/panita-client.png
 cmp squashfs-root/panita-client.png squashfs-root/usr/share/icons/hicolor/512x512/apps/panita-client.png
 file "$appimage" squashfs-root/usr/bin/panita-client > "$artifact/verification/appimage-info.txt"
