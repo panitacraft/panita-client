@@ -59,6 +59,8 @@ const MINECRAFT_PULSE_PROPERTIES: &str = "application.name=Minecraft application
 const MINECRAFT_PIPEWIRE_PROPERTIES: &str = "{ application.name = \"Minecraft\" application.id = \"com.panitacraft.minecraft\" application.icon-name = \"minecraft\" media.role = \"Game\" }";
 #[cfg(any(target_os = "linux", test))]
 const MINECRAFT_PIPEWIRE_PROPERTY_BODY: &str = "application.name = \"Minecraft\" application.id = \"com.panitacraft.minecraft\" application.icon-name = \"minecraft\" media.role = \"Game\"";
+#[cfg(any(target_os = "linux", test))]
+const MINECRAFT_SDL_VIDEO_DRIVERS: &str = "x11,wayland";
 
 /// AppImage runtime paths point into the launcher's mounted image. They can make
 /// an independently installed Java load launcher libraries or desktop modules.
@@ -91,6 +93,10 @@ fn sanitize_game_environment(command: &mut tokio::process::Command) {
     sanitize_appimage_environment(command, std::env::var_os("APPIMAGE").is_some());
     #[cfg(any(target_os = "linux", test))]
     {
+        // Minecraft 26.3 uses SDL3 and otherwise prefers native Wayland. Prefer
+        // X11/XWayland for consistent decorations and icons across compositors,
+        // while retaining native Wayland for sessions without an X server.
+        command.env("SDL_VIDEO_DRIVER", MINECRAFT_SDL_VIDEO_DRIVERS);
         for key in AUDIO_IDENTITY_ENVIRONMENT {
             command.env_remove(key);
         }

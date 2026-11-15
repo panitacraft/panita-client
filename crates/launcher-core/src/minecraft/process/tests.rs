@@ -78,6 +78,7 @@ fn game_environment_drops_desktop_identity_without_clearing_the_host_session() {
     child.env("DISPLAY", ":99");
     child.env("WAYLAND_DISPLAY", "wayland-test");
     child.env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/synthetic-bus");
+    child.env("SDL_VIDEO_DRIVER", "wayland");
     child.env("PULSE_PROP", "media.title=existing");
     child.env("PIPEWIRE_PROPS", "{ node.latency = 1024/48000 }");
     for key in JAVA_OPTIONS_ENVIRONMENT {
@@ -105,6 +106,7 @@ fn game_environment_drops_desktop_identity_without_clearing_the_host_session() {
         ("DISPLAY", ":99"),
         ("WAYLAND_DISPLAY", "wayland-test"),
         ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/synthetic-bus"),
+        ("SDL_VIDEO_DRIVER", MINECRAFT_SDL_VIDEO_DRIVERS),
     ] {
         assert!(changes.contains(&(key.into(), Some(value.into()))), "{key}");
     }
@@ -189,6 +191,7 @@ fn systemd_service_builder_preserves_io_contract_without_exposing_environment_va
         "--service-type=exec",
         "--description=Minecraft",
         "--property=UnsetEnvironment=GIO_LAUNCHED_DESKTOP_FILE",
+        "--setenv=SDL_VIDEO_DRIVER",
         "--setenv=PULSE_PROP",
         "--setenv=PIPEWIRE_PROPS",
         "/opt/runtime/java$$/bin/java",
@@ -234,6 +237,10 @@ fn fallback_runner_uses_literal_arguments_and_an_owned_process_group() {
     assert_eq!(args[3], launch.executable.as_os_str());
     assert_eq!(args[4], "literal;argument");
     assert_eq!(args[5], "$HOME");
+    assert!(environment_changes(&builder).contains(&(
+        "SDL_VIDEO_DRIVER".into(),
+        Some(MINECRAFT_SDL_VIDEO_DRIVERS.into())
+    )));
     assert!(matches!(control, ProcessControl::ProcessGroup));
 }
 
