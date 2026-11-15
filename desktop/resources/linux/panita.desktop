@@ -6,6 +6,6 @@ Icon={{icon}}
 Terminal=false
 Categories=Game;
 StartupNotify=true
-StartupWMClass=panita-desktop
+StartupWMClass=com.panitacraft.client
 MimeType=x-scheme-handler/panitacraft;
 X-PanitaClient-Owner=com.panitacraft.client

@@ -10,13 +10,13 @@ pub(super) enum OpenError {
     TimedOut,
 }
 
-/// Keep the packaged Wayland app ID and the established X11 window class stable.
+/// Keep the GTK, Wayland and X11 application identity aligned with the desktop file.
 /// GTK initialization is idempotent; Tauri initializes it again while creating its event loop.
 #[cfg(target_os = "linux")]
 pub(super) fn configure_identity() {
-    gtk::glib::set_prgname(Some("panita-client"));
+    gtk::glib::set_prgname(Some("com.panitacraft.client"));
     if gtk::init().is_ok() {
-        gtk::gdk::set_program_class("panita-desktop");
+        gtk::gdk::set_program_class("com.panitacraft.client");
     }
 }
 

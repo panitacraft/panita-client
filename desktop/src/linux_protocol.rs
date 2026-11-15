@@ -1,17 +1,19 @@
-//! Use the package's desktop-file ID so a user override remains one application.
+//! Keep the protocol handler and desktop shell identity on the GTK application ID.
 use std::io::{Error, ErrorKind, Write};
 use std::path::Path;
 
-const DESKTOP_ID: &str = "panita-client.desktop";
+const APP_ID: &str = "com.panitacraft.client";
+const DESKTOP_ID: &str = "com.panitacraft.client.desktop";
 const CALLBACK_TEST_ID: &str = "panita-client-callback.desktop";
 const PREVIOUS_ID: &str = "Panita Client.desktop";
-const LEGACY_ID: &str = "com.panitacraft.client.desktop";
+const LEGACY_ID: &str = "panita-client.desktop";
 const MIME: &str = "x-scheme-handler/panitacraft";
 const OWNED_PREFIX: &str = "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"";
-const OWNED_SUFFIX: &str = "\" %u\nIcon=panita-client\nStartupWMClass=panita-desktop\nTerminal=false\nStartupNotify=true\nMimeType=x-scheme-handler/panitacraft;\nX-PanitaClient-Owner=com.panitacraft.client\n";
+const OWNED_SUFFIX: &str = "\" %u\nIcon=panita-client\nStartupWMClass=com.panitacraft.client\nTerminal=false\nStartupNotify=true\nMimeType=x-scheme-handler/panitacraft;\nX-PanitaClient-Owner=com.panitacraft.client\n";
+const PREVIOUS_OWNED_SUFFIX: &str = "\" %u\nIcon=panita-client\nStartupWMClass=panita-desktop\nTerminal=false\nStartupNotify=true\nMimeType=x-scheme-handler/panitacraft;\nX-PanitaClient-Owner=com.panitacraft.client\n";
 const CALLBACK_TEST_SUFFIX: &str = "\" %u\nIcon=panita-client\nNoDisplay=true\nTerminal=false\nStartupNotify=true\nMimeType=x-scheme-handler/panitacraft;\nX-PanitaClient-Owner=com.panitacraft.client\n";
-const LEGACY_PREFIX: &str = "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"";
-const LEGACY_SUFFIX: &str =
+const HIDDEN_LEGACY_PREFIX: &str = "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"";
+const HIDDEN_LEGACY_SUFFIX: &str =
     "\" %u\nTerminal=false\nNoDisplay=true\nMimeType=x-scheme-handler/panitacraft;\n";
 const ICON_NAME: &str = "panita-client.png";
 const ICON: &[u8] = include_bytes!("../icons/icon.png");
@@ -33,7 +35,7 @@ fn desktop_entry(executable: &Path) -> Result<String, ()> {
         .replace('%', "%%")
         .replace('\\', "\\\\");
     Ok(format!(
-        "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"{escaped}\" %u\nIcon=panita-client\nStartupWMClass=panita-desktop\nTerminal=false\nStartupNotify=true\nMimeType={MIME};\nX-PanitaClient-Owner=com.panitacraft.client\n"
+        "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"{escaped}\" %u\nIcon=panita-client\nStartupWMClass=com.panitacraft.client\nTerminal=false\nStartupNotify=true\nMimeType={MIME};\nX-PanitaClient-Owner=com.panitacraft.client\n"
     ))
 }
 
@@ -83,6 +85,12 @@ fn owned_entry(content: &str, prefix: &str, suffix: &str) -> bool {
         })
 }
 
+fn replaceable_canonical_entry(content: &str) -> bool {
+    owned_entry(content, OWNED_PREFIX, OWNED_SUFFIX)
+        || owned_entry(content, OWNED_PREFIX, PREVIOUS_OWNED_SUFFIX)
+        || owned_entry(content, HIDDEN_LEGACY_PREFIX, HIDDEN_LEGACY_SUFFIX)
+}
+
 fn create_new_file(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let mut file = std::fs::OpenOptions::new()
         .write(true)
@@ -117,7 +125,7 @@ fn publish_desktop_entry(directory: &Path, expected: &str) -> std::io::Result<bo
     if current == expected {
         return Ok(false);
     }
-    if !owned_entry(&current, OWNED_PREFIX, OWNED_SUFFIX) {
+    if !replaceable_canonical_entry(&current) {
         return Err(Error::new(
             ErrorKind::AlreadyExists,
             "desktop entry is not launcher-owned",
@@ -134,21 +142,48 @@ struct HandlerQuery<'a> {
 }
 
 fn xdg_default_is_canonical(query: HandlerQuery<'_>) -> bool {
-    query.success && String::from_utf8_lossy(query.stdout).trim() == DESKTOP_ID
+    xdg_default_id(query).as_deref() == Some(DESKTOP_ID)
 }
 
 fn gio_default_is_canonical(query: HandlerQuery<'_>) -> bool {
+    gio_default_id(query).as_deref() == Some(DESKTOP_ID)
+}
+
+fn xdg_default_id(query: HandlerQuery<'_>) -> Option<String> {
+    query
+        .success
+        .then(|| String::from_utf8_lossy(query.stdout).trim().to_owned())
+        .filter(|handler| !handler.is_empty())
+}
+
+fn gio_default_id(query: HandlerQuery<'_>) -> Option<String> {
     if !query.success {
-        return false;
+        return None;
     }
     let stdout = String::from_utf8_lossy(query.stdout);
-    let Some(first_line) = stdout.lines().next().map(str::trim) else {
-        return false;
-    };
-    first_line.starts_with("Default application for ")
-        && first_line
-            .rsplit_once(": ")
-            .is_some_and(|(_, handler)| handler.trim() == DESKTOP_ID)
+    let first_line = stdout.lines().next().map(str::trim)?;
+    first_line
+        .starts_with("Default application for ")
+        .then_some(())
+        .and_then(|()| first_line.rsplit_once(": "))
+        .map(|(_, handler)| handler.trim().to_owned())
+        .filter(|handler| !handler.is_empty())
+}
+
+fn legacy_handler(id: &str) -> bool {
+    [LEGACY_ID, PREVIOUS_ID, CALLBACK_TEST_ID].contains(&id)
+}
+
+fn handler_requires_migration(
+    xdg: HandlerQuery<'_>,
+    desktop: Option<&str>,
+    gio: Option<HandlerQuery<'_>>,
+) -> bool {
+    xdg_default_id(xdg).is_some_and(|handler| legacy_handler(&handler))
+        || (is_gnome_desktop(desktop)
+            && gio
+                .and_then(gio_default_id)
+                .is_some_and(|handler| legacy_handler(&handler)))
 }
 
 fn is_gnome_desktop(desktop: Option<&str>) -> bool {
@@ -215,8 +250,8 @@ fn migrate_files(executable: &Path, directory: &Path, icons: &Path) -> std::io::
         OWNED_PREFIX,
         CALLBACK_TEST_SUFFIX,
     )?;
-    changed |= remove_owned_entry(directory, PREVIOUS_ID, OWNED_PREFIX, OWNED_SUFFIX)?;
-    changed |= remove_owned_entry(directory, LEGACY_ID, LEGACY_PREFIX, LEGACY_SUFFIX)?;
+    changed |= remove_owned_entry(directory, PREVIOUS_ID, OWNED_PREFIX, PREVIOUS_OWNED_SUFFIX)?;
+    changed |= remove_owned_entry(directory, LEGACY_ID, OWNED_PREFIX, PREVIOUS_OWNED_SUFFIX)?;
     if !canonical_entry_is_owned(directory, &entry) {
         return Err(Error::new(
             ErrorKind::InvalidData,
@@ -235,12 +270,82 @@ fn refresh_desktop_database(directory: &Path) {
 }
 
 #[cfg(target_os = "linux")]
+fn migrate_handler(directory: &Path, expected: &str) -> Result<(), ()> {
+    let query = std::process::Command::new("xdg-mime")
+        .args(["query", "default", MIME])
+        .output()
+        .map_err(|_| ())?;
+    let xdg = HandlerQuery {
+        success: query.status.success(),
+        stdout: &query.stdout,
+    };
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+    let gio_output = is_gnome_desktop(desktop.as_deref())
+        .then(|| {
+            std::process::Command::new("gio")
+                .args(["mime", MIME])
+                .env("LC_ALL", "C")
+                .env("LANG", "C")
+                .output()
+                .ok()
+        })
+        .flatten();
+    let gio = gio_output.as_ref().map(|output| HandlerQuery {
+        success: output.status.success(),
+        stdout: &output.stdout,
+    });
+    if !handler_requires_migration(xdg, desktop.as_deref(), gio) {
+        return Ok(());
+    }
+    let status = std::process::Command::new("xdg-mime")
+        .args(["default", DESKTOP_ID, MIME])
+        .status()
+        .map_err(|_| ())?;
+    if !status.success() || !canonical_entry_is_owned(directory, expected) {
+        return Err(());
+    }
+    let verification = std::process::Command::new("xdg-mime")
+        .args(["query", "default", MIME])
+        .output()
+        .map_err(|_| ())?;
+    let xdg = HandlerQuery {
+        success: verification.status.success(),
+        stdout: &verification.stdout,
+    };
+    let gio_output = if !xdg_default_is_canonical(xdg) && is_gnome_desktop(desktop.as_deref()) {
+        std::process::Command::new("gio")
+            .args(["mime", MIME])
+            .env("LC_ALL", "C")
+            .env("LANG", "C")
+            .output()
+            .ok()
+    } else {
+        None
+    };
+    let gio = gio_output.as_ref().map(|output| HandlerQuery {
+        success: output.status.success(),
+        stdout: &output.stdout,
+    });
+    if !handler_is_verified(
+        canonical_entry_is_owned(directory, expected),
+        xdg,
+        desktop.as_deref(),
+        gio,
+    ) {
+        return Err(());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
 pub(super) fn migrate(executable: &Path, directory: &Path, icons: &Path) -> Result<(), ()> {
     let _guard = INTEGRATION_LOCK.lock().map_err(|_| ())?;
     let changed = migrate_files(executable, directory, icons).map_err(|_| ())?;
     if changed {
         refresh_desktop_database(directory);
     }
+    let expected = desktop_entry(executable)?;
+    migrate_handler(directory, &expected)?;
     Ok(())
 }
 
@@ -320,9 +425,35 @@ mod tests {
         assert!(entry.contains("Panita Client 100%%.AppImage\" %u\n"));
         assert!(!entry.contains("NoDisplay=true"));
         assert!(entry.contains("X-PanitaClient-Owner=com.panitacraft.client\n"));
-        assert_eq!(DESKTOP_ID, "panita-client.desktop");
+        assert!(entry.contains("StartupWMClass=com.panitacraft.client\n"));
+        assert_eq!(DESKTOP_ID, "com.panitacraft.client.desktop");
         assert!(desktop_entry(Path::new("relative")).is_err());
         assert!(desktop_entry(&std::env::temp_dir().join("bad\npath")).is_err());
+    }
+
+    #[test]
+    fn packaged_and_runtime_identity_sources_remain_aligned() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json"))
+            .unwrap_or_else(|_| panic!("Tauri config"));
+        assert_eq!(config["identifier"], APP_ID);
+        assert_eq!(config["app"]["enableGTKAppId"], true);
+        assert_eq!(DESKTOP_ID, format!("{APP_ID}.desktop"));
+        for entry in [
+            include_str!("../resources/linux/panita.desktop"),
+            include_str!("../resources/linux/com.panitacraft.client.desktop"),
+        ] {
+            assert!(
+                entry
+                    .lines()
+                    .any(|line| line == format!("StartupWMClass={APP_ID}"))
+            );
+            assert!(
+                entry
+                    .lines()
+                    .any(|line| line == "MimeType=x-scheme-handler/panitacraft;")
+            );
+            assert!(entry.lines().any(|line| line.ends_with(" %u")));
+        }
     }
 
     #[test]
@@ -342,12 +473,12 @@ mod tests {
         assert!(canonical_entry_is_owned(&directory, &canonical_entry));
         std::fs::write(
             &legacy,
-            format!("{LEGACY_PREFIX}{test_executable_text}{LEGACY_SUFFIX}"),
+            format!("{OWNED_PREFIX}{test_executable_text}{PREVIOUS_OWNED_SUFFIX}"),
         )
         .unwrap_or_else(|_| panic!("legacy entry"));
         std::fs::write(
             &previous,
-            format!("{OWNED_PREFIX}{test_executable_text}{OWNED_SUFFIX}"),
+            format!("{OWNED_PREFIX}{test_executable_text}{PREVIOUS_OWNED_SUFFIX}"),
         )
         .unwrap_or_else(|_| panic!("previous entry"));
         std::fs::write(
@@ -365,13 +496,20 @@ mod tests {
             .is_ok()
         );
         assert!(!callback_test.exists());
-        assert!(remove_owned_entry(&directory, LEGACY_ID, LEGACY_PREFIX, LEGACY_SUFFIX).is_ok());
+        assert!(
+            remove_owned_entry(&directory, LEGACY_ID, OWNED_PREFIX, PREVIOUS_OWNED_SUFFIX).is_ok()
+        );
         assert!(!legacy.exists());
-        assert!(remove_owned_entry(&directory, PREVIOUS_ID, OWNED_PREFIX, OWNED_SUFFIX).is_ok());
+        assert!(
+            remove_owned_entry(&directory, PREVIOUS_ID, OWNED_PREFIX, PREVIOUS_OWNED_SUFFIX)
+                .is_ok()
+        );
         assert!(!previous.exists());
         std::fs::write(&legacy, "[Desktop Entry]\nName=Custom handler\n")
             .unwrap_or_else(|_| panic!("custom entry"));
-        assert!(remove_owned_entry(&directory, LEGACY_ID, LEGACY_PREFIX, LEGACY_SUFFIX).is_ok());
+        assert!(
+            remove_owned_entry(&directory, LEGACY_ID, OWNED_PREFIX, PREVIOUS_OWNED_SUFFIX).is_ok()
+        );
         assert!(legacy.exists());
         std::fs::write(
             &callback_test,
@@ -408,10 +546,16 @@ mod tests {
         let canonical = directory.join(DESKTOP_ID);
         let old_executable = directory.join("old-panita-client.AppImage");
         let current_executable = directory.join("panita-client.AppImage");
-        let old_entry = desktop_entry(&old_executable).unwrap_or_else(|_| panic!("old entry"));
         let current_entry =
             desktop_entry(&current_executable).unwrap_or_else(|_| panic!("current entry"));
-        std::fs::write(&canonical, old_entry).unwrap_or_else(|_| panic!("old canonical entry"));
+        std::fs::write(
+            &canonical,
+            format!(
+                "{HIDDEN_LEGACY_PREFIX}{}{HIDDEN_LEGACY_SUFFIX}",
+                old_executable.display()
+            ),
+        )
+        .unwrap_or_else(|_| panic!("old canonical entry"));
         let callback_test = directory.join(CALLBACK_TEST_ID);
         std::fs::write(
             &callback_test,
@@ -478,7 +622,7 @@ mod tests {
         };
         let gio = HandlerQuery {
             success: true,
-            stdout: b"Default application for 'x-scheme-handler/panitacraft': panita-client.desktop\nRegistered applications:\n",
+            stdout: b"Default application for 'x-scheme-handler/panitacraft': com.panitacraft.client.desktop\nRegistered applications:\n",
         };
         assert!(handler_is_verified(
             true,
@@ -510,7 +654,7 @@ mod tests {
             true,
             HandlerQuery {
                 success: true,
-                stdout: b"panita-client.desktop\n",
+                stdout: b"com.panitacraft.client.desktop\n",
             },
             None,
             None
@@ -523,6 +667,31 @@ mod tests {
             },
             None,
             None
+        ));
+    }
+
+    #[test]
+    fn handler_migration_accepts_only_known_previous_ids() {
+        for previous in [LEGACY_ID, PREVIOUS_ID, CALLBACK_TEST_ID] {
+            assert!(handler_requires_migration(
+                HandlerQuery {
+                    success: true,
+                    stdout: format!("{previous}\n").as_bytes(),
+                },
+                None,
+                None,
+            ));
+        }
+        assert!(!handler_requires_migration(
+            HandlerQuery {
+                success: true,
+                stdout: b"custom.desktop\n",
+            },
+            Some("GNOME"),
+            Some(HandlerQuery {
+                success: true,
+                stdout: b"Default application for 'x-scheme-handler/panitacraft': custom.desktop\n",
+            }),
         ));
     }
 }

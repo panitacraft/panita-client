@@ -11,6 +11,7 @@
     "frontendDist": "../ui/dist"
   },
   "app": {
+    "enableGTKAppId": true,
     "appDirectoriesOverride": {
       "data": "$DATA/PanitaClient"
     },
