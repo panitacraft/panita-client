@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+report_error() {
+  status=$?
+  printf 'Package inspection failed at line %s: %s\n' "$1" "$2" >&2
+  exit "$status"
+}
+trap 'report_error "$LINENO" "$BASH_COMMAND"' ERR
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$root"
 suffix=
@@ -8,6 +14,10 @@ if [[ "${LOADER_VALIDATION:-}" = 1 ]]; then
   version=$(node -p "require('./desktop/tauri.beta.conf.json').version")
   artifact="$root/target/loader-validation/$version/linux"
   suffix=_loader-validation
+elif [[ "${CI_UNSIGNED:-}" = 1 ]]; then
+  test -z "${RELEASE_TAG:-}"
+  version=$(node scripts/check-version.mjs)
+  artifact="$root/target/ci/$version/linux"
 elif [[ -n "${RELEASE_TAG:-}" ]]; then
   version=$(node scripts/release-version.mjs "$RELEASE_TAG")
   artifact="$root/target/releases/$version/linux"
@@ -100,7 +110,15 @@ test -x squashfs-root/usr/bin/panita-client
 appimage_icon=squashfs-root/panita-client.png
 test -s "$appimage_icon"
 test "$(readlink squashfs-root/.DirIcon)" = panita-client.png
-file "$appimage_icon" | grep -Eq ': PNG image data, [1-9][0-9]* x [1-9][0-9]*,'
+resolved_appimage_icon=$(readlink -e -- "$appimage_icon")
+case "$resolved_appimage_icon" in
+  "$check_dir"/squashfs-root/*) ;;
+  *)
+    echo 'AppImage root icon resolves outside the AppDir' >&2
+    exit 1
+    ;;
+esac
+LC_ALL=C file -L -b -- "$appimage_icon" | grep -Eq '^PNG image data, [1-9][0-9]* x [1-9][0-9]*,'
 mapfile -d '' -t root_desktops < <(find squashfs-root -maxdepth 1 -name '*.desktop' -print0)
 if [[ "${#root_desktops[@]}" -ne 1 ]]; then
   echo "Expected exactly one root AppImage desktop entry, found ${#root_desktops[@]}" >&2

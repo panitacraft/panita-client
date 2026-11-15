@@ -48,3 +48,22 @@ test('Linux release packaging runs the candidate regression inspection', async (
     /if: runner\.os == 'Linux'\r?\n        run: bash scripts\/linux\/verify-candidate\.sh/,
   );
 });
+
+test('Ubuntu PR and develop CI build and inspect real unsigned Linux packages', async () => {
+  const workflow = await readFile('.github/workflows/checks.yml', 'utf8');
+  const builder = await readFile('scripts/build-beta.mjs', 'utf8');
+  const inspection = await readFile('scripts/linux/verify-candidate.sh', 'utf8');
+  const build = workflow.indexOf('- name: Build and inspect real Linux packages');
+
+  assert.notEqual(build, -1);
+  assert.match(
+    workflow.slice(build),
+    /if: runner\.os == 'Linux' && \(github\.event_name == 'pull_request' \|\| github\.ref == 'refs\/heads\/develop'\)/,
+  );
+  assert.match(workflow.slice(build), /node scripts\/build-beta\.mjs --ci-unsigned/);
+  assert.match(workflow.slice(build), /CI_UNSIGNED=1 bash scripts\/linux\/verify-candidate\.sh/);
+  assert.match(workflow, /patchelf desktop-file-utils xdg-utils/);
+  assert.match(builder, /loaderValidation \|\| ciUnsigned \? \['--no-sign'\]/);
+  assert.match(builder, /if \(!loaderValidation && !ciUnsigned\)/);
+  assert.match(inspection, /artifact="\$root\/target\/ci\/\$version\/linux"/);
+});
