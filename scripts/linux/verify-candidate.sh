@@ -97,8 +97,10 @@ cd "$check_dir"
 "$check_dir/candidate.AppImage" --appimage-extract > "$artifact/verification/appimage-files.txt"
 test -x squashfs-root/AppRun
 test -x squashfs-root/usr/bin/panita-client
-test -f squashfs-root/panita-client.png
+appimage_icon=squashfs-root/panita-client.png
+test -s "$appimage_icon"
 test "$(readlink squashfs-root/.DirIcon)" = panita-client.png
+file "$appimage_icon" | grep -Eq ': PNG image data, [1-9][0-9]* x [1-9][0-9]*,'
 mapfile -d '' -t root_desktops < <(find squashfs-root -maxdepth 1 -name '*.desktop' -print0)
 if [[ "${#root_desktops[@]}" -ne 1 ]]; then
   echo "Expected exactly one root AppImage desktop entry, found ${#root_desktops[@]}" >&2
@@ -123,7 +125,6 @@ if grep -Fq 'Exec=/usr/bin/panita-client' "$appimage_desktop" "$packaged_appimag
   exit 1
 fi
 test -f squashfs-root/usr/share/icons/hicolor/512x512/apps/panita-client.png
-cmp squashfs-root/panita-client.png squashfs-root/usr/share/icons/hicolor/512x512/apps/panita-client.png
 file "$appimage" squashfs-root/usr/bin/panita-client > "$artifact/verification/appimage-info.txt"
 test ! -e /usr/bin/panita-client
 test -x /usr/bin/test

@@ -98,3 +98,14 @@ test('Linux icon inputs contain every configured resolution', async () => {
     assert.deepEqual(pngSize(await readFile(path)), [size, size], path);
   }
 });
+
+test('AppImage inspection accepts the bundler-selected root icon size', async () => {
+  const inspection = await readFile('scripts/linux/verify-candidate.sh', 'utf8');
+
+  assert.match(inspection, /test "\$\(readlink squashfs-root\/\.DirIcon\)" = panita-client\.png/);
+  assert.match(inspection, /file "\$appimage_icon" \| grep -Eq ': PNG image data,/);
+  assert.doesNotMatch(
+    inspection,
+    /cmp squashfs-root\/panita-client\.png squashfs-root\/usr\/share\/icons\/hicolor\/512x512/,
+  );
+});
