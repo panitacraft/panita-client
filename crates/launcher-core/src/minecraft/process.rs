@@ -22,6 +22,56 @@ use crate::registry::InstanceRegistry;
 const MAX_LINE: usize = 8192;
 pub const OUTPUT_PAGE_SIZE: usize = 500;
 
+/// Desktop launch context belongs to the launcher process, not to a game it starts.
+/// Some Linux shells use these values while matching a new window to a desktop entry;
+/// allowing them to reach Java can therefore group Minecraft under Panita Client.
+const DESKTOP_IDENTITY_ENVIRONMENT: [&str; 7] = [
+    "GIO_LAUNCHED_DESKTOP_FILE",
+    "GIO_LAUNCHED_DESKTOP_FILE_PID",
+    "BAMF_DESKTOP_FILE_HINT",
+    "CHROME_DESKTOP",
+    "DESKTOP_STARTUP_ID",
+    "XDG_ACTIVATION_TOKEN",
+    "__CFBundleIdentifier",
+];
+
+/// AppImage runtime paths point into the launcher's mounted image. They can make
+/// an independently installed Java load launcher libraries or desktop modules.
+#[cfg(any(target_os = "linux", test))]
+const APPIMAGE_ENVIRONMENT: [&str; 14] = [
+    "APPIMAGE",
+    "APPDIR",
+    "ARGV0",
+    "OWD",
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "GIO_EXTRA_MODULES",
+    "GIO_MODULE_DIR",
+    "GSETTINGS_SCHEMA_DIR",
+    "GTK_PATH",
+    "GTK_EXE_PREFIX",
+    "GTK_DATA_PREFIX",
+    "GDK_PIXBUF_MODULE_FILE",
+    "GDK_PIXBUF_MODULEDIR",
+];
+
+fn sanitize_game_environment(command: &mut tokio::process::Command) {
+    for key in DESKTOP_IDENTITY_ENVIRONMENT {
+        command.env_remove(key);
+    }
+    #[cfg(target_os = "linux")]
+    sanitize_appimage_environment(command, std::env::var_os("APPIMAGE").is_some());
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn sanitize_appimage_environment(command: &mut tokio::process::Command, appimage: bool) {
+    if appimage {
+        for key in APPIMAGE_ENVIRONMENT {
+            command.env_remove(key);
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutputStream {
     Stdout,
@@ -252,6 +302,7 @@ impl LaunchLease {
             .env_remove("_JAVA_OPTIONS")
             .env_remove("JDK_JAVA_OPTIONS")
             .kill_on_drop(false);
+        sanitize_game_environment(&mut builder);
         #[cfg(windows)]
         builder.creation_flags(0x08000000);
         let mut child = builder

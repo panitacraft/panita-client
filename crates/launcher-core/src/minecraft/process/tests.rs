@@ -59,6 +59,67 @@ fn command(paths: &AppPaths, id: Uuid, test: &str) -> LaunchCommand {
     }
 }
 
+fn environment_changes(command: &tokio::process::Command) -> Vec<(String, Option<String>)> {
+    command
+        .as_std()
+        .get_envs()
+        .map(|(key, value)| {
+            (
+                key.to_string_lossy().into_owned(),
+                value.map(|value| value.to_string_lossy().into_owned()),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn game_environment_drops_desktop_identity_without_clearing_the_host_session() {
+    let mut child = tokio::process::Command::new("java");
+    child.env("DISPLAY", ":99");
+    child.env("WAYLAND_DISPLAY", "wayland-test");
+    child.env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/synthetic-bus");
+    for key in DESKTOP_IDENTITY_ENVIRONMENT {
+        child.env(key, "launcher-owned");
+    }
+
+    sanitize_game_environment(&mut child);
+    let changes = environment_changes(&child);
+    for key in DESKTOP_IDENTITY_ENVIRONMENT {
+        assert!(changes.contains(&(key.into(), None)), "{key}");
+    }
+    for (key, value) in [
+        ("DISPLAY", ":99"),
+        ("WAYLAND_DISPLAY", "wayland-test"),
+        ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/synthetic-bus"),
+    ] {
+        assert!(changes.contains(&(key.into(), Some(value.into()))), "{key}");
+    }
+    assert!(!child.as_std().get_envs().any(|(key, _)| key == "HOME"));
+}
+
+#[test]
+fn appimage_cleanup_is_conditional_and_keeps_desktop_session_access() {
+    let mut packaged = tokio::process::Command::new("java");
+    for key in APPIMAGE_ENVIRONMENT {
+        packaged.env(key, "/synthetic/appimage/value");
+    }
+    packaged.env("XDG_RUNTIME_DIR", "/run/user/1000");
+    sanitize_appimage_environment(&mut packaged, true);
+    let changes = environment_changes(&packaged);
+    for key in APPIMAGE_ENVIRONMENT {
+        assert!(changes.contains(&(key.into(), None)), "{key}");
+    }
+    assert!(changes.contains(&("XDG_RUNTIME_DIR".into(), Some("/run/user/1000".into()))));
+
+    let mut installed = tokio::process::Command::new("java");
+    installed.env("LD_LIBRARY_PATH", "/host/custom-libraries");
+    sanitize_appimage_environment(&mut installed, false);
+    assert!(environment_changes(&installed).contains(&(
+        "LD_LIBRARY_PATH".into(),
+        Some("/host/custom-libraries".into())
+    )));
+}
+
 #[test]
 fn child_output_fixture() {
     // Invoked only as an exact child test. Ordinary workspace runs do no work.
