@@ -67,21 +67,39 @@ cd "$check_dir"
 "$check_dir/candidate.AppImage" --appimage-extract > "$artifact/verification/appimage-files.txt"
 test -x squashfs-root/AppRun
 test -x squashfs-root/usr/bin/panita-client
-test -f squashfs-root/panita-client.desktop
 test -f squashfs-root/panita-client.png
 test "$(readlink squashfs-root/.DirIcon)" = panita-client.png
-desktop-file-validate squashfs-root/panita-client.desktop
-grep -Fx 'Name=Panita Client' squashfs-root/panita-client.desktop
-grep -Fx 'Icon=panita-client' squashfs-root/panita-client.desktop
-grep -Fx 'StartupWMClass=com.panitacraft.client' squashfs-root/panita-client.desktop
-test -f squashfs-root/usr/share/applications/panita-client.desktop
-test -f squashfs-root/usr/share/applications/com.panitacraft.client.desktop
-desktop-file-validate squashfs-root/usr/share/applications/com.panitacraft.client.desktop
-grep -Fx 'Exec=/usr/bin/panita-client %u' squashfs-root/usr/share/applications/com.panitacraft.client.desktop
-grep -Fx 'StartupWMClass=com.panitacraft.client' squashfs-root/usr/share/applications/com.panitacraft.client.desktop
+mapfile -d '' -t root_desktops < <(find squashfs-root -maxdepth 1 -name '*.desktop' -print0)
+if [[ "${#root_desktops[@]}" -ne 1 ]]; then
+  echo "Expected exactly one root AppImage desktop entry, found ${#root_desktops[@]}" >&2
+  printf '  %s\n' "${root_desktops[@]}" >&2
+  exit 1
+fi
+appimage_desktop=${root_desktops[0]}
+test "$(basename -- "$appimage_desktop")" = panita-client.desktop
+desktop-file-validate "$appimage_desktop"
+grep -Fx 'Name=Panita Client' "$appimage_desktop"
+grep -Fx 'Exec=panita-client %u' "$appimage_desktop"
+grep -Fx 'Icon=panita-client' "$appimage_desktop"
+grep -Fx 'StartupWMClass=com.panitacraft.client' "$appimage_desktop"
+packaged_appimage_desktop=squashfs-root/usr/share/applications/panita-client.desktop
+test -f "$packaged_appimage_desktop"
+desktop-file-validate "$packaged_appimage_desktop"
+grep -Fx 'Exec=panita-client %u' "$packaged_appimage_desktop"
+grep -Fx 'StartupWMClass=com.panitacraft.client' "$packaged_appimage_desktop"
+test ! -e squashfs-root/usr/share/applications/com.panitacraft.client.desktop
+if grep -Fq 'Exec=/usr/bin/panita-client' "$appimage_desktop" "$packaged_appimage_desktop"; then
+  echo 'AppImage desktop entries must not execute the host /usr/bin/panita-client path' >&2
+  exit 1
+fi
 test -f squashfs-root/usr/share/icons/hicolor/512x512/apps/panita-client.png
 cmp squashfs-root/panita-client.png squashfs-root/usr/share/icons/hicolor/512x512/apps/panita-client.png
 file "$appimage" squashfs-root/usr/bin/panita-client > "$artifact/verification/appimage-info.txt"
+test ! -e /usr/bin/panita-client
+test -x /usr/bin/test
+mv squashfs-root/usr/bin/panita-client squashfs-root/usr/bin/panita-client.real
+install -m 0755 /usr/bin/test squashfs-root/usr/bin/panita-client
+squashfs-root/AppRun panita-apprun-probe = panita-apprun-probe
 cd "$artifact"
 sha256sum --check SHA256SUMS
 printf '%s\n' 'Package inspection passed. Installed-product testing remains pending.'

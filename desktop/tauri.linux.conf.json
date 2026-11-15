@@ -17,11 +17,6 @@
           "/usr/share/applications/com.panitacraft.client.desktop": "resources/linux/com.panitacraft.client.desktop"
         },
         "postInstallScript": "resources/linux/deb-postinstall.sh"
-      },
-      "appimage": {
-        "files": {
-          "/usr/share/applications/com.panitacraft.client.desktop": "resources/linux/com.panitacraft.client.desktop"
-        }
       }
     }
   }

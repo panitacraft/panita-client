@@ -44,8 +44,8 @@ test('Linux desktop identity matches the packaged executable and icon theme', as
     'resources/linux/com.panitacraft.client.desktop',
   );
   assert.equal(
-    linux.bundle.linux.appimage.files['/usr/share/applications/com.panitacraft.client.desktop'],
-    'resources/linux/com.panitacraft.client.desktop',
+    linux.bundle.linux.appimage?.files?.['/usr/share/applications/com.panitacraft.client.desktop'],
+    undefined,
   );
   assert.equal(linux.bundle.linux.deb.postInstallScript, 'resources/linux/deb-postinstall.sh');
   assert.match(postInstall, /X-PanitaClient-Owner=com\.panitacraft\.client/);
