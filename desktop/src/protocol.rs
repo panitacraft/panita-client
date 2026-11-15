@@ -48,7 +48,9 @@ pub fn register(_app: &tauri::AppHandle) -> Result<(), ErrorCode> {
 }
 
 #[cfg(target_os = "linux")]
-pub fn register(app: &tauri::AppHandle) -> Result<(), ErrorCode> {
+fn linux_paths(
+    app: &tauri::AppHandle,
+) -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf), ErrorCode> {
     let executable = app
         .env()
         .appimage
@@ -60,6 +62,22 @@ pub fn register(app: &tauri::AppHandle) -> Result<(), ErrorCode> {
         .map_err(|_| ErrorCode::CallbackRegistrationFailed)?;
     let directory = data.join("applications");
     let icons = data.join("icons/hicolor/512x512/apps");
+    Ok((executable, directory, icons))
+}
+
+#[cfg(target_os = "linux")]
+pub fn migrate_desktop_integration(app: &tauri::AppHandle) {
+    let Ok((executable, directory, icons)) = linux_paths(app) else {
+        return;
+    };
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let _ = linux_protocol::migrate(&executable, &directory, &icons);
+    });
+}
+
+#[cfg(target_os = "linux")]
+pub fn register(app: &tauri::AppHandle) -> Result<(), ErrorCode> {
+    let (executable, directory, icons) = linux_paths(app)?;
     linux_protocol::register(&executable, &directory, &icons)
         .map_err(|_| ErrorCode::CallbackRegistrationFailed)
 }

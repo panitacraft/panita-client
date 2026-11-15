@@ -239,6 +239,8 @@ pub fn run() {
             play_commands::restore_window(app, cwd);
         }))
         .setup(|app| {
+            #[cfg(target_os = "linux")]
+            protocol::migrate_desktop_integration(app.handle());
             #[cfg(any(windows, target_os = "linux"))]
             tray::install(app.handle());
             // Session log files are best effort: a failure keeps in-memory diagnostics.
