@@ -78,13 +78,27 @@ fn game_environment_drops_desktop_identity_without_clearing_the_host_session() {
     child.env("DISPLAY", ":99");
     child.env("WAYLAND_DISPLAY", "wayland-test");
     child.env("DBUS_SESSION_BUS_ADDRESS", "unix:path=/synthetic-bus");
+    child.env("PULSE_PROP", "media.title=existing");
+    child.env("PIPEWIRE_PROPS", "{ node.latency = 1024/48000 }");
+    for key in JAVA_OPTIONS_ENVIRONMENT {
+        child.env(key, "launcher-owned");
+    }
     for key in DESKTOP_IDENTITY_ENVIRONMENT {
+        child.env(key, "launcher-owned");
+    }
+    for key in AUDIO_IDENTITY_ENVIRONMENT {
         child.env(key, "launcher-owned");
     }
 
     sanitize_game_environment(&mut child);
     let changes = environment_changes(&child);
+    for key in JAVA_OPTIONS_ENVIRONMENT {
+        assert!(changes.contains(&(key.into(), None)), "{key}");
+    }
     for key in DESKTOP_IDENTITY_ENVIRONMENT {
+        assert!(changes.contains(&(key.into(), None)), "{key}");
+    }
+    for key in AUDIO_IDENTITY_ENVIRONMENT {
         assert!(changes.contains(&(key.into(), None)), "{key}");
     }
     for (key, value) in [
@@ -94,7 +108,33 @@ fn game_environment_drops_desktop_identity_without_clearing_the_host_session() {
     ] {
         assert!(changes.contains(&(key.into(), Some(value.into()))), "{key}");
     }
+    let pulse = changes
+        .iter()
+        .find(|(key, _)| key == "PULSE_PROP")
+        .and_then(|(_, value)| value.as_deref())
+        .unwrap_or_else(|| panic!("Pulse properties"));
+    assert!(pulse.starts_with("media.title=existing "));
+    assert!(pulse.ends_with(MINECRAFT_PULSE_PROPERTIES));
+    let pipewire = changes
+        .iter()
+        .find(|(key, _)| key == "PIPEWIRE_PROPS")
+        .and_then(|(_, value)| value.as_deref())
+        .unwrap_or_else(|| panic!("PipeWire properties"));
+    assert!(pipewire.contains("node.latency = 1024/48000"));
+    assert!(pipewire.contains(MINECRAFT_PIPEWIRE_PROPERTY_BODY));
     assert!(!child.as_std().get_envs().any(|(key, _)| key == "HOME"));
+}
+
+#[test]
+fn malformed_pipewire_properties_are_replaced_with_minecraft_identity() {
+    assert_eq!(
+        pipewire_properties(Some("not-a-property-object".into())),
+        OsString::from(MINECRAFT_PIPEWIRE_PROPERTIES)
+    );
+    assert_eq!(
+        pipewire_properties(Some("{ }".into())),
+        OsString::from(MINECRAFT_PIPEWIRE_PROPERTIES)
+    );
 }
 
 #[test]
@@ -118,6 +158,165 @@ fn appimage_cleanup_is_conditional_and_keeps_desktop_session_access() {
         "LD_LIBRARY_PATH".into(),
         Some("/host/custom-libraries".into())
     )));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn systemd_service_builder_preserves_io_contract_without_exposing_environment_values() {
+    let launch = LaunchCommand {
+        executable: "/opt/runtime/java$/bin/java".into(),
+        directory: "/tmp/game directory".into(),
+        args: vec!["-Dfixture=$HOME".into(), "main.Class".into()],
+        redactions: vec![],
+    };
+    let operation = OperationId::new();
+    let tools = SystemdTools {
+        run: "/usr/bin/systemd-run".into(),
+        control: "/usr/bin/systemctl".into(),
+    };
+    let (builder, control) = systemd_builder(&launch, operation, &tools);
+    let args: Vec<_> = builder
+        .as_std()
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+    for expected in [
+        "--user",
+        "--wait",
+        "--pipe",
+        "--collect",
+        "--same-dir",
+        "--service-type=exec",
+        "--description=Minecraft",
+        "--property=UnsetEnvironment=GIO_LAUNCHED_DESKTOP_FILE",
+        "--setenv=PULSE_PROP",
+        "--setenv=PIPEWIRE_PROPS",
+        "/opt/runtime/java$$/bin/java",
+        "-Dfixture=$$HOME",
+    ] {
+        assert!(
+            args.iter().any(|argument| argument == expected),
+            "{expected}"
+        );
+    }
+    assert!(!args.iter().any(|argument| {
+        argument.contains(MINECRAFT_PULSE_PROPERTIES)
+            || argument.contains(MINECRAFT_PIPEWIRE_PROPERTIES)
+    }));
+    let expected_unit = format!("minecraft-{}.service", operation.value().simple());
+    assert!(
+        args.iter()
+            .any(|argument| argument == &format!("--unit={expected_unit}"))
+    );
+    assert!(matches!(
+        control,
+        ProcessControl::SystemdService { unit, .. } if unit == expected_unit
+    ));
+    assert_eq!(
+        builder.as_std().get_current_dir(),
+        Some(launch.directory.as_path())
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn fallback_runner_uses_literal_arguments_and_an_owned_process_group() {
+    let launch = LaunchCommand {
+        executable: "/opt/runtime/java with spaces/bin/java".into(),
+        directory: "/tmp/game directory".into(),
+        args: vec!["literal;argument".into(), "$HOME".into()],
+        redactions: vec![],
+    };
+    let (builder, control) = fallback_builder(&launch).unwrap_or_else(|_| panic!("fallback"));
+    let args: Vec<_> = builder.as_std().get_args().collect();
+    assert_eq!(args[0], "-c");
+    assert_eq!(args[2], "panita-minecraft-runner");
+    assert_eq!(args[3], launch.executable.as_os_str());
+    assert_eq!(args[4], "literal;argument");
+    assert_eq!(args[5], "$HOME");
+    assert!(matches!(control, ProcessControl::ProcessGroup));
+}
+
+#[cfg(target_os = "linux")]
+fn fallback_fixture_command(test: &str) -> LaunchCommand {
+    LaunchCommand {
+        executable: std::env::current_exe().unwrap_or_else(|_| panic!("test executable")),
+        directory: std::env::temp_dir(),
+        args: vec![
+            "--exact".into(),
+            format!("minecraft::process::tests::{test}"),
+            "--nocapture".into(),
+        ],
+        redactions: vec![],
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn fallback_runner_preserves_output_and_exit_status() {
+    let launch = fallback_fixture_command("child_output_fixture");
+    let (mut builder, _) = fallback_builder(&launch).unwrap_or_else(|_| panic!("fallback"));
+    let mut child = builder.spawn().unwrap_or_else(|_| panic!("spawn"));
+    let stdin_guard = child.stdin.take().unwrap_or_else(|| panic!("stdin guard"));
+    let mut stdout = child.stdout.take().unwrap_or_else(|| panic!("stdout"));
+    let mut stderr = child.stderr.take().unwrap_or_else(|| panic!("stderr"));
+    let output = async move {
+        let mut bytes = Vec::new();
+        stdout
+            .read_to_end(&mut bytes)
+            .await
+            .unwrap_or_else(|_| panic!("stdout read"));
+        bytes
+    };
+    let errors = async move {
+        let mut bytes = Vec::new();
+        stderr
+            .read_to_end(&mut bytes)
+            .await
+            .unwrap_or_else(|_| panic!("stderr read"));
+        bytes
+    };
+    let (output, errors, status) = tokio::join!(output, errors, child.wait());
+    drop(stdin_guard);
+    let status = status.unwrap_or_else(|_| panic!("wait"));
+    assert_eq!(status.code(), Some(7));
+    assert!(String::from_utf8_lossy(&output).contains("credential=fixture-access-token"));
+    assert!(String::from_utf8_lossy(&errors).contains("stderr fixture-access-token"));
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn fallback_watchdog_terminates_the_group_when_supervision_disappears() {
+    let launch = fallback_fixture_command("child_sleep_fixture");
+    let (mut builder, _) = fallback_builder(&launch).unwrap_or_else(|_| panic!("fallback"));
+    let mut child = builder.spawn().unwrap_or_else(|_| panic!("spawn"));
+    let stdin_guard = child.stdin.take().unwrap_or_else(|| panic!("stdin guard"));
+    drop(stdin_guard);
+    let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+        .await
+        .unwrap_or_else(|_| panic!("watchdog timeout"))
+        .unwrap_or_else(|_| panic!("wait"));
+    assert!(!status.success());
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn fallback_graceful_stop_targets_java_and_reaps_the_runner() {
+    let launch = fallback_fixture_command("child_sleep_fixture");
+    let (mut builder, control) = fallback_builder(&launch).unwrap_or_else(|_| panic!("fallback"));
+    let mut child = builder.spawn().unwrap_or_else(|_| panic!("spawn"));
+    let stdin_guard = child.stdin.take().unwrap_or_else(|| panic!("stdin guard"));
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        stop_child(&mut child, &control, false).await,
+        Ok(StopOutcome::Requested)
+    );
+    let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
+        .await
+        .unwrap_or_else(|_| panic!("graceful stop timeout"))
+        .unwrap_or_else(|_| panic!("wait"));
+    drop(stdin_guard);
+    assert!(!status.success());
 }
 
 #[test]
@@ -227,11 +426,8 @@ async fn lease_excludes_duplicate_launch_and_mutation_until_force_stop() {
         Some(StopOutcome::Unsupported)
     );
     assert_eq!(game.force_stop().await.ok(), Some(StopOutcome::Requested));
-    assert!(
-        tokio::time::timeout(Duration::from_secs(10), game.wait())
-            .await
-            .is_ok()
-    );
+    let stopped = tokio::time::timeout(Duration::from_secs(10), game.wait()).await;
+    assert!(stopped.is_ok(), "events: {:?}", game.events());
     assert_eq!(busy, Some(ErrorCode::OperationBusy));
     assert!(blocked_writer);
     assert!(LaunchLease::acquire(&paths, id).is_ok());
