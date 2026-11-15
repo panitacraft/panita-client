@@ -2,6 +2,7 @@
 use std::io::{Error, ErrorKind, Write};
 use std::path::Path;
 
+#[cfg(test)]
 const APP_ID: &str = "com.panitacraft.client";
 const DESKTOP_ID: &str = "com.panitacraft.client.desktop";
 const CALLBACK_TEST_ID: &str = "panita-client-callback.desktop";

@@ -245,7 +245,7 @@ pub fn run() {
                 Ok(pending) => {
                     let logs = state.logs.clone();
                     let process = state.process;
-                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                    drop(tauri::async_runtime::spawn_blocking(move || {
                         if let Err(code) = protocol::finish_desktop_integration(pending) {
                             logs.record(launcher_core::logging::LogRecord {
                                 process,
@@ -255,7 +255,7 @@ pub fn run() {
                                 ),
                             });
                         }
-                    });
+                    }));
                 }
                 Err(code) => state.logs.record(launcher_core::logging::LogRecord {
                     process: state.process,
