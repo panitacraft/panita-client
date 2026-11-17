@@ -5,7 +5,8 @@
 use std::collections::BTreeMap;
 use std::collections::VecDeque;
 #[cfg(any(target_os = "linux", test))]
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
@@ -179,7 +180,14 @@ struct SupervisedIo {
     errors: tokio::task::JoinHandle<()>,
 }
 
-fn configure_process_builder(builder: &mut tokio::process::Command, command: &LaunchCommand) {
+/// Variables the launcher sets for the game after sanitizing, such as the window identity.
+type GameEnvironment = [(OsString, OsString)];
+
+fn configure_process_builder(
+    builder: &mut tokio::process::Command,
+    command: &LaunchCommand,
+    environment: &GameEnvironment,
+) {
     builder
         .current_dir(&command.directory)
         .stdin(Stdio::null())
@@ -187,6 +195,9 @@ fn configure_process_builder(builder: &mut tokio::process::Command, command: &La
         .stderr(Stdio::piped())
         .kill_on_drop(false);
     sanitize_game_environment(builder);
+    for (key, value) in environment {
+        builder.env(key, value);
+    }
     #[cfg(windows)]
     builder.creation_flags(0x08000000);
 }
@@ -195,10 +206,11 @@ fn configure_process_builder(builder: &mut tokio::process::Command, command: &La
 fn spawn_game_process(
     command: &LaunchCommand,
     _operation: OperationId,
+    environment: &GameEnvironment,
 ) -> Result<SpawnedGame, CoreError> {
     let mut builder = tokio::process::Command::new(&command.executable);
     builder.args(&command.args);
-    configure_process_builder(&mut builder, command);
+    configure_process_builder(&mut builder, command, environment);
     let child = builder
         .spawn()
         .map_err(|_| CoreError::new(ErrorCode::ProcessStartFailed))?;
@@ -294,6 +306,14 @@ fn valid_systemd_environment_name(name: &OsStr) -> bool {
 }
 
 #[cfg(target_os = "linux")]
+fn explicitly_set(command: &tokio::process::Command, key: &str) -> bool {
+    command
+        .as_std()
+        .get_envs()
+        .any(|(name, value)| name == key && value.is_some())
+}
+
+#[cfg(target_os = "linux")]
 fn effective_environment_keys(command: &tokio::process::Command) -> Vec<OsString> {
     let mut environment: BTreeMap<OsString, OsString> = std::env::vars_os()
         .filter(|(key, value)| {
@@ -333,15 +353,30 @@ fn systemd_escape_argument(value: &OsStr) -> OsString {
     OsString::from_vec(escaped)
 }
 
+/// UnsetEnvironment also removes a value passed with --setenv, so keep the keys
+/// the launcher deliberately provides for the game.
+#[cfg(target_os = "linux")]
+fn unset_appimage_properties(builder: &mut tokio::process::Command, appimage: bool) {
+    if !appimage {
+        return;
+    }
+    for key in APPIMAGE_ENVIRONMENT {
+        if !explicitly_set(builder, key) {
+            builder.arg(format!("--property=UnsetEnvironment={key}"));
+        }
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn systemd_builder(
     command: &LaunchCommand,
     operation: OperationId,
     tools: &SystemdTools,
+    environment: &GameEnvironment,
 ) -> (tokio::process::Command, ProcessControl) {
     let unit = format!("minecraft-{}.service", operation.value().simple());
     let mut builder = tokio::process::Command::new(&tools.run);
-    configure_process_builder(&mut builder, command);
+    configure_process_builder(&mut builder, command, environment);
     builder.args([
         "--user",
         "--quiet",
@@ -359,11 +394,7 @@ fn systemd_builder(
     {
         builder.arg(format!("--property=UnsetEnvironment={key}"));
     }
-    if std::env::var_os("APPIMAGE").is_some() {
-        for key in APPIMAGE_ENVIRONMENT {
-            builder.arg(format!("--property=UnsetEnvironment={key}"));
-        }
-    }
+    unset_appimage_properties(&mut builder, std::env::var_os("APPIMAGE").is_some());
     for key in effective_environment_keys(&builder) {
         builder.arg(format!("--setenv={}", key.to_string_lossy()));
     }
@@ -387,6 +418,7 @@ fn systemd_builder(
 #[cfg(target_os = "linux")]
 fn fallback_builder(
     command: &LaunchCommand,
+    environment: &GameEnvironment,
 ) -> Result<(tokio::process::Command, ProcessControl), CoreError> {
     const SCRIPT: &str = "exec 3<&0; trap '' TERM INT HUP; (trap '' TERM INT HUP; while IFS= read -r line <&3; do :; done; kill -KILL 0) & watchdog=$!; (trap - TERM INT HUP; exec 3<&-; exec \"$@\" </dev/null) & child=$!; wait \"$child\"; status=$?; kill -KILL \"$watchdog\" 2>/dev/null; wait \"$watchdog\" 2>/dev/null; exit \"$status\"";
 
@@ -399,7 +431,7 @@ fn fallback_builder(
         .arg("panita-minecraft-runner")
         .arg(&command.executable)
         .args(&command.args);
-    configure_process_builder(&mut builder, command);
+    configure_process_builder(&mut builder, command, environment);
     builder.stdin(Stdio::piped()).process_group(0);
     Ok((builder, ProcessControl::ProcessGroup))
 }
@@ -408,12 +440,13 @@ fn fallback_builder(
 fn spawn_game_process(
     command: &LaunchCommand,
     operation: OperationId,
+    environment: &GameEnvironment,
 ) -> Result<SpawnedGame, CoreError> {
     if !command.executable.is_file() {
         return Err(CoreError::new(ErrorCode::ProcessStartFailed));
     }
     if let Some(tools) = systemd_tools() {
-        let (mut builder, control) = systemd_builder(command, operation, &tools);
+        let (mut builder, control) = systemd_builder(command, operation, &tools, environment);
         if let Ok(child) = builder.spawn() {
             return Ok(SpawnedGame {
                 child,
@@ -422,7 +455,7 @@ fn spawn_game_process(
             });
         }
     }
-    let (mut builder, control) = fallback_builder(command)?;
+    let (mut builder, control) = fallback_builder(command, environment)?;
     let mut child = builder
         .spawn()
         .map_err(|_| CoreError::new(ErrorCode::ProcessStartFailed))?;
@@ -656,11 +689,15 @@ impl LaunchLease {
         {
             return Err(CoreError::new(ErrorCode::InvalidData));
         }
+        #[cfg(target_os = "linux")]
+        let environment = super::linux_window::game_window_environment(&self.paths);
+        #[cfg(not(target_os = "linux"))]
+        let environment: Vec<(OsString, OsString)> = Vec::new();
         let SpawnedGame {
             mut child,
             control,
             stdin_guard,
-        } = spawn_game_process(&command, operation)?;
+        } = spawn_game_process(&command, operation, &environment)?;
         let events = Arc::new(Events {
             process,
             operation,

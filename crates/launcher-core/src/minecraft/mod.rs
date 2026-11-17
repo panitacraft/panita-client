@@ -11,6 +11,8 @@ pub mod download;
 mod executable;
 pub mod install;
 pub mod launch;
+#[cfg(any(target_os = "linux", test))]
+mod linux_window;
 mod log_context;
 pub mod maintenance;
 pub mod native_cache;
