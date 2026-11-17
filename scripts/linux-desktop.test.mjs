@@ -71,6 +71,34 @@ test('Linux desktop identity matches the packaged executable and icon theme', as
   assert.match(postInstall, /Exec=\(\/usr\/bin\/\)\?panita-client %u/);
 });
 
+test('Every Linux package provides libdecor so native Wayland windows keep their title bar', async () => {
+  const linux = await readJson('desktop/tauri.linux.conf.json');
+  const pkgbuild = await readFile('scripts/linux/arch/PKGBUILD', 'utf8');
+  const stage = await readFile('scripts/linux/stage-libdecor.sh', 'utf8');
+  const build = await readFile('scripts/build-beta.mjs', 'utf8');
+  const inspection = await readFile('scripts/linux/verify-candidate.sh', 'utf8');
+  const arch = await readFile('scripts/linux/build-arch-package.sh', 'utf8');
+  const depends = linux.bundle.linux.deb.depends;
+
+  assert.ok(depends.includes('libdecor-0-0'));
+  assert.ok(depends.includes('libdecor-0-plugin-1-gtk | libdecor-0-plugin-1-cairo'));
+  assert.match(pkgbuild, /depends=\([^)]*'libdecor'/s);
+  assert.match(arch, /grep -Fx 'depend = libdecor'/);
+  assert.match(inspection, /libdecor-0-0/);
+  // The AppImage carries the library and plugin from the build host's apt packages.
+  const files = linux.bundle.linux.appimage.files;
+  assert.deepEqual(Object.keys(files).sort(), [
+    '/usr/lib/panita/libdecor/copyright',
+    '/usr/lib/panita/libdecor/libdecor-0.so.0',
+    '/usr/lib/panita/libdecor/plugins-1/libdecor-cairo.so',
+  ]);
+  for (const source of Object.values(files)) assert.match(source, /^\.\.\/target\/linux-libdecor\//);
+  assert.match(stage, /libdecor-0-plugin-1-cairo/);
+  assert.doesNotMatch(stage, /https?:\/\/|sha256sum/);
+  assert.match(build, /stage-libdecor\.sh/);
+  assert.match(inspection, /usr\/lib\/panita\/libdecor/);
+});
+
 test('Linux updater relaunch is sanitized and deferred until final exit', async () => {
   const updater = await readFile('desktop/src/update_commands.rs', 'utf8');
   const desktop = await readFile('desktop/src/lib.rs', 'utf8');
