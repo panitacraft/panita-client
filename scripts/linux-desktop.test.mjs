@@ -159,3 +159,21 @@ test('Linux AppImage icon inspection follows a packaged icon symlink', {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('Minecraft windows share one hidden desktop entry that matches the game application ID', async () => {
+  const window = await readFile('crates/launcher-core/src/minecraft/linux_window.rs', 'utf8');
+  const identity = await readFile('desktop/src/linux_game_identity.rs', 'utf8');
+  const bridge = await readFile('desktop/src/protocol.rs', 'utf8');
+  const play = await readFile('crates/launcher-core/src/minecraft/play.rs', 'utf8');
+
+  assert.match(window, /pub\(super\) const APP_ID: &str = "com\.panitacraft\.minecraft";/);
+  assert.match(window, /"SDL_APP_ID"/);
+  assert.match(identity, /const ENTRY_ID: &str = "com\.panitacraft\.minecraft\.desktop";/);
+  assert.match(identity, /StartupWMClass=com\.panitacraft\.minecraft\\n/);
+  assert.match(identity, /NoDisplay=true/);
+  assert.match(identity, /Icon=com\.panitacraft\.minecraft\\n/);
+  assert.match(window, /const ICON_FILE: &str = "com\.panitacraft\.minecraft\.png";/);
+  assert.match(identity, /const ICON_FILE: &str = "com\.panitacraft\.minecraft\.png";/);
+  assert.match(bridge, /linux_game_identity::publish/);
+  assert.match(play, /publish_minecraft_icons/);
+});

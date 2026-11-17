@@ -197,6 +197,7 @@ PanitaClient/
 ├─ versions/
 ├─ runtime/
 ├─ content/               # disposable shared pack-file cache; player-clearable
+├─ runtime-libs/          # disposable AppImage-only libdecor copy for game windows (Linux)
 ├─ instances/{slug}/      # stable readable directory mapped to a catalog UUID
 │  ├─ instance.json       # schema 4: one UUID, catalog/status/source/settings
 │  ├─ installed.json      # schema 4 (vanilla) or 5 (modpack): exact plan and explicit installed/uninstalled status
@@ -342,6 +343,33 @@ panita-client/
 - The owner's Linux VM BOX is for testing the final installed product, not development or builds. Use a separate build environment. Its previously installed development packages may mask missing runtime dependencies; record this limitation and arrange a clean test baseline before claiming clean-install qualification. Do not remove packages or reset the VM without owner authorization.
 - Update affected decision documents when an owner-approved policy changes. Remove contradictory superseded instructions.
 - Use Annex A for the accepted authentication and storage policy. Local decision documents and implementation issues must remain consistent with it; surface conflicts before implementing them.
+
+### 5.1 Linux game window (2026-11-17)
+
+Owner decision, 2026-11-17. Minecraft 26.x renders through SDL3 on native Wayland and
+needs libdecor for its title bar on GNOME, whose compositor offers no server-side
+decorations. Forcing SDL3 onto X11 is not allowed: it crashes Fabric 26.3 with Iris.
+Players must never install libdecor by hand.
+
+- The `.deb` depends on `libdecor-0-0` and `libdecor-0-plugin-1-gtk | libdecor-0-plugin-1-cairo`;
+  the Arch package depends on `libdecor`. The AppImage cannot declare dependencies, so it
+  carries `libdecor-0.so.0`, `libdecor-cairo.so` and the license text under
+  `usr/lib/panita/libdecor/`, staged at build time from the build host's apt packages
+  (`scripts/linux/stage-libdecor.sh`). Never pin mirror URLs or hashes for these files.
+- Only when running as an AppImage and the host lacks libdecor or its plugin, the launcher
+  copies the bundled files to `runtime-libs/libdecor/` (owner-only, content-verified,
+  atomic, redirected paths rejected) so they outlive the launcher mount, and gives the
+  game process alone a narrow `LD_LIBRARY_PATH` holding just that directory plus
+  `LIBDECOR_PLUGIN_DIR`. The AppImage variables stay removed from the game environment, and
+  the systemd path must not unset a key the launcher provides. The folder is disposable.
+- The game receives `SDL_APP_ID=com.panitacraft.minecraft`. The launcher publishes one
+  shared, `NoDisplay` desktop entry `com.panitacraft.minecraft.desktop` (owner-marked, never
+  per instance) and the `com.panitacraft.minecraft` icon in the user's `~/.local/share`
+  tree. The icon comes from the game's own verified asset objects (`icons/icon_*.png`); the
+  Panita icon is the fallback until then. Player-owned files at those names are preserved.
+  GLFW/X11 games (1.21.x) derive their window class from the title, so they are not
+  matched by this entry and remain unqualified.
+- These Linux behaviors are implemented but unvalidated until tested on Ubuntu x64 (§6).
 
 ## Annex A. Account and Token Storage Decision
 
