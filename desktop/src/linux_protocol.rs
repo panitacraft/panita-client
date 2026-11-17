@@ -22,7 +22,8 @@ const ICON: &[u8] = include_bytes!("../icons/icon.png");
 #[cfg(target_os = "linux")]
 static INTEGRATION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-fn desktop_entry(executable: &Path) -> Result<String, ()> {
+/// Desktop Entry `Exec` text for an absolute executable path.
+pub(super) fn escaped_executable(executable: &Path) -> Result<String, ()> {
     let executable = executable.to_str().ok_or(())?;
     if !Path::new(executable).is_absolute() || executable.contains(['\n', '\r', '\0']) {
         return Err(());
@@ -35,6 +36,11 @@ fn desktop_entry(executable: &Path) -> Result<String, ()> {
         .replace('$', "\\$")
         .replace('%', "%%")
         .replace('\\', "\\\\");
+    Ok(escaped)
+}
+
+fn desktop_entry(executable: &Path) -> Result<String, ()> {
+    let escaped = escaped_executable(executable)?;
     Ok(format!(
         "[Desktop Entry]\nType=Application\nName=Panita Client\nExec=\"{escaped}\" %u\nIcon=panita-client\nStartupWMClass=com.panitacraft.client\nTerminal=false\nStartupNotify=true\nMimeType={MIME};\nX-PanitaClient-Owner=com.panitacraft.client\n"
     ))

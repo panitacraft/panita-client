@@ -3,6 +3,9 @@ use launcher_core::error::ErrorCode;
 #[cfg(target_os = "linux")]
 use tauri::Manager;
 #[cfg(any(target_os = "linux", test))]
+#[path = "linux_game_identity.rs"]
+mod linux_game_identity;
+#[cfg(any(target_os = "linux", test))]
 #[path = "linux_protocol.rs"]
 mod linux_protocol;
 
@@ -79,8 +82,16 @@ pub fn prepare_desktop_integration(
     app: &tauri::AppHandle,
 ) -> Result<PendingDesktopIntegration, ErrorCode> {
     let (executable, directory, icons) = linux_paths(app)?;
-    let changed = linux_protocol::prepare(&executable, &directory, &icons)
+    let mut changed = linux_protocol::prepare(&executable, &directory, &icons)
         .map_err(|_| ErrorCode::CallbackRegistrationFailed)?;
+    // The shared Minecraft window identity is best effort and must never block
+    // the launcher: without it the game window only keeps a generic icon.
+    if let (Ok(escaped), Some(hicolor)) = (
+        linux_protocol::escaped_executable(&executable),
+        icons.ancestors().nth(2),
+    ) {
+        changed |= linux_game_identity::publish(&escaped, &directory, hicolor).unwrap_or(false);
+    }
     Ok(PendingDesktopIntegration {
         executable,
         directory,
