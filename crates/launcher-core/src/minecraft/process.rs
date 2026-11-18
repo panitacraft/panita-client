@@ -105,7 +105,47 @@ fn sanitize_appimage_environment(command: &mut tokio::process::Command, appimage
         for key in APPIMAGE_ENVIRONMENT {
             command.env_remove(key);
         }
+        if let Some(appdir) = std::env::var_os("APPDIR") {
+            for (key, value) in scrub_appdir(std::env::vars_os(), std::path::Path::new(&appdir)) {
+                match value {
+                    Some(value) => command.env(key, value),
+                    None => command.env_remove(key),
+                };
+            }
+        }
     }
+}
+
+/// AppRun points many variables into the launcher's temporary mount, such as the
+/// GTK input-module cache or the first XDG_DATA_DIRS entries. A game that loads
+/// the host's GTK (libdecor's GTK plugin) would pick up modules and data built for
+/// another GTK, and the mount disappears when the launcher exits. Return the
+/// changes that drop every entry below `appdir`, leaving other entries in order.
+#[cfg(any(target_os = "linux", test))]
+fn scrub_appdir(
+    environment: impl IntoIterator<Item = (OsString, OsString)>,
+    appdir: &std::path::Path,
+) -> Vec<(OsString, Option<OsString>)> {
+    let Some(prefix) = appdir.to_str().filter(|prefix| !prefix.is_empty()) else {
+        return Vec::new();
+    };
+    let mut changes = Vec::new();
+    for (key, value) in environment {
+        let Some(text) = value.to_str().filter(|text| text.contains(prefix)) else {
+            continue;
+        };
+        let entries: Vec<&str> = text.split(':').filter(|entry| !entry.is_empty()).collect();
+        let kept: Vec<&str> = entries
+            .iter()
+            .copied()
+            .filter(|entry| !std::path::Path::new(entry).starts_with(appdir))
+            .collect();
+        if kept.len() == entries.len() {
+            continue;
+        }
+        changes.push((key, (!kept.is_empty()).then(|| kept.join(":").into())));
+    }
+    changes
 }
 
 #[cfg(any(target_os = "linux", test))]

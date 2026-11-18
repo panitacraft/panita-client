@@ -160,6 +160,42 @@ fn appimage_cleanup_is_conditional_and_keeps_desktop_session_access() {
     )));
 }
 
+#[test]
+fn appimage_scrub_drops_entries_below_the_mount_and_keeps_host_entries_in_order() {
+    let appdir = std::path::Path::new("/tmp/.mount_panitaXYZ");
+    let environment = [
+        (
+            "XDG_DATA_DIRS",
+            "/tmp/.mount_panitaXYZ/usr/share/:/tmp/.mount_panitaXYZ/usr/share:/usr/share/ubuntu:/usr/local/share/:/usr/share/",
+        ),
+        (
+            "GTK_IM_MODULE_FILE",
+            "/tmp/.mount_panitaXYZ//usr/lib/gtk-3.0/3.0.0/immodules.cache",
+        ),
+        ("PATH", "/tmp/.mount_panitaXYZ/usr/bin:/usr/bin"),
+        ("GTK_THEME", "Adwaita:dark"),
+        ("HOME", "/home/player"),
+        // The mount name only appears inside a longer, unrelated entry.
+        ("NOTE", "/tmp/.mount_panitaXYZ-backup/share"),
+    ]
+    .map(|(key, value)| (OsString::from(key), OsString::from(value)));
+    let changes = scrub_appdir(environment, appdir);
+    assert_eq!(
+        changes,
+        [
+            (
+                OsString::from("XDG_DATA_DIRS"),
+                Some(OsString::from(
+                    "/usr/share/ubuntu:/usr/local/share/:/usr/share/"
+                ))
+            ),
+            (OsString::from("GTK_IM_MODULE_FILE"), None),
+            (OsString::from("PATH"), Some(OsString::from("/usr/bin"))),
+        ]
+    );
+    assert!(scrub_appdir([], std::path::Path::new("")).is_empty());
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn appimage_unsets_skip_keys_the_launcher_provides_for_the_game() {
