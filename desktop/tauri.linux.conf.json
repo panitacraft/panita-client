@@ -15,7 +15,7 @@
           "xdg-utils",
           "libayatana-appindicator3-1",
           "libdecor-0-0",
-          "libdecor-0-plugin-1-gtk | libdecor-0-plugin-1-cairo"
+          "libdecor-0-plugin-1-cairo"
         ],
         "desktopTemplate": "resources/linux/panita.desktop",
         "files": {

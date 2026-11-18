@@ -6,6 +6,11 @@
 //! bar. Debian and Arch packages depend on it. An AppImage cannot declare
 //! dependencies, so it carries a copy that is published to the launcher's data
 //! directory and exposed to the game only when the host lacks libdecor.
+//!
+//! The cairo plugin is the one that must be present. The GTK plugin cannot start
+//! inside the game's JVM on Ubuntu 26.04 and, when it is the only plugin, the window
+//! gets no title bar; libdecor falls back to cairo when GTK fails. The bundled
+//! library and plugin are always used together, never mixed with the host's.
 // Only Linux launches the game through this module; other platforms compile the
 // platform-neutral planning code solely to run its unit tests.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -32,33 +37,24 @@ const HOST_LIBRARY_DIRECTORIES: [&str; 6] = [
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct HostLibdecor {
     pub(super) library: bool,
-    pub(super) plugin: bool,
+    /// The cairo plugin, the one that works inside the game's process.
+    pub(super) cairo_plugin: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Decorations {
-    /// The host provides libdecor and a plugin; leave the game environment alone.
+    /// The host provides libdecor and its cairo plugin; leave the game environment alone.
     Host,
-    /// The host has libdecor but no plugin; add only the bundled plugin directory.
-    BundledPlugin,
-    /// The host has no libdecor; expose the bundled library and plugin.
-    BundledLibrary,
+    /// Expose the bundled library and cairo plugin as a matching pair.
+    Bundled,
 }
 
 pub(super) fn decorations(host: HostLibdecor) -> Decorations {
-    match (host.library, host.plugin) {
-        (true, true) => Decorations::Host,
-        (true, false) => Decorations::BundledPlugin,
-        (false, _) => Decorations::BundledLibrary,
+    if host.library && host.cairo_plugin {
+        Decorations::Host
+    } else {
+        Decorations::Bundled
     }
-}
-
-fn plugin_directory_has_plugin(directory: &Path) -> bool {
-    std::fs::read_dir(directory).is_ok_and(|entries| {
-        entries
-            .flatten()
-            .any(|entry| entry.file_name().to_string_lossy().ends_with(".so"))
-    })
 }
 
 pub(super) fn host_libdecor_in(directories: &[&Path]) -> HostLibdecor {
@@ -66,8 +62,12 @@ pub(super) fn host_libdecor_in(directories: &[&Path]) -> HostLibdecor {
         library: directories
             .iter()
             .any(|directory| directory.join(LIBRARY_NAME).exists()),
-        plugin: directories.iter().any(|directory| {
-            plugin_directory_has_plugin(&directory.join("libdecor").join(PLUGIN_DIRECTORY))
+        cairo_plugin: directories.iter().any(|directory| {
+            directory
+                .join("libdecor")
+                .join(PLUGIN_DIRECTORY)
+                .join(PLUGIN_NAME)
+                .exists()
         }),
     }
 }
@@ -76,8 +76,7 @@ pub(super) fn environment_for(support: Decorations, directory: &Path) -> Vec<(Os
     let plugins = directory.join(PLUGIN_DIRECTORY);
     match support {
         Decorations::Host => Vec::new(),
-        Decorations::BundledPlugin => vec![("LIBDECOR_PLUGIN_DIR".into(), plugins.into())],
-        Decorations::BundledLibrary => vec![
+        Decorations::Bundled => vec![
             // A single narrow directory that holds only libdecor, so no host
             // library can be shadowed. The launcher's AppImage paths stay removed.
             ("LD_LIBRARY_PATH".into(), directory.as_os_str().to_owned()),
@@ -390,69 +389,61 @@ mod tests {
 
     #[test]
     fn host_support_decides_what_the_game_receives() {
-        let both = HostLibdecor {
-            library: true,
-            plugin: true,
+        let host = |library, cairo_plugin| HostLibdecor {
+            library,
+            cairo_plugin,
         };
-        let no_plugin = HostLibdecor {
-            library: true,
-            plugin: false,
-        };
-        let none = HostLibdecor {
-            library: false,
-            plugin: false,
-        };
-        assert_eq!(decorations(both), Decorations::Host);
-        assert_eq!(decorations(no_plugin), Decorations::BundledPlugin);
-        assert_eq!(decorations(none), Decorations::BundledLibrary);
+        assert_eq!(decorations(host(true, true)), Decorations::Host);
+        // A host with only the GTK plugin, or only the library, is not enough.
+        assert_eq!(decorations(host(true, false)), Decorations::Bundled);
+        assert_eq!(decorations(host(false, false)), Decorations::Bundled);
+        assert_eq!(decorations(host(false, true)), Decorations::Bundled);
         let directory = Path::new("/data/runtime-libs/libdecor");
         assert!(environment_for(Decorations::Host, directory).is_empty());
+        // The bundled library and plugin always travel together.
         assert_eq!(
-            environment_for(Decorations::BundledPlugin, directory),
-            [(
-                OsString::from("LIBDECOR_PLUGIN_DIR"),
-                directory.join("plugins-1").into_os_string()
-            )]
+            environment_for(Decorations::Bundled, directory),
+            [
+                (
+                    OsString::from("LD_LIBRARY_PATH"),
+                    directory.as_os_str().to_owned()
+                ),
+                (
+                    OsString::from("LIBDECOR_PLUGIN_DIR"),
+                    directory.join("plugins-1").into_os_string()
+                ),
+            ]
         );
-        let library = environment_for(Decorations::BundledLibrary, directory);
-        assert_eq!(
-            library[0],
-            (
-                OsString::from("LD_LIBRARY_PATH"),
-                directory.as_os_str().to_owned()
-            )
-        );
-        assert_eq!(library.len(), 2);
     }
 
     #[test]
-    fn host_detection_needs_both_the_library_and_a_plugin() {
+    fn host_detection_needs_the_library_and_the_cairo_plugin() {
         let host = temporary("host");
         assert_eq!(
             host_libdecor_in(&[host.as_path()]),
             HostLibdecor {
                 library: false,
-                plugin: false
+                cairo_plugin: false
             }
         );
         std::fs::write(host.join(LIBRARY_NAME), b"library").unwrap_or_else(|_| panic!("library"));
-        assert_eq!(
-            host_libdecor_in(&[host.as_path()]),
-            HostLibdecor {
-                library: true,
-                plugin: false
-            }
-        );
         let plugins = host.join("libdecor").join(PLUGIN_DIRECTORY);
         std::fs::create_dir_all(&plugins).unwrap_or_else(|_| panic!("plugins"));
-        std::fs::write(plugins.join("README"), b"not a plugin").unwrap_or_else(|_| panic!("note"));
-        assert!(!host_libdecor_in(&[host.as_path()]).plugin);
-        std::fs::write(plugins.join(PLUGIN_NAME), b"plugin").unwrap_or_else(|_| panic!("plugin"));
+        // The GTK plugin alone does not count: it cannot start inside the game.
+        std::fs::write(plugins.join("libdecor-gtk.so"), b"gtk").unwrap_or_else(|_| panic!("gtk"));
         assert_eq!(
             host_libdecor_in(&[host.as_path()]),
             HostLibdecor {
                 library: true,
-                plugin: true
+                cairo_plugin: false
+            }
+        );
+        std::fs::write(plugins.join(PLUGIN_NAME), b"cairo").unwrap_or_else(|_| panic!("cairo"));
+        assert_eq!(
+            host_libdecor_in(&[host.as_path()]),
+            HostLibdecor {
+                library: true,
+                cairo_plugin: true
             }
         );
         let _ = std::fs::remove_dir_all(host);

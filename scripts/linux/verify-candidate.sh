@@ -63,7 +63,8 @@ test ! -e "$check_dir/deb/usr/share/applications/Panita Client.desktop"
 # Native Wayland needs libdecor for window decorations on GNOME. The package
 # must pull it in so players never install it by hand.
 grep -E '^ ?Depends:.*(^|[ ,:])libdecor-0-0([ ,]|$)' "$artifact/verification/package-info.txt"
-grep -E '^ ?Depends:.*libdecor-0-plugin-1-gtk \| libdecor-0-plugin-1-cairo' "$artifact/verification/package-info.txt"
+# The GTK plugin cannot start inside the game's JVM, so the cairo plugin is required.
+grep -E '^ ?Depends:.*libdecor-0-plugin-1-cairo' "$artifact/verification/package-info.txt"
 
 # Exercise the exact desktop payload left by a 1.0.0 Debian installation. The
 # test root keeps the maintainer script unprivileged and isolated from the host.

@@ -351,13 +351,16 @@ needs libdecor for its title bar on GNOME, whose compositor offers no server-sid
 decorations. Forcing SDL3 onto X11 is not allowed: it crashes Fabric 26.3 with Iris.
 Players must never install libdecor by hand.
 
-- The `.deb` depends on `libdecor-0-0` and `libdecor-0-plugin-1-gtk | libdecor-0-plugin-1-cairo`;
+- The `.deb` depends on `libdecor-0-0` and `libdecor-0-plugin-1-cairo`. The GTK plugin cannot start
+  inside the game's JVM on Ubuntu 26.04 (verified on BOX 2026-11-18: with only the GTK plugin
+  there is no title bar; with the cairo plugin installed there is), so the cairo plugin is required;
   the Arch package depends on `libdecor`. The AppImage cannot declare dependencies, so it
   carries `libdecor-0.so.0`, `libdecor-cairo.so` and the license text under
   `usr/lib/panita/libdecor/`, staged at build time from the build host's apt packages
   (`scripts/linux/stage-libdecor.sh`). Never pin mirror URLs or hashes for these files.
-- Only when running as an AppImage and the host lacks libdecor or its plugin, the launcher
-  copies the bundled files to `runtime-libs/libdecor/` (owner-only, content-verified,
+- Only when running as an AppImage and the host lacks libdecor or its cairo plugin, the launcher
+  copies the bundled library and plugin, always together and never mixed with the host's,
+  to `runtime-libs/libdecor/` (owner-only, content-verified,
   atomic, redirected paths rejected) so they outlive the launcher mount, and gives the
   game process alone a narrow `LD_LIBRARY_PATH` holding just that directory plus
   `LIBDECOR_PLUGIN_DIR`. The AppImage variables stay removed from the game environment, and

@@ -81,7 +81,8 @@ test('Every Linux package provides libdecor so native Wayland windows keep their
   const depends = linux.bundle.linux.deb.depends;
 
   assert.ok(depends.includes('libdecor-0-0'));
-  assert.ok(depends.includes('libdecor-0-plugin-1-gtk | libdecor-0-plugin-1-cairo'));
+  assert.ok(depends.includes('libdecor-0-plugin-1-cairo'));
+  assert.ok(!depends.some(entry => entry.includes('libdecor-0-plugin-1-gtk')));
   assert.match(pkgbuild, /depends=\([^)]*'libdecor'/s);
   assert.match(arch, /grep -Fx 'depend = libdecor'/);
   assert.match(inspection, /libdecor-0-0/);
