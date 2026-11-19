@@ -52,7 +52,12 @@ grep -Fx "pkgname = panita-client" "$work/pkginfo"
 grep -Fx "pkgver = ${arch_version}-1" "$work/pkginfo"
 grep -Fx 'arch = x86_64' "$work/pkginfo"
 grep -Fx 'depend = webkit2gtk-4.1' "$work/pkginfo"
-grep -Fx 'depend = libdecor' "$work/pkginfo"
+# libdecor is optional: only GNOME on Wayland needs it, KDE and wlroots draw the title bar.
+grep -Fq 'optdepend = libdecor:' "$work/pkginfo"
+if grep -Fxq 'depend = libdecor' "$work/pkginfo"; then
+  echo 'libdecor must stay an optional dependency on Arch' >&2
+  exit 1
+fi
 bsdtar -tf "$package" > "$work/contents"
 grep -Fx 'usr/bin/panita-client' "$work/contents"
 grep -Fx 'usr/share/applications/com.panitacraft.client.desktop' "$work/contents"

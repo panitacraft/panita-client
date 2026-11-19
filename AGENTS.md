@@ -197,7 +197,7 @@ PanitaClient/
 ├─ versions/
 ├─ runtime/
 ├─ content/               # disposable shared pack-file cache; player-clearable
-├─ runtime-libs/          # disposable AppImage-only libdecor copy for game windows (Linux)
+├─ runtime-libs/          # disposable libdecor copy, only for an AppImage on GNOME Wayland (Linux)
 ├─ instances/{slug}/      # stable readable directory mapped to a catalog UUID
 │  ├─ instance.json       # schema 4: one UUID, catalog/status/source/settings
 │  ├─ installed.json      # schema 4 (vanilla) or 5 (modpack): exact plan and explicit installed/uninstalled status
@@ -354,17 +354,22 @@ Players must never install libdecor by hand.
 - The `.deb` depends on `libdecor-0-0` and `libdecor-0-plugin-1-cairo`. The GTK plugin cannot start
   inside the game's JVM on Ubuntu 26.04 (verified on BOX 2026-11-18: with only the GTK plugin
   there is no title bar; with the cairo plugin installed there is), so the cairo plugin is required;
-  the Arch package depends on `libdecor`. The AppImage cannot declare dependencies, so it
+  the Arch package lists `libdecor` as an optional dependency, because only GNOME on Wayland
+  needs it (KDE Plasma and wlroots compositors draw the title bar through the standard
+  decoration protocol, so SDL never uses libdecor there). The AppImage cannot declare dependencies, so it
   carries `libdecor-0.so.0`, `libdecor-cairo.so` and the license text under
   `usr/lib/panita/libdecor/`, staged at build time from the build host's apt packages
   (`scripts/linux/stage-libdecor.sh`). Never pin mirror URLs or hashes for these files.
-- Only when running as an AppImage and the host lacks libdecor or its cairo plugin, the launcher
+- Only when running as an AppImage on a Wayland session whose `XDG_CURRENT_DESKTOP` is GNOME-family
+  and the host lacks libdecor or its cairo plugin, the launcher
   copies the bundled library and plugin, always together and never mixed with the host's,
   to `runtime-libs/libdecor/` (owner-only, content-verified,
   atomic, redirected paths rejected) so they outlive the launcher mount, and gives the
   game process alone a narrow `LD_LIBRARY_PATH` holding just that directory plus
   `LIBDECOR_PLUGIN_DIR`. The AppImage variables stay removed from the game environment, and
-  the systemd path must not unset a key the launcher provides. The folder is disposable.
+  the systemd path must not unset a key the launcher provides. The folder is disposable: in every
+  other case (host libdecor present, other desktop, X11, or not an AppImage) the next Play removes
+  the files the launcher created there and leaves anything else.
 - The game receives `SDL_APP_ID=com.panitacraft.minecraft`. The launcher publishes one
   shared, `NoDisplay` desktop entry `com.panitacraft.minecraft.desktop` (owner-marked, never
   per instance) and the `com.panitacraft.minecraft` icon in the user's `~/.local/share`

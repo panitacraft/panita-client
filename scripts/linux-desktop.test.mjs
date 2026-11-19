@@ -83,8 +83,9 @@ test('Every Linux package provides libdecor so native Wayland windows keep their
   assert.ok(depends.includes('libdecor-0-0'));
   assert.ok(depends.includes('libdecor-0-plugin-1-cairo'));
   assert.ok(!depends.some(entry => entry.includes('libdecor-0-plugin-1-gtk')));
-  assert.match(pkgbuild, /depends=\([^)]*'libdecor'/s);
-  assert.match(arch, /grep -Fx 'depend = libdecor'/);
+  assert.doesNotMatch(pkgbuild, /depends=\([^)]*'libdecor'/s);
+  assert.match(pkgbuild, /optdepends=\('libdecor:/);
+  assert.match(arch, /optdepend = libdecor:/);
   assert.match(inspection, /libdecor-0-0/);
   // The AppImage carries the library and plugin from the build host's apt packages.
   const files = linux.bundle.linux.appimage.files;
