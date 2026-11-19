@@ -351,7 +351,9 @@ needs libdecor for its title bar on GNOME, whose compositor offers no server-sid
 decorations. Forcing SDL3 onto X11 is not allowed: it crashes Fabric 26.3 with Iris.
 Players must never install libdecor by hand.
 
-- The `.deb` depends on `libdecor-0-0` and `libdecor-0-plugin-1-cairo`. The GTK plugin cannot start
+- The `.deb` recommends `libdecor-0-0` and `libdecor-0-plugin-1-cairo` (not a hard dependency: only GNOME
+  on Wayland needs them and `apt` installs recommendations by default; a player who disables
+  recommendations loses only the title bar). The GTK plugin cannot start
   inside the game's JVM on Ubuntu 26.04 (verified on BOX 2026-11-18: with only the GTK plugin
   there is no title bar; with the cairo plugin installed there is), so the cairo plugin is required;
   the Arch package lists `libdecor` as an optional dependency, because only GNOME on Wayland

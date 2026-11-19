@@ -60,11 +60,15 @@ grep -Fq 'Panita Client.desktop' "$check_dir/control/postinst"
 grep -Fq 'StartupWMClass=panita-desktop' "$check_dir/control/postinst"
 grep -Fq "^Exec=(/usr/bin/)?panita-client %u$" "$check_dir/control/postinst"
 test ! -e "$check_dir/deb/usr/share/applications/Panita Client.desktop"
-# Native Wayland needs libdecor for window decorations on GNOME. The package
-# must pull it in so players never install it by hand.
-grep -E '^ ?Depends:.*(^|[ ,:])libdecor-0-0([ ,]|$)' "$artifact/verification/package-info.txt"
-# The GTK plugin cannot start inside the game's JVM, so the cairo plugin is required.
-grep -E '^ ?Depends:.*libdecor-0-plugin-1-cairo' "$artifact/verification/package-info.txt"
+# Only GNOME on Wayland needs libdecor for the game's title bar, so the package
+# recommends it: apt installs it by default and it is not forced on other desktops.
+# The GTK plugin cannot start inside the game's JVM, so the cairo plugin is the one named.
+grep -E '^ ?Recommends:.*(^|[ ,:])libdecor-0-0([ ,]|$)' "$artifact/verification/package-info.txt"
+grep -E '^ ?Recommends:.*libdecor-0-plugin-1-cairo' "$artifact/verification/package-info.txt"
+if grep -E '^ ?Depends:.*libdecor' "$artifact/verification/package-info.txt"; then
+  echo 'libdecor must stay a recommendation of the Debian package' >&2
+  exit 1
+fi
 
 # Exercise the exact desktop payload left by a 1.0.0 Debian installation. The
 # test root keeps the maintainer script unprivileged and isolated from the host.

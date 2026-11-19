@@ -78,11 +78,11 @@ test('Every Linux package provides libdecor so native Wayland windows keep their
   const build = await readFile('scripts/build-beta.mjs', 'utf8');
   const inspection = await readFile('scripts/linux/verify-candidate.sh', 'utf8');
   const arch = await readFile('scripts/linux/build-arch-package.sh', 'utf8');
-  const depends = linux.bundle.linux.deb.depends;
+  const { depends, recommends } = linux.bundle.linux.deb;
 
-  assert.ok(depends.includes('libdecor-0-0'));
-  assert.ok(depends.includes('libdecor-0-plugin-1-cairo'));
-  assert.ok(!depends.some(entry => entry.includes('libdecor-0-plugin-1-gtk')));
+  // Recommended, not required: only GNOME on Wayland needs it, and apt installs it by default.
+  assert.deepEqual(recommends, ['libdecor-0-0', 'libdecor-0-plugin-1-cairo']);
+  assert.ok(!depends.some(entry => entry.includes('libdecor')));
   assert.doesNotMatch(pkgbuild, /depends=\([^)]*'libdecor'/s);
   assert.match(pkgbuild, /optdepends=\('libdecor:/);
   assert.match(arch, /optdepend = libdecor:/);
