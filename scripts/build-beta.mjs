@@ -60,6 +60,9 @@ const destination = join(root, loaderValidation ? 'target/loader-validation' : r
 console.log(`Unsigned ${loaderValidation ? 'internal loader validation' : release ? 'release' : ciUnsigned ? 'CI validation' : 'beta'}: ${config.version} (${bundles.map(([bundle]) => bundle).join(', ')})\nSource: ${revision}\nOutput: ${destination}`);
 if (args.includes('--check')) process.exit(0);
 
+// The AppImage carries libdecor for hosts that lack it; stage it from the build host's apt packages.
+if (os === 'linux') run('bash', [join(root, 'scripts/linux/stage-libdecor.sh')]);
+
 // No OS code signing (the configuration disables it) and no publication is performed. Tauri
 // retains the existing application identity. Updater signing needs TAURI_SIGNING_PRIVATE_KEY
 // and is skipped for internal loader-validation and ephemeral CI-validation builds, which are

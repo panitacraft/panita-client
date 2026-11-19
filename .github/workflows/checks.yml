@@ -24,7 +24,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y build-essential ca-certificates curl wget file git xz-utils pkg-config libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf desktop-file-utils xdg-utils
+          sudo apt-get install --no-install-recommends -y build-essential ca-certificates curl wget file git xz-utils pkg-config libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf desktop-file-utils xdg-utils libdecor-0-0 libdecor-0-plugin-1-cairo
       - uses: actions/setup-node@v7.1.0
         with:
           node-version: '24.16.0'

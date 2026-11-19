@@ -60,6 +60,15 @@ grep -Fq 'Panita Client.desktop' "$check_dir/control/postinst"
 grep -Fq 'StartupWMClass=panita-desktop' "$check_dir/control/postinst"
 grep -Fq "^Exec=(/usr/bin/)?panita-client %u$" "$check_dir/control/postinst"
 test ! -e "$check_dir/deb/usr/share/applications/Panita Client.desktop"
+# Only GNOME on Wayland needs libdecor for the game's title bar, so the package
+# recommends it: apt installs it by default and it is not forced on other desktops.
+# The GTK plugin cannot start inside the game's JVM, so the cairo plugin is the one named.
+grep -E '^ ?Recommends:.*(^|[ ,:])libdecor-0-0([ ,]|$)' "$artifact/verification/package-info.txt"
+grep -E '^ ?Recommends:.*libdecor-0-plugin-1-cairo' "$artifact/verification/package-info.txt"
+if grep -E '^ ?Depends:.*libdecor' "$artifact/verification/package-info.txt"; then
+  echo 'libdecor must stay a recommendation of the Debian package' >&2
+  exit 1
+fi
 
 # Exercise the exact desktop payload left by a 1.0.0 Debian installation. The
 # test root keeps the maintainer script unprivileged and isolated from the host.
@@ -143,6 +152,15 @@ if grep -Fq 'Exec=/usr/bin/panita-client' "$appimage_desktop" "$packaged_appimag
   exit 1
 fi
 test -f squashfs-root/usr/share/icons/hicolor/512x512/apps/panita-client.png
+# An AppImage cannot declare dependencies, so it carries libdecor for hosts that
+# lack it. The launcher copies these files to its own data directory at run time.
+libdecor_dir=squashfs-root/usr/lib/panita/libdecor
+for bundled in libdecor-0.so.0 plugins-1/libdecor-cairo.so; do
+  test -f "$libdecor_dir/$bundled"
+  test ! -L "$libdecor_dir/$bundled"
+  LC_ALL=C file -b -- "$libdecor_dir/$bundled" | grep -Eq '^ELF 64-bit LSB shared object, x86-64'
+done
+test -s "$libdecor_dir/copyright"
 file "$appimage" squashfs-root/usr/bin/panita-client > "$artifact/verification/appimage-info.txt"
 test ! -e /usr/bin/panita-client
 test -x /usr/bin/test

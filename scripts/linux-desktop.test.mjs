@@ -71,6 +71,36 @@ test('Linux desktop identity matches the packaged executable and icon theme', as
   assert.match(postInstall, /Exec=\(\/usr\/bin\/\)\?panita-client %u/);
 });
 
+test('Every Linux package provides libdecor so native Wayland windows keep their title bar', async () => {
+  const linux = await readJson('desktop/tauri.linux.conf.json');
+  const pkgbuild = await readFile('scripts/linux/arch/PKGBUILD', 'utf8');
+  const stage = await readFile('scripts/linux/stage-libdecor.sh', 'utf8');
+  const build = await readFile('scripts/build-beta.mjs', 'utf8');
+  const inspection = await readFile('scripts/linux/verify-candidate.sh', 'utf8');
+  const arch = await readFile('scripts/linux/build-arch-package.sh', 'utf8');
+  const { depends, recommends } = linux.bundle.linux.deb;
+
+  // Recommended, not required: only GNOME on Wayland needs it, and apt installs it by default.
+  assert.deepEqual(recommends, ['libdecor-0-0', 'libdecor-0-plugin-1-cairo']);
+  assert.ok(!depends.some(entry => entry.includes('libdecor')));
+  assert.doesNotMatch(pkgbuild, /depends=\([^)]*'libdecor'/s);
+  assert.match(pkgbuild, /optdepends=\('libdecor:/);
+  assert.match(arch, /optdepend = libdecor:/);
+  assert.match(inspection, /libdecor-0-0/);
+  // The AppImage carries the library and plugin from the build host's apt packages.
+  const files = linux.bundle.linux.appimage.files;
+  assert.deepEqual(Object.keys(files).sort(), [
+    '/usr/lib/panita/libdecor/copyright',
+    '/usr/lib/panita/libdecor/libdecor-0.so.0',
+    '/usr/lib/panita/libdecor/plugins-1/libdecor-cairo.so',
+  ]);
+  for (const source of Object.values(files)) assert.match(source, /^\.\.\/target\/linux-libdecor\//);
+  assert.match(stage, /libdecor-0-plugin-1-cairo/);
+  assert.doesNotMatch(stage, /https?:\/\/|sha256sum/);
+  assert.match(build, /stage-libdecor\.sh/);
+  assert.match(inspection, /usr\/lib\/panita\/libdecor/);
+});
+
 test('Linux updater relaunch is sanitized and deferred until final exit', async () => {
   const updater = await readFile('desktop/src/update_commands.rs', 'utf8');
   const desktop = await readFile('desktop/src/lib.rs', 'utf8');
@@ -130,4 +160,22 @@ test('Linux AppImage icon inspection follows a packaged icon symlink', {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('Minecraft windows share one hidden desktop entry that matches the game application ID', async () => {
+  const window = await readFile('crates/launcher-core/src/minecraft/linux_window.rs', 'utf8');
+  const identity = await readFile('desktop/src/linux_game_identity.rs', 'utf8');
+  const bridge = await readFile('desktop/src/protocol.rs', 'utf8');
+  const play = await readFile('crates/launcher-core/src/minecraft/play.rs', 'utf8');
+
+  assert.match(window, /pub\(super\) const APP_ID: &str = "com\.panitacraft\.minecraft";/);
+  assert.match(window, /"SDL_APP_ID"/);
+  assert.match(identity, /const ENTRY_ID: &str = "com\.panitacraft\.minecraft\.desktop";/);
+  assert.match(identity, /StartupWMClass=com\.panitacraft\.minecraft\\n/);
+  assert.match(identity, /NoDisplay=true/);
+  assert.match(identity, /Icon=com\.panitacraft\.minecraft\\n/);
+  assert.match(window, /const ICON_FILE: &str = "com\.panitacraft\.minecraft\.png";/);
+  assert.match(identity, /const ICON_FILE: &str = "com\.panitacraft\.minecraft\.png";/);
+  assert.match(bridge, /linux_game_identity::publish/);
+  assert.match(play, /publish_minecraft_icons/);
 });

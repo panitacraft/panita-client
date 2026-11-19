@@ -160,6 +160,62 @@ fn appimage_cleanup_is_conditional_and_keeps_desktop_session_access() {
     )));
 }
 
+#[test]
+fn appimage_scrub_drops_entries_below_the_mount_and_keeps_host_entries_in_order() {
+    let appdir = std::path::Path::new("/tmp/.mount_panitaXYZ");
+    let environment = [
+        (
+            "XDG_DATA_DIRS",
+            "/tmp/.mount_panitaXYZ/usr/share/:/tmp/.mount_panitaXYZ/usr/share:/usr/share/ubuntu:/usr/local/share/:/usr/share/",
+        ),
+        (
+            "GTK_IM_MODULE_FILE",
+            "/tmp/.mount_panitaXYZ//usr/lib/gtk-3.0/3.0.0/immodules.cache",
+        ),
+        ("PATH", "/tmp/.mount_panitaXYZ/usr/bin:/usr/bin"),
+        ("GTK_THEME", "Adwaita:dark"),
+        ("HOME", "/home/player"),
+        // The mount name only appears inside a longer, unrelated entry.
+        ("NOTE", "/tmp/.mount_panitaXYZ-backup/share"),
+    ]
+    .map(|(key, value)| (OsString::from(key), OsString::from(value)));
+    let changes = scrub_appdir(environment, appdir);
+    assert_eq!(
+        changes,
+        [
+            (
+                OsString::from("XDG_DATA_DIRS"),
+                Some(OsString::from(
+                    "/usr/share/ubuntu:/usr/local/share/:/usr/share/"
+                ))
+            ),
+            (OsString::from("GTK_IM_MODULE_FILE"), None),
+            (OsString::from("PATH"), Some(OsString::from("/usr/bin"))),
+        ]
+    );
+    assert!(scrub_appdir([], std::path::Path::new("")).is_empty());
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn appimage_unsets_skip_keys_the_launcher_provides_for_the_game() {
+    let mut builder = tokio::process::Command::new("/usr/bin/systemd-run");
+    builder.env("LD_LIBRARY_PATH", "/data/runtime-libs/libdecor");
+    unset_appimage_properties(&mut builder, true);
+    let args: Vec<_> = builder
+        .as_std()
+        .get_args()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect();
+    assert!(!args.contains(&"--property=UnsetEnvironment=LD_LIBRARY_PATH".to_owned()));
+    assert!(args.contains(&"--property=UnsetEnvironment=LD_PRELOAD".to_owned()));
+    assert!(args.contains(&"--property=UnsetEnvironment=GTK_PATH".to_owned()));
+
+    let mut outside = tokio::process::Command::new("/usr/bin/systemd-run");
+    unset_appimage_properties(&mut outside, false);
+    assert_eq!(outside.as_std().get_args().count(), 0);
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn systemd_service_builder_preserves_io_contract_without_exposing_environment_values() {
@@ -174,7 +230,7 @@ fn systemd_service_builder_preserves_io_contract_without_exposing_environment_va
         run: "/usr/bin/systemd-run".into(),
         control: "/usr/bin/systemctl".into(),
     };
-    let (builder, control) = systemd_builder(&launch, operation, &tools);
+    let (builder, control) = systemd_builder(&launch, operation, &tools, &[]);
     let args: Vec<_> = builder
         .as_std()
         .get_args()
@@ -227,7 +283,7 @@ fn fallback_runner_uses_literal_arguments_and_an_owned_process_group() {
         args: vec!["literal;argument".into(), "$HOME".into()],
         redactions: vec![],
     };
-    let (builder, control) = fallback_builder(&launch).unwrap_or_else(|_| panic!("fallback"));
+    let (builder, control) = fallback_builder(&launch, &[]).unwrap_or_else(|_| panic!("fallback"));
     let args: Vec<_> = builder.as_std().get_args().collect();
     assert_eq!(args[0], "-c");
     assert_eq!(args[2], "panita-minecraft-runner");
@@ -255,7 +311,7 @@ fn fallback_fixture_command(test: &str) -> LaunchCommand {
 #[tokio::test]
 async fn fallback_runner_preserves_output_and_exit_status() {
     let launch = fallback_fixture_command("child_output_fixture");
-    let (mut builder, _) = fallback_builder(&launch).unwrap_or_else(|_| panic!("fallback"));
+    let (mut builder, _) = fallback_builder(&launch, &[]).unwrap_or_else(|_| panic!("fallback"));
     let mut child = builder.spawn().unwrap_or_else(|_| panic!("spawn"));
     let stdin_guard = child.stdin.take().unwrap_or_else(|| panic!("stdin guard"));
     let mut stdout = child.stdout.take().unwrap_or_else(|| panic!("stdout"));
@@ -288,7 +344,7 @@ async fn fallback_runner_preserves_output_and_exit_status() {
 #[tokio::test]
 async fn fallback_watchdog_terminates_the_group_when_supervision_disappears() {
     let launch = fallback_fixture_command("child_sleep_fixture");
-    let (mut builder, _) = fallback_builder(&launch).unwrap_or_else(|_| panic!("fallback"));
+    let (mut builder, _) = fallback_builder(&launch, &[]).unwrap_or_else(|_| panic!("fallback"));
     let mut child = builder.spawn().unwrap_or_else(|_| panic!("spawn"));
     let stdin_guard = child.stdin.take().unwrap_or_else(|| panic!("stdin guard"));
     drop(stdin_guard);
@@ -303,7 +359,8 @@ async fn fallback_watchdog_terminates_the_group_when_supervision_disappears() {
 #[tokio::test]
 async fn fallback_graceful_stop_targets_java_and_reaps_the_runner() {
     let launch = fallback_fixture_command("child_sleep_fixture");
-    let (mut builder, control) = fallback_builder(&launch).unwrap_or_else(|_| panic!("fallback"));
+    let (mut builder, control) =
+        fallback_builder(&launch, &[]).unwrap_or_else(|_| panic!("fallback"));
     let mut child = builder.spawn().unwrap_or_else(|_| panic!("spawn"));
     let stdin_guard = child.stdin.take().unwrap_or_else(|| panic!("stdin guard"));
     tokio::time::sleep(Duration::from_millis(50)).await;

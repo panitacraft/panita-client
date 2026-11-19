@@ -8,6 +8,7 @@ license=('GPL-3.0-or-later')
 depends=('cairo' 'gdk-pixbuf2' 'glib2' 'gtk3' 'pango' 'webkit2gtk-4.1'
          'openssl' 'gcc-libs' 'glibc' 'xdg-utils' 'hicolor-icon-theme' 'desktop-file-utils'
          'libayatana-appindicator')
+optdepends=('libdecor: title bar for the game window on GNOME Wayland')
 options=('!strip' '!debug' '!emptydirs')
 source=('payload.tar')
 sha256sums=("${PANITA_PAYLOAD_SHA256:?}")

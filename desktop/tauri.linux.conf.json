@@ -12,11 +12,19 @@
     "linux": {
       "deb": {
         "depends": ["xdg-utils", "libayatana-appindicator3-1"],
+        "recommends": ["libdecor-0-0", "libdecor-0-plugin-1-cairo"],
         "desktopTemplate": "resources/linux/panita.desktop",
         "files": {
           "/usr/share/applications/com.panitacraft.client.desktop": "resources/linux/com.panitacraft.client.desktop"
         },
         "postInstallScript": "resources/linux/deb-postinstall.sh"
+      },
+      "appimage": {
+        "files": {
+          "/usr/lib/panita/libdecor/libdecor-0.so.0": "../target/linux-libdecor/libdecor-0.so.0",
+          "/usr/lib/panita/libdecor/plugins-1/libdecor-cairo.so": "../target/linux-libdecor/plugins-1/libdecor-cairo.so",
+          "/usr/lib/panita/libdecor/copyright": "../target/linux-libdecor/copyright"
+        }
       }
     }
   }
