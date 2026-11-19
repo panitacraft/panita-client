@@ -11,6 +11,12 @@
 //! inside the game's JVM on Ubuntu 26.04 and, when it is the only plugin, the window
 //! gets no title bar; libdecor falls back to cairo when GTK fails. The bundled
 //! library and plugin are always used together, never mixed with the host's.
+//!
+//! Most compositors (KDE Plasma, wlroots) draw the title bar themselves through the
+//! standard decoration protocol, and SDL then does not use libdecor at all. Only
+//! GNOME's compositor does not, so the bundled copy is used only for an AppImage on
+//! a GNOME Wayland session whose host lacks libdecor. In every other case a copy
+//! left by an earlier launch is removed.
 // Only Linux launches the game through this module; other platforms compile the
 // platform-neutral planning code solely to run its unit tests.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -41,19 +47,38 @@ pub(super) struct HostLibdecor {
     pub(super) cairo_plugin: bool,
 }
 
+/// The parts of the launch session that decide whether libdecor is needed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Session {
+    pub(super) appimage: bool,
+    pub(super) wayland: bool,
+    pub(super) gnome: bool,
+}
+
+/// XDG_CURRENT_DESKTOP is a colon-separated list such as `ubuntu:GNOME` or
+/// `GNOME-Classic:GNOME`.
+pub(super) fn desktop_is_gnome(desktop: Option<&str>) -> bool {
+    desktop.is_some_and(|desktop| {
+        desktop
+            .split(':')
+            .any(|entry| entry.to_ascii_uppercase().starts_with("GNOME"))
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Decorations {
-    /// The host provides libdecor and its cairo plugin; leave the game environment alone.
-    Host,
+    /// Leave the game environment alone and remove any earlier bundled copy.
+    NotNeeded,
     /// Expose the bundled library and cairo plugin as a matching pair.
     Bundled,
 }
 
-pub(super) fn decorations(host: HostLibdecor) -> Decorations {
-    if host.library && host.cairo_plugin {
-        Decorations::Host
-    } else {
+pub(super) fn decorations(session: Session, host: HostLibdecor) -> Decorations {
+    let host_is_complete = host.library && host.cairo_plugin;
+    if session.appimage && session.wayland && session.gnome && !host_is_complete {
         Decorations::Bundled
+    } else {
+        Decorations::NotNeeded
     }
 }
 
@@ -75,7 +100,7 @@ pub(super) fn host_libdecor_in(directories: &[&Path]) -> HostLibdecor {
 pub(super) fn environment_for(support: Decorations, directory: &Path) -> Vec<(OsString, OsString)> {
     let plugins = directory.join(PLUGIN_DIRECTORY);
     match support {
-        Decorations::Host => Vec::new(),
+        Decorations::NotNeeded => Vec::new(),
         Decorations::Bundled => vec![
             // A single narrow directory that holds only libdecor, so no host
             // library can be shadowed. The launcher's AppImage paths stay removed.
@@ -183,6 +208,42 @@ mod runtime_copy {
             0o700,
         )?;
         Ok(destination.to_owned())
+    }
+
+    fn remove_owned_files(directory: &Path, known: &str) {
+        let Ok(entries) = fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let ours = name == known || (name.starts_with('.') && name.ends_with(".tmp"));
+            // DirEntry::file_type does not follow links, so a redirected entry is skipped.
+            if ours && entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+    }
+
+    fn is_real_directory(path: &Path) -> bool {
+        fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_dir())
+    }
+
+    /// Remove only what `publish` creates. Redirected entries, other files and
+    /// non-empty directories are left alone, and failures are ignored.
+    pub(super) fn remove(destination: &Path) {
+        if !is_real_directory(destination) {
+            return;
+        }
+        let plugins = destination.join(PLUGIN_DIRECTORY);
+        if is_real_directory(&plugins) {
+            remove_owned_files(&plugins, PLUGIN_NAME);
+            let _ = fs::remove_dir(&plugins);
+        }
+        remove_owned_files(destination, LIBRARY_NAME);
+        let _ = fs::remove_dir(destination);
+        if let Some(parent) = destination.parent() {
+            let _ = fs::remove_dir(parent);
+        }
     }
 }
 
@@ -345,31 +406,28 @@ fn bundled_directory() -> Option<PathBuf> {
     directory.join(LIBRARY_NAME).is_file().then_some(directory)
 }
 
-#[cfg(target_os = "linux")]
-fn appimage_decorations(paths: &crate::paths::AppPaths) -> Vec<(OsString, OsString)> {
-    let directories: Vec<&Path> = HOST_LIBRARY_DIRECTORIES.iter().map(Path::new).collect();
-    let support = decorations(host_libdecor_in(&directories));
-    if support == Decorations::Host {
-        return Vec::new();
-    }
-    let Some(source) = bundled_directory() else {
-        return Vec::new();
-    };
-    let destination = paths.root().join("runtime-libs").join("libdecor");
-    match runtime_copy::publish(&source, &destination) {
-        Ok(directory) => environment_for(support, &directory),
-        // Without a verified private copy the game still starts, only without a title bar.
-        Err(_) => Vec::new(),
-    }
-}
-
-/// Environment that gives the game window a stable identity and, inside an
-/// AppImage, working decorations. Deb and Arch rely on package dependencies.
+/// Environment that gives the game window a stable identity and, where needed,
+/// working decorations. Deb and Arch rely on package dependencies instead.
 #[cfg(target_os = "linux")]
 pub(super) fn game_window_environment(paths: &crate::paths::AppPaths) -> Vec<(OsString, OsString)> {
     let mut environment = vec![("SDL_APP_ID".into(), APP_ID.into())];
-    if std::env::var_os("APPIMAGE").is_some() {
-        environment.extend(appimage_decorations(paths));
+    let session = Session {
+        appimage: std::env::var_os("APPIMAGE").is_some(),
+        wayland: std::env::var_os("WAYLAND_DISPLAY").is_some_and(|value| !value.is_empty()),
+        gnome: desktop_is_gnome(std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref()),
+    };
+    let directories: Vec<&Path> = HOST_LIBRARY_DIRECTORIES.iter().map(Path::new).collect();
+    let destination = paths.root().join("runtime-libs").join("libdecor");
+    match decorations(session, host_libdecor_in(&directories)) {
+        Decorations::NotNeeded => runtime_copy::remove(&destination),
+        Decorations::Bundled => {
+            // Without a verified private copy the game still starts, only without a title bar.
+            if let Some(source) = bundled_directory()
+                && let Ok(directory) = runtime_copy::publish(&source, &destination)
+            {
+                environment.extend(environment_for(Decorations::Bundled, &directory));
+            }
+        }
     }
     environment
 }
@@ -388,18 +446,53 @@ mod tests {
     }
 
     #[test]
-    fn host_support_decides_what_the_game_receives() {
+    fn libdecor_is_bundled_only_for_an_appimage_on_gnome_wayland_without_a_complete_host() {
         let host = |library, cairo_plugin| HostLibdecor {
             library,
             cairo_plugin,
         };
-        assert_eq!(decorations(host(true, true)), Decorations::Host);
+        let session = Session {
+            appimage: true,
+            wayland: true,
+            gnome: true,
+        };
+        assert_eq!(
+            decorations(session, host(false, false)),
+            Decorations::Bundled
+        );
         // A host with only the GTK plugin, or only the library, is not enough.
-        assert_eq!(decorations(host(true, false)), Decorations::Bundled);
-        assert_eq!(decorations(host(false, false)), Decorations::Bundled);
-        assert_eq!(decorations(host(false, true)), Decorations::Bundled);
+        assert_eq!(
+            decorations(session, host(true, false)),
+            Decorations::Bundled
+        );
+        assert_eq!(
+            decorations(session, host(false, true)),
+            Decorations::Bundled
+        );
+        assert_eq!(
+            decorations(session, host(true, true)),
+            Decorations::NotNeeded
+        );
+        // Any other session never needs it, even with nothing installed.
+        let none = host(false, false);
+        for other in [
+            Session {
+                appimage: false,
+                ..session
+            },
+            Session {
+                wayland: false,
+                ..session
+            },
+            Session {
+                gnome: false,
+                ..session
+            },
+        ] {
+            assert_eq!(decorations(other, none), Decorations::NotNeeded);
+        }
         let directory = Path::new("/data/runtime-libs/libdecor");
-        assert!(environment_for(Decorations::Host, directory).is_empty());
+        assert!(environment_for(Decorations::NotNeeded, directory).is_empty());
         // The bundled library and plugin always travel together.
         assert_eq!(
             environment_for(Decorations::Bundled, directory),
@@ -414,6 +507,17 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn only_gnome_family_desktops_need_the_bundled_decorations() {
+        for desktop in ["GNOME", "ubuntu:GNOME", "GNOME-Classic:GNOME", "gnome"] {
+            assert!(desktop_is_gnome(Some(desktop)), "{desktop}");
+        }
+        for desktop in ["KDE", "X-Cinnamon", "sway", "Hyprland", "COSMIC", ""] {
+            assert!(!desktop_is_gnome(Some(desktop)), "{desktop}");
+        }
+        assert!(!desktop_is_gnome(None));
     }
 
     #[test]
@@ -447,6 +551,50 @@ mod tests {
             }
         );
         let _ = std::fs::remove_dir_all(host);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn removing_the_copy_deletes_only_what_the_launcher_created() {
+        let root = temporary("remove");
+        let source = root.join("bundle");
+        std::fs::create_dir_all(source.join(PLUGIN_DIRECTORY)).unwrap_or_else(|_| panic!("source"));
+        std::fs::write(source.join(LIBRARY_NAME), b"library").unwrap_or_else(|_| panic!("library"));
+        std::fs::write(source.join(PLUGIN_DIRECTORY).join(PLUGIN_NAME), b"plugin")
+            .unwrap_or_else(|_| panic!("plugin"));
+        let destination = root.join("runtime-libs").join("libdecor");
+
+        // Nothing to remove is not an error.
+        runtime_copy::remove(&destination);
+        runtime_copy::publish(&source, &destination).unwrap_or_else(|_| panic!("publish"));
+        std::fs::write(destination.join(".libdecor-0.so.0.abc.tmp"), b"half")
+            .unwrap_or_else(|_| panic!("leftover"));
+        runtime_copy::remove(&destination);
+        assert!(!root.join("runtime-libs").exists());
+
+        // A file the player or another tool put there keeps its directory alive.
+        runtime_copy::publish(&source, &destination).unwrap_or_else(|_| panic!("publish again"));
+        std::fs::write(destination.join("notes.txt"), b"keep").unwrap_or_else(|_| panic!("notes"));
+        runtime_copy::remove(&destination);
+        assert!(!destination.join(LIBRARY_NAME).exists());
+        assert!(!destination.join(PLUGIN_DIRECTORY).exists());
+        assert_eq!(
+            std::fs::read(destination.join("notes.txt")).ok().as_deref(),
+            Some(&b"keep"[..])
+        );
+
+        // A redirected directory is never followed or removed.
+        let target = root.join("target");
+        std::fs::create_dir_all(&target).unwrap_or_else(|_| panic!("target"));
+        std::fs::write(target.join(LIBRARY_NAME), b"elsewhere").unwrap_or_else(|_| panic!("file"));
+        let linked = root.join("linked").join("libdecor");
+        std::fs::create_dir_all(linked.parent().unwrap_or(&root))
+            .unwrap_or_else(|_| panic!("parent"));
+        std::os::unix::fs::symlink(&target, &linked).unwrap_or_else(|_| panic!("symlink"));
+        runtime_copy::remove(&linked);
+        assert!(target.join(LIBRARY_NAME).exists());
+        assert!(std::fs::symlink_metadata(&linked).is_ok());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[cfg(target_os = "linux")]
