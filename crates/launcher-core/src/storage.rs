@@ -108,6 +108,8 @@ impl PrivateStore {
         let store = Self::open(paths)?;
         #[cfg(windows)]
         windows::migrate(&store)?;
+        #[cfg(target_os = "linux")]
+        repair_creation_mode(&store.root)?;
         Ok(store)
     }
 
@@ -224,6 +226,41 @@ impl PrivateStore {
         }
         Ok(())
     }
+}
+
+/// Create the application data root through the private store rather than the
+/// process umask. Missing ancestors are created normally; only the root is private.
+/// Call this before anything else can create the root with ordinary permissions.
+pub fn ensure_application_root(root: &Path) -> Result<(), CoreError> {
+    if let Some(parent) = root.parent() {
+        std::fs::create_dir_all(parent).map_err(map_io_error)?;
+    }
+    PrivateDir::ensure(root)
+        .map(drop)
+        .map_err(map_private_error)
+}
+
+/// Retire the one mode earlier builds produced themselves: they created the root
+/// with the umask, which leaves `0775` where the default umask is `0002`. Only a
+/// root owned by this user in exactly that shape is tightened, through the
+/// descriptor already held, so the check cannot race a replaced path. Any other
+/// mode or owner stays rejected by the credential namespace check.
+#[cfg(target_os = "linux")]
+fn repair_creation_mode(root: &PrivateDir) -> Result<(), CoreError> {
+    use std::os::fd::AsFd;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let directory = File::from(root.as_fd().try_clone_to_owned().map_err(map_io_error)?);
+    let metadata = directory.metadata().map_err(map_io_error)?;
+    let mode = metadata.mode() & 0o7777;
+    if !metadata.is_dir()
+        || metadata.uid() != rustix::process::geteuid().as_raw()
+        || !matches!(mode, 0o775 | 0o777)
+    {
+        return Ok(());
+    }
+    directory
+        .set_permissions(std::fs::Permissions::from_mode(mode & !0o022))
+        .map_err(map_io_error)
 }
 
 fn is_atomic_temp_name(name: &str) -> bool {
@@ -365,6 +402,76 @@ mod tests {
         drop(data);
         drop(store);
         std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+    }
+
+    #[test]
+    fn application_root_is_created_privately_and_accepts_credentials() {
+        let base = std::env::temp_dir().join(format!("panita-root-{}", Uuid::new_v4()));
+        let root = base.join("missing").join("PanitaClient");
+        ensure_application_root(&root).unwrap_or_else(|_| panic!("root"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&root)
+                .unwrap_or_else(|_| panic!("root metadata"))
+                .permissions()
+                .mode()
+                & 0o7777;
+            assert_eq!(mode, 0o700);
+        }
+        ensure_application_root(&root).unwrap_or_else(|_| panic!("existing root"));
+        let paths = AppPaths::new(&root).unwrap_or_else(|_| panic!("paths"));
+        let store = PrivateStore::open_application(&paths).unwrap_or_else(|_| panic!("store"));
+        // Reading an absent credential file still runs the namespace check.
+        for name in ["accounts.json", "panita-session.json"] {
+            assert!(matches!(store.read(name), Ok(None)));
+        }
+        drop(store);
+        std::fs::remove_dir_all(base).unwrap_or_else(|_| panic!("cleanup"));
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn root_created_with_the_umask_is_repaired_only_in_its_known_shape() {
+        use std::os::unix::fs::PermissionsExt;
+        for (before, repaired) in [(0o775, Some(0o755)), (0o777, Some(0o755)), (0o770, None)] {
+            let paths = test_paths();
+            let store = PrivateStore::open(&paths).unwrap_or_else(|_| panic!("private store"));
+            let name = "panita-session.json";
+            store
+                .transaction(name, |_| Ok((b"synthetic-private-data".to_vec(), ())))
+                .unwrap_or_else(|_| panic!("private fixture"));
+            drop(store);
+            std::fs::set_permissions(paths.root(), std::fs::Permissions::from_mode(before))
+                .unwrap_or_else(|_| panic!("umask-shaped root"));
+            let store = PrivateStore::open_application(&paths)
+                .unwrap_or_else(|_| panic!("open application"));
+            let mode = std::fs::metadata(paths.root())
+                .unwrap_or_else(|_| panic!("root metadata"))
+                .permissions()
+                .mode()
+                & 0o7777;
+            match repaired {
+                Some(expected) => {
+                    assert_eq!(mode, expected);
+                    assert_eq!(
+                        store.read(name).ok().flatten().as_deref(),
+                        Some(b"synthetic-private-data".as_slice())
+                    );
+                }
+                None => {
+                    assert_eq!(mode, before);
+                    assert_eq!(
+                        store.read(name).err().map(|error| error.code()),
+                        Some(ErrorCode::UnsafePermissions)
+                    );
+                }
+            }
+            drop(store);
+            std::fs::set_permissions(paths.root(), std::fs::Permissions::from_mode(0o700))
+                .unwrap_or_else(|_| panic!("restore"));
+            std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+        }
     }
 
     #[test]

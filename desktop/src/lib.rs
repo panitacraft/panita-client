@@ -122,11 +122,12 @@ async fn open_logs_folder(
         return Err(launcher_core::error::ErrorCode::InvalidData);
     }
     // Fixed location under the data root; the frontend supplies no path.
-    let directory = app
+    let root = app
         .path()
         .app_data_dir()
-        .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?
-        .join("logs");
+        .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
+    launcher_core::storage::ensure_application_root(&root).map_err(|error| error.code())?;
+    let directory = root.join("logs");
     std::fs::create_dir_all(&directory)
         .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
     folder_opener::open(app, directory).await.map(|_| true)
@@ -267,7 +268,7 @@ pub fn run() {
             tray::install(app.handle());
             // Session log files are best effort: a failure keeps in-memory diagnostics.
             if let Ok(root) = app.path().app_data_dir() {
-                let _ = std::fs::create_dir_all(&root);
+                let _ = launcher_core::storage::ensure_application_root(&root);
                 let mut header = vec![
                     format!("launcher version={}", env!("CARGO_PKG_VERSION")),
                     format!("platform arch={}", std::env::consts::ARCH),
