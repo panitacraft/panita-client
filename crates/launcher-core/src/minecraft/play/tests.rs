@@ -427,7 +427,9 @@ async fn complete_offline_attempt_requires_new_warning_confirmation_every_time()
             );
         }
         previous = Some(current);
-        assert!(LaunchLease::acquire(&paths, id).is_ok());
+        LaunchLease::acquire(&paths, id).unwrap_or_else(|error| {
+            panic!("reacquire launch lease after attempt {attempt}: {error}")
+        });
     }
     drop(accounts);
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
