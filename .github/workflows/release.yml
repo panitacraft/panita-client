@@ -125,7 +125,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y build-essential ca-certificates curl wget file git xz-utils pkg-config libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf desktop-file-utils xdg-utils
+          sudo apt-get install --no-install-recommends -y build-essential ca-certificates curl wget file git xz-utils pkg-config libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf desktop-file-utils xdg-utils libdecor-0-0 libdecor-0-plugin-1-cairo
           sudo apt-get install --no-install-recommends -y makepkg=6.0.2-6ubuntu2 pacman-package-manager=6.0.2-6ubuntu2 fakeroot libarchive-tools zstd
           sudo install -d /var/lib/pacman/local /var/lib/pacman/sync
           sudo pacman-db-upgrade
@@ -135,8 +135,22 @@ jobs:
         run: pnpm --dir ui test
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
+      - name: Prepare private Windows test directory
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $testTemp = Join-Path $env:RUNNER_TEMP 'panita-tests'
+          New-Item -ItemType Directory -Path $testTemp -Force | Out-Null
+          $testSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          & icacls.exe $testTemp '/inheritance:r' '/grant:r' "*${testSid}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F'
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to prepare the private test directory.' }
+          "TEMP=$testTemp" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TMP=$testTemp" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Test Rust
         run: cargo test --workspace --locked
+      - name: Test Windows filesystem dependency
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path vendor/private-fs/Cargo.toml --lib --locked
       - name: Test Linux filesystem dependency
         if: runner.os == 'Linux'
         run: |

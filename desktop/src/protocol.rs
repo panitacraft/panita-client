@@ -3,6 +3,9 @@ use launcher_core::error::ErrorCode;
 #[cfg(target_os = "linux")]
 use tauri::Manager;
 #[cfg(any(target_os = "linux", test))]
+#[path = "linux_game_identity.rs"]
+mod linux_game_identity;
+#[cfg(any(target_os = "linux", test))]
 #[path = "linux_protocol.rs"]
 mod linux_protocol;
 
@@ -48,18 +51,65 @@ pub fn register(_app: &tauri::AppHandle) -> Result<(), ErrorCode> {
 }
 
 #[cfg(target_os = "linux")]
-pub fn register(app: &tauri::AppHandle) -> Result<(), ErrorCode> {
+fn linux_paths(
+    app: &tauri::AppHandle,
+) -> Result<(std::path::PathBuf, std::path::PathBuf, std::path::PathBuf), ErrorCode> {
     let executable = app
         .env()
         .appimage
         .map(std::path::PathBuf::from)
         .unwrap_or(std::env::current_exe().map_err(|_| ErrorCode::CallbackRegistrationFailed)?);
-    let directory = app
+    let data = app
         .path()
         .data_dir()
-        .map_err(|_| ErrorCode::CallbackRegistrationFailed)?
-        .join("applications");
-    linux_protocol::register(&executable, &directory)
+        .map_err(|_| ErrorCode::CallbackRegistrationFailed)?;
+    let directory = data.join("applications");
+    let icons = data.join("icons/hicolor/512x512/apps");
+    Ok((executable, directory, icons))
+}
+
+#[cfg(target_os = "linux")]
+pub struct PendingDesktopIntegration {
+    executable: std::path::PathBuf,
+    directory: std::path::PathBuf,
+    changed: bool,
+}
+
+/// Publish the canonical launcher identity before GTK maps the first window.
+/// This phase intentionally performs local, idempotent file operations only.
+#[cfg(target_os = "linux")]
+pub fn prepare_desktop_integration(
+    app: &tauri::AppHandle,
+) -> Result<PendingDesktopIntegration, ErrorCode> {
+    let (executable, directory, icons) = linux_paths(app)?;
+    let mut changed = linux_protocol::prepare(&executable, &directory, &icons)
+        .map_err(|_| ErrorCode::CallbackRegistrationFailed)?;
+    // The shared Minecraft window identity is best effort and must never block
+    // the launcher: without it the game window only keeps a generic icon.
+    if let (Ok(escaped), Some(hicolor)) = (
+        linux_protocol::escaped_executable(&executable),
+        icons.ancestors().nth(2),
+    ) {
+        changed |= linux_game_identity::publish(&escaped, &directory, hicolor).unwrap_or(false);
+    }
+    Ok(PendingDesktopIntegration {
+        executable,
+        directory,
+        changed,
+    })
+}
+
+/// Refresh shell caches and migrate a legacy MIME default off the startup path.
+#[cfg(target_os = "linux")]
+pub fn finish_desktop_integration(pending: PendingDesktopIntegration) -> Result<(), ErrorCode> {
+    linux_protocol::finish_migration(&pending.executable, &pending.directory, pending.changed)
+        .map_err(|_| ErrorCode::CallbackRegistrationFailed)
+}
+
+#[cfg(target_os = "linux")]
+pub fn register(app: &tauri::AppHandle) -> Result<(), ErrorCode> {
+    let (executable, directory, icons) = linux_paths(app)?;
+    linux_protocol::register(&executable, &directory, &icons)
         .map_err(|_| ErrorCode::CallbackRegistrationFailed)
 }
 

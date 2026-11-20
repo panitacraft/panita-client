@@ -178,11 +178,20 @@ pub(crate) fn existing_parent(
     }
 }
 
-/// File handles are retained until drop, so another process cannot publish the same artifact.
+/// Holds the interprocess lock until the operation finishes.
 pub(crate) struct ArtifactLock {
     // Retain both handles: closing a duplicate on Windows can release file locks.
-    _file: std::fs::File,
+    file: std::fs::File,
     _source: private_fs::PrivateFile,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for ArtifactLock {
+    fn drop(&mut self) {
+        // A concurrent fork can retain these descriptors until its child execs.
+        // Release the flock now so the next operation can acquire it immediately.
+        let _ = self.file.unlock();
+    }
 }
 
 /// Nonblocking coordination for directory migration and local audits.
@@ -242,12 +251,13 @@ fn try_lock_inner(
     let file = native_file(&source)?;
     match file.try_lock() {
         Ok(()) => {
-            private_fs::verify_data(&file).map_err(map_private_error)?;
-            check_instance_root(root, &directory, relative, erasing)?;
-            Ok(Some(ArtifactLock {
-                _file: file,
+            let guard = ArtifactLock {
+                file,
                 _source: source,
-            }))
+            };
+            private_fs::verify_data(&guard.file).map_err(map_private_error)?;
+            check_instance_root(root, &directory, relative, erasing)?;
+            Ok(Some(guard))
         }
         Err(std::fs::TryLockError::WouldBlock) => Ok(None),
         Err(std::fs::TryLockError::Error(error)) => Err(io(error)),
@@ -283,12 +293,13 @@ pub(crate) async fn lock(
         cancel.check()?;
         match file.try_lock() {
             Ok(()) => {
-                private_fs::verify_data(&file).map_err(map_private_error)?;
-                check_instance_root(root, &directory, relative, false)?;
-                return Ok(ArtifactLock {
-                    _file: file,
+                let guard = ArtifactLock {
+                    file,
                     _source: source,
-                });
+                };
+                private_fs::verify_data(&guard.file).map_err(map_private_error)?;
+                check_instance_root(root, &directory, relative, false)?;
+                return Ok(guard);
             }
             Err(std::fs::TryLockError::WouldBlock) => tokio::select! {
                 _ = cancel.cancelled() => cancel.check()?,
@@ -1264,9 +1275,32 @@ mod tests {
                     0
                 );
             }
-            assert!(private_fs::verify_data(&guard._file).is_ok());
+            assert!(private_fs::verify_data(&guard.file).is_ok());
         }
         assert!(try_lock(paths.root(), relative).ok().flatten().is_some());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn artifact_lock_releases_while_an_inherited_descriptor_is_open() {
+        let paths = paths();
+        let relative = "locks/inherited.lock";
+        let guard = try_lock(paths.root(), relative)
+            .unwrap_or_else(|error| panic!("initial lock: {error}"))
+            .unwrap_or_else(|| panic!("lock already held"));
+        // A duplicate refers to the same open file description as a forked child.
+        let inherited = guard
+            .file
+            .try_clone()
+            .unwrap_or_else(|error| panic!("duplicate descriptor: {error}"));
+        assert!(matches!(try_lock(paths.root(), relative), Ok(None)));
+        drop(guard);
+        let next = try_lock(paths.root(), relative)
+            .unwrap_or_else(|error| panic!("reacquire lock: {error}"))
+            .unwrap_or_else(|| panic!("duplicate descriptor kept the lock held"));
+        drop(inherited);
+        drop(next);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }
 
     #[tokio::test]

@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
     build-essential ca-certificates curl wget file git xz-utils pkg-config \
     libwebkit2gtk-4.1-dev libssl-dev libxdo-dev libayatana-appindicator3-dev \
     librsvg2-dev patchelf desktop-file-utils xdg-utils \
+    libdecor-0-0 libdecor-0-plugin-1-cairo \
     && rm -rf /var/lib/apt/lists/*
 
 ARG NODE_VERSION=24.16.0

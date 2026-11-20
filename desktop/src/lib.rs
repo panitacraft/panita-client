@@ -122,11 +122,12 @@ async fn open_logs_folder(
         return Err(launcher_core::error::ErrorCode::InvalidData);
     }
     // Fixed location under the data root; the frontend supplies no path.
-    let directory = app
+    let root = app
         .path()
         .app_data_dir()
-        .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?
-        .join("logs");
+        .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
+    launcher_core::storage::ensure_application_root(&root).map_err(|error| error.code())?;
+    let directory = root.join("logs");
     std::fs::create_dir_all(&directory)
         .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
     folder_opener::open(app, directory).await.map(|_| true)
@@ -203,6 +204,8 @@ pub fn run() {
     if linux_activation::forward_from_environment(&context.config().identifier) {
         return;
     }
+    #[cfg(target_os = "linux")]
+    linux_desktop::configure_identity();
     let process = launcher_core::operation::ProcessSessionId::new();
     let logs = Arc::new(launcher_core::logging::BoundedLog::default());
     logs.record(launcher_core::logging::LogRecord {
@@ -237,12 +240,35 @@ pub fn run() {
             play_commands::restore_window(app, cwd);
         }))
         .setup(|app| {
+            let state = app.state::<DesktopState>();
+            #[cfg(target_os = "linux")]
+            match protocol::prepare_desktop_integration(app.handle()) {
+                Ok(pending) => {
+                    let logs = state.logs.clone();
+                    let process = state.process;
+                    drop(tauri::async_runtime::spawn_blocking(move || {
+                        if let Err(code) = protocol::finish_desktop_integration(pending) {
+                            logs.record(launcher_core::logging::LogRecord {
+                                process,
+                                operation: None,
+                                event: launcher_core::logging::LogEvent::DesktopIntegrationFailure(
+                                    code,
+                                ),
+                            });
+                        }
+                    }));
+                }
+                Err(code) => state.logs.record(launcher_core::logging::LogRecord {
+                    process: state.process,
+                    operation: None,
+                    event: launcher_core::logging::LogEvent::DesktopIntegrationFailure(code),
+                }),
+            }
             #[cfg(any(windows, target_os = "linux"))]
             tray::install(app.handle());
             // Session log files are best effort: a failure keeps in-memory diagnostics.
-            let state = app.state::<DesktopState>();
             if let Ok(root) = app.path().app_data_dir() {
-                let _ = std::fs::create_dir_all(&root);
+                let _ = launcher_core::storage::ensure_application_root(&root);
                 let mut header = vec![
                     format!("launcher version={}", env!("CARGO_PKG_VERSION")),
                     format!("platform arch={}", std::env::consts::ARCH),
@@ -347,10 +373,14 @@ pub fn run() {
     drop(startup_gate);
     match result {
         Ok(app) => app.run(|app, event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = event
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event
                 && play_commands::prevent_close(app)
             {
                 api.prevent_exit();
+            }
+            #[cfg(target_os = "linux")]
+            if matches!(event, tauri::RunEvent::Exit) {
+                update_commands::relaunch_after_exit(app);
             }
         }),
         Err(_) => {

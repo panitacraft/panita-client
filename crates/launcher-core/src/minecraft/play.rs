@@ -386,6 +386,11 @@ impl PendingPlay {
                 }
             } => result?,
         };
+        // The helper desktop entry needs the Minecraft icon; this never blocks a launch.
+        #[cfg(target_os = "linux")]
+        if let Ok(index) = self.installed.plan.asset_index_path() {
+            super::linux_window::publish_minecraft_icons(&self.paths, &index);
+        }
         self.cancel.commit(|| {
             self.accounts
                 .with_play_authorization(authorization, |identity| {

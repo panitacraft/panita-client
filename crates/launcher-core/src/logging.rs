@@ -76,6 +76,7 @@ pub enum LogEvent {
     /// serial, token or service response, only the fixed error code.
     ActivationFailure(ErrorCode),
     LauncherUpdateFailure(ErrorCode),
+    DesktopIntegrationFailure(ErrorCode),
     WorkflowChanged {
         request: Uuid,
         workflow: Workflow,
@@ -315,6 +316,10 @@ impl BoundedLog {
                         view.event = "launcher_update_failure";
                         view.error = Some(code);
                     }
+                    LogEvent::DesktopIntegrationFailure(code) => {
+                        view.event = "desktop_integration_failure";
+                        view.error = Some(code);
+                    }
                     LogEvent::WorkflowChanged {
                         request,
                         workflow,
@@ -410,6 +415,21 @@ mod tests {
         assert_eq!(record["error"], "session_rejected");
         assert_eq!(record["operationId"], serde_json::Value::Null);
         assert_eq!(record["workflow"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn desktop_migration_failures_expose_only_a_fixed_event_and_error_code() {
+        let log = BoundedLog::default();
+        log.record(LogRecord {
+            process: ProcessSessionId::new(),
+            operation: None,
+            event: LogEvent::DesktopIntegrationFailure(ErrorCode::CallbackRegistrationFailed),
+        });
+        let value = serde_json::to_value(log.view()).unwrap_or_else(|_| panic!("serialize"));
+        let record = &value["records"][0];
+        assert_eq!(record["event"], "desktop_integration_failure");
+        assert_eq!(record["error"], "callback_registration_failed");
+        assert_eq!(record.as_object().map(|object| object.len()), Some(7));
     }
 
     #[test]

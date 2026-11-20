@@ -80,7 +80,15 @@ pub(super) async fn start_microsoft_login(
         .transpose()
         .map_err(|_| ErrorCode::InvalidData)?;
     let accounts = controller(&state)?;
-    protocol::register(&app)?;
+    let registration = protocol::register(&app);
+    if let Err(code) = registration {
+        state.logs.record(launcher_core::logging::LogRecord {
+            process: state.process,
+            operation: None,
+            event: launcher_core::logging::LogEvent::DesktopIntegrationFailure(code),
+        });
+        return Err(code);
+    }
     state.plays.cancel_pending();
     state.plays.publish(&app);
     // Developer override accepts only this fixed mode, never an arbitrary URI.
