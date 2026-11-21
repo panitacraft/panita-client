@@ -5,6 +5,7 @@ import { Launcher } from '../src/launcher';
 import { PlayProvider } from '../src/play';
 import { PreferencesProvider } from '../src/settings';
 import { CatalogArtwork } from '../src/components/catalog-artwork';
+import logoWhite from '../src/assets/logo-white.svg';
 import { AccountAvatar, avatarUrl } from '../src/components/account-avatar';
 import { InstanceBadges } from '../src/components/instance-badges';
 import type { CatalogOverview } from '../src/preview-catalog';
@@ -198,8 +199,9 @@ test('update conflicts require explicit set-aside consent before retrying', asyn
 test('missing and failed artwork use a local fallback without removing controls', async () => {
   const { container, rerender } = render(<CatalogArtwork url="https://cdn.example.com/icon.png" />);
   fireEvent.error(container.querySelector('img')!);
-  await waitFor(() => expect(container.querySelector('svg')).not.toBeNull());
-  expect(container.querySelector('img')).toBeNull();
+  await waitFor(() => expect(container.querySelector('.instance-fallback')).not.toBeNull());
+  expect(container.querySelector('.instance-fallback')?.getAttribute('src')).toBe(logoWhite);
+  expect(container.querySelector('img[crossorigin]')).toBeNull();
   rerender(<CatalogArtwork url="https://cdn.example.com/new.png" />);
   expect(container.querySelector('img')?.getAttribute('referrerpolicy')).toBe('no-referrer');
 });
@@ -237,7 +239,18 @@ test('offline avatars stay local and Microsoft avatar failures use the same loca
   expect(container.querySelector('img')!.getAttribute('src')).toBe(fallback);
 });
 
-test('disabled status explains why both instance controls are disabled', async () => {
+test('a disabled installed instance keeps its options menu open to uninstall', async () => {
+  catalog.instances[0] = { ...first, availability: 'disabled', enabled: false };
+  const user = userEvent.setup(); mount();
+  const card = await screen.findByRole('article', { name: 'Aventura' });
+  expect((screen.getByRole('button', { name: 'No disponible para jugar' }) as HTMLButtonElement).disabled).toBe(true);
+  const options = within(card).getByRole('button', { name: 'Opciones de instancia' }) as HTMLButtonElement;
+  expect(options.disabled).toBe(false);
+  await user.click(options);
+  expect(screen.getByRole('menuitem', { name: 'Desinstalar…' })).toBeTruthy();
+});
+
+test('disabled status explains why the play control is disabled', async () => {
   catalog.instances[0] = { ...first, availability: 'disabled', enabled: false };
   mount();
   const card = await screen.findByRole('article', { name: 'Aventura' });
@@ -245,7 +258,6 @@ test('disabled status explains why both instance controls are disabled', async (
   fireEvent.focus(status);
   await screen.findByRole('tooltip', { name: 'Esta instancia está deshabilitada. Tus mundos y archivos se conservan.' });
   expect((screen.getByRole('button', { name: 'No disponible para jugar' }) as HTMLButtonElement).disabled).toBe(true);
-  expect((within(card).getByRole('button', { name: 'Opciones de instancia' }) as HTMLButtonElement).disabled).toBe(true);
   expect(screen.queryByRole('menu')).toBeNull();
 });
 
