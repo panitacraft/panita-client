@@ -13,5 +13,5 @@ export function CatalogArtwork({ url, banner = false }: { url?: string | null; b
   // A cached image can finish loading before React attaches onLoad.
   useEffect(() => { if (source && image.current?.complete && image.current.naturalWidth > 0) setLoaded(source); }, [source]);
   if (source && source !== failed) return <img ref={image} className={`${banner ? 'banner-image' : 'instance-icon'} artwork-fade ${loaded === source ? 'is-loaded' : ''} ${played ? 'has-played' : ''}`} src={source} alt="" aria-hidden="true" crossOrigin="anonymous" referrerPolicy="no-referrer" loading={banner ? 'eager' : 'lazy'} decoding="async" onLoad={() => setLoaded(source)} onAnimationEnd={() => setPlayed(true)} onError={() => setFailed(source)} />;
-  return banner ? <><div className="hero-grid" aria-hidden="true" /><img className="hero-brand" src={logoWhite} alt="" aria-hidden="true" /></> : <img className="instance-fallback size-6" src={logoWhite} alt="" aria-hidden="true" decoding="async" />;
+  return banner ? <><div className="hero-grid" aria-hidden="true" /><img className="hero-brand" src={logoWhite} alt="" aria-hidden="true" /></> : <img className="instance-fallback size-9" src={logoWhite} alt="" aria-hidden="true" decoding="async" />;
 }
