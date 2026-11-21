@@ -109,14 +109,30 @@ test('activation preserves the full serial, supports copy, and regenerates expir
   await user.click(screen.getByRole('button', { name: 'Continuar' }));
   expect(await screen.findByLabelText('Código ABCD-EFGH-IJKL')).toBeTruthy();
   expect(screen.getByRole('heading', { name: 'Acceder a Panita Client' })).toBeTruthy();
-  await user.click(screen.getByRole('button', { name: 'Copiar código' }));
-  expect(await navigator.clipboard.readText()).toBe('ABCD-EFGH-IJKL');
-  const confirmCommand = '/confirm code:ABCD-EFGH-IJKL';
-  const copyCommand = screen.getByRole('button', { name: `Copiar comando ${confirmCommand}` });
-  expect(copyCommand.textContent).toBe(confirmCommand);
-  await user.click(copyCommand);
-  expect(await navigator.clipboard.readText()).toBe(confirmCommand);
-  expect(screen.getByText('¡Copiado!')).toBeTruthy();
+  const copySerial = screen.getByRole('button', { name: 'Copiar código' });
+  const commandLabel = '/confirm ABCD-EFGH-IJKL';
+  const copyCommand = screen.getByRole('button', { name: `Copiar comando ${commandLabel}` });
+  expect(copyCommand.textContent).toBe(commandLabel);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    await act(async () => { fireEvent.click(copySerial); });
+    expect(await navigator.clipboard.readText()).toBe('ABCD-EFGH-IJKL');
+    expect(copySerial.textContent).toBe('¡Copiado!');
+    expect(copySerial.querySelector('.lucide-check')).toBeTruthy();
+    expect(copyCommand.textContent).toBe(commandLabel);
+
+    await act(async () => { fireEvent.click(copyCommand); });
+    expect(await navigator.clipboard.readText()).toBe('/confirm code:ABCD-EFGH-IJKL');
+    expect(copyCommand.textContent).toBe('¡Copiado!');
+    expect(copyCommand.querySelector('.lucide-check')).toBeTruthy();
+    expect(document.querySelector('.transient-notice')).toBeNull();
+
+    act(() => { vi.advanceTimersByTime(4000); });
+    expect(copySerial.textContent).toBe('Copiar código');
+    expect(copyCommand.textContent).toBe(commandLabel);
+  } finally {
+    vi.useRealTimers();
+  }
   await act(async () => {
     activation = { ...activation, revision: activation.revision + 1, state: 'no_session', serial: null, expires_at: null, error: 'activation_expired' };
     native.listeners.get('activation-changed')?.forEach(callback => callback({ payload: activation }));
