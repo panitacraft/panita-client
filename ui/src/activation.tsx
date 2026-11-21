@@ -192,6 +192,40 @@ export function ActivationGate({ children }: { children: ReactNode }) {
   return <Shell><section><p role="status">Cargando…</p></section></Shell>;
 }
 
+function ActivationCopyButton({ serial, command = false, disabled = false, onError }: {
+  serial: string;
+  command?: boolean;
+  disabled?: boolean;
+  onError: () => void;
+}) {
+  const confirmation = useTransientNotice();
+  const feedback = confirmation.notice?.message;
+  const commandLabel = `/confirm ${serial}`;
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(command ? `/confirm code:${serial}` : serial);
+      confirmation.show('¡Copiado!');
+    } catch {
+      confirmation.clear();
+      onError();
+    }
+  }
+
+  return <>
+    {command ? (
+      <button type="button" className="serial-command" aria-label={feedback ? undefined : `Copiar comando ${commandLabel}`} title={feedback ? undefined : 'Copiar comando'} onClick={() => void copy()}>
+        {feedback ? <><Check aria-hidden="true" />{feedback}</> : <code>{commandLabel}</code>}
+      </button>
+    ) : (
+      <Button type="button" variant="outline" disabled={disabled} onClick={() => void copy()}>
+        {feedback ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}{feedback ?? 'Copiar código'}
+      </Button>
+    )}
+    <span className="sr-only" role="status">{feedback}</span>
+  </>;
+}
+
 function ActivationScreen() {
   const activation = useActivation();
   const [identifier, setIdentifier] = useState('');
@@ -205,7 +239,6 @@ function ActivationScreen() {
   useEffect(() => { if (view?.serial) { setLastSerial(view.serial); toast.clear(); } }, [view?.serial, toast.clear]);
   if (!activation) return null;
   const serial = view?.serial ?? lastSerial;
-  const confirmCommand = `/confirm code:${serial}`;
   const starting = activation.busy === 'start_activation' || view?.state === 'creating';
   const code = view?.error ?? activation.error;
   const shown = code ? `${messageForError(code)}${code === 'activation_rate_limited' ? retryAfterText(view?.retry_after ?? null) : ''}` : null;
@@ -214,13 +247,8 @@ function ActivationScreen() {
   // Without a session there is nothing to play offline: activating is what needs the service.
   const needsConnection = !pending && isConnectivityError(code);
 
-  async function copyActivationText(text: string, confirmation: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.show(confirmation);
-    } catch {
-      toast.show('No pudimos copiar el texto. Selecciónalo y cópialo a mano.', 'error');
-    }
+  function reportCopyError() {
+    toast.show('No pudimos copiar el texto. Selecciónalo y cópialo a mano.', 'error');
   }
 
   async function openBot() {
@@ -261,11 +289,11 @@ function ActivationScreen() {
       {(pending || expired) && serial && <div className={`serial-box ${expired ? 'is-expired' : ''}`}>
         {identifier.trim() && <p className="member-greeting">Hola, <ProfileArtwork username={identifier.trim()} /><strong>{identifier.trim()}</strong></p>}
         <div className="serial-groups" role="status" aria-label={`Código ${serial}`}><code>{serial}</code></div>
-        <Button variant="outline" disabled={expired} onClick={() => void copyActivationText(serial, 'Código copiado.')}><Copy aria-hidden="true" />Copiar código</Button>
+        <ActivationCopyButton key={expired ? 'expired' : serial} serial={serial} disabled={expired} onError={reportCopyError} />
         {pending && <>
           <p className="serial-instructions">
             Envía el código a <button type="button" className="text-action bot-link" title="Abrir la conversación con Panita Bot en Discord" onClick={() => void openBot()}>Panita Bot</button> por mensaje directo.<br />
-            En el servidor, usa <button type="button" className="serial-command" aria-label={`Copiar comando ${confirmCommand}`} title="Copiar comando" onClick={() => void copyActivationText(confirmCommand, '¡Copiado!')}><code>{confirmCommand}</code></button>
+            En el servidor, usa <ActivationCopyButton key={serial} serial={serial} command onError={reportCopyError} />
           </p>
           <p className="serial-expiry">Vence en {countdownText(remainingSeconds(view?.expires_at ?? null, now))}.</p>
         </>}
