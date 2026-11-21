@@ -192,6 +192,40 @@ export function ActivationGate({ children }: { children: ReactNode }) {
   return <Shell><section><p role="status">Cargando…</p></section></Shell>;
 }
 
+function ActivationCopyButton({ serial, command = false, disabled = false, onError }: {
+  serial: string;
+  command?: boolean;
+  disabled?: boolean;
+  onError: () => void;
+}) {
+  const confirmation = useTransientNotice();
+  const feedback = confirmation.notice?.message;
+  const commandLabel = `/confirm ${serial}`;
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(command ? `/confirm code:${serial}` : serial);
+      confirmation.show('¡Copiado!');
+    } catch {
+      confirmation.clear();
+      onError();
+    }
+  }
+
+  return <>
+    {command ? (
+      <button type="button" className="serial-command" aria-label={feedback ? undefined : `Copiar comando ${commandLabel}`} title={feedback ? undefined : 'Copiar comando'} onClick={() => void copy()}>
+        {feedback ? <><Check aria-hidden="true" />{feedback}</> : <code>{commandLabel}</code>}
+      </button>
+    ) : (
+      <Button type="button" variant="outline" disabled={disabled} onClick={() => void copy()}>
+        {feedback ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}{feedback ?? 'Copiar código'}
+      </Button>
+    )}
+    <span className="sr-only" role="status">{feedback}</span>
+  </>;
+}
+
 function ActivationScreen() {
   const activation = useActivation();
   const [identifier, setIdentifier] = useState('');
@@ -213,10 +247,8 @@ function ActivationScreen() {
   // Without a session there is nothing to play offline: activating is what needs the service.
   const needsConnection = !pending && isConnectivityError(code);
 
-  async function copySerial() {
-    if (!serial) return;
-    try { await navigator.clipboard.writeText(serial); toast.show('Código copiado.'); }
-    catch { toast.show('No pudimos copiar el código. Selecciónalo y cópialo a mano.', 'error'); }
+  function reportCopyError() {
+    toast.show('No pudimos copiar el texto. Selecciónalo y cópialo a mano.', 'error');
   }
 
   async function openBot() {
@@ -244,15 +276,25 @@ function ActivationScreen() {
       {view && !pending && !expired && <form className="activation-form" noValidate onSubmit={event => { event.preventDefault(); void activation.start(identifier); }}>
         <label htmlFor="member-identifier">IGN o usuario de Discord</label>
         <div className="identifier-input"><ProfileArtwork username={identifier.trim()} /><input id="member-identifier" placeholder="Ej. Aerosmith_" value={identifier} onChange={event => setIdentifier(event.target.value)} maxLength={100} required autoComplete="off" /></div>
-        <div className="terms-consent"><input id="accept-terms" type="checkbox" aria-label="He leído y acepto los Términos de Uso de Panitacraft" checked={acceptedTerms} required onChange={event => setAcceptedTerms(event.target.checked)} /><span>He leído y acepto los <button type="button" className="text-action" onClick={() => void openTerms()}>Términos de Uso</button> de Panitacraft.</span></div>
+        <div className="terms-consent">
+          <input id="accept-terms" type="checkbox" aria-labelledby="terms-consent-text" checked={acceptedTerms} required onChange={event => setAcceptedTerms(event.target.checked)} />
+          <span id="terms-consent-text">
+            <label htmlFor="accept-terms">He leído y acepto los </label>
+            <button type="button" className="text-action" onClick={event => { event.stopPropagation(); void openTerms(); }}>Términos de Uso</button>
+            <label htmlFor="accept-terms"> de Panitacraft.</label>
+          </span>
+        </div>
         <Button type="submit" disabled={starting || !acceptedTerms || identifier.trim().length === 0}>{starting ? 'Generando tu código…' : 'Continuar'}<ArrowRight aria-hidden="true" /></Button>
       </form>}
       {(pending || expired) && serial && <div className={`serial-box ${expired ? 'is-expired' : ''}`}>
         {identifier.trim() && <p className="member-greeting">Hola, <ProfileArtwork username={identifier.trim()} /><strong>{identifier.trim()}</strong></p>}
         <div className="serial-groups" role="status" aria-label={`Código ${serial}`}><code>{serial}</code></div>
-        <Button variant="outline" disabled={expired} onClick={() => void copySerial()}><Copy aria-hidden="true" />Copiar código</Button>
+        <ActivationCopyButton key={expired ? 'expired' : serial} serial={serial} disabled={expired} onError={reportCopyError} />
         {pending && <>
-          <p className="serial-instructions">Envía el código a <button type="button" className="text-action bot-link" title="Abrir la conversación con Panita Bot en Discord" onClick={() => void openBot()}>Panita Bot</button> por mensaje directo.<br />En el servidor, usa <code>/confirm {serial}</code></p>
+          <p className="serial-instructions">
+            Envía el código a <button type="button" className="text-action bot-link" title="Abrir la conversación con Panita Bot en Discord" onClick={() => void openBot()}>Panita Bot</button> por mensaje directo.<br />
+            En el servidor, usa <ActivationCopyButton key={serial} serial={serial} command onError={reportCopyError} />
+          </p>
           <p className="serial-expiry">Vence en {countdownText(remainingSeconds(view?.expires_at ?? null, now))}.</p>
         </>}
         <p>¿No eres tú? <button className="text-action" disabled={!!activation.busy} onClick={() => { void activation.cancel().then(() => setLastSerial(null)); }}>Cambiar</button></p>
