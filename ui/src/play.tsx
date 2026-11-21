@@ -131,7 +131,9 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     : (installAllowed && entry?.phase !== 'installed') || entry?.phase === 'uninstalled'
       ? busy || !installAllowed || !isTauri() || !play?.snapshot
       : busy || !allowed || !isTauri() || !play?.snapshot;
-  const optionsEnabled = optionsVisible && !primaryDisabled;
+  // A disabled instance cannot be played, but its menu must stay reachable so the player can still uninstall it.
+  const uninstallReachable = !active && uninstallAllowed && !busy && isTauri() && !!play?.snapshot;
+  const optionsEnabled = optionsVisible && (!primaryDisabled || uninstallReachable);
   useEffect(() => { if (!optionsEnabled) setOptionsOpen(false); }, [optionsEnabled]);
 
   async function act<C extends PlayCommand>(command: C, args: Omit<PlayArguments[C], 'instanceId'>) {

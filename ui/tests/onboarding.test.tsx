@@ -109,13 +109,36 @@ test('activation preserves the full serial, supports copy, and regenerates expir
   await user.click(screen.getByRole('button', { name: 'Continuar' }));
   expect(await screen.findByLabelText('Código ABCD-EFGH-IJKL')).toBeTruthy();
   expect(screen.getByRole('heading', { name: 'Acceder a Panita Client' })).toBeTruthy();
-  await user.click(screen.getByRole('button', { name: 'Copiar código' }));
-  expect(await navigator.clipboard.readText()).toBe('ABCD-EFGH-IJKL');
+  const copySerial = screen.getByRole('button', { name: 'Copiar código' });
+  const commandLabel = '/confirm ABCD-EFGH-IJKL';
+  const copyCommand = screen.getByRole('button', { name: `Copiar comando ${commandLabel}` });
+  expect(copyCommand.textContent).toBe(commandLabel);
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    await act(async () => { fireEvent.click(copySerial); });
+    expect(await navigator.clipboard.readText()).toBe('ABCD-EFGH-IJKL');
+    expect(copySerial.textContent).toBe('¡Copiado!');
+    expect(copySerial.querySelector('.lucide-check')).toBeTruthy();
+    expect(copyCommand.textContent).toBe(commandLabel);
+
+    await act(async () => { fireEvent.click(copyCommand); });
+    expect(await navigator.clipboard.readText()).toBe('/confirm code:ABCD-EFGH-IJKL');
+    expect(copyCommand.textContent).toBe('¡Copiado!');
+    expect(copyCommand.querySelector('.lucide-check')).toBeTruthy();
+    expect(document.querySelector('.transient-notice')).toBeNull();
+
+    act(() => { vi.advanceTimersByTime(4000); });
+    expect(copySerial.textContent).toBe('Copiar código');
+    expect(copyCommand.textContent).toBe(commandLabel);
+  } finally {
+    vi.useRealTimers();
+  }
   await act(async () => {
     activation = { ...activation, revision: activation.revision + 1, state: 'no_session', serial: null, expires_at: null, error: 'activation_expired' };
     native.listeners.get('activation-changed')?.forEach(callback => callback({ payload: activation }));
   });
   expect((screen.getByRole('button', { name: 'Copiar código' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByRole('button', { name: /Copiar comando/ })).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Generar otro código' }));
   await waitFor(() => expect((screen.getByRole('button', { name: 'Copiar código' }) as HTMLButtonElement).disabled).toBe(false));
   expect(native.invoke).toHaveBeenLastCalledWith('activation_snapshot', undefined);
@@ -130,12 +153,22 @@ test('file names inside an activation error are shown as inline code', async () 
   expect(alert.textContent).toContain('Cierra el cliente y elimina panita-session.json');
 });
 
-test('the Terms of Use link opens through the fixed backend command', async () => {
+test('the Terms of Use text toggles consent and the button opens the terms independently', async () => {
   const implementation = native.invoke.getMockImplementation()!;
   native.invoke.mockImplementation(async (command: string, ...rest: unknown[]) => command === 'open_terms_of_use' ? undefined : implementation(command, ...rest));
   const user = userEvent.setup(); mount();
-  await user.click(await screen.findByRole('button', { name: 'Términos de Uso' }));
-  expect(native.invoke).toHaveBeenCalledWith('open_terms_of_use', undefined);
+  const checkbox = await screen.findByRole<HTMLInputElement>('checkbox', { name: 'He leído y acepto los Términos de Uso de Panitacraft.' });
+  const termsButton = screen.getByRole('button', { name: 'Términos de Uso' });
+  await user.click(termsButton);
+  expect(native.invoke).toHaveBeenLastCalledWith('open_terms_of_use', undefined);
+  expect(checkbox.checked).toBe(false);
+
+  await user.click(screen.getByText('He leído y acepto los'));
+  expect(checkbox.checked).toBe(true);
+  await user.click(termsButton);
+  expect(checkbox.checked).toBe(true);
+  await user.click(screen.getByText('de Panitacraft.'));
+  expect(checkbox.checked).toBe(false);
 });
 
 test('Panita Bot opens its Discord conversation and a failure says what to do instead', async () => {
@@ -149,5 +182,4 @@ test('Panita Bot opens its Discord conversation and a failure says what to do in
   native.invoke.mockImplementation(async (command: string, ...rest: unknown[]) => command === 'open_panita_bot' ? Promise.reject('browser_unavailable') : implementation(command, ...rest));
   await user.click(link);
   expect(await screen.findByText(/No pudimos abrir Discord/)).toBeTruthy();
-  expect(document.querySelector('.serial-instructions code')?.textContent).toBe('/confirm ABCD-EFGH-IJKL');
 });
