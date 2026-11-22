@@ -28,6 +28,28 @@ pub(super) fn lines(data_root: &Path) -> Vec<String> {
     ]
 }
 
+/// What the installation choice needs to know about the machine. A missing value is
+/// `None`, never an error: the player then gets no machine-based recommendation.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct Resources {
+    /// Installed physical memory.
+    pub(super) memory_mib: Option<u64>,
+    /// Free space on the volume that holds the launcher's data.
+    pub(super) free_disk_mib: Option<u64>,
+}
+
+pub(super) fn resources(data_root: &Path) -> Resources {
+    // The root may not exist yet on a first run; its nearest existing parent shares the volume.
+    let existing = data_root.ancestors().find(|path| path.exists());
+    Resources {
+        memory_mib: memory().0.map(|bytes| bytes / MIB),
+        free_disk_mib: existing
+            .and_then(|path| fs2::available_space(path).ok())
+            .map(|bytes| bytes / MIB),
+    }
+}
+
 fn mib(bytes: Option<u64>) -> String {
     bytes.map_or_else(|| "unknown".to_owned(), |value| (value / MIB).to_string())
 }
@@ -216,6 +238,16 @@ PCI_ID=10DE:2684
             ),
             None
         );
+    }
+
+    #[test]
+    fn reports_memory_and_free_disk_even_when_the_data_root_does_not_exist_yet() {
+        let missing = std::env::temp_dir().join("panita-resources-test/not/created/yet");
+        let found = resources(&missing);
+        assert!(found.memory_mib.is_some_and(|value| value > 0), "{found:?}");
+        assert!(found.free_disk_mib.is_some(), "{found:?}");
+        let json = serde_json::to_value(&found).unwrap_or_default();
+        assert!(json.get("memoryMib").is_some() && json.get("freeDiskMib").is_some());
     }
 
     #[test]

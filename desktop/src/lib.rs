@@ -113,6 +113,23 @@ fn diagnostic_snapshot(
     state.logs.view()
 }
 
+/// Memory and free disk space, for recommending an installation variant. Nothing else
+/// about the machine is read, and the frontend supplies no path.
+#[tauri::command]
+fn system_resources(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<hardware::Resources, launcher_core::error::ErrorCode> {
+    if window.label() != "main" {
+        return Err(launcher_core::error::ErrorCode::InvalidData);
+    }
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
+    Ok(hardware::resources(&root))
+}
+
 #[tauri::command]
 async fn open_logs_folder(
     app: tauri::AppHandle,
@@ -311,6 +328,7 @@ pub fn run() {
             window_commands::main_window_control,
             initialize,
             diagnostic_snapshot,
+            system_resources,
             open_logs_folder,
             catalog_snapshot,
             activation_commands::activation_snapshot,
