@@ -13,10 +13,12 @@ import { ActivationPanel, useActivation } from './activation';
 import { OperationDock, PlayControls, PlayNotice, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
 import { canInstall, canOpenInstanceOptions, canRepair, canUninstall, isPack, updateTarget } from './library-state';
+import { automaticVariantSwitch, hasVariantChoice, instanceVariants, withdrawnVariant } from './variant-state';
 import { SettingsPanel, usePreferences } from './settings';
 import { GeneralPanel, VersionBadge } from './update';
 import { DiagnosticsPanel } from './diagnostics';
 import { CachePanel, PackPanel } from './pack';
+import { VariantPanel } from './components/variant-panel';
 import { CrashNotifications } from './game-output';
 import { instanceStatus, visibleSelection, type LauncherPage } from './launcher-state';
 import { CatalogArtwork } from './components/catalog-artwork';
@@ -44,7 +46,7 @@ export function Launcher() {
   const [page, setPage] = useState<LauncherPage>('library');
   const [cacheRequest, setCacheRequest] = useState(0);
   const [settingsScope, setSettingsScope] = useState<'global' | 'instance'>('global');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'game' | 'storage' | 'diagnostics'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'game' | 'storage' | 'diagnostics' | 'variant'>('general');
   const [accountView, setAccountView] = useState<AccountsView | null>(null);
   const [instancePage, setInstancePage] = useState(0);
   const [version, setVersion] = useState(__APP_VERSION__);
@@ -58,6 +60,10 @@ export function Launcher() {
   const instances = catalog.kind === 'ready' ? catalog.instances : [];
   const selectedId = visibleSelection(instances, preferences?.id ?? null);
   const selected = instances.find(instance => instance.id === selectedId);
+  const settingsTabs: readonly (readonly [typeof settingsTab, string])[] = settingsScope === 'global'
+    ? [['general', 'General'], ['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['diagnostics', 'Diagnóstico']]
+    : selected && hasVariantChoice(selected) ? [['game', 'Minecraft'], ['variant', 'Rendimiento']] : [];
+  const variantTab = settingsScope === 'instance' && settingsTab === 'variant' && !!selected && hasVariantChoice(selected);
   const selectedAccount = accountView?.accounts.find(account => account.metadata.account_id === accountView.selected_account_id);
   const { rail, capacity } = useInstanceRail(instances.length);
   const pageCount = Math.ceil(instances.length / capacity);
@@ -169,7 +175,7 @@ export function Launcher() {
                 <h1>{instance.name}</h1>
                 <p>{instance.description}</p>
                 <div className="instance-tags">
-                  <InstanceBadges instance={instance} showLoaderHint />
+                  <InstanceBadges instance={instance} showLoaderHint showVariant />
                   {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible', 'Instalando', 'Reparando', 'Actualizando', 'Preparando inicio', 'Cerrando Minecraft'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
                 </div>
               </div>
@@ -180,7 +186,7 @@ export function Launcher() {
               {instance.availability === 'unverified' && <p role="status">No pudimos verificar el estado de esta instancia.</p>}
               {!instance.compatible && <p role="status">Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
               {!instance.supported && <p role="status">Este tipo de instancia todavía no es compatible.</p>}
-              <PlayControls onPackCache={() => { openSettings('global'); setSettingsTab('storage'); setCacheRequest(value => value + 1); }} instanceId={instance.id} removalPending={instance.removalPending} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available' || liveEntry(instance.id)?.phase === 'installed')} />
+              <PlayControls onPackCache={() => { openSettings('global'); setSettingsTab('storage'); setCacheRequest(value => value + 1); }} instanceId={instance.id} removalPending={instance.removalPending} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} variants={instanceVariants(instance)} withdrawnVariant={withdrawnVariant(instance, catalog.stale || unverified)} automaticSwitch={automaticVariantSwitch(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available' || liveEntry(instance.id)?.phase === 'installed')} />
               <PackPanel instanceId={instance.id} awaiting={instance.localState === 'awaiting_files'} onChanged={() => setCatalogAttempt(previous => previous + 1)} />
             </div>
           </article>)}
@@ -193,10 +199,11 @@ export function Launcher() {
         </div>
         <div hidden={page !== 'settings'} className="utility-page settings-page">
           <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? `Ajustes · ${selected?.name ?? 'Instancia'}` : 'Ajustes Globales'}</h1><p>{settingsScope === 'instance' ? 'Sobrescribe los ajustes globales solo para esta instancia.' : 'Estos valores se aplicarán por defecto a todas las instancias.'}</p></div>
-          {settingsScope === 'global' && <div className="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
-            {([['general', 'General'], ['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['diagnostics', 'Diagnóstico']] as const).map(([value, label]) => <Button key={value} className="rounded-b-none" variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
+          {settingsTabs.length > 0 && <div className="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
+            {settingsTabs.map(([value, label]) => <Button key={value} className="rounded-b-none" variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
           </div>}
-          <div hidden={settingsScope === 'global' && settingsTab !== 'game'}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
+          <div hidden={settingsScope === 'global' ? settingsTab !== 'game' : variantTab}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
+          {variantTab && selected && <VariantPanel instance={selected} stale={(catalog.kind === 'ready' ? catalog.stale : true) || unverified} onStarted={() => setPage('library')} />}
           <div hidden={settingsScope !== 'global' || settingsTab !== 'storage'}><CachePanel openRequest={cacheRequest} /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'general'}><GeneralPanel /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'diagnostics'}>{settingsScope === 'global' && settingsTab === 'diagnostics' && <DiagnosticsPanel />}</div>

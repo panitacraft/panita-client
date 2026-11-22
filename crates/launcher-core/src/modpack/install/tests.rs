@@ -586,6 +586,7 @@ fn mrpack_catalog(id: Uuid, loader: Option<&str>, minecraft: Option<&str>) -> Ca
         banner_url: None,
         sort_order: 1,
         updated_at: "2026-10-27T00:00:00Z".into(),
+        variants: crate::catalog::standard_only(),
         source: CatalogSource::Modrinth {
             project_id: "project".into(),
             pack_version_id: "version".into(),

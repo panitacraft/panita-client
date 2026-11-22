@@ -27,6 +27,11 @@ pub struct UpdateRequest {
     /// Packs only: continue past conflicts by moving the player's files aside.
     #[serde(default)]
     pub move_aside: bool,
+    /// Custom packs only: the variant the request was made for and the one to install.
+    #[serde(default)]
+    pub from_variant: Option<crate::catalog::Variant>,
+    #[serde(default)]
+    pub to_variant: Option<crate::catalog::Variant>,
 }
 
 pub struct UpdateOutcome {

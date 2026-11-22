@@ -1034,6 +1034,7 @@ mod tests {
             banner_url: None,
             sort_order: 1,
             updated_at: "2026-10-16T00:00:00Z".into(),
+            variants: crate::catalog::standard_only(),
             source: CatalogSource::Vanilla {
                 minecraft_version: "1.21.1".into(),
             },

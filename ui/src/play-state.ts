@@ -44,6 +44,6 @@ export function playActive(phase: PlayPhase): boolean {
 }
 
 export function installationRefreshKey(snapshot: PlaySnapshot | null): string {
-  return snapshot?.instances.filter(entry => (entry.operation !== 'play' || entry.error === 'update_required') && !playActive(entry.phase))
+  return snapshot?.instances.filter(entry => (entry.operation !== 'play' || (entry.error === 'update_required' || entry.error === 'variant_unavailable')) && !playActive(entry.phase))
     .map(entry => `${entry.instanceId}:${entry.requestId}:${entry.phase}`).sort().join('|') ?? '';
 }

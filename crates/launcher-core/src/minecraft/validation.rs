@@ -148,6 +148,7 @@ fn catalog(target: &ValidationTarget) -> CatalogInstance {
         banner_url: None,
         sort_order: 0,
         updated_at: "1970-01-01T00:00:00Z".into(),
+        variants: crate::catalog::standard_only(),
         source: CatalogSource::Unsupported {
             source_type: "loader_validation".into(),
         },

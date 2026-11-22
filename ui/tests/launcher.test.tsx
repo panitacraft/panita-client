@@ -31,7 +31,12 @@ const first = {
   source: { type: 'custom', current_version_id: 'v2', label: 'Dos', loader: 'neoforge' },
   installedSource: { type: 'custom', current_version_id: 'v2', label: 'Dos', loader: 'neoforge' },
 };
-const manualFile = { path: 'mods/manual.jar', name: 'Mod manual', fileName: 'manual.jar', folder: 'mods', projectId: 1, fileId: 2, size: 10, reason: 'manual' };
+const variantOptions = [
+  { id: 'lite', fileCount: 12, size: 48_200_000, sameAsPrevious: false },
+  { id: 'standard', fileCount: 28, size: 128_307_508, sameAsPrevious: false },
+  { id: 'deluxe', fileCount: 35, size: 190_000_000, sameAsPrevious: false },
+];
+const manualFile ={ path: 'mods/manual.jar', name: 'Mod manual', fileName: 'manual.jar', folder: 'mods', projectId: 1, fileId: 2, size: 10, reason: 'manual' };
 function entry(patch: Partial<PlayEntry>): PlayEntry {
   return { instanceId: 'pack-a', requestId: 'request', phase: 'running', operation: 'play', confirmationId: null, error: null, exitCode: null, exitSuccess: null, backupRequested: false, backupOperation: null, receivedFiles: 0, reusedFiles: 0, retainedFiles: 0, ...patch };
 }
@@ -62,6 +67,7 @@ beforeEach(() => {
       case 'pack_version_names': return { installed: 'Uno', available: 'Dos' };
       case 'pack_files': return { files: [manualFile], complete: false };
       case 'import_pack_file': throw 'artifact_mismatch';
+      case 'instance_variants': return variantOptions;
       case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': case 'open_instance_folder': return;
       default: throw new Error(`Unexpected test command: ${command}`);
     }
@@ -502,4 +508,118 @@ test('active repair shows one content spinner and disables the options dropdown'
   expect((within(card).getByRole('button', { name: 'Opciones de instancia' }) as HTMLButtonElement).disabled).toBe(true);
   expect(within(card).getByRole('button', { name: 'Preparando…' }).getAttribute('aria-disabled')).toBe('true');
   expect(card.querySelectorAll('.spin').length).toBe(1);
+});
+
+const withVariants = { variants: ['lite', 'standard', 'deluxe'] };
+
+test('an instance with several variants asks which to install, with Standard preselected', async () => {
+  catalog.instances[0] = { ...first, ...withVariants, localState: 'not_installed', hasInstallationManifest: false, installedSource: null };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
+  const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
+  expect(backend.invoke).toHaveBeenCalledWith('instance_variants', { instanceId: 'pack-a' });
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_install')).toBe(false);
+  // The sizes arrive after the cards, which are already in place.
+  await within(dialog).findByText(/28 archivos/);
+  expect(((await within(dialog).findByRole('radio', { name: /^Estándar/ })) as HTMLInputElement).checked).toBe(true);
+  expect(within(dialog).getByText(/Sin mods cosméticos ni shaders/)).toBeTruthy();
+  await user.click(within(dialog).getByRole('radio', { name: /^Mejorado/ }));
+  await user.click(within(dialog).getByRole('button', { name: 'Instalar', exact: true }));
+  expect(backend.invoke).toHaveBeenCalledWith('begin_install', expect.objectContaining({ instanceId: 'pack-a', variant: 'deluxe' }));
+});
+
+test('an instance that offers only Standard installs without any question', async () => {
+  catalog.instances[0] = { ...first, localState: 'not_installed', hasInstallationManifest: false, installedSource: null };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(backend.invoke).toHaveBeenCalledWith('begin_install', expect.objectContaining({ instanceId: 'pack-a' }));
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'instance_variants')).toBe(false);
+});
+
+async function openVariantTab(user: ReturnType<typeof userEvent.setup>) {
+  await screen.findByRole('button', { name: 'Jugar', exact: true });
+  await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
+  // Changing the variant lives in the instance settings, not in this menu.
+  expect(screen.queryByRole('menuitem', { name: /Cambiar (variante|rendimiento)/ })).toBeNull();
+  await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
+  await user.click(await screen.findByRole('tab', { name: 'Rendimiento' }));
+}
+
+test('the variant is changed from a tab of the instance settings, as an update of the same version', async () => {
+  catalog.instances[0] = { ...first, ...withVariants, installedVariant: 'standard' };
+  const user = userEvent.setup(); mount();
+  await openVariantTab(user);
+  const lite = await screen.findByRole('radio', { name: 'Ligero' });
+  await screen.findByText(/28 archivos/);
+  // The installed variant is marked and cannot be "changed" to itself.
+  expect(screen.getByText('Instalada')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Cambiar rendimiento' }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(lite);
+  await user.click(screen.getByRole('button', { name: 'Cambiar rendimiento' }));
+  expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({
+    instanceId: 'pack-a',
+    update: { from_version: 'v2', to_version: 'v2', backup_worlds: false, from_variant: 'standard', to_variant: 'lite' },
+  }));
+  // Progress and results are on the instance page, so the player goes back to it.
+  expect(await screen.findByRole('button', { name: 'Jugar', exact: true })).toBeTruthy();
+});
+
+test('a conflict while changing the variant can be retried from the instance page with the same variant', async () => {
+  catalog.instances[0] = { ...first, ...withVariants, installedVariant: 'standard' };
+  const user = userEvent.setup(); mount();
+  await openVariantTab(user);
+  await user.click(await screen.findByRole('radio', { name: 'Ligero' }));
+  await user.click(screen.getByRole('button', { name: 'Cambiar rendimiento' }));
+  await emit(entry({ operation: 'update', phase: 'failed', error: 'pack_conflict', packConflicts: [{ path: 'mods/a.jar', reason: 'occupied' }] }));
+  await user.click(await screen.findByRole('button', { name: 'Continuar y guardar mis archivos' }));
+  expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({
+    update: { from_version: 'v2', to_version: 'v2', backup_worlds: false, from_variant: 'standard', to_variant: 'lite', move_aside: true },
+  }));
+});
+
+test('an instance with one variant has no variant tab, and one that is not installed explains why', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('button', { name: 'Jugar', exact: true });
+  await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
+  await screen.findByRole('heading', { name: 'Ajustes · Aventura', exact: true });
+  expect(screen.queryByRole('tab', { name: 'Rendimiento' })).toBeNull();
+});
+
+test('a version update of a pack installed before variants names no variant, so the backend keeps it', async () => {
+  catalog.instances[0] = { ...first, ...withVariants, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  await user.click(screen.getByRole('button', { name: 'Actualizar', exact: true }));
+  expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({ update: { from_version: 'v1', to_version: 'v2', backup_worlds: true } }));
+});
+
+test('a variant the instance stopped offering moves to Standard by itself, once, and tells the player', async () => {
+  catalog.instances[0] = { ...first, variants: ['standard'], installedVariant: 'lite' };
+  mount();
+  await waitFor(() => expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({
+    instanceId: 'pack-a',
+    update: { from_version: 'v2', to_version: 'v2', backup_worlds: false, from_variant: 'lite', to_variant: 'standard' },
+  })));
+  expect(await screen.findByText(/Ligero ya no se ofrece/)).toBeTruthy();
+  // A failed attempt is not repeated on its own.
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
+  expect(backend.invoke.mock.calls.filter(([command]) => command === 'begin_update')).toHaveLength(1);
+});
+
+test('the variant cards appear at once and only their sizes wait for the backend', async () => {
+  const base = backend.invoke.getMockImplementation();
+  backend.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => command === 'instance_variants' ? new Promise(() => {}) : base?.(command, args));
+  catalog.instances[0] = { ...first, ...withVariants, localState: 'not_installed', hasInstallationManifest: false, installedSource: null };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
+  const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
+  for (const name of ['Ligero', 'Estándar', 'Mejorado']) {
+    expect((within(dialog).getByRole('radio', { name }) as HTMLInputElement).disabled).toBe(true);
+  }
+  expect(within(dialog).getAllByText('Calculando tamaño…')).toHaveLength(3);
+  // The default is already marked, but nothing can be confirmed until the sizes are known.
+  expect((within(dialog).getByRole('radio', { name: 'Estándar' }) as HTMLInputElement).checked).toBe(true);
+  expect((within(dialog).getByRole('button', { name: 'Instalar', exact: true }) as HTMLButtonElement).disabled).toBe(true);
 });

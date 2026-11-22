@@ -9,6 +9,10 @@ pub enum PackIdentity {
         version_id: Uuid,
         published_at: String,
         label: Option<String>,
+        /// Always written, Standard included. An installation recorded before
+        /// variants existed has none and reads as Standard.
+        #[serde(default)]
+        variant: crate::catalog::Variant,
     },
     Modrinth {
         project_id: String,
@@ -94,6 +98,7 @@ impl PackState {
                 version_id,
                 published_at,
                 label,
+                ..
             } => {
                 if version_id.is_nil()
                     || !date(published_at)
