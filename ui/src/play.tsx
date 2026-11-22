@@ -1,9 +1,10 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronDown, CircleArrowUp, Download, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { ChevronDown, CircleArrowUp, Download, Play, FolderOpen, FileText, Database, Layers, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { InstanceProgress } from './components/instance-progress';
 import { AccountDialog } from './components/account-dialog';
+import { VariantDialog } from './components/variant-dialog';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
@@ -12,7 +13,8 @@ import { acceptPlaySnapshot, playActive, type PlaySnapshot } from './play-state'
 import { useLauncherUpdate } from './update';
 import { blocksPlay } from './update-state';
 import type { UpdateTarget } from './library-state';
-import { invokePlay, type PlayArguments, type PlayCommand } from './play-api';
+import { invokePlay, type PlayArguments, type PlayCommand, type UpdateArguments } from './play-api';
+import { variantNames, withdrawnVariantText, type Variant, type VariantChange, type VariantOption } from './variant-state';
 import { nativeCleanupSummary, nativeRetentionReason, type NativeCleanupReport } from './native-cleanup-state';
 import {
   backedUpSummary, conflictReasonText, conflictsResolvable, folderHint, manualHeading, reasonText, releasedSummary,
@@ -91,10 +93,19 @@ export function usePlaySnapshot() {
   return useContext(PlayContext)?.snapshot ?? null;
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, removalPending = false, optionsAllowed = false }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; removalPending?: boolean; optionsAllowed?: boolean }) {
+/** Stand-in sizes for the browser preview, where there is no backend to ask. */
+function previewOptions(variants: Variant[]): VariantOption[] {
+  return variants.map((id, index) => ({ id, fileCount: 12 * (index + 1), size: 48_000_000 * (index + 1), sameAsPrevious: false }));
+}
+
+export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, removalPending = false, optionsAllowed = false, variants = ['standard'], installedVariant = null, variantChange = null, withdrawnVariant = null, automaticSwitch = null }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; removalPending?: boolean; optionsAllowed?: boolean; variants?: Variant[]; installedVariant?: Variant | null; variantChange?: VariantChange | null; withdrawnVariant?: Variant | null; automaticSwitch?: (VariantChange & { to: Variant }) | null }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  const [variantDialog, setVariantDialog] = useState<{ mode: 'install' | 'change'; options: VariantOption[] | null; error: string | null } | null>(null);
+  const [retryUpdate, setRetryUpdate] = useState<UpdateArguments | null>(null);
+  const [switchNotice, setSwitchNotice] = useState<Variant | null>(null);
+  const switched = useRef<string | null>(null);
   const [forceQuestion, setForceQuestion] = useState<string | null>(null);
   const [updateQuestion, setUpdateQuestion] = useState<(UpdateTarget & { backupWorlds: boolean }) | null>(null);
   const [uninstallQuestion, setUninstallQuestion] = useState(false);
@@ -143,6 +154,51 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     try { await play.act(command, { instanceId, ...args } as PlayArguments[C]); }
     finally { busyRef.current = false; setBusy(false); }
   }
+
+  const choice = variants.length > 1;
+  // What a conflict or a missing manual file asks the player to repeat.
+  const retry: UpdateArguments | null = updateTarget
+    ? { from_version: updateTarget.fromVersion, to_version: updateTarget.toVersion, backup_worlds: lastBackup }
+    : retryUpdate;
+
+  function openVariants(mode: 'install' | 'change') {
+    setLogError(null);
+    if (!isTauri()) { setVariantDialog({ mode, options: previewOptions(variants), error: null }); return; }
+    setVariantDialog({ mode, options: null, error: null });
+    void invoke<VariantOption[]>('instance_variants', { instanceId }).then(options => {
+      // Nothing to choose between: install the one variant that exists.
+      if (options.length === 0) {
+        setVariantDialog(null);
+        if (mode === 'install') void act('begin_install', { requestId: crypto.randomUUID() });
+        return;
+      }
+      setVariantDialog(current => current && { ...current, options });
+    }).catch(cause => setVariantDialog(current => current && { ...current, error: messageForError(cause) }));
+  }
+
+  function confirmVariant(variant: Variant) {
+    const mode = variantDialog?.mode;
+    setVariantDialog(null);
+    if (mode === 'install') { void act('begin_install', { requestId: crypto.randomUUID(), variant }); return; }
+    if (mode !== 'change' || !variantChange) return;
+    // The same published version: only the variant changes. Worlds are never touched.
+    const update: UpdateArguments = { from_version: variantChange.pin, to_version: variantChange.pin, backup_worlds: false, from_variant: variantChange.installed, to_variant: variant };
+    setRetryUpdate(update);
+    void act('begin_update', { requestId: crypto.randomUUID(), update });
+  }
+
+  // An installed variant the instance withdrew moves to Standard without a question: it is
+  // not a version change, and nothing the player owns is touched. One attempt per variant,
+  // so a failure waits for the player instead of retrying in a loop.
+  const switchKey = automaticSwitch ? `${automaticSwitch.pin}:${automaticSwitch.installed}` : null;
+  useEffect(() => {
+    if (!automaticSwitch || !switchKey || active || busyRef.current || !isTauri() || !play?.snapshot || switched.current === switchKey) return;
+    switched.current = switchKey;
+    setSwitchNotice(automaticSwitch.installed);
+    const update: UpdateArguments = { from_version: automaticSwitch.pin, to_version: automaticSwitch.pin, backup_worlds: false, from_variant: automaticSwitch.installed, to_variant: automaticSwitch.to };
+    setRetryUpdate(update);
+    void act('begin_update', { requestId: crypto.randomUUID(), update });
+  }, [switchKey, active, play?.snapshot]);
 
   async function cleanNatives() {
     if (busyRef.current) return;
@@ -196,8 +252,10 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         <ul>{entry.nativeCleanup.details.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
       </details>}
     </div>}
+    {switchNotice && <p role="status">{withdrawnVariantText(switchNotice)}</p>}
+    {installedVariant && choice && !switchNotice && <p role="status" className="variant-badge">Variante instalada: {variantNames[installedVariant]}</p>}
     {entry?.error && entry.error !== 'operation_cancelled' && <p className="account-error" role="alert">{messageForError(entry.error)}</p>}
-    {!active && entry?.operation === 'update' && entry.error === 'pack_conflict' && (entry.packConflicts?.length ?? 0) > 0 && updateTarget && <fieldset className="catalog-notice">
+    {!active && entry?.operation === 'update' && entry.error === 'pack_conflict' && (entry.packConflicts?.length ?? 0) > 0 && retry && <fieldset className="catalog-notice">
       <legend>{updateConflictHeading(entry.packConflicts?.length ?? 0)}</legend>
       <p>No cambiamos nada: tu instalación sigue como estaba.</p>
       <ul>{(entry.packConflicts ?? []).map(conflict => <li key={conflict.path}><code>{conflict.path}</code>: {conflictReasonText(conflict.reason)}</li>)}</ul>
@@ -205,14 +263,14 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         ? <>
           <p>Si continúas, movemos tus archivos a la carpeta <code>pack-backups</code> de esta instancia (no los borramos) e instalamos los del modpack.</p>
           <div className="account-buttons">
-            <button type="button" disabled={busy || !isTauri()} onClick={() => void act('begin_update', { requestId: crypto.randomUUID(), update: { from_version: updateTarget.fromVersion, to_version: updateTarget.toVersion, backup_worlds: lastBackup, move_aside: true } })}>Continuar y guardar mis archivos</button>
+            <button type="button" disabled={busy || !isTauri()} onClick={() => void act('begin_update', { requestId: crypto.randomUUID(), update: { ...retry, move_aside: true } })}>Continuar y guardar mis archivos</button>
           </div>
         </>
         : <p>Mueve esa carpeta o enlace fuera de la instancia y vuelve a actualizar.</p>}
     </fieldset>}
-    {!active && entry?.operation === 'update' && entry.error === 'manual_files_required' && (entry.packAwaiting?.length ?? 0) > 0 && updateTarget && <fieldset className="catalog-notice">
+    {!active && entry?.operation === 'update' && entry.error === 'manual_files_required' && (entry.packAwaiting?.length ?? 0) > 0 && retry && <fieldset className="catalog-notice">
       <legend>{manualHeading(entry.packAwaiting?.length ?? 0)}</legend>
-      <p>No cambiamos nada. Descarga estos archivos, guárdalos en la carpeta indicada y vuelve a pulsar «Actualizar…».</p>
+      <p>No cambiamos nada. Descarga estos archivos, guárdalos en la carpeta indicada y vuelve a intentarlo.</p>
       <ul>{(entry.packAwaiting ?? []).map(file => <li key={file.path}>
         <strong>{file.name}</strong> (<code>{file.fileName}</code>)
         <p>{reasonText(file.reason)} {folderHint(file)}</p>
@@ -247,7 +305,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     {active ? <Button className={`primary-play h-12 text-xl ${running && entry.phase !== 'stopping' ? 'bg-danger text-foreground hover:bg-danger-hover focus-visible:ring-danger-hover' : 'busy-play'}`} size="lg" aria-disabled={!running || entry.phase === 'stopping'} onClick={() => { if (running && entry && entry.phase !== 'stopping') setForceQuestion(entry.requestId); }}>
       {running && entry.phase !== 'stopping' ? <Square aria-hidden="true" /> : <LoaderCircle className="spin" aria-hidden="true" />}{running ? entry.phase === 'stopping' ? 'Cerrando…' : 'Cerrar forzosamente…' : 'Preparando…'}
     </Button> : updateTarget ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy} onClick={askUpdate}><RefreshCw aria-hidden="true" />Actualizar…</Button>
-      : (installAllowed && entry?.phase !== 'installed') || entry?.phase === 'uninstalled' ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy || !installAllowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.phase === 'failed' ? 'Reintentar instalación' : 'Instalar'}</Button>
+      : (installAllowed && entry?.phase !== 'installed') || entry?.phase === 'uninstalled' ? <Button className="primary-play h-12 text-xl" size="lg" disabled={busy || !installAllowed || !isTauri() || !play?.snapshot} onClick={() => choice ? openVariants('install') : void act('begin_install', { requestId: crypto.randomUUID() })}><Download aria-hidden="true" />{entry?.phase === 'failed' ? 'Reintentar instalación' : 'Instalar'}</Button>
       : launcherRequired ? <Button className="primary-play h-12 text-xl" size="lg" aria-disabled="true" title="Actualiza Panita Client para poder jugar. El botón de versión de la barra lateral inicia la actualización." onClick={() => launcherUpdate?.highlight()}><CircleArrowUp aria-hidden="true" />Actualización requerida</Button>
       : <Button className="primary-play h-12 text-xl" size="lg" disabled={busy || !allowed || !isTauri() || !play?.snapshot} onClick={() => void act('begin_play', { requestId: crypto.randomUUID() })}><Play aria-hidden="true" />{allowed ? 'Jugar' : 'No disponible para jugar'}</Button>}
     {optionsVisible && <>
@@ -261,6 +319,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         {running && entry && <>
           {play?.snapshot?.gracefulStopSupported && entry.phase !== 'stopping' && <DropdownMenuItem disabled={busy} onSelect={() => void act('stop_game', { requestId: entry.requestId, force: false })}><Square aria-hidden="true" />Solicitar cierre</DropdownMenuItem>}
         </>}
+        {!active && variantChange && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => openVariants('change')}><Layers aria-hidden="true" />Cambiar variante…</DropdownMenuItem>}
         {!active && repairAllowed && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => void act('begin_repair', { requestId: crypto.randomUUID() })}><Wrench aria-hidden="true" />Reparar archivos</DropdownMenuItem>}
         {!active && (cleanupAllowed || entry?.phase === 'uninstalled') && <DropdownMenuItem disabled={busy || !isTauri() || !play?.snapshot} onSelect={() => void cleanNatives()}><RefreshCw aria-hidden="true" />Limpiar nativos antiguos</DropdownMenuItem>}
         {!active && uninstallAllowed && <><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" disabled={busy} onSelect={askUninstall}><Trash2 aria-hidden="true" />Desinstalar…</DropdownMenuItem></>}
@@ -275,6 +334,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       <ul>{cleanupDetails.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
     </details>}
     {cleanupError && <p role="alert">{cleanupError}</p>}
+    {variantDialog && <VariantDialog mode={variantDialog.mode} options={variantDialog.options} installed={variantDialog.mode === 'change' ? variantChange?.installed ?? null : null} error={variantDialog.error} busy={busy} onConfirm={confirmVariant} onCancel={() => setVariantDialog(null)} />}
     <dialog ref={uninstallDialog} className="update-dialog" aria-labelledby={instanceId + '-uninstall-title'} onCancel={() => setUninstallQuestion(false)} onClose={() => { if (!uninstallDialog.current?.open) setUninstallQuestion(false); }}>
     {uninstallQuestion && <>
       <h2 id={instanceId + '-uninstall-title'}>Desinstalar instancia</h2>
@@ -303,6 +363,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       <ul className="update-notes">
         {updateQuestion.pack && <li><ShieldCheck aria-hidden="true" />Actualizaremos solo los archivos del modpack que no hayas cambiado.</li>}
         {updateQuestion.pack && <li><ShieldCheck aria-hidden="true" />Tus mundos, mods añadidos y ajustes editados se conservan.</li>}
+        {updateQuestion.pack && withdrawnVariant && <li><TriangleAlert aria-hidden="true" />{withdrawnVariantText(withdrawnVariant)}</li>}
         <li id={instanceId + '-update-warning'} className="is-warning"><TriangleAlert aria-hidden="true" />Abrir mundos con otra versión puede cambiarlos. Volver de versión no deshace esos cambios.</li>
       </ul>
       <label className="backup-choice"><input type="checkbox" checked={updateQuestion.backupWorlds} onChange={event => setUpdateQuestion({ ...updateQuestion, backupWorlds: event.target.checked })} /><span>Crear copia de mis mundos (recomendado)</span></label>
