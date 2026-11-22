@@ -519,6 +519,8 @@ test('an instance with several variants asks which to install, with Standard pre
   const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
   expect(backend.invoke).toHaveBeenCalledWith('instance_variants', { instanceId: 'pack-a' });
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_install')).toBe(false);
+  // The sizes arrive after the cards, which are already in place.
+  await within(dialog).findByText(/28 archivos/);
   expect(((await within(dialog).findByRole('radio', { name: /^Standard/ })) as HTMLInputElement).checked).toBe(true);
   expect(within(dialog).getByText(/Sin mods cosméticos ni shaders/)).toBeTruthy();
   await user.click(within(dialog).getByRole('radio', { name: /^Deluxe/ }));
@@ -572,4 +574,20 @@ test('a variant the instance stopped offering moves to Standard by itself, once,
   // A failed attempt is not repeated on its own.
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
   expect(backend.invoke.mock.calls.filter(([command]) => command === 'begin_update')).toHaveLength(1);
+});
+
+test('the variant cards appear at once and only their sizes wait for the backend', async () => {
+  const base = backend.invoke.getMockImplementation();
+  backend.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => command === 'instance_variants' ? new Promise(() => {}) : base?.(command, args));
+  catalog.instances[0] = { ...first, ...withVariants, localState: 'not_installed', hasInstallationManifest: false, installedSource: null };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
+  const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
+  for (const name of ['Lite', 'Standard', 'Deluxe']) {
+    expect((within(dialog).getByRole('radio', { name }) as HTMLInputElement).disabled).toBe(true);
+  }
+  expect(within(dialog).getAllByText('Calculando tamaño…')).toHaveLength(3);
+  // The default is already marked, but nothing can be confirmed until the sizes are known.
+  expect((within(dialog).getByRole('radio', { name: 'Standard' }) as HTMLInputElement).checked).toBe(true);
+  expect((within(dialog).getByRole('button', { name: 'Instalar', exact: true }) as HTMLButtonElement).disabled).toBe(true);
 });

@@ -13,7 +13,7 @@ import { ActivationPanel, useActivation } from './activation';
 import { OperationDock, PlayControls, PlayNotice, usePlaySnapshot } from './play';
 import { installationRefreshKey } from './play-state';
 import { canInstall, canOpenInstanceOptions, canRepair, canUninstall, isPack, updateTarget } from './library-state';
-import { automaticVariantSwitch, installedVariant, instanceVariants, variantChange, withdrawnVariant } from './variant-state';
+import { automaticVariantSwitch, instanceVariants, variantChange, withdrawnVariant } from './variant-state';
 import { SettingsPanel, usePreferences } from './settings';
 import { GeneralPanel, VersionBadge } from './update';
 import { DiagnosticsPanel } from './diagnostics';
@@ -170,7 +170,7 @@ export function Launcher() {
                 <h1>{instance.name}</h1>
                 <p>{instance.description}</p>
                 <div className="instance-tags">
-                  <InstanceBadges instance={instance} showLoaderHint />
+                  <InstanceBadges instance={instance} showLoaderHint showVariant />
                   {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible', 'Instalando', 'Reparando', 'Actualizando', 'Preparando inicio', 'Cerrando Minecraft'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
                 </div>
               </div>
@@ -181,7 +181,7 @@ export function Launcher() {
               {instance.availability === 'unverified' && <p role="status">No pudimos verificar el estado de esta instancia.</p>}
               {!instance.compatible && <p role="status">Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
               {!instance.supported && <p role="status">Este tipo de instancia todavía no es compatible.</p>}
-              <PlayControls onPackCache={() => { openSettings('global'); setSettingsTab('storage'); setCacheRequest(value => value + 1); }} instanceId={instance.id} removalPending={instance.removalPending} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} variants={instanceVariants(instance)} installedVariant={installedVariant(instance)} variantChange={variantChange(instance, catalog.stale || unverified)} withdrawnVariant={withdrawnVariant(instance, catalog.stale || unverified)} automaticSwitch={automaticVariantSwitch(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available' || liveEntry(instance.id)?.phase === 'installed')} />
+              <PlayControls onPackCache={() => { openSettings('global'); setSettingsTab('storage'); setCacheRequest(value => value + 1); }} instanceId={instance.id} removalPending={instance.removalPending} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} variants={instanceVariants(instance)} variantChange={variantChange(instance, catalog.stale || unverified)} withdrawnVariant={withdrawnVariant(instance, catalog.stale || unverified)} automaticSwitch={automaticVariantSwitch(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available' || liveEntry(instance.id)?.phase === 'installed')} />
               <PackPanel instanceId={instance.id} awaiting={instance.localState === 'awaiting_files'} onChanged={() => setCatalogAttempt(previous => previous + 1)} />
             </div>
           </article>)}

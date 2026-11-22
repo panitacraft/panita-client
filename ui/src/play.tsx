@@ -14,7 +14,7 @@ import { useLauncherUpdate } from './update';
 import { blocksPlay } from './update-state';
 import type { UpdateTarget } from './library-state';
 import { invokePlay, type PlayArguments, type PlayCommand, type UpdateArguments } from './play-api';
-import { variantNames, withdrawnVariantText, type Variant, type VariantChange, type VariantOption } from './variant-state';
+import { withdrawnVariantText, type Variant, type VariantChange, type VariantOption } from './variant-state';
 import { nativeCleanupSummary, nativeRetentionReason, type NativeCleanupReport } from './native-cleanup-state';
 import {
   backedUpSummary, conflictReasonText, conflictsResolvable, folderHint, manualHeading, reasonText, releasedSummary,
@@ -98,7 +98,7 @@ function previewOptions(variants: Variant[]): VariantOption[] {
   return variants.map((id, index) => ({ id, fileCount: 12 * (index + 1), size: 48_000_000 * (index + 1), sameAsPrevious: false }));
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, removalPending = false, optionsAllowed = false, variants = ['standard'], installedVariant = null, variantChange = null, withdrawnVariant = null, automaticSwitch = null }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; removalPending?: boolean; optionsAllowed?: boolean; variants?: Variant[]; installedVariant?: Variant | null; variantChange?: VariantChange | null; withdrawnVariant?: Variant | null; automaticSwitch?: (VariantChange & { to: Variant }) | null }) {
+export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, removalPending = false, optionsAllowed = false, variants = ['standard'], variantChange = null, withdrawnVariant = null, automaticSwitch = null }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; removalPending?: boolean; optionsAllowed?: boolean; variants?: Variant[]; variantChange?: VariantChange | null; withdrawnVariant?: Variant | null; automaticSwitch?: (VariantChange & { to: Variant }) | null }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -253,7 +253,6 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       </details>}
     </div>}
     {switchNotice && <p role="status">{withdrawnVariantText(switchNotice)}</p>}
-    {installedVariant && choice && !switchNotice && <p role="status" className="variant-badge">Variante instalada: {variantNames[installedVariant]}</p>}
     {entry?.error && entry.error !== 'operation_cancelled' && <p className="account-error" role="alert">{messageForError(entry.error)}</p>}
     {!active && entry?.operation === 'update' && entry.error === 'pack_conflict' && (entry.packConflicts?.length ?? 0) > 0 && retry && <fieldset className="catalog-notice">
       <legend>{updateConflictHeading(entry.packConflicts?.length ?? 0)}</legend>
@@ -334,7 +333,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       <ul>{cleanupDetails.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
     </details>}
     {cleanupError && <p role="alert">{cleanupError}</p>}
-    {variantDialog && <VariantDialog mode={variantDialog.mode} options={variantDialog.options} installed={variantDialog.mode === 'change' ? variantChange?.installed ?? null : null} error={variantDialog.error} busy={busy} onConfirm={confirmVariant} onCancel={() => setVariantDialog(null)} />}
+    {variantDialog && <VariantDialog mode={variantDialog.mode} variants={variants} options={variantDialog.options} installed={variantDialog.mode === 'change' ? variantChange?.installed ?? null : null} error={variantDialog.error} busy={busy} onConfirm={confirmVariant} onCancel={() => setVariantDialog(null)} />}
     <dialog ref={uninstallDialog} className="update-dialog" aria-labelledby={instanceId + '-uninstall-title'} onCancel={() => setUninstallQuestion(false)} onClose={() => { if (!uninstallDialog.current?.open) setUninstallQuestion(false); }}>
     {uninstallQuestion && <>
       <h2 id={instanceId + '-uninstall-title'}>Desinstalar instancia</h2>

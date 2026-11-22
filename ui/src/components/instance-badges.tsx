@@ -2,6 +2,8 @@ import { Hint } from './hint';
 import { Blocks, RefreshCw } from 'lucide-react';
 import type { CatalogInstance } from '../preview-catalog';
 import { isPack } from '../library-state';
+import { hasVariantChoice, installedVariant, variantNames } from '../variant-state';
+import { variantIcons } from './variant-icons';
 import minecraft from '../assets/brands/minecraft.svg';
 import neoforge from '../assets/brands/neoforge.svg';
 import forge from '../assets/brands/forge.svg';
@@ -15,7 +17,10 @@ const loaders: Record<string, { name: string; icon: string }> = {
   quilt: { name: 'Quilt', icon: quilt },
 };
 
-export function InstanceBadges({ instance, updateAvailable = false, showLoaderHint = false }: { instance: CatalogInstance; updateAvailable?: boolean; showLoaderHint?: boolean }) {
+export function InstanceBadges({ instance, updateAvailable = false, showLoaderHint = false, showVariant = false }: { instance: CatalogInstance; updateAvailable?: boolean; showLoaderHint?: boolean; showVariant?: boolean }) {
+  // The variant is worth a chip only where the player can choose between several.
+  const variant = showVariant && hasVariantChoice(instance) ? installedVariant(instance) : null;
+  const VariantIcon = variant ? variantIcons[variant] : null;
   const pack = isPack(instance);
   const loaderId = instance.installedLoader?.name ?? instance.source?.loader ?? instance.installedSource?.loader;
   const loader = loaderId ? loaders[loaderId] : undefined;
@@ -31,6 +36,7 @@ export function InstanceBadges({ instance, updateAvailable = false, showLoaderHi
   return <>
     {instance.minecraftVersion && (loaderText && showLoaderHint ? <Hint text={loaderText}>{gameBadge}</Hint> : gameBadge)}
     {pack && versionLabel && <span className="pack-version">{versionLabel}</span>}
+    {variant && VariantIcon && <span className="variant-badge"><VariantIcon aria-hidden="true" />Variante {variantNames[variant]}</span>}
     {updateAvailable && <span className="update-badge"><RefreshCw aria-hidden="true" />Actualización disponible</span>}
     {pack && !loaderId && !versionLabel && <span>Modpack</span>}
   </>;
