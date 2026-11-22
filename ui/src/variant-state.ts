@@ -11,7 +11,7 @@ export const variantOrder: readonly Variant[] = ['lite', 'standard', 'deluxe'];
 
 export const variantNames: Record<Variant, string> = { lite: 'Ligero', standard: 'Estándar', deluxe: 'Mejorado' };
 
-export const variantTaglines: Record<Variant, string> = { lite: 'Ligero y rápido', standard: 'Equilibrado', deluxe: 'Máxima experiencia' };
+export const variantTaglines: Record<Variant, string> = { lite: 'Entra y juega', standard: 'Equilibrado', deluxe: 'Máxima experiencia' };
 
 export const variantDescriptions: Record<Variant, string> = {
   lite: 'Lo mínimo para entrar al servidor, con resource packs y configuración. Sin mods cosméticos ni shaders: pesa poco y se instala rápido.',
