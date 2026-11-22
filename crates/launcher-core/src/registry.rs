@@ -627,6 +627,20 @@ pub struct InstalledLoader {
     pub version: String,
 }
 
+/// The variant of an active pack installation. An uninstalled one keeps its pack state
+/// as a tombstone for configuration history, but it is no longer installed from anything.
+fn installed_variant(
+    installed: &crate::minecraft::install::InstalledLock,
+) -> Option<crate::catalog::Variant> {
+    if installed.schema_version != 2 {
+        return None;
+    }
+    installed
+        .pack
+        .as_ref()
+        .map(crate::modpack::install::variant_of)
+}
+
 impl InstalledLoader {
     /// The caller reads and validates the manifest once before exposing hints.
     fn from_manifest(installed: &crate::minecraft::install::InstalledLock) -> Option<Self> {
@@ -749,10 +763,7 @@ pub async fn load_catalog(
                         view.has_installation_manifest = manifest.is_some();
                         view.installed_loader =
                             manifest.as_ref().and_then(InstalledLoader::from_manifest);
-                        view.installed_variant = manifest
-                            .as_ref()
-                            .and_then(|installed| installed.pack.as_ref())
-                            .map(crate::modpack::install::variant_of);
+                        view.installed_variant = manifest.as_ref().and_then(installed_variant);
                     }
                     Err(error) => {
                         overview.registry_warning.get_or_insert(error.code());

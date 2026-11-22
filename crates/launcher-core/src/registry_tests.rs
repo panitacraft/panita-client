@@ -673,3 +673,41 @@ fn registry_removed_and_offline_views_do_not_invent_installations() {
     assert!(!views[0].compatible);
     assert_eq!(views[0].local_state, InstallationState::NotInstalled);
 }
+
+#[test]
+fn the_installed_variant_is_reported_for_an_active_pack_and_not_for_a_tombstone() {
+    use crate::catalog::Variant;
+    use crate::minecraft::{maintenance, play::tests};
+    use crate::modpack::state::{PackIdentity, PackState};
+    let (paths, accounts, id) = tests::fixture();
+    drop(accounts);
+    tests::complete_installation(&paths, id);
+    let mut manifest = maintenance::installation_manifest(&paths, id)
+        .unwrap_or_else(|_| panic!("manifest"))
+        .unwrap_or_else(|| panic!("installed"));
+    // Vanilla carries no pack, so it has no variant.
+    assert_eq!(installed_variant(&manifest), None);
+    manifest.pack = Some(PackState {
+        schema: 1,
+        id,
+        source: PackIdentity::Custom {
+            version_id: Uuid::new_v4(),
+            published_at: "2026-10-25T20:54:25Z".into(),
+            label: None,
+            variant: Variant::Deluxe,
+        },
+        minecraft_version: "1.21.1".into(),
+        loader: "neoforge".into(),
+        loader_version: "21.1.264".into(),
+        files: Vec::new(),
+        consumed_defaults: Default::default(),
+        skipped_configuration: Vec::new(),
+        pending: Vec::new(),
+    });
+    manifest.schema_version = 2;
+    assert_eq!(installed_variant(&manifest), Some(Variant::Deluxe));
+    // Uninstalling leaves the pack state behind as history; nothing is installed from it.
+    manifest.schema_version = 3;
+    assert_eq!(installed_variant(&manifest), None);
+    std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+}
