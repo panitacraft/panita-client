@@ -547,7 +547,7 @@ test('the variant that suits the machine is preselected, marked and explained', 
   await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
   const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
   await within(dialog).findByText(/28 archivos/);
-  expect(await within(dialog).findByText('Recomendamos Ligero porque tu equipo tiene 4 GB de RAM.')).toBeTruthy();
+  expect(await within(dialog).findByText('Te recomendamos el Perfil de Rendimiento Ligero porque tu equipo tiene 4 GB de RAM.')).toBeTruthy();
   expect((within(dialog).getByRole('radio', { name: /^Ligero/ }) as HTMLInputElement).checked).toBe(true);
   expect(within(dialog.querySelector('label:has(input[value="lite"])') as HTMLElement).getByText('Recomendada')).toBeTruthy();
   expect(dialog.querySelectorAll('.variant-chip').length).toBe(1);
@@ -582,7 +582,7 @@ test('the Rendimiento tab marks the recommended variant but keeps the installed 
   const user = userEvent.setup(); mount();
   await openVariantTab(user);
   await screen.findByText(/28 archivos/);
-  expect(await screen.findByText('Recomendamos Ligero porque tu equipo tiene 2 GB de RAM.')).toBeTruthy();
+  expect(await screen.findByText('Te recomendamos el Perfil de Rendimiento Ligero porque tu equipo tiene 2 GB de RAM.')).toBeTruthy();
   expect(screen.getByText('Recomendada')).toBeTruthy();
   expect((screen.getByRole('radio', { name: 'Estándar' }) as HTMLInputElement).checked).toBe(true);
   expect((screen.getByRole('button', { name: 'Cambiar rendimiento' }) as HTMLButtonElement).disabled).toBe(true);

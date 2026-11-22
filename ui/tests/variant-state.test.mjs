@@ -124,7 +124,7 @@ test('the recommendation follows the memory and says why', () => {
   assert.equal(recommendVariant(cards, { memoryMib: 4 * GIB, freeDiskMib: plenty })?.variant, 'lite');
   assert.equal(recommendVariant(cards, { memoryMib: 8 * GIB, freeDiskMib: plenty })?.variant, 'standard');
   assert.equal(recommendVariant(cards, { memoryMib: 16 * GIB, freeDiskMib: plenty })?.variant, 'deluxe');
-  assert.match(recommendVariant(cards, { memoryMib: 16 * GIB, freeDiskMib: plenty })?.reason ?? '', /Mejorado porque tu equipo tiene 16 GB de RAM/);
+  assert.match(recommendVariant(cards, { memoryMib: 16 * GIB, freeDiskMib: plenty })?.reason ?? '', /^Te recomendamos el Perfil de Rendimiento Mejorado porque tu equipo tiene 16 GB de RAM.$/);
   // Without a reading, Standard is recommended and nothing is claimed about the machine.
   assert.deepEqual(recommendVariant(cards, null), { variant: 'standard', reason: null });
   assert.deepEqual(recommendVariant(cards, { memoryMib: null, freeDiskMib: null }), { variant: 'standard', reason: null });
@@ -146,7 +146,7 @@ test('a variant that would not fit on the disk gives way to a lighter one', () =
   assert.equal(recommendVariant(cards, machine(14))?.variant, 'deluxe');
   const standard = recommendVariant(cards, machine(13));
   assert.equal(standard?.variant, 'standard');
-  assert.match(standard?.reason ?? '', /Estándar.*16 GB de RAM.*13 GB/);
+  assert.match(standard?.reason ?? '', /^Te recomendamos el Perfil de Rendimiento Estándar: .*16 GB de RAM.*13 GB/);
   assert.equal(recommendVariant(cards, machine(6))?.variant, 'standard');
   assert.equal(recommendVariant(cards, machine(5))?.variant, 'lite');
   // Even the lightest one is tight: it is still the one recommended, with a warning.

@@ -199,9 +199,9 @@ export function recommendVariant(cards: readonly VariantCard[], resources: Syste
   const gigabytes = tier ? Math.round((resources?.memoryMib as number) / GIB) : null;
   const space = known ? bytes((free as number) * MIB) : null;
   let reason: string | null = null;
-  if (variant !== memoryChoice) reason = `Recomendamos ${variantNames[variant]}: tu equipo tiene ${gigabytes} GB de RAM, pero el espacio libre en disco (${space}) no alcanza para una opción más completa.`;
-  else if (known && !fits(variant) && shown.length > 1) reason = `Recomendamos ${variantNames[variant]}: el espacio libre en disco (${space}) es justo y es la opción más ligera.`;
-  else if (gigabytes !== null) reason = `Recomendamos ${variantNames[variant]} porque tu equipo tiene ${gigabytes} GB de RAM.`;
+  if (variant !== memoryChoice) reason = `Te recomendamos el Perfil de Rendimiento ${variantNames[variant]}: tu equipo tiene ${gigabytes} GB de RAM, pero el espacio libre en disco (${space}) no alcanza para una opción más completa.`;
+  else if (known && !fits(variant) && shown.length > 1) reason = `Te recomendamos el Perfil de Rendimiento ${variantNames[variant]}: el espacio libre en disco (${space}) es justo y es la opción más ligera.`;
+  else if (gigabytes !== null) reason = `Te recomendamos el Perfil de Rendimiento ${variantNames[variant]} porque tu equipo tiene ${gigabytes} GB de RAM.`;
   return { variant, reason };
 }
 
