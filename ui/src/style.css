@@ -249,20 +249,24 @@
   .erase-warning code { overflow-wrap: anywhere; }
   .backup-choice { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; line-height: 1.5; }
   .backup-choice input { margin: 4px 0 0; }
-  .account-dialog .variant-options { display: grid; gap: 10px; margin: 14px 0; padding: 0; border: 0; }
-  .account-dialog .variant-option { position: relative; display: flex; align-items: center; gap: 14px; margin: 0; padding: 14px 16px; border: 1px solid #383838; border-radius: 10px; background: #141414; cursor: pointer; transition: border-color .15s, background-color .15s; }
+  .account-dialog.variant-dialog { width: min(800px, calc(100vw - 40px)); }
+  .account-dialog .variant-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: 18px 0; padding: 0; border: 0; }
+  .account-dialog .variant-option { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 14px; margin: 0; padding: 18px; border: 1px solid #383838; border-radius: 12px; background: #141414; cursor: pointer; transition: border-color .15s, background-color .15s; }
   .account-dialog .variant-option:hover { border-color: #515151; }
   .account-dialog .variant-option:has(input:checked) { border-color: #54A636; background: rgba(84, 166, 54, .08); }
   .account-dialog .variant-option:has(input:focus-visible) { outline: 2px solid #54A636; outline-offset: 2px; }
-  .variant-icon { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border: 1px solid #383838; border-radius: 10px; background: #1B1B1B; color: #BABABA; }
-  .variant-icon svg { width: 22px; height: 22px; }
+  .variant-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .variant-icon { display: grid; place-items: center; flex-shrink: 0; width: 48px; height: 48px; border: 1px solid #383838; border-radius: 12px; background: #1B1B1B; color: #BABABA; }
+  .variant-icon svg { width: 24px; height: 24px; }
   .variant-option:has(input:checked) .variant-icon { border-color: #54A636; color: #54A636; }
-  .variant-text { display: grid; flex: 1; gap: 2px; min-width: 0; }
-  .variant-text small { color: #BABABA; font-size: 13px; line-height: 1.45; }
-  .variant-text .variant-meta { color: #8f8f8f; font-size: 12px; }
-  .variant-chips { display: flex; flex-shrink: 0; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .variant-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   .variant-chip { padding: 2px 10px; border: 1px solid #54A636; border-radius: 999px; color: #54A636; font-size: 12px; font-weight: 600; white-space: nowrap; }
   .variant-chip.is-installed { background: #54A636; color: #141414; }
+  .variant-text { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 0; }
+  .variant-text strong { font-size: 16px; }
+  .variant-text small { color: #BABABA; font-size: 13px; line-height: 1.5; }
+  .variant-text .variant-meta { margin-top: auto; padding-top: 8px; color: #8f8f8f; font-size: 12px; }
+  .variant-dialog .account-buttons { margin-top: 24px; }
   .update-dialog .account-buttons { margin-top: 24px; }
   .page-heading > p { color: #BABABA; }
   .utility-page > section, .utility-page > div > section { background: #1B1B1B; border: 1px solid #383838; border-radius: 12px; padding: 24px; margin-bottom: 20px; }

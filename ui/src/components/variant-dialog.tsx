@@ -29,7 +29,7 @@ export function VariantDialog({ mode, options, installed = null, error = null, b
   const [picked, setPicked] = useState<Variant | null>(null);
   const selected = picked && choices.some(option => option.id === picked) ? picked : defaultVariant(choices, installed);
   const unchanged = mode === 'change' && selected === installed;
-  return <AccountDialog title={mode === 'install' ? 'Elige cómo instalar' : 'Cambiar variante'} className="update-dialog variant-dialog" onCancel={onCancel}>
+  return <AccountDialog title={mode === 'install' ? 'Elige cómo instalar' : 'Cambiar variante'} className="variant-dialog" onCancel={onCancel}>
     <p>{mode === 'install'
       ? 'Esta instancia tiene varias variantes. Cada una incluye todo lo de la anterior. Puedes cambiarla después sin perder tus mundos.'
       : 'Descargaremos lo que falte y quitaremos solo los archivos que instalamos nosotros. Tus mundos, mods añadidos y ajustes editados se conservan.'}</p>
@@ -41,15 +41,17 @@ export function VariantDialog({ mode, options, installed = null, error = null, b
         const Icon = variantIcons[option.id];
         return <label key={option.id} className="variant-option">
           <input className="sr-only" type="radio" name="variant" value={option.id} checked={selected === option.id} onChange={() => setPicked(option.id)} />
-          <span className="variant-icon" aria-hidden="true"><Icon /></span>
+          <span className="variant-head">
+            <span className="variant-icon" aria-hidden="true"><Icon /></span>
+            <span className="variant-chips">
+              {option.id === installed && <span className="variant-chip is-installed">Instalada</span>}
+              {option.id === 'standard' && mode === 'install' && <span className="variant-chip">Recomendada</span>}
+            </span>
+          </span>
           <span className="variant-text">
             <strong>{variantNames[option.id]}</strong>
             <small>{variantDescriptions[option.id]}</small>
             <small className="variant-meta">{optionSizeText(option)}</small>
-          </span>
-          <span className="variant-chips">
-            {option.id === installed && <span className="variant-chip is-installed">Instalada</span>}
-            {option.id === 'standard' && mode === 'install' && <span className="variant-chip">Recomendada</span>}
           </span>
         </label>;
       })}
