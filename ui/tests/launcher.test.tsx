@@ -543,7 +543,7 @@ test('changing the variant of an installed pack is an update of the same version
   await user.click(screen.getByRole('menuitem', { name: 'Cambiar variante…' }));
   const dialog = await screen.findByRole('dialog', { name: 'Cambiar variante' });
   // The installed variant is marked and cannot be "changed" to itself.
-  expect(await within(dialog).findByText(/instalada/)).toBeTruthy();
+  expect(await within(dialog).findByText('Instalada')).toBeTruthy();
   expect((within(dialog).getByRole('button', { name: 'Cambiar variante' }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(within(dialog).getByRole('radio', { name: /^Lite/ }));
   await user.click(within(dialog).getByRole('button', { name: 'Cambiar variante' }));

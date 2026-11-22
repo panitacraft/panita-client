@@ -1,11 +1,14 @@
 import { useState } from 'react';
-import { Download, RefreshCw, X } from 'lucide-react';
+import { Download, Feather, Package, RefreshCw, Sparkles, X, type LucideIcon } from 'lucide-react';
 import { AccountDialog } from './account-dialog';
 import { Button } from './ui/button';
 import {
   defaultVariant, optionSizeText, selectableOptions, variantDescriptions, variantNames,
   type Variant, type VariantOption,
 } from '../variant-state';
+
+/** Light for the essentials, a box for the whole instance, sparkles for the extras. */
+const variantIcons: Record<Variant, LucideIcon> = { lite: Feather, standard: Package, deluxe: Sparkles };
 
 /**
  * The choice of a variant, before installing or when changing an installation. Options
@@ -34,16 +37,22 @@ export function VariantDialog({ mode, options, installed = null, error = null, b
     {!options && !error && <p role="status">Consultando las variantes…</p>}
     {options && <fieldset className="variant-options">
       <legend className="sr-only">Variante</legend>
-      {choices.map(option => <label key={option.id} className="backup-choice variant-option">
-        <input type="radio" name="variant" value={option.id} checked={selected === option.id} onChange={() => setPicked(option.id)} />
-        <span>
-          <strong>{variantNames[option.id]}</strong>
-          {option.id === 'standard' && mode === 'install' ? ' · recomendada' : ''}
-          {option.id === installed ? ' · instalada' : ''}
-          <small>{variantDescriptions[option.id]}</small>
-          <small>{optionSizeText(option)}</small>
-        </span>
-      </label>)}
+      {choices.map(option => {
+        const Icon = variantIcons[option.id];
+        return <label key={option.id} className="variant-option">
+          <input className="sr-only" type="radio" name="variant" value={option.id} checked={selected === option.id} onChange={() => setPicked(option.id)} />
+          <span className="variant-icon" aria-hidden="true"><Icon /></span>
+          <span className="variant-text">
+            <strong>{variantNames[option.id]}</strong>
+            <small>{variantDescriptions[option.id]}</small>
+            <small className="variant-meta">{optionSizeText(option)}</small>
+          </span>
+          <span className="variant-chips">
+            {option.id === installed && <span className="variant-chip is-installed">Instalada</span>}
+            {option.id === 'standard' && mode === 'install' && <span className="variant-chip">Recomendada</span>}
+          </span>
+        </label>;
+      })}
     </fieldset>}
     <div className="account-buttons">
       <Button disabled={busy || !options || choices.length === 0 || unchanged} onClick={() => onConfirm(selected)}>
