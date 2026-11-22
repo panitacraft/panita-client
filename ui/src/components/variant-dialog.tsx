@@ -3,7 +3,7 @@ import { Download, Feather, Package, RefreshCw, Sparkles, X, type LucideIcon } f
 import { AccountDialog } from './account-dialog';
 import { Button } from './ui/button';
 import {
-  defaultVariant, optionSizeText, selectableOptions, variantDescriptions, variantNames,
+  defaultVariant, optionSizeText, selectableOptions, variantDescriptions, variantNames, variantTaglines,
   type Variant, type VariantOption,
 } from '../variant-state';
 
@@ -51,6 +51,7 @@ export function VariantDialog({ mode, options, installed = null, error = null, b
           </span>
           <span className="variant-text" id={`${prefix}-${option.id}-text`}>
             <strong id={`${prefix}-${option.id}-name`}>{variantNames[option.id]}</strong>
+            <span className="variant-tagline">{variantTaglines[option.id]}</span>
             <small>{variantDescriptions[option.id]}</small>
             <small className="variant-meta">{optionSizeText(option)}</small>
           </span>

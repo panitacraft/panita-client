@@ -11,10 +11,12 @@ export const variantOrder: readonly Variant[] = ['lite', 'standard', 'deluxe'];
 
 export const variantNames: Record<Variant, string> = { lite: 'Lite', standard: 'Standard', deluxe: 'Deluxe' };
 
+export const variantTaglines: Record<Variant, string> = { lite: 'Ligera y rápida', standard: 'Equilibrada', deluxe: 'Máxima experiencia' };
+
 export const variantDescriptions: Record<Variant, string> = {
-  lite: 'Solo lo necesario para entrar al servidor, más resource packs y configuración. Sin mods cosméticos ni shaders.',
-  standard: 'La instancia completa: Lite más los mods opcionales y el resto.',
-  deluxe: 'Standard más mods extra del lado del cliente, resource packs y shader packs.',
+  lite: 'Lo justo para entrar al servidor: los mods imprescindibles, resource packs y configuración. Sin mods cosméticos ni shaders.',
+  standard: 'La instancia completa tal como la conocías: mods imprescindibles y opcionales, resource packs y configuración.',
+  deluxe: 'Todo lo de Standard, con mods extra del lado del cliente, más resource packs y shader packs para verla al máximo.',
 };
 
 export function isVariant(value: unknown): value is Variant {
