@@ -14,9 +14,9 @@ export const variantNames: Record<Variant, string> = { lite: 'Lite', standard: '
 export const variantTaglines: Record<Variant, string> = { lite: 'Ligera y rápida', standard: 'Equilibrada', deluxe: 'Máxima experiencia' };
 
 export const variantDescriptions: Record<Variant, string> = {
-  lite: 'Lo justo para entrar al servidor: los mods imprescindibles, resource packs y configuración. Sin mods cosméticos ni shaders.',
-  standard: 'La instancia completa tal como la conocías: mods imprescindibles y opcionales, resource packs y configuración.',
-  deluxe: 'Todo lo de Standard, con mods extra del lado del cliente, más resource packs y shader packs para verla al máximo.',
+  lite: 'Lo mínimo para entrar al servidor, con resource packs y configuración. Sin mods cosméticos ni shaders: pesa poco y se instala rápido.',
+  standard: 'La experiencia completa de la instancia: mods necesarios y opcionales, resource packs y configuración. La opción recomendada.',
+  deluxe: 'La más completa: añade mods extra del lado del cliente, resource packs adicionales y shader packs.',
 };
 
 export function isVariant(value: unknown): value is Variant {
