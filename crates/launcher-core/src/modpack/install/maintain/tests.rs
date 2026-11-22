@@ -1176,3 +1176,74 @@ fn an_update_keeps_the_variant_and_a_retired_one_moves_to_standard_by_itself() {
         .is_err()
     );
 }
+
+/// Record the installation the way a custom install does: the entry and the
+/// installed source both name the first manifest's game version and pin.
+fn record_as_custom(world: &World, first: &Manifest) {
+    let registry = InstanceRegistry::new(world.paths.clone());
+    let mut record = registry
+        .get(world.id)
+        .unwrap_or_default()
+        .unwrap_or_else(|| panic!("record"));
+    let source = CatalogSource::Custom {
+        minecraft_version: first.minecraft_version.clone(),
+        loader: first.loader.clone(),
+        current_version_id: Some(first.version_id),
+        label: first.label.clone(),
+        published_at: Some(first.published_at.clone()),
+    };
+    record.last_catalog.minecraft_version = Some(first.minecraft_version.clone());
+    record.last_catalog.source = source.clone();
+    record.resolved_source = source;
+    assert!(registry.save(&record).is_ok());
+}
+
+#[tokio::test]
+async fn an_update_to_another_minecraft_version_completes_and_publishes_the_new_source() {
+    let world = world();
+    let mut pair = installed_pair(&world).await;
+    record_as_custom(&world, &pair.first);
+    pair.second.minecraft_version = "1.21.4".to_owned();
+    let before = pack(&world);
+    assert_eq!(before.minecraft_version, "1.21.1");
+
+    let report = updated(update_to(&world, &pair.second, &pair.server, false).await);
+    assert_eq!((report.added, report.replaced, report.removed), (1, 1, 1));
+    let lock = pack(&world);
+    assert_eq!(pin_of(&lock), pair.second.version_id.to_string());
+    assert_eq!(lock.minecraft_version, "1.21.4");
+    assert!(matches!(
+        record_source(&world),
+        Some(CatalogSource::Custom { minecraft_version, current_version_id: Some(version), .. })
+            if minecraft_version == "1.21.4" && version == pair.second.version_id
+    ));
+    // The registry still reads the record, so no catalog warning is raised afterwards.
+    assert!(InstanceRegistry::new(world.paths.clone()).load().is_ok());
+    assert_eq!(state(&world), Some(InstallationState::Installed));
+    no_transaction(&world);
+}
+
+#[tokio::test]
+async fn an_update_that_only_changes_the_loader_version_completes_and_publishes_it() {
+    let world = world();
+    let mut pair = installed_pair(&world).await;
+    record_as_custom(&world, &pair.first);
+    pair.second.loader_version = "21.1.300".to_owned();
+    assert_eq!(pack(&world).loader_version, "21.1.264");
+
+    let report = updated(update_to(&world, &pair.second, &pair.server, false).await);
+    assert_eq!((report.added, report.replaced, report.removed), (1, 1, 1));
+    let lock = pack(&world);
+    assert_eq!(pin_of(&lock), pair.second.version_id.to_string());
+    assert_eq!(lock.minecraft_version, "1.21.1");
+    assert_eq!(lock.loader, "neoforge");
+    assert_eq!(lock.loader_version, "21.1.300");
+    assert!(matches!(
+        record_source(&world),
+        Some(CatalogSource::Custom { loader, current_version_id: Some(version), .. })
+            if loader == "neoforge" && version == pair.second.version_id
+    ));
+    assert!(InstanceRegistry::new(world.paths.clone()).load().is_ok());
+    assert_eq!(state(&world), Some(InstallationState::Installed));
+    no_transaction(&world);
+}
