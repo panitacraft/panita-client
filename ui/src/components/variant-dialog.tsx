@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Download, Feather, Package, RefreshCw, Sparkles, X, type LucideIcon } from 'lucide-react';
 import { AccountDialog } from './account-dialog';
 import { Button } from './ui/button';
@@ -25,6 +25,7 @@ export function VariantDialog({ mode, options, installed = null, error = null, b
   onConfirm: (variant: Variant) => void;
   onCancel: () => void;
 }) {
+  const prefix = useId();
   const choices = options ? selectableOptions(options, installed) : [];
   const [picked, setPicked] = useState<Variant | null>(null);
   const selected = picked && choices.some(option => option.id === picked) ? picked : defaultVariant(choices, installed);
@@ -40,7 +41,7 @@ export function VariantDialog({ mode, options, installed = null, error = null, b
       {choices.map(option => {
         const Icon = variantIcons[option.id];
         return <label key={option.id} className="variant-option">
-          <input className="sr-only" type="radio" name="variant" value={option.id} checked={selected === option.id} onChange={() => setPicked(option.id)} />
+          <input className="sr-only" type="radio" name="variant" aria-labelledby={`${prefix}-${option.id}-name`} aria-describedby={`${prefix}-${option.id}-text`} value={option.id} checked={selected === option.id} onChange={() => setPicked(option.id)} />
           <span className="variant-head">
             <span className="variant-icon" aria-hidden="true"><Icon /></span>
             <span className="variant-chips">
@@ -48,8 +49,8 @@ export function VariantDialog({ mode, options, installed = null, error = null, b
               {option.id === 'standard' && mode === 'install' && <span className="variant-chip">Recomendada</span>}
             </span>
           </span>
-          <span className="variant-text">
-            <strong>{variantNames[option.id]}</strong>
+          <span className="variant-text" id={`${prefix}-${option.id}-text`}>
+            <strong id={`${prefix}-${option.id}-name`}>{variantNames[option.id]}</strong>
             <small>{variantDescriptions[option.id]}</small>
             <small className="variant-meta">{optionSizeText(option)}</small>
           </span>

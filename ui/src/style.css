@@ -250,16 +250,16 @@
   .backup-choice { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; line-height: 1.5; }
   .backup-choice input { margin: 4px 0 0; }
   .account-dialog.variant-dialog { width: min(800px, calc(100vw - 40px)); }
-  .account-dialog .variant-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: 18px 0; padding: 0; border: 0; }
-  .account-dialog .variant-option { position: relative; display: flex; flex-direction: column; align-items: stretch; gap: 14px; margin: 0; padding: 18px; border: 1px solid #383838; border-radius: 12px; background: #141414; cursor: pointer; transition: border-color .15s, background-color .15s; }
+  .account-dialog .variant-options { display: flex; flex-wrap: nowrap; gap: 14px; margin: 18px 0; padding: 4px 2px 12px; border: 0; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: #515151 transparent; }
+  .account-dialog .variant-option { position: relative; display: flex; flex: 1 0 220px; flex-direction: column; align-items: stretch; gap: 14px; margin: 0; padding: 18px; border: 1px solid #383838; border-radius: 12px; background: #141414; cursor: pointer; scroll-snap-align: start; transition: border-color .15s, background-color .15s; }
   .account-dialog .variant-option:hover { border-color: #515151; }
   .account-dialog .variant-option:has(input:checked) { border-color: #54A636; background: rgba(84, 166, 54, .08); }
   .account-dialog .variant-option:has(input:focus-visible) { outline: 2px solid #54A636; outline-offset: 2px; }
-  .variant-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-  .variant-icon { display: grid; place-items: center; flex-shrink: 0; width: 48px; height: 48px; border: 1px solid #383838; border-radius: 12px; background: #1B1B1B; color: #BABABA; }
-  .variant-icon svg { width: 24px; height: 24px; }
-  .variant-option:has(input:checked) .variant-icon { border-color: #54A636; color: #54A636; }
-  .variant-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .variant-head { display: flex; justify-content: center; padding-top: 10px; }
+  .variant-icon { display: grid; place-items: center; color: #8f8f8f; transition: color .15s; }
+  .variant-icon svg { width: 56px; height: 56px; stroke-width: 1.5; }
+  .variant-option:has(input:checked) .variant-icon { color: #54A636; }
+  .variant-chips { position: absolute; top: 12px; right: 12px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   .variant-chip { padding: 2px 10px; border: 1px solid #54A636; border-radius: 999px; color: #54A636; font-size: 12px; font-weight: 600; white-space: nowrap; }
   .variant-chip.is-installed { background: #54A636; color: #141414; }
   .variant-text { display: flex; flex: 1; flex-direction: column; gap: 6px; min-width: 0; }
