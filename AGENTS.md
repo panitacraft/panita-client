@@ -755,11 +755,25 @@ and individual measurements are evidence, not product guarantees.
     attempt per withdrawn variant, never a retry loop; it needs a recently verified
     session like every update, and a failure waits for the player.
   - Before installing, show the choice only when more than Standard is offered, with
-    Standard preselected and each variant's size. Do not offer a variant that installs
+    the recommended variant preselected (Standard when nothing could be read from the
+    machine) and each variant's size. Do not offer a variant that installs
     exactly what the one below it does. The API names are fixed (`lite`, `standard`,
     `deluxe`) and are the only identifiers stored or sent. The player sees them in Spanish
     as Ligero, Estándar and Mejorado, under the name Rendimiento (owner decision,
     2026-11-21); the short Spanish descriptions belong to the launcher.
+  - Recommended variant (owner decision, 2026-11-22). When installing and when changing
+    the variant, the launcher reads the installed memory and the free space of the
+    volume that holds its data (two numbers, through the `system_resources` command; the
+    frontend supplies no path) and marks one variant as recommended. Memory decides, in
+    whole gigabytes because the system reports a little under the nominal amount: 4 GB
+    or less recommends Lite, more than 4 and less than 12 Standard, 12 or more Deluxe.
+    A variant the instance does not show gives way to the closest one below it. A
+    variant whose files would not fit (twice the files it adds, because pack files are
+    cached and then copied, plus 2 GB for the game when installing) gives way to the
+    next lighter one. If memory cannot be read, Standard is recommended and nothing is
+    claimed about the machine. The recommendation only preselects and explains; the
+    player can always choose another variant, and when changing, the installed variant
+    stays selected. Nothing else about the machine is read, stored or sent.
   - Variant behavior is verified by tests; real Windows and Ubuntu launches of Lite
     and Deluxe installations remain unqualified until tested.
 
