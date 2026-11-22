@@ -744,6 +744,9 @@ and individual measurements are evidence, not product guarantees.
     installed and that still match their recorded baseline, keeps edited files as the
     player's, and never touches worlds, so it offers no world backup. A version update
     keeps the installed variant.
+  - The player changes the variant of an installed pack from a Variante tab in the
+    instance settings, which exists only when the instance offers a choice; the
+    options menu does not carry it. The first choice is made when installing.
   - Owner exception to "updates never install automatically": when the instance stops
     offering the installed variant, the launcher moves the installation to Standard on
     its own, without a confirmation, and tells the player. It applies only when the
