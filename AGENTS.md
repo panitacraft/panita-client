@@ -723,6 +723,40 @@ and individual measurements are evidence, not product guarantees.
 - Qualify the new installed-product scope on Windows 11 x64 and Ubuntu x64;
   retain the separate Ubuntu 24.04 build baseline. macOS is outside scope.
   Earlier MVP results do not qualify new modpack or updater behavior.
+- Instance variants (owner decisions, 2026-11-21). A custom instance installs in one
+  of three fixed, nested variants the player chooses: Lite (only what entering the
+  server needs, plus resource packs and configuration), Standard (the instance as it
+  was: Lite plus optional mods and the rest) and Deluxe (Standard plus extra
+  client-side mods, resource packs and shader packs). Each file carries the smallest
+  variant that includes it, so `lite ⊂ standard ⊂ deluxe`. Each instance decides which
+  to offer; Standard is always offered, and vanilla and Modrinth offer only Standard.
+  - Always request the manifest with `?variant=`, Standard included, and refuse an
+    answer for another variant. A published version is immutable, so `(version_id,
+    variant)` always yields the same files and archives. A `404` for a non-Standard
+    variant means it is no longer offered, not that the instance is gone. The current
+    by-ID answer's `variants` decides what is offered before any manifest is asked.
+  - `installed.json` schema 5 records `variant` in the custom pack identity and always
+    writes it, Standard included. An installation recorded without it reads as
+    Standard. Older builds reject the field and must not operate on that data. The
+    installed variant is not part of the pin: it never makes Play ask for an update.
+  - Changing the variant is an update of the same pin, computed by the ownership-aware
+    diff of §7: it downloads what is missing, removes only files the launcher
+    installed and that still match their recorded baseline, keeps edited files as the
+    player's, and never touches worlds, so it offers no world backup. A version update
+    keeps the installed variant.
+  - Owner exception to "updates never install automatically": when the instance stops
+    offering the installed variant, the launcher moves the installation to Standard on
+    its own, without a confirmation, and tells the player. It applies only when the
+    pin did not change; Play is refused until then. A pin change goes through the
+    confirmed update of Annex A, which also falls back to Standard. One automatic
+    attempt per withdrawn variant, never a retry loop; it needs a recently verified
+    session like every update, and a failure waits for the player.
+  - Before installing, show the choice only when more than Standard is offered, with
+    Standard preselected and each variant's size. Do not offer a variant that installs
+    exactly what the one below it does. Names are fixed (Lite, Standard, Deluxe); the
+    short Spanish descriptions belong to the launcher.
+  - Variant behavior is verified by tests; real Windows and Ubuntu launches of Lite
+    and Deluxe installations remain unqualified until tested.
 
 ## 8. Release Channels, Updates and Versioning (2026-10-30)
 
