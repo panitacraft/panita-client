@@ -74,7 +74,7 @@ const messages: Record<LauncherErrorCode, string> = {
   manual_files_required: 'Faltan archivos que debes descargar tú mismo. Complétalos para poder jugar.',
   pack_conflict: 'Ya existen archivos tuyos donde este modpack necesita instalar los suyos. No cambiamos nada: revisa la lista, muévelos o elimínalos y vuelve a instalar.',
   update_required: 'Actualiza esta instancia antes de jugar.',
-  variant_unavailable: 'Esa variante ya no se ofrece en esta instancia. Actualiza la lista de instancias y elige otra variante.',
+  variant_unavailable: 'Esa opción de rendimiento ya no se ofrece en esta instancia. Actualiza la lista de instancias y elige otra.',
   launcher_update_required: 'Actualiza Panita Client antes de jugar.',
   launcher_update_unsupported: 'Esta instalación no puede actualizarse sola. Instala la versión nueva desde la página de la versión.',
   launcher_update_failed: 'No se pudo actualizar Panita Client. Inténtalo de nuevo.',

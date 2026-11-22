@@ -10,7 +10,7 @@ import { playActive } from '../play-state';
 import { instanceVariants, previewOptions, resolveVariant, variantCards, variantChange, type Variant, type VariantOption } from '../variant-state';
 
 /**
- * The "Variante" tab of an instance's settings. Changing it is an update of the same
+ * The "Rendimiento" tab of an instance's settings. Changing it is an update of the same
  * published version: it downloads what is missing and removes only what the launcher
  * installed. Worlds are never touched.
  */
@@ -40,10 +40,10 @@ export function VariantPanel({ instance, stale, onStarted }: { instance: Catalog
 
   if (!change) {
     return <section className="variant-panel" aria-labelledby="variant-heading">
-      <h2 id="variant-heading" className="sr-only">Variante</h2>
+      <h2 id="variant-heading" className="sr-only">Rendimiento</h2>
       <p>{installed === null && !instance.installedSource
-        ? 'Instala la instancia para poder cambiar su variante. Al instalarla podrás elegir una.'
-        : 'Ahora mismo no se puede cambiar la variante. Actualiza la instancia o comprueba tu conexión e inténtalo de nuevo.'}</p>
+        ? 'Instala la instancia para poder cambiar su rendimiento. Al instalarla podrás elegir un nivel.'
+        : 'Ahora mismo no se puede cambiar el rendimiento. Actualiza la instancia o comprueba tu conexión e inténtalo de nuevo.'}</p>
     </section>;
   }
   const loading = !options && !error;
@@ -59,13 +59,13 @@ export function VariantPanel({ instance, stale, onStarted }: { instance: Catalog
   }
 
   return <section className="variant-panel" aria-labelledby="variant-heading">
-    <h2 id="variant-heading" className="sr-only">Variante</h2>
+    <h2 id="variant-heading" className="sr-only">Rendimiento</h2>
     <p>Descargaremos lo que falte y quitaremos solo los archivos que instalamos nosotros. Tus mundos, mods añadidos y ajustes editados se conservan.</p>
-    {error && <div role="alert"><p className="account-error">No pudimos consultar las variantes. {error}</p><button type="button" onClick={() => setAttempt(previous => previous + 1)}>Reintentar</button></div>}
-    {loading && <p className="sr-only" role="status">Consultando las variantes…</p>}
+    {error && <div role="alert"><p className="account-error">No pudimos consultar los niveles de rendimiento. {error}</p><button type="button" onClick={() => setAttempt(previous => previous + 1)}>Reintentar</button></div>}
+    {loading && <p className="sr-only" role="status">Consultando los niveles de rendimiento…</p>}
     <VariantPicker cards={cards} loading={loading} selected={selected} installed={installed} onPick={setPicked} />
     <div className="account-buttons">
-      <Button disabled={loading || !!error || working || unchanged || !isTauri()} onClick={() => void apply()}><RefreshCw aria-hidden="true" />Cambiar variante</Button>
+      <Button disabled={loading || !!error || working || unchanged || !isTauri()} onClick={() => void apply()}><RefreshCw aria-hidden="true" />Cambiar rendimiento</Button>
     </div>
     {working && <p role="status">Hay una operación en curso en esta instancia. Espera a que termine.</p>}
   </section>;

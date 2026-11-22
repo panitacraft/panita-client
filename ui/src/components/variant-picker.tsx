@@ -19,7 +19,7 @@ export function VariantPicker({ cards, loading, selected, installed = null, reco
   const prefix = useId();
   if (cards.length === 0) return null;
   return <fieldset className="variant-options" aria-busy={loading}>
-    <legend className="sr-only">Variante</legend>
+    <legend className="sr-only">Rendimiento</legend>
     {cards.map(card => {
       const Icon = variantIcons[card.id];
       return <label key={card.id} className="variant-option">

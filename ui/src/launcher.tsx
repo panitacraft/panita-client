@@ -62,7 +62,7 @@ export function Launcher() {
   const selected = instances.find(instance => instance.id === selectedId);
   const settingsTabs: readonly (readonly [typeof settingsTab, string])[] = settingsScope === 'global'
     ? [['general', 'General'], ['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['diagnostics', 'Diagnóstico']]
-    : selected && hasVariantChoice(selected) ? [['game', 'Minecraft'], ['variant', 'Variante']] : [];
+    : selected && hasVariantChoice(selected) ? [['game', 'Minecraft'], ['variant', 'Rendimiento']] : [];
   const variantTab = settingsScope === 'instance' && settingsTab === 'variant' && !!selected && hasVariantChoice(selected);
   const selectedAccount = accountView?.accounts.find(account => account.metadata.account_id === accountView.selected_account_id);
   const { rail, capacity } = useInstanceRail(instances.length);

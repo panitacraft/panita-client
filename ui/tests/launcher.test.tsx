@@ -521,9 +521,9 @@ test('an instance with several variants asks which to install, with Standard pre
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_install')).toBe(false);
   // The sizes arrive after the cards, which are already in place.
   await within(dialog).findByText(/28 archivos/);
-  expect(((await within(dialog).findByRole('radio', { name: /^Standard/ })) as HTMLInputElement).checked).toBe(true);
+  expect(((await within(dialog).findByRole('radio', { name: /^Estándar/ })) as HTMLInputElement).checked).toBe(true);
   expect(within(dialog).getByText(/Sin mods cosméticos ni shaders/)).toBeTruthy();
-  await user.click(within(dialog).getByRole('radio', { name: /^Deluxe/ }));
+  await user.click(within(dialog).getByRole('radio', { name: /^Mejorado/ }));
   await user.click(within(dialog).getByRole('button', { name: 'Instalar', exact: true }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_install', expect.objectContaining({ instanceId: 'pack-a', variant: 'deluxe' }));
 });
@@ -541,22 +541,22 @@ async function openVariantTab(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByRole('button', { name: 'Jugar', exact: true });
   await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
   // Changing the variant lives in the instance settings, not in this menu.
-  expect(screen.queryByRole('menuitem', { name: /Cambiar variante/ })).toBeNull();
+  expect(screen.queryByRole('menuitem', { name: /Cambiar (variante|rendimiento)/ })).toBeNull();
   await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
-  await user.click(await screen.findByRole('tab', { name: 'Variante' }));
+  await user.click(await screen.findByRole('tab', { name: 'Rendimiento' }));
 }
 
 test('the variant is changed from a tab of the instance settings, as an update of the same version', async () => {
   catalog.instances[0] = { ...first, ...withVariants, installedVariant: 'standard' };
   const user = userEvent.setup(); mount();
   await openVariantTab(user);
-  const lite = await screen.findByRole('radio', { name: 'Lite' });
+  const lite = await screen.findByRole('radio', { name: 'Ligero' });
   await screen.findByText(/28 archivos/);
   // The installed variant is marked and cannot be "changed" to itself.
   expect(screen.getByText('Instalada')).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Cambiar variante' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: 'Cambiar rendimiento' }) as HTMLButtonElement).disabled).toBe(true);
   await user.click(lite);
-  await user.click(screen.getByRole('button', { name: 'Cambiar variante' }));
+  await user.click(screen.getByRole('button', { name: 'Cambiar rendimiento' }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({
     instanceId: 'pack-a',
     update: { from_version: 'v2', to_version: 'v2', backup_worlds: false, from_variant: 'standard', to_variant: 'lite' },
@@ -569,8 +569,8 @@ test('a conflict while changing the variant can be retried from the instance pag
   catalog.instances[0] = { ...first, ...withVariants, installedVariant: 'standard' };
   const user = userEvent.setup(); mount();
   await openVariantTab(user);
-  await user.click(await screen.findByRole('radio', { name: 'Lite' }));
-  await user.click(screen.getByRole('button', { name: 'Cambiar variante' }));
+  await user.click(await screen.findByRole('radio', { name: 'Ligero' }));
+  await user.click(screen.getByRole('button', { name: 'Cambiar rendimiento' }));
   await emit(entry({ operation: 'update', phase: 'failed', error: 'pack_conflict', packConflicts: [{ path: 'mods/a.jar', reason: 'occupied' }] }));
   await user.click(await screen.findByRole('button', { name: 'Continuar y guardar mis archivos' }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({
@@ -584,7 +584,7 @@ test('an instance with one variant has no variant tab, and one that is not insta
   await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
   await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
   await screen.findByRole('heading', { name: 'Ajustes · Aventura', exact: true });
-  expect(screen.queryByRole('tab', { name: 'Variante' })).toBeNull();
+  expect(screen.queryByRole('tab', { name: 'Rendimiento' })).toBeNull();
 });
 
 test('a version update of a pack installed before variants names no variant, so the backend keeps it', async () => {
@@ -602,7 +602,7 @@ test('a variant the instance stopped offering moves to Standard by itself, once,
     instanceId: 'pack-a',
     update: { from_version: 'v2', to_version: 'v2', backup_worlds: false, from_variant: 'lite', to_variant: 'standard' },
   })));
-  expect(await screen.findByText(/La variante Lite ya no se ofrece/)).toBeTruthy();
+  expect(await screen.findByText(/Ligero ya no se ofrece/)).toBeTruthy();
   // A failed attempt is not repeated on its own.
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
   expect(backend.invoke.mock.calls.filter(([command]) => command === 'begin_update')).toHaveLength(1);
@@ -615,11 +615,11 @@ test('the variant cards appear at once and only their sizes wait for the backend
   const user = userEvent.setup(); mount();
   await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
   const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
-  for (const name of ['Lite', 'Standard', 'Deluxe']) {
+  for (const name of ['Ligero', 'Estándar', 'Mejorado']) {
     expect((within(dialog).getByRole('radio', { name }) as HTMLInputElement).disabled).toBe(true);
   }
   expect(within(dialog).getAllByText('Calculando tamaño…')).toHaveLength(3);
   // The default is already marked, but nothing can be confirmed until the sizes are known.
-  expect((within(dialog).getByRole('radio', { name: 'Standard' }) as HTMLInputElement).checked).toBe(true);
+  expect((within(dialog).getByRole('radio', { name: 'Estándar' }) as HTMLInputElement).checked).toBe(true);
   expect((within(dialog).getByRole('button', { name: 'Instalar', exact: true }) as HTMLButtonElement).disabled).toBe(true);
 });

@@ -9,13 +9,13 @@ export type VariantOption = { id: Variant; fileCount: number; size: number; same
 
 export const variantOrder: readonly Variant[] = ['lite', 'standard', 'deluxe'];
 
-export const variantNames: Record<Variant, string> = { lite: 'Lite', standard: 'Standard', deluxe: 'Deluxe' };
+export const variantNames: Record<Variant, string> = { lite: 'Ligero', standard: 'Estándar', deluxe: 'Mejorado' };
 
-export const variantTaglines: Record<Variant, string> = { lite: 'Ligera y rápida', standard: 'Equilibrada', deluxe: 'Máxima experiencia' };
+export const variantTaglines: Record<Variant, string> = { lite: 'Ligero y rápido', standard: 'Equilibrado', deluxe: 'Máxima experiencia' };
 
 export const variantDescriptions: Record<Variant, string> = {
   lite: 'Lo mínimo para entrar al servidor, con resource packs y configuración. Sin mods cosméticos ni shaders: pesa poco y se instala rápido.',
-  standard: 'La experiencia completa de la instancia: mods necesarios y opcionales, resource packs y configuración. La opción recomendada.',
+  standard: 'La experiencia completa de la instancia: mods necesarios y opcionales, resource packs y configuración. Es la opción recomendada.',
   deluxe: 'La más completa: añade mods extra del lado del cliente, resource packs adicionales y shader packs.',
 };
 
@@ -56,7 +56,7 @@ export function optionSizeText(option: Pick<VariantOption, 'fileCount' | 'size'>
 }
 
 export function withdrawnVariantText(variant: Variant): string {
-  return `La variante ${variantNames[variant]} ya no se ofrece en esta instancia. Pasamos tu instalación a ${variantNames.standard}.`;
+  return `La opción de rendimiento ${variantNames[variant]} ya no se ofrece en esta instancia. Pasamos tu instalación a ${variantNames.standard}.`;
 }
 
 // Rules over a catalog entry. They read the entry only; the backend decides again.

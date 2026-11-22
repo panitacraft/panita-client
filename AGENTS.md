@@ -744,7 +744,7 @@ and individual measurements are evidence, not product guarantees.
     installed and that still match their recorded baseline, keeps edited files as the
     player's, and never touches worlds, so it offers no world backup. A version update
     keeps the installed variant.
-  - The player changes the variant of an installed pack from a Variante tab in the
+  - The player changes the variant of an installed pack from a Rendimiento tab in the
     instance settings, which exists only when the instance offers a choice; the
     options menu does not carry it. The first choice is made when installing.
   - Owner exception to "updates never install automatically": when the instance stops
@@ -756,8 +756,10 @@ and individual measurements are evidence, not product guarantees.
     session like every update, and a failure waits for the player.
   - Before installing, show the choice only when more than Standard is offered, with
     Standard preselected and each variant's size. Do not offer a variant that installs
-    exactly what the one below it does. Names are fixed (Lite, Standard, Deluxe); the
-    short Spanish descriptions belong to the launcher.
+    exactly what the one below it does. The API names are fixed (`lite`, `standard`,
+    `deluxe`) and are the only identifiers stored or sent. The player sees them in Spanish
+    as Ligero, Estándar and Mejorado, under the name Rendimiento (owner decision,
+    2026-11-21); the short Spanish descriptions belong to the launcher.
   - Variant behavior is verified by tests; real Windows and Ubuntu launches of Lite
     and Deluxe installations remain unqualified until tested.
 

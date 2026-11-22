@@ -25,9 +25,9 @@ export function VariantDialog({ variants, options, error = null, busy, onConfirm
   const [picked, setPicked] = useState<Variant | null>(null);
   const selected = resolveVariant(cards, picked);
   return <AccountDialog title="Elige cómo instalar" className="variant-dialog" onCancel={onCancel}>
-    <p>Esta instancia tiene varias variantes. Cada una incluye todo lo de la anterior. Puedes cambiarla después desde los ajustes de la instancia, sin perder tus mundos.</p>
+    <p>Esta instancia tiene varios niveles de rendimiento. Cada nivel incluye todo lo del anterior. Puedes cambiarlo después en la pestaña Rendimiento de los ajustes de la instancia, sin perder tus mundos.</p>
     {error && <p className="account-error" role="alert">{error}</p>}
-    {loading && <p className="sr-only" role="status">Consultando las variantes…</p>}
+    {loading && <p className="sr-only" role="status">Consultando los niveles de rendimiento…</p>}
     <VariantPicker cards={cards} loading={loading} selected={selected} recommended onPick={setPicked} />
     <div className="account-buttons">
       <Button disabled={busy || loading || cards.length === 0} onClick={() => onConfirm(selected)}><Download aria-hidden="true" />Instalar</Button>

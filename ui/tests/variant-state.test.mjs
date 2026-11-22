@@ -74,7 +74,7 @@ test('a withdrawn variant moves to Standard on its own only when nothing else is
   for (const patch of [{ availability: 'disabled' }, { removalPending: true }, { localState: 'running' }]) {
     assert.equal(automaticVariantSwitch({ ...withdrawn, ...patch }, false), null, JSON.stringify(patch));
   }
-  assert.match(withdrawnVariantText('lite'), /Lite ya no se ofrece.*Standard/);
+  assert.match(withdrawnVariantText('lite'), /Ligero ya no se ofrece.*Estándar/);
 });
 
 test('cards exist before the sizes do, and a pick that is no longer shown falls back to the default', async () => {
