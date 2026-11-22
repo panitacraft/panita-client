@@ -46,6 +46,9 @@ test('an installation recorded before variants is Standard and only custom packs
   assert.equal(installedVariant({ ...instance, installedVariant: 'lite' }), 'lite');
   assert.equal(installedVariant({ ...instance, installedVariant: 'gold' }), 'standard');
   assert.equal(installedVariant({ ...instance, installedSource: null }), null);
+  // After an uninstall the catalog still remembers the pin, but nothing is installed.
+  assert.equal(installedVariant({ ...instance, localState: 'not_installed' }), null);
+  assert.equal(installedVariant({ ...instance, installedVariant: null }), null);
   assert.equal(installedVariant({ ...instance, source: { type: 'vanilla' }, installedSource: { type: 'vanilla' } }), null);
 });
 

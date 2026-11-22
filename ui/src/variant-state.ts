@@ -83,6 +83,8 @@ export function hasVariantChoice(instance: CatalogInstance): boolean {
 /** The variant an installed pack was made from; a pack recorded before variants is Standard. */
 export function installedVariant(instance: CatalogInstance): Variant | null {
   if (!isCustom(instance) || pin(instance.installedSource) === null) return null;
+  // An uninstalled instance keeps its recorded pin as history; nothing is installed from it.
+  if (instance.localState === 'not_installed' || instance.installedVariant === null) return null;
   return isVariant(instance.installedVariant) ? instance.installedVariant : 'standard';
 }
 
