@@ -43,6 +43,76 @@ pub(crate) fn purge_cache(store: &PrivateStore) -> Result<(), CoreError> {
     })
 }
 
+/// The fixed installation variants of a custom instance. They are nested by the API:
+/// every file carries the smallest variant that includes it, so each variant installs
+/// everything the one before it does. `Standard` is always offered.
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Variant {
+    Lite,
+    #[default]
+    Standard,
+    Deluxe,
+}
+
+impl Variant {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Lite => "lite",
+            Self::Standard => "standard",
+            Self::Deluxe => "deluxe",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "lite" => Some(Self::Lite),
+            "standard" => Some(Self::Standard),
+            "deluxe" => Some(Self::Deluxe),
+            _ => None,
+        }
+    }
+}
+
+/// What a source that offers no choice (vanilla, Modrinth, an older API) provides.
+pub fn standard_only() -> Vec<Variant> {
+    vec![Variant::Standard]
+}
+
+/// The variants an answer offers, ordered and unique. Names this launcher does not
+/// know are ignored: it cannot install them, and a future API may add some.
+/// Only custom instances offer a choice; `Standard` must always be present.
+fn offered_variants(raw: Option<&[String]>, custom: bool) -> Result<Vec<Variant>, CoreError> {
+    let Some(raw) = raw else {
+        return Ok(standard_only());
+    };
+    if raw.len() > 16 {
+        return Err(invalid());
+    }
+    let mut offered = std::collections::BTreeSet::new();
+    for name in raw {
+        match Variant::parse(name) {
+            Some(variant) => {
+                if !offered.insert(variant) {
+                    return Err(invalid());
+                }
+            }
+            None if bounded_text(name, 32) => {}
+            None => return Err(invalid()),
+        }
+    }
+    if !offered.contains(&Variant::Standard) {
+        return Err(invalid());
+    }
+    Ok(if custom {
+        offered.into_iter().collect()
+    } else {
+        standard_only()
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum CatalogSource {
@@ -130,6 +200,16 @@ pub struct CatalogInstance {
     pub sort_order: u32,
     pub updated_at: String,
     pub source: CatalogSource,
+    /// Ordered `lite`, `standard`, `deluxe`; always holds `standard`. Only a custom
+    /// instance can offer more than that.
+    #[serde(default = "standard_only")]
+    pub variants: Vec<Variant>,
+}
+
+impl CatalogInstance {
+    pub fn offers(&self, variant: Variant) -> bool {
+        self.variants.contains(&variant)
+    }
 }
 
 #[derive(Deserialize)]
@@ -154,6 +234,8 @@ struct RawInstance {
     current_version_id: Option<Uuid>,
     current_version_label: Option<String>,
     current_version_published_at: Option<String>,
+    #[serde(default)]
+    variants: Option<Vec<String>>,
 }
 
 fn invalid() -> CoreError {
@@ -222,6 +304,7 @@ impl TryFrom<RawInstance> for CatalogInstance {
         {
             return Err(invalid());
         }
+        let variants = offered_variants(raw.variants.as_deref(), raw.source_type == "custom")?;
         let source = match raw.source_type.as_str() {
             "vanilla" => {
                 if raw.modrinth_project_id.is_some()
@@ -297,6 +380,7 @@ impl TryFrom<RawInstance> for CatalogInstance {
             sort_order: raw.sort_order,
             updated_at: raw.updated_at,
             source,
+            variants,
         })
     }
 }
@@ -364,6 +448,12 @@ impl CatalogInstance {
             current_version_id,
             current_version_label,
             current_version_published_at,
+            variants: Some(
+                self.variants
+                    .iter()
+                    .map(|variant| variant.as_str().to_owned())
+                    .collect(),
+            ),
         })?;
         Ok(())
     }

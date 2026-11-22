@@ -718,3 +718,84 @@ async fn live_public_catalog_includes_two_independent_vanilla_records() {
     drop(store);
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
 }
+
+fn custom_record(variants: Option<Value>) -> Value {
+    let mut raw = record();
+    raw["source_type"] = json!("custom");
+    raw["loader"] = json!("neoforge");
+    raw["current_version_id"] = json!("2f0f8b1e-5d0a-4a35-8f2a-6c3d4e5f6a7b");
+    raw["current_version_label"] = json!("0.2");
+    raw["current_version_published_at"] = json!("2026-10-25T20:54:25Z");
+    if let Some(variants) = variants {
+        raw["variants"] = variants;
+    }
+    raw
+}
+
+fn offered(raw: Value) -> Result<Vec<Variant>, CoreError> {
+    parse_list(list(vec![raw]).as_bytes()).map(|parsed| parsed[0].variants.clone())
+}
+
+#[test]
+fn variants_default_to_standard_and_only_a_custom_instance_offers_a_choice() {
+    // An older API names none: that is Standard.
+    assert_eq!(offered(record()).ok(), Some(vec![Variant::Standard]));
+    assert_eq!(
+        offered(custom_record(None)).ok(),
+        Some(vec![Variant::Standard])
+    );
+    assert_eq!(
+        offered(custom_record(Some(json!(["standard"])))).ok(),
+        Some(vec![Variant::Standard])
+    );
+    // Offered in the API's order, whatever order they arrive in.
+    let all = vec![Variant::Lite, Variant::Standard, Variant::Deluxe];
+    assert_eq!(
+        offered(custom_record(Some(json!(["lite", "standard", "deluxe"])))).ok(),
+        Some(all.clone())
+    );
+    assert_eq!(
+        offered(custom_record(Some(json!(["deluxe", "standard", "lite"])))).ok(),
+        Some(all)
+    );
+    // A name from a future API is ignored, never offered.
+    assert_eq!(
+        offered(custom_record(Some(json!(["standard", "platinum"])))).ok(),
+        Some(vec![Variant::Standard])
+    );
+    // Vanilla and Modrinth never offer a choice, whatever the answer says.
+    let mut vanilla = record();
+    vanilla["variants"] = json!(["lite", "standard", "deluxe"]);
+    assert_eq!(offered(vanilla).ok(), Some(vec![Variant::Standard]));
+    // Standard is always present; a list that lacks it, repeats a name or is
+    // malformed is refused rather than guessed.
+    for bad in [
+        json!([]),
+        json!(["lite"]),
+        json!(["standard", "standard"]),
+        json!(["standard", ""]),
+        json!(["standard", "bad\u{0}name"]),
+        json!("standard"),
+    ] {
+        assert!(offered(custom_record(Some(bad.clone()))).is_err(), "{bad}");
+    }
+    // The record that is stored and read back keeps what was offered.
+    let parsed =
+        parse_list(list(vec![custom_record(Some(json!(["lite", "standard"])))]).as_bytes())
+            .unwrap_or_else(|_| panic!("custom"));
+    assert!(parsed[0].validate().is_ok());
+    assert!(parsed[0].offers(Variant::Lite));
+    assert!(!parsed[0].offers(Variant::Deluxe));
+    let stored = serde_json::to_string(&parsed[0]).unwrap_or_default();
+    assert!(
+        stored.contains(r#""variants":["lite","standard"]"#),
+        "{stored}"
+    );
+    // A record written before variants existed has none and reads as Standard.
+    let mut old: Value = serde_json::from_str(&stored).unwrap_or_default();
+    if let Some(object) = old.as_object_mut() {
+        object.remove("variants");
+    }
+    let read: CatalogInstance = serde_json::from_value(old).unwrap_or_else(|_| panic!("old"));
+    assert_eq!(read.variants, vec![Variant::Standard]);
+}

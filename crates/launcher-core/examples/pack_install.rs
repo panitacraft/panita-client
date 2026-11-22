@@ -92,7 +92,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             });
             let started = std::time::Instant::now();
-            match install_any(&paths, id, &platform, &cancel, base, pack, None).await? {
+            match install_any(
+                &paths,
+                id,
+                &platform,
+                &cancel,
+                base,
+                pack,
+                launcher_core::catalog::Variant::Standard,
+                None,
+            )
+            .await?
+            {
                 Installed::Pack(Outcome::Installed(report)) => println!(
                     "{}",
                     serde_json::json!({"result": "installed", "files": report.files,
@@ -132,6 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 banner_url: None,
                 sort_order: 1,
                 updated_at: "2026-10-28T00:00:00Z".into(),
+                variants: launcher_core::catalog::standard_only(),
                 source: CatalogSource::Modrinth {
                     project_id: project,
                     pack_version_id: version,
@@ -145,7 +157,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             });
             let started = std::time::Instant::now();
-            match install_catalog(&paths, catalog, &platform, &cancel, base, pack, None).await? {
+            match install_catalog(
+                &paths,
+                catalog,
+                &platform,
+                &cancel,
+                base,
+                pack,
+                launcher_core::catalog::Variant::Standard,
+                None,
+            )
+            .await?
+            {
                 Outcome::Installed(report) => println!(
                     "{}",
                     serde_json::json!({"result": "installed", "files": report.files,
@@ -206,6 +229,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     to_version: version,
                     backup_worlds: false,
                     move_aside: args.get(5).is_some_and(|flag| flag == "move-aside"),
+                    from_variant: None,
+                    to_variant: None,
                 };
                 match update_catalog(
                     &paths, id, &platform, request, &cancel, base, pack, catalog, None,

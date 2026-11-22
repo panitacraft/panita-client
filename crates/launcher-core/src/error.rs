@@ -40,6 +40,8 @@ pub enum ErrorCode {
     CatalogConfirmationRequired,
     WorldBackupUnsafe,
     UpdateSelectionChanged,
+    /// The requested or installed variant is not offered by the instance any more.
+    VariantUnavailable,
     /// The persisted account file is damaged or unsupported; it is left untouched.
     AccountsFileInvalid,
     /// A browser callback arrived when no login was waiting for it.

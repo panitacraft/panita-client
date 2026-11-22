@@ -26,7 +26,7 @@ use super::{
     transfer::{Expected, PackDownloader},
 };
 use crate::{
-    catalog::{CatalogClient, CatalogInstance, CatalogSource},
+    catalog::{CatalogClient, CatalogInstance, CatalogSource, Variant},
     error::{CoreError, ErrorCode},
     minecraft::{
         Platform,
@@ -50,6 +50,7 @@ pub use maintain::{
     Blocked, RepairReport, UninstallReport, UpdateOutcome, UpdateReport, UpdateRequest, is_pack,
     pin_of, repair as repair_pack, repair_with_catalog as repair_catalog,
     uninstall as uninstall_pack, update as update_pack, update_with_catalog as update_catalog,
+    variant_of,
 };
 
 /// A destination this operation created because it was absent at preflight.
@@ -306,6 +307,7 @@ impl Plan {
                 version_id: manifest.version_id,
                 published_at: manifest.published_at.clone(),
                 label: manifest.label.clone(),
+                variant: manifest.variant,
             },
             minecraft_version: manifest.minecraft_version.clone(),
             kind,
@@ -683,6 +685,7 @@ pub enum Installed {
 }
 
 /// Install a catalog instance of any installable source: vanilla, or a pack.
+#[allow(clippy::too_many_arguments)]
 pub async fn install_any(
     paths: &AppPaths,
     id: Uuid,
@@ -690,6 +693,7 @@ pub async fn install_any(
     cancel: &Cancellation,
     progress: Progress,
     pack_progress: ProgressSink,
+    variant: Variant,
     auth: Option<PanitaCredentials>,
 ) -> Result<Installed, CoreError> {
     let client = CatalogClient::new()?.with_auth(auth.clone());
@@ -701,18 +705,91 @@ pub async fn install_any(
         catalog.source,
         CatalogSource::Custom { .. } | CatalogSource::Modrinth { .. }
     ) {
-        return install(paths, id, platform, cancel, progress, pack_progress, auth)
-            .await
-            .map(Installed::Pack);
+        return install(
+            paths,
+            id,
+            platform,
+            cancel,
+            progress,
+            pack_progress,
+            variant,
+            auth,
+        )
+        .await
+        .map(Installed::Pack);
+    }
+    // Only a custom instance offers a choice.
+    if variant != Variant::Standard {
+        return Err(CoreError::new(ErrorCode::VariantUnavailable));
     }
     crate::minecraft::install::install(paths, id, platform, cancel, progress, auth).await?;
     Ok(Installed::Vanilla)
 }
 
-/// The custom pack's exact manifest for the current catalog pin.
+/// One variant the player can pick before installing a custom instance.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariantOption {
+    pub id: Variant,
+    /// Cumulative, like the manifest's: everything this variant installs.
+    pub file_count: u64,
+    pub size: u64,
+    /// The variant installs exactly what the one below it does, so choosing it adds
+    /// nothing. The variants are nested, so an equal count of files means equal files.
+    pub same_as_previous: bool,
+}
+
+/// The choices of a custom instance, with what each installs. Empty when the instance
+/// offers only Standard: nothing is asked then. Standard always exists, so its manifest
+/// carries every offered variant's size.
+pub async fn variant_options(
+    id: Uuid,
+    cancel: &Cancellation,
+    auth: Option<PanitaCredentials>,
+) -> Result<Vec<VariantOption>, CoreError> {
+    let client = CatalogClient::new()?.with_auth(auth.clone());
+    let catalog = tokio::select! {
+        _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
+        result = client.detail(id) => result?,
+    };
+    let CatalogSource::Custom {
+        current_version_id: Some(version),
+        ..
+    } = &catalog.source
+    else {
+        return Ok(Vec::new());
+    };
+    if catalog.variants.len() < 2 {
+        return Ok(Vec::new());
+    }
+    let manifests = ManifestClient::new()?.with_auth(auth);
+    let cached = tokio::select! {
+        _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
+        result = manifests.fetch(id, *version, Variant::Standard, None) => result?,
+    };
+    let manifest = cached.manifest();
+    manifest.bind_current(&catalog)?;
+    let mut options: Vec<VariantOption> = Vec::new();
+    for variant in &catalog.variants {
+        let summary = manifest.summary(*variant).ok_or_else(invalid)?;
+        let same_as_previous = options
+            .last()
+            .is_some_and(|last| last.file_count == summary.file_count && last.size == summary.size);
+        options.push(VariantOption {
+            id: *variant,
+            file_count: summary.file_count,
+            size: summary.size,
+            same_as_previous,
+        });
+    }
+    Ok(options)
+}
+
+/// The custom pack's exact manifest for the current catalog pin and one variant.
 async fn custom_plan(
     catalog: &CatalogInstance,
     id: Uuid,
+    variant: Variant,
     cancel: &Cancellation,
     auth: Option<PanitaCredentials>,
 ) -> Result<Plan, CoreError> {
@@ -723,22 +800,27 @@ async fn custom_plan(
     else {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     };
-    custom_plan_pinned(*version, Some(catalog), id, cancel, auth).await
+    // The current by-ID answer decides what is offered, before any manifest is asked.
+    if !catalog.offers(variant) {
+        return Err(CoreError::new(ErrorCode::VariantUnavailable));
+    }
+    custom_plan_pinned(*version, Some(catalog), id, variant, cancel, auth).await
 }
 
-/// The manifest of one exact published version. Only the current pin is bound to
-/// the catalog; an installed pin, used for repair, is historical.
+/// The manifest of one exact published version and variant. Only the current pin is
+/// bound to the catalog; an installed pin, used for repair, is historical.
 async fn custom_plan_pinned(
     version: Uuid,
     bind: Option<&CatalogInstance>,
     id: Uuid,
+    variant: Variant,
     cancel: &Cancellation,
     auth: Option<PanitaCredentials>,
 ) -> Result<Plan, CoreError> {
     let manifests = ManifestClient::new()?.with_auth(auth);
     let cached = tokio::select! {
         _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
-        result = manifests.fetch(id, version, None) => result?,
+        result = manifests.fetch(id, version, variant, None) => result?,
     };
     let manifest = cached.manifest();
     if let Some(catalog) = bind {
@@ -823,6 +905,7 @@ async fn mrpack_plan_pinned(
 }
 
 /// Install the current exact catalog pin of a pack.
+#[allow(clippy::too_many_arguments)]
 pub async fn install(
     paths: &AppPaths,
     id: Uuid,
@@ -830,6 +913,7 @@ pub async fn install(
     cancel: &Cancellation,
     progress: Progress,
     pack_progress: ProgressSink,
+    variant: Variant,
     auth: Option<PanitaCredentials>,
 ) -> Result<Outcome, CoreError> {
     let credentials = auth.clone();
@@ -845,6 +929,7 @@ pub async fn install(
         cancel,
         progress,
         pack_progress,
+        variant,
         credentials,
     )
     .await
@@ -852,6 +937,7 @@ pub async fn install(
 
 /// Install the pack a catalog entry that was already fetched pins. The entry must be
 /// the current by-ID response; development harnesses may supply their own.
+#[allow(clippy::too_many_arguments)]
 pub async fn install_catalog(
     paths: &AppPaths,
     catalog: CatalogInstance,
@@ -859,6 +945,7 @@ pub async fn install_catalog(
     cancel: &Cancellation,
     progress: Progress,
     pack_progress: ProgressSink,
+    variant: Variant,
     auth: Option<PanitaCredentials>,
 ) -> Result<Outcome, CoreError> {
     let id = catalog.id;
@@ -867,6 +954,10 @@ pub async fn install_catalog(
     if !catalog.enabled {
         return Err(CoreError::new(ErrorCode::InstanceDisabled));
     }
+    // The player's choice must be one the current answer offers; a Modrinth pack has none.
+    if !catalog.offers(variant) {
+        return Err(CoreError::new(ErrorCode::VariantUnavailable));
+    }
     if !catalog
         .compatible_with(&semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?)
     {
@@ -874,7 +965,7 @@ pub async fn install_catalog(
     }
     let downloader = PackDownloader::new()?;
     let plan = match &catalog.source {
-        CatalogSource::Custom { .. } => custom_plan(&catalog, id, cancel, auth).await?,
+        CatalogSource::Custom { .. } => custom_plan(&catalog, id, variant, cancel, auth).await?,
         CatalogSource::Modrinth { .. } => {
             mrpack_plan(paths, &downloader, &catalog, cancel, pack_progress.clone()).await?
         }

@@ -27,6 +27,7 @@ fn state(files: Vec<ManagedFile>, consumed: &[&str]) -> PackState {
             version_id: Uuid::new_v4(),
             published_at: "2026-10-25T20:54:25Z".into(),
             label: None,
+            variant: crate::catalog::Variant::Standard,
         },
         minecraft_version: "1.21.1".into(),
         loader: "neoforge".into(),

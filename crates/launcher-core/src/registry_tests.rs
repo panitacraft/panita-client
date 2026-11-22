@@ -34,7 +34,7 @@ fn installed_loader_hint_reports_the_recorded_version_and_omits_tombstones() {
     std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
 }
 
-fn entry(id: Uuid) -> CatalogInstance {
+pub(crate) fn entry(id: Uuid) -> CatalogInstance {
     CatalogInstance {
         id,
         slug: "vanilla-actual".to_owned(),
@@ -48,6 +48,7 @@ fn entry(id: Uuid) -> CatalogInstance {
         banner_url: None,
         sort_order: 10,
         updated_at: "2026-10-16T00:00:00Z".to_owned(),
+        variants: crate::catalog::standard_only(),
         source: CatalogSource::Vanilla {
             minecraft_version: "1.21.1".to_owned(),
         },

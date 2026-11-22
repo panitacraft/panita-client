@@ -148,6 +148,20 @@ fn require_current_source(
     }
 }
 
+/// A pack installed from a variant the instance no longer offers does not launch. The
+/// player's installation moves to Standard first, through an update, so nothing is
+/// left running from content the instance withdrew.
+fn require_offered_variant(
+    pack: &PackState,
+    offered: &[crate::catalog::Variant],
+) -> Result<(), CoreError> {
+    if offered.contains(&crate::modpack::install::variant_of(pack)) {
+        Ok(())
+    } else {
+        Err(CoreError::new(ErrorCode::VariantUnavailable))
+    }
+}
+
 /// The installed pack must be the one this catalog entry pins, in the same format.
 fn pack_matches(source: &CatalogSource, pack: &PackState) -> bool {
     match (source, &pack.source) {
@@ -295,6 +309,8 @@ async fn prepare_with_catalog(
         registry.remember_catalog(std::slice::from_ref(current))?;
     }
     let current_source = detail.as_ref().ok().map(|current| current.source.clone());
+    // Only a current answer says what is offered: an outage keeps the warned launch.
+    let current_variants = detail.as_ref().ok().map(|current| current.variants.clone());
     let decision = catalog_decision(&local.last_catalog, detail).and_then(|warning| {
         if let Some(current) = &current_source {
             require_current_source(&local.resolved_source, current)?;
@@ -320,6 +336,11 @@ async fn prepare_with_catalog(
         _ = cancel.cancelled() => return Err(CoreError::new(ErrorCode::OperationCancelled)),
         result = audit => result.map_err(|_| CoreError::new(ErrorCode::StorageUnavailable))??,
     };
+    // An installed variant the instance stopped offering no longer launches: the
+    // player's installation moves to Standard first, through an update.
+    if let (Some(pack), Some(offered)) = (&installed.pack, &current_variants) {
+        require_offered_variant(pack, offered)?;
+    }
     accounts.check_play_selection(&selection)?;
     Ok(PendingPlay {
         paths,

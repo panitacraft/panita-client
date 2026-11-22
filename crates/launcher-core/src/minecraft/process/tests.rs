@@ -25,6 +25,7 @@ fn fixture() -> (AppPaths, Uuid) {
         banner_url: None,
         sort_order: 0,
         updated_at: "2026-10-17T00:00:00Z".into(),
+        variants: crate::catalog::standard_only(),
         source: CatalogSource::Vanilla {
             minecraft_version: "1.21.1".into(),
         },

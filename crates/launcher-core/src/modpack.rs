@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    catalog::{CatalogInstance, CatalogSource},
+    catalog::{CatalogInstance, CatalogSource, Variant},
     error::{CoreError, ErrorCode},
     minecraft::safe_unicode_path,
 };
@@ -233,6 +233,14 @@ pub struct Archives {
     pub defaults: Option<Archive>,
     pub enforced: Option<Archive>,
 }
+/// What one offered variant installs, cumulative like the variants themselves.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VariantSummary {
+    pub id: Variant,
+    pub file_count: u64,
+    pub size: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     pub instance_id: Uuid,
@@ -243,6 +251,12 @@ pub struct Manifest {
     pub minecraft_version: String,
     pub loader: String,
     pub loader_version: String,
+    /// The variant `files` and `archives` belong to.
+    #[serde(default)]
+    pub variant: Variant,
+    /// Every variant the instance offers, with its cumulative count and size.
+    #[serde(default)]
+    pub variants: Vec<VariantSummary>,
     pub files: Vec<ManifestFile>,
     pub archives: Archives,
 }
@@ -253,12 +267,31 @@ struct Response {
 
 impl Manifest {
     pub fn parse(bytes: &[u8], instance: Uuid, version: Uuid) -> Result<Self, CoreError> {
+        Self::parse_variant(bytes, instance, version, Variant::Standard)
+    }
+
+    /// The answer must be the variant that was asked for: an API that ignored the
+    /// parameter would serve Standard, and installing that as Lite or Deluxe is wrong.
+    pub fn parse_variant(
+        bytes: &[u8],
+        instance: Uuid,
+        version: Uuid,
+        variant: Variant,
+    ) -> Result<Self, CoreError> {
         if bytes.len() > MAX_DOCUMENT_BYTES {
             return Err(invalid());
         }
         let response: Response = serde_json::from_slice(bytes).map_err(|_| invalid())?;
         response.data.validate(instance, version)?;
+        if response.data.variant != variant {
+            return Err(invalid());
+        }
         Ok(response.data)
+    }
+
+    /// The summary of one offered variant, when the answer carries them.
+    pub fn summary(&self, variant: Variant) -> Option<&VariantSummary> {
+        self.variants.iter().find(|summary| summary.id == variant)
     }
 
     pub fn validate(&self, instance: Uuid, version: Uuid) -> Result<(), CoreError> {
@@ -274,6 +307,17 @@ impl Manifest {
             || !pin(&self.loader_version)
             || self.label.as_deref().is_some_and(|label| !text(label, 32))
             || self.files.len() > MAX_FILES
+            || self.variants.len() > 3
+            || (!self.variants.is_empty()
+                && (!self
+                    .variants
+                    .iter()
+                    .any(|summary| summary.id == self.variant)
+                    || !self
+                        .variants
+                        .iter()
+                        .any(|summary| summary.id == Variant::Standard)
+                    || !self.variants.windows(2).all(|pair| pair[0].id < pair[1].id)))
         {
             return Err(invalid());
         }

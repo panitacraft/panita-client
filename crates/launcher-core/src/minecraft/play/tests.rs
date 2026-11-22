@@ -238,6 +238,7 @@ fn local() -> CatalogInstance {
         banner_url: None,
         sort_order: 10,
         updated_at: "2026-10-13T06:22:29Z".into(),
+        variants: crate::catalog::standard_only(),
         source: CatalogSource::Vanilla {
             minecraft_version: "26.3".into(),
         },
@@ -974,6 +975,7 @@ fn an_installed_pack_must_be_the_one_the_catalog_pins_in_the_same_format() {
             version_id: Uuid::new_v4(),
             published_at: "2026-10-25T20:54:25Z".into(),
             label: None,
+            variant: crate::catalog::Variant::Standard,
         },
         "neoforge",
     );
@@ -1000,6 +1002,7 @@ fn custom_pack_play_requires_a_supported_matching_loader_and_minecraft_pin() {
                 version_id: version,
                 published_at: "2026-10-25T20:54:25Z".into(),
                 label: None,
+                variant: crate::catalog::Variant::Standard,
             },
             name,
         );
@@ -1043,4 +1046,46 @@ async fn account_validation_starts_with_the_audit_only_for_launches_without_a_wa
     assert!(LaunchLease::acquire(&paths, id).is_ok());
     drop(accounts);
     assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+}
+
+#[test]
+fn play_refuses_a_pack_whose_installed_variant_the_instance_stopped_offering() {
+    use crate::catalog::Variant;
+    use crate::modpack::state::PackIdentity;
+    let installed = |variant| {
+        state_for(
+            PackIdentity::Custom {
+                version_id: Uuid::new_v4(),
+                published_at: "2026-10-25T20:54:25Z".into(),
+                label: None,
+                variant,
+            },
+            "neoforge",
+        )
+    };
+    let all = [Variant::Lite, Variant::Standard, Variant::Deluxe];
+    for variant in all {
+        assert!(require_offered_variant(&installed(variant), &all).is_ok());
+    }
+    // Withdrawn variants are refused until the installation moves to Standard.
+    for variant in [Variant::Lite, Variant::Deluxe] {
+        assert_eq!(
+            require_offered_variant(&installed(variant), &[Variant::Standard])
+                .err()
+                .map(|error| error.code()),
+            Some(ErrorCode::VariantUnavailable)
+        );
+    }
+    assert!(require_offered_variant(&installed(Variant::Standard), &[Variant::Standard]).is_ok());
+    // A Modrinth pack is Standard, which every answer offers.
+    let modrinth = state_for(
+        PackIdentity::Modrinth {
+            project_id: "project".into(),
+            version_id: "v1".into(),
+            archive_sha512: "a".repeat(128),
+            index_sha256: "b".repeat(64),
+        },
+        "neoforge",
+    );
+    assert!(require_offered_variant(&modrinth, &[Variant::Standard]).is_ok());
 }
