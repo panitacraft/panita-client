@@ -537,22 +537,54 @@ test('an instance that offers only Standard installs without any question', asyn
   expect(backend.invoke.mock.calls.some(([command]) => command === 'instance_variants')).toBe(false);
 });
 
-test('changing the variant of an installed pack is an update of the same version that leaves worlds alone', async () => {
-  catalog.instances[0] = { ...first, ...withVariants, installedVariant: 'standard' };
-  const user = userEvent.setup(); mount();
+async function openVariantTab(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByRole('button', { name: 'Jugar', exact: true });
   await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
-  await user.click(screen.getByRole('menuitem', { name: 'Cambiar variante…' }));
-  const dialog = await screen.findByRole('dialog', { name: 'Cambiar variante' });
+  // Changing the variant lives in the instance settings, not in this menu.
+  expect(screen.queryByRole('menuitem', { name: /Cambiar variante/ })).toBeNull();
+  await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
+  await user.click(await screen.findByRole('tab', { name: 'Variante' }));
+}
+
+test('the variant is changed from a tab of the instance settings, as an update of the same version', async () => {
+  catalog.instances[0] = { ...first, ...withVariants, installedVariant: 'standard' };
+  const user = userEvent.setup(); mount();
+  await openVariantTab(user);
+  const lite = await screen.findByRole('radio', { name: 'Lite' });
+  await screen.findByText(/28 archivos/);
   // The installed variant is marked and cannot be "changed" to itself.
-  expect(await within(dialog).findByText('Instalada')).toBeTruthy();
-  expect((within(dialog).getByRole('button', { name: 'Cambiar variante' }) as HTMLButtonElement).disabled).toBe(true);
-  await user.click(within(dialog).getByRole('radio', { name: /^Lite/ }));
-  await user.click(within(dialog).getByRole('button', { name: 'Cambiar variante' }));
+  expect(screen.getByText('Instalada')).toBeTruthy();
+  expect((screen.getByRole('button', { name: 'Cambiar variante' }) as HTMLButtonElement).disabled).toBe(true);
+  await user.click(lite);
+  await user.click(screen.getByRole('button', { name: 'Cambiar variante' }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({
     instanceId: 'pack-a',
     update: { from_version: 'v2', to_version: 'v2', backup_worlds: false, from_variant: 'standard', to_variant: 'lite' },
   }));
+  // Progress and results are on the instance page, so the player goes back to it.
+  expect(await screen.findByRole('button', { name: 'Jugar', exact: true })).toBeTruthy();
+});
+
+test('a conflict while changing the variant can be retried from the instance page with the same variant', async () => {
+  catalog.instances[0] = { ...first, ...withVariants, installedVariant: 'standard' };
+  const user = userEvent.setup(); mount();
+  await openVariantTab(user);
+  await user.click(await screen.findByRole('radio', { name: 'Lite' }));
+  await user.click(screen.getByRole('button', { name: 'Cambiar variante' }));
+  await emit(entry({ operation: 'update', phase: 'failed', error: 'pack_conflict', packConflicts: [{ path: 'mods/a.jar', reason: 'occupied' }] }));
+  await user.click(await screen.findByRole('button', { name: 'Continuar y guardar mis archivos' }));
+  expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({
+    update: { from_version: 'v2', to_version: 'v2', backup_worlds: false, from_variant: 'standard', to_variant: 'lite', move_aside: true },
+  }));
+});
+
+test('an instance with one variant has no variant tab, and one that is not installed explains why', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('button', { name: 'Jugar', exact: true });
+  await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
+  await screen.findByRole('heading', { name: 'Ajustes · Aventura', exact: true });
+  expect(screen.queryByRole('tab', { name: 'Variante' })).toBeNull();
 });
 
 test('a version update of a pack installed before variants names no variant, so the backend keeps it', async () => {

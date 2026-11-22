@@ -76,3 +76,21 @@ test('a withdrawn variant moves to Standard on its own only when nothing else is
   }
   assert.match(withdrawnVariantText('lite'), /Lite ya no se ofrece.*Standard/);
 });
+
+test('cards exist before the sizes do, and a pick that is no longer shown falls back to the default', async () => {
+  const { variantCards, resolveVariant, previewOptions } = await import('../src/variant-state.ts');
+  const loading = variantCards(['lite', 'standard', 'deluxe'], null, null);
+  assert.deepEqual(loading.map(card => [card.id, card.pending]), [['lite', true], ['standard', true], ['deluxe', true]]);
+  assert.deepEqual(variantCards(['lite', 'standard'], null, 'network_unavailable'), []);
+  const loaded = variantCards(['lite', 'standard', 'deluxe'], [
+    { id: 'lite', fileCount: 1, size: 1, sameAsPrevious: false },
+    { id: 'standard', fileCount: 2, size: 2, sameAsPrevious: false },
+    { id: 'deluxe', fileCount: 2, size: 2, sameAsPrevious: true },
+  ], null);
+  assert.deepEqual(loaded.map(card => card.id), ['lite', 'standard']);
+  assert.equal(resolveVariant(loaded, null), 'standard');
+  assert.equal(resolveVariant(loaded, 'lite'), 'lite');
+  assert.equal(resolveVariant(loaded, 'deluxe'), 'standard');
+  assert.equal(resolveVariant(loaded, null, 'lite'), 'lite');
+  assert.deepEqual(previewOptions(['lite', 'standard']).map(option => option.id), ['lite', 'standard']);
+});

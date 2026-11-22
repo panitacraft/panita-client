@@ -122,3 +122,27 @@ export function automaticVariantSwitch(instance: CatalogInstance, stale: boolean
   if (!withdrawn || !current || !samePinReady(instance, stale)) return null;
   return { pin: current, installed: withdrawn, to: 'standard' };
 }
+
+/** A choice as shown: with its sizes, or still waiting for them. */
+export type VariantCard = VariantOption & { pending?: boolean };
+
+/**
+ * The cards to show. They come from what the catalog says is offered, so they exist before
+ * the sizes do; an error shows none. Once the sizes arrive, a variant that adds nothing
+ * over the one below is left out, unless it is the installed one.
+ */
+export function variantCards(variants: readonly Variant[], options: readonly VariantOption[] | null, error: string | null, installed: Variant | null = null): VariantCard[] {
+  if (options) return selectableOptions(options, installed);
+  if (error) return [];
+  return variants.map(id => ({ id, fileCount: 0, size: 0, sameAsPrevious: false, pending: true }));
+}
+
+/** The variant picked, or the default when nothing was picked or the pick is no longer shown. */
+export function resolveVariant(cards: readonly VariantCard[], picked: Variant | null, installed: Variant | null = null): Variant {
+  return picked && cards.some(card => card.id === picked) ? picked : defaultVariant(cards, installed);
+}
+
+/** Stand-in sizes for the browser preview, where there is no backend to ask. */
+export function previewOptions(variants: readonly Variant[]): VariantOption[] {
+  return variants.map((id, index) => ({ id, fileCount: 12 * (index + 1), size: 48_000_000 * (index + 1), sameAsPrevious: false }));
+}

@@ -250,11 +250,11 @@
   .backup-choice { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0; line-height: 1.5; }
   .backup-choice input { margin: 4px 0 0; }
   .account-dialog.variant-dialog { width: min(960px, calc(100vw - 40px)); }
-  .account-dialog .variant-options { display: flex; flex-wrap: nowrap; gap: 14px; margin: 18px 0; padding: 4px 2px 12px; border: 0; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: #515151 transparent; }
-  .account-dialog .variant-option { position: relative; display: flex; flex: 1 0 180px; flex-direction: column; align-items: stretch; gap: 14px; margin: 0; padding: 18px; border: 1px solid #383838; border-radius: 12px; background: #141414; cursor: pointer; scroll-snap-align: start; transition: border-color .15s, background-color .15s; }
-  .account-dialog .variant-option:hover { border-color: #515151; }
-  .account-dialog .variant-option:has(input:checked) { border-color: #54A636; background: rgba(84, 166, 54, .08); }
-  .account-dialog .variant-option:has(input:focus-visible) { outline: 2px solid #54A636; outline-offset: 2px; }
+  .variant-options { display: flex; flex-wrap: nowrap; gap: 14px; margin: 18px 0; padding: 4px 2px 12px; border: 0; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: thin; scrollbar-color: #515151 transparent; }
+  .variant-options .variant-option { position: relative; display: flex; flex: 1 0 180px; flex-direction: column; align-items: stretch; gap: 14px; margin: 0; padding: 18px; border: 1px solid #383838; border-radius: 12px; background: #141414; cursor: pointer; scroll-snap-align: start; transition: border-color .15s, background-color .15s; }
+  .variant-options .variant-option:hover { border-color: #515151; }
+  .variant-options .variant-option:has(input:checked) { border-color: #54A636; background: rgba(84, 166, 54, .08); }
+  .variant-options .variant-option:has(input:focus-visible) { outline: 2px solid #54A636; outline-offset: 2px; }
   .variant-head { display: flex; justify-content: center; padding-top: 10px; }
   .variant-icon { display: grid; place-items: center; color: #8f8f8f; transition: color .15s; }
   .variant-icon svg { width: 56px; height: 56px; stroke-width: 1.5; }
@@ -268,11 +268,14 @@
   .variant-text small { color: #BABABA; font-size: 13px; line-height: 1.5; }
   .variant-text .variant-meta { margin-top: auto; padding-top: 8px; color: #8f8f8f; font-size: 12px; }
   .variant-dialog .account-buttons { margin-top: 24px; }
+  .variant-panel { max-width: 960px; }
+  .variant-panel > p { color: #BABABA; margin-bottom: 4px; }
+  .variant-panel .account-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
   .variant-pending, .variant-ready { display: flex; align-items: center; gap: 8px; min-height: 18px; }
   .variant-pending { color: #8f8f8f; }
   .variant-spinner { width: 12px; height: 12px; border: 2px solid #515151; border-top-color: #54A636; border-radius: 50%; animation: variant-spin .8s linear infinite; }
   .variant-ready { animation: variant-fade .35s ease both; }
-  .account-dialog .variant-option:has(input:disabled) { cursor: progress; }
+  .variant-options .variant-option:has(input:disabled) { cursor: progress; }
   @keyframes variant-spin { to { transform: rotate(360deg); } }
   @keyframes variant-fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .variant-spinner, .variant-ready { animation: none; } }
