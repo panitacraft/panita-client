@@ -267,6 +267,7 @@
   .variant-tagline { color: #54A636; font-size: 12px; font-weight: 600; margin-top: -4px; }
   .variant-text small { color: #BABABA; font-size: 13px; line-height: 1.5; }
   .variant-text .variant-meta { margin-top: auto; padding-top: 8px; color: #8f8f8f; font-size: 12px; }
+  .variant-reason { margin: 10px 0 0; color: #BABABA; font-size: 13px; }
   .variant-dialog .account-buttons { margin-top: 24px; }
   .variant-panel { max-width: 960px; }
   .variant-panel > p { color: #BABABA; margin-bottom: 4px; }

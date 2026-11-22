@@ -7,7 +7,8 @@ import { messageForError } from '../errors';
 import type { CatalogInstance } from '../preview-catalog';
 import { usePlayControl } from '../play';
 import { playActive } from '../play-state';
-import { instanceVariants, previewOptions, resolveVariant, variantCards, variantChange, type Variant, type VariantOption } from '../variant-state';
+import { useSystemResources } from '../system-api';
+import { instanceVariants, previewOptions, recommendVariant, resolveVariant, variantCards, variantChange, type Variant, type VariantOption } from '../variant-state';
 
 /**
  * The "Rendimiento" tab of an instance's settings. Changing it is an update of the same
@@ -16,6 +17,7 @@ import { instanceVariants, previewOptions, resolveVariant, variantCards, variant
  */
 export function VariantPanel({ instance, stale, onStarted }: { instance: CatalogInstance; stale: boolean; onStarted: () => void }) {
   const play = usePlayControl();
+  const resources = useSystemResources();
   const change = variantChange(instance, stale);
   const variants = instanceVariants(instance);
   const [options, setOptions] = useState<VariantOption[] | null>(null);
@@ -48,7 +50,8 @@ export function VariantPanel({ instance, stale, onStarted }: { instance: Catalog
   }
   const loading = !options && !error;
   const cards = variantCards(variants, options, error, installed);
-  const selected = resolveVariant(cards, picked, installed);
+  const recommendation = recommendVariant(cards, resources, installed);
+  const selected = resolveVariant(cards, picked, installed, recommendation?.variant ?? null);
   const unchanged = selected === installed;
 
   async function apply() {
@@ -63,7 +66,8 @@ export function VariantPanel({ instance, stale, onStarted }: { instance: Catalog
     <p>Descargaremos lo que falte y quitaremos solo los archivos que instalamos nosotros. Tus mundos, mods añadidos y ajustes editados se conservan.</p>
     {error && <div role="alert"><p className="account-error">No pudimos consultar los niveles de rendimiento. {error}</p><button type="button" onClick={() => setAttempt(previous => previous + 1)}>Reintentar</button></div>}
     {loading && <p className="sr-only" role="status">Consultando los niveles de rendimiento…</p>}
-    <VariantPicker cards={cards} loading={loading} selected={selected} installed={installed} onPick={setPicked} />
+    {recommendation?.reason && <p className="variant-reason">{recommendation.reason}</p>}
+    <VariantPicker cards={cards} loading={loading} selected={selected} installed={installed} recommended={recommendation?.variant ?? null} onPick={setPicked} />
     <div className="account-buttons">
       <Button disabled={loading || !!error || working || unchanged || !isTauri()} onClick={() => void apply()}><RefreshCw aria-hidden="true" />Cambiar rendimiento</Button>
     </div>
