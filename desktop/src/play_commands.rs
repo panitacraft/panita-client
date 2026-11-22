@@ -1060,6 +1060,8 @@ pub(super) fn begin_install(
     state: tauri::State<'_, DesktopState>,
     instance_id: Uuid,
     request_id: Uuid,
+    // Custom instances only; absent installs Standard.
+    variant: Option<launcher_core::catalog::Variant>,
 ) -> Result<(), ErrorCode> {
     begin_maintenance(
         app,
@@ -1069,6 +1071,7 @@ pub(super) fn begin_install(
         OperationKind::Install,
         None,
         false,
+        variant.unwrap_or_default(),
     )
 }
 
@@ -1088,6 +1091,7 @@ pub(super) fn begin_update(
         OperationKind::Update,
         Some(update),
         false,
+        Default::default(),
     )
 }
 
@@ -1106,6 +1110,7 @@ pub(super) fn begin_repair(
         OperationKind::Repair,
         None,
         false,
+        Default::default(),
     )
 }
 
@@ -1129,6 +1134,7 @@ pub(super) fn begin_uninstall(
         OperationKind::Uninstall,
         None,
         delete_instance.unwrap_or(false),
+        Default::default(),
     )
 }
 
@@ -1167,6 +1173,7 @@ fn begin_maintenance(
     kind: OperationKind,
     update: Option<launcher_core::minecraft::update::UpdateRequest>,
     delete_instance: bool,
+    variant: launcher_core::catalog::Variant,
 ) -> Result<(), ErrorCode> {
     let platform = if kind == OperationKind::Uninstall {
         None
@@ -1293,6 +1300,8 @@ fn begin_maintenance(
                         to_version: update.to_version,
                         backup_worlds: update.backup_worlds,
                         move_aside: update.move_aside,
+                        from_variant: update.from_variant,
+                        to_variant: update.to_variant,
                     },
                     &cancel,
                     progress,
@@ -1348,6 +1357,14 @@ fn begin_maintenance(
                 .map_err(|error| error.code())?;
                 Ok((None, outcome.retained_files, outcome.native_cleanup))
             } else if let Some(update) = update {
+                // Only a custom pack has variants; a vanilla update names none.
+                let standard = Some(launcher_core::catalog::Variant::Standard);
+                if [update.from_variant, update.to_variant]
+                    .into_iter()
+                    .any(|named| named.is_some() && named != standard)
+                {
+                    return Err(ErrorCode::InvalidData);
+                }
                 let outcome = launcher_core::minecraft::update::update(
                     &paths,
                     instance_id,
@@ -1380,6 +1397,7 @@ fn begin_maintenance(
                     &cancel,
                     progress,
                     pack_progress,
+                    variant,
                     credentials.clone(),
                 )
                 .await

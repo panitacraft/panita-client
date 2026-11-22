@@ -353,6 +353,7 @@ pub fn run() {
             play_commands::begin_uninstall,
             play_commands::clean_native_cache,
             pack_commands::pack_files,
+            pack_commands::instance_variants,
             pack_commands::verify_pack_files,
             pack_commands::open_pack_source,
             pack_commands::open_pack_folder,

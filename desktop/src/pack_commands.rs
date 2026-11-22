@@ -83,6 +83,28 @@ pub(super) async fn pack_files(
     Ok(list(&files))
 }
 
+/// What each variant of a custom instance installs, for the choice before installing.
+/// Empty when the instance offers only Standard. Needs a recently verified session,
+/// like the installation it leads to.
+#[tauri::command]
+pub(super) async fn instance_variants(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+) -> Result<Vec<launcher_core::modpack::install::VariantOption>, ErrorCode> {
+    main_only(&window)?;
+    let credentials = super::activation_commands::controller(&state)?
+        .online_credentials()
+        .map_err(|error| error.code())?;
+    launcher_core::modpack::install::variant_options(
+        instance_id,
+        &Cancellation::default(),
+        Some(credentials),
+    )
+    .await
+    .map_err(|error| error.code())
+}
+
 /// Re-check the whole list against the player's folder. Local: no session, no network.
 #[tauri::command]
 pub(super) async fn verify_pack_files(
