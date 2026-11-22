@@ -711,3 +711,75 @@ fn the_installed_variant_is_reported_for_an_active_pack_and_not_for_a_tombstone(
     assert_eq!(installed_variant(&manifest), None);
     std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
 }
+
+fn custom_entry(id: Uuid, minecraft: &str, version: Uuid) -> CatalogInstance {
+    let mut catalog = entry(id);
+    catalog.minecraft_version = Some(minecraft.to_owned());
+    catalog.source = CatalogSource::Custom {
+        minecraft_version: minecraft.to_owned(),
+        loader: "fabric".to_owned(),
+        current_version_id: Some(version),
+        label: Some("1.0.0".to_owned()),
+        published_at: Some("2026-11-20T10:00:00Z".to_owned()),
+    };
+    catalog
+}
+
+fn custom_installation(id: Uuid, minecraft: &str) -> InstallationRecord {
+    let last_catalog = custom_entry(id, minecraft, Uuid::new_v4());
+    InstallationRecord {
+        resolved_source: last_catalog.source.clone(),
+        last_catalog,
+        ..installed(id)
+    }
+}
+
+#[test]
+fn a_custom_pin_on_another_minecraft_version_is_remembered_and_the_installation_stays() {
+    let (paths, registry) = temporary();
+    let id = Uuid::new_v4();
+    let record = custom_installation(id, "26.1.2");
+    assert!(registry.save(&record).is_ok());
+    let next = custom_entry(id, "26.3", Uuid::new_v4());
+    assert!(
+        registry
+            .remember_catalog(std::slice::from_ref(&next))
+            .is_ok()
+    );
+    let stored = registry
+        .get(id)
+        .unwrap_or_else(|_| panic!("get"))
+        .unwrap_or_else(|| panic!("record"));
+    assert_eq!(stored.last_catalog, next);
+    // The installation keeps the source it was installed from until an update publishes.
+    assert_eq!(stored.resolved_source, record.resolved_source);
+    // The record on disk must still decode, so later reads do not report it as damaged.
+    let directory = paths.instance(id).unwrap_or_else(|_| panic!("path"));
+    let name = InstanceRegistry::record_name(&directory);
+    let bytes = std::fs::read(directory.join(name)).unwrap_or_default();
+    assert!(InstallationRecord::decode(&bytes, id).is_ok());
+    assert!(registry.load().is_ok());
+    std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+}
+
+#[test]
+fn a_new_custom_version_of_the_same_game_and_loader_is_remembered() {
+    // The catalog carries the loader name only, so a loader version change never reaches it.
+    let (paths, registry) = temporary();
+    let id = Uuid::new_v4();
+    let record = custom_installation(id, "26.1.2");
+    assert!(registry.save(&record).is_ok());
+    let next = custom_entry(id, "26.1.2", Uuid::new_v4());
+    assert!(
+        registry
+            .remember_catalog(std::slice::from_ref(&next))
+            .is_ok()
+    );
+    let stored = registry
+        .get(id)
+        .unwrap_or_else(|_| panic!("get"))
+        .unwrap_or_else(|| panic!("record"));
+    assert_eq!(stored.last_catalog, next);
+    assert_eq!(stored.resolved_source, record.resolved_source);
+    std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+}

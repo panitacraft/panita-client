@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   automaticVariantSwitch, defaultVariant, hasVariantChoice, installedVariant, instanceVariants, isVariant, offeredVariants,
-  optionSizeText, selectableOptions, variantChange, withdrawnVariant, withdrawnVariantText,
+  optionSizeText, recommendVariant, resolveVariant, selectableOptions, variantChange, variantForMemory, withdrawnVariant, withdrawnVariantText,
 } from '../src/variant-state.ts';
 
 const custom = { type: 'custom', current_version_id: 'v2' };
@@ -96,4 +96,81 @@ test('cards exist before the sizes do, and a pick that is no longer shown falls 
   assert.equal(resolveVariant(loaded, 'deluxe'), 'standard');
   assert.equal(resolveVariant(loaded, null, 'lite'), 'lite');
   assert.deepEqual(previewOptions(['lite', 'standard']).map(option => option.id), ['lite', 'standard']);
+});
+
+const GIB = 1024;
+const cards = [
+  { id: 'lite', fileCount: 12, size: 500 * 1024 * 1024, sameAsPrevious: false },
+  { id: 'standard', fileCount: 28, size: 2 * GIB * 1024 * 1024, sameAsPrevious: false },
+  { id: 'deluxe', fileCount: 35, size: 6 * GIB * 1024 * 1024, sameAsPrevious: false },
+];
+
+test('memory decides the variant: up to 4 GB Lite, over 4 and under 12 Standard, 12 or more Deluxe', () => {
+  assert.equal(variantForMemory(2 * GIB), 'lite');
+  assert.equal(variantForMemory(4 * GIB), 'lite');
+  // The system reports a little under the nominal amount; whole gigabytes decide.
+  assert.equal(variantForMemory(3.9 * GIB), 'lite');
+  assert.equal(variantForMemory(5 * GIB), 'standard');
+  assert.equal(variantForMemory(7.8 * GIB), 'standard');
+  assert.equal(variantForMemory(11 * GIB), 'standard');
+  assert.equal(variantForMemory(11.9 * GIB), 'deluxe');
+  assert.equal(variantForMemory(12 * GIB), 'deluxe');
+  assert.equal(variantForMemory(15.9 * GIB), 'deluxe');
+  for (const unknown of [null, undefined, 0, -1, Number.NaN]) assert.equal(variantForMemory(unknown), null);
+});
+
+test('the recommendation follows the memory and says why', () => {
+  const plenty = 500 * GIB;
+  assert.equal(recommendVariant(cards, { memoryMib: 4 * GIB, freeDiskMib: plenty })?.variant, 'lite');
+  assert.equal(recommendVariant(cards, { memoryMib: 8 * GIB, freeDiskMib: plenty })?.variant, 'standard');
+  assert.equal(recommendVariant(cards, { memoryMib: 16 * GIB, freeDiskMib: plenty })?.variant, 'deluxe');
+  assert.match(recommendVariant(cards, { memoryMib: 16 * GIB, freeDiskMib: plenty })?.reason ?? '', /^Te recomendamos el Perfil de Rendimiento Mejorado porque tu equipo tiene 16 GB de RAM.$/);
+  // Without a reading, Standard is recommended and nothing is claimed about the machine.
+  assert.deepEqual(recommendVariant(cards, null), { variant: 'standard', reason: null });
+  assert.deepEqual(recommendVariant(cards, { memoryMib: null, freeDiskMib: null }), { variant: 'standard', reason: null });
+  assert.equal(recommendVariant([], { memoryMib: 16 * GIB, freeDiskMib: plenty }), null);
+});
+
+test('a variant the instance does not show gives way to the closest one below, or the lowest', () => {
+  const plenty = 500 * GIB;
+  const noDeluxe = cards.slice(0, 2);
+  assert.equal(recommendVariant(noDeluxe, { memoryMib: 16 * GIB, freeDiskMib: plenty })?.variant, 'standard');
+  const onlyUpper = cards.slice(1);
+  assert.equal(recommendVariant(onlyUpper, { memoryMib: 2 * GIB, freeDiskMib: plenty })?.variant, 'standard');
+  assert.equal(recommendVariant(onlyUpper, { memoryMib: 16 * GIB, freeDiskMib: plenty })?.variant, 'deluxe');
+});
+
+test('a variant that would not fit on the disk gives way to a lighter one', () => {
+  // Deluxe: twice 6 GB plus 2 GB for the game is 14 GB. Standard needs 6 GB; Lite a little over 3 GB.
+  const machine = (freeGib) => ({ memoryMib: 16 * GIB, freeDiskMib: freeGib * GIB });
+  assert.equal(recommendVariant(cards, machine(14))?.variant, 'deluxe');
+  const standard = recommendVariant(cards, machine(13));
+  assert.equal(standard?.variant, 'standard');
+  assert.match(standard?.reason ?? '', /^Te recomendamos el Perfil de Rendimiento Estándar: .*16 GB de RAM.*13 GB/);
+  assert.equal(recommendVariant(cards, machine(6))?.variant, 'standard');
+  assert.equal(recommendVariant(cards, machine(5))?.variant, 'lite');
+  // Even the lightest one is tight: it is still the one recommended, with a warning.
+  const tight = recommendVariant(cards, machine(1));
+  assert.equal(tight?.variant, 'lite');
+  assert.match(tight?.reason ?? '', /espacio libre en disco/);
+  // Sizes still being fetched, or a disk that could not be read, never block a recommendation.
+  const pending = cards.map(card => ({ ...card, size: 0, pending: true }));
+  assert.equal(recommendVariant(pending, machine(1))?.variant, 'deluxe');
+  assert.equal(recommendVariant(cards, { memoryMib: 16 * GIB, freeDiskMib: null })?.variant, 'deluxe');
+});
+
+test('when changing, only what is added to the installed files needs room', () => {
+  // Standard is installed. Deluxe adds 4 GB, which is 8 GB with the copy; the game is already there.
+  const machine = (freeGib) => ({ memoryMib: 16 * GIB, freeDiskMib: freeGib * GIB });
+  assert.equal(recommendVariant(cards, machine(8), 'standard')?.variant, 'deluxe');
+  assert.equal(recommendVariant(cards, machine(7), 'standard')?.variant, 'standard');
+});
+
+test('the default is the installed variant, then the recommended one, then Standard', () => {
+  assert.equal(defaultVariant(cards, null, 'deluxe'), 'deluxe');
+  assert.equal(defaultVariant(cards, 'lite', 'deluxe'), 'lite');
+  assert.equal(defaultVariant(cards, null, null), 'standard');
+  assert.equal(defaultVariant(cards.slice(0, 2), null, 'deluxe'), 'standard');
+  assert.equal(resolveVariant(cards, null, null, 'lite'), 'lite');
+  assert.equal(resolveVariant(cards, 'deluxe', null, 'lite'), 'deluxe');
 });

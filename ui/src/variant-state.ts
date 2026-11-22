@@ -15,7 +15,7 @@ export const variantTaglines: Record<Variant, string> = { lite: 'Entra y juega',
 
 export const variantDescriptions: Record<Variant, string> = {
   lite: 'Lo mínimo para entrar al servidor, con resource packs y configuración. Sin mods cosméticos ni shaders: pesa poco y se instala rápido.',
-  standard: 'La experiencia completa de la instancia: mods necesarios y opcionales, resource packs y configuración. Es la opción recomendada.',
+  standard: 'La experiencia completa de la instancia: mods necesarios y opcionales, resource packs y configuración.',
   deluxe: 'La más completa: añade mods extra del lado del cliente, resource packs adicionales y shader packs.',
 };
 
@@ -37,9 +37,13 @@ export function selectableOptions(options: readonly VariantOption[], installed: 
   return options.filter(option => !option.sameAsPrevious || option.id === installed);
 }
 
-/** The installed variant is chosen by default when changing; Standard when installing. */
-export function defaultVariant(options: readonly VariantOption[], installed: Variant | null = null): Variant {
+/**
+ * The installed variant is chosen by default when changing. When installing, the variant
+ * recommended for this machine is; without a recommendation, Standard.
+ */
+export function defaultVariant(options: readonly VariantOption[], installed: Variant | null = null, recommended: Variant | null = null): Variant {
   if (installed && options.some(option => option.id === installed)) return installed;
+  if (recommended && options.some(option => option.id === recommended)) return recommended;
   return options.some(option => option.id === 'standard') ? 'standard' : options[0]?.id ?? 'standard';
 }
 
@@ -140,8 +144,65 @@ export function variantCards(variants: readonly Variant[], options: readonly Var
 }
 
 /** The variant picked, or the default when nothing was picked or the pick is no longer shown. */
-export function resolveVariant(cards: readonly VariantCard[], picked: Variant | null, installed: Variant | null = null): Variant {
-  return picked && cards.some(card => card.id === picked) ? picked : defaultVariant(cards, installed);
+export function resolveVariant(cards: readonly VariantCard[], picked: Variant | null, installed: Variant | null = null, recommended: Variant | null = null): Variant {
+  return picked && cards.some(card => card.id === picked) ? picked : defaultVariant(cards, installed, recommended);
+}
+
+/** What the launcher reads from the machine; a value it could not read is null. */
+export type SystemResources = { memoryMib: number | null; freeDiskMib: number | null };
+
+export type Recommendation = { variant: Variant; reason: string | null };
+
+const MIB = 1024 * 1024;
+const GIB = 1024;
+/** Free space kept for the game, Java and the loader, on top of the pack itself. */
+const BASE_RESERVE_BYTES = 2 * 1024 * MIB;
+
+/**
+ * The variant that suits the installed memory: 4 GB or less is Lite, more than 4 and
+ * less than 12 is Standard, 12 or more is Deluxe. The system reports a little less than the
+ * nominal amount (a 12 GB machine shows about 11.9), so the memory is rounded to whole GB.
+ */
+export function variantForMemory(memoryMib: number | null | undefined): Variant | null {
+  if (typeof memoryMib !== 'number' || !Number.isFinite(memoryMib) || memoryMib <= 0) return null;
+  const gigabytes = Math.round(memoryMib / GIB);
+  return gigabytes <= 4 ? 'lite' : gigabytes < 12 ? 'standard' : 'deluxe';
+}
+
+/** The free space a change needs: the new files are cached and then copied, so twice their size. */
+function neededBytes(card: VariantCard, installed: VariantCard | undefined, installing: boolean): number {
+  const added = Math.max(0, card.size - (installed?.size ?? 0));
+  return (installing ? BASE_RESERVE_BYTES : 0) + 2 * added;
+}
+
+/**
+ * The variant to recommend among the cards shown, from the memory and the free disk space.
+ * The memory decides; a variant the instance does not offer gives way to the closest one
+ * below it (or the lowest one), and any variant whose files would not fit on the disk gives
+ * way to the next lighter one. Without a reading of the memory, Standard is recommended.
+ */
+export function recommendVariant(cards: readonly VariantCard[], resources: SystemResources | null, installed: Variant | null = null): Recommendation | null {
+  const shown = variantOrder.filter(id => cards.some(card => card.id === id));
+  if (shown.length === 0) return null;
+  const tier = variantForMemory(resources?.memoryMib);
+  const wanted = tier ?? 'standard';
+  const below = shown.filter(id => variantOrder.indexOf(id) <= variantOrder.indexOf(wanted));
+  let index = below.length > 0 ? below.length - 1 : 0;
+  const byId = (id: Variant) => cards.find(card => card.id === id) as VariantCard;
+  const free = resources?.freeDiskMib;
+  const known = typeof free === 'number' && Number.isFinite(free) && free >= 0;
+  const fits = (id: Variant) => !known || byId(id).pending === true || byId(id).size <= 0
+    || neededBytes(byId(id), installed ? cards.find(card => card.id === installed) : undefined, installed === null) <= (free as number) * MIB;
+  const memoryChoice = shown[index];
+  while (index > 0 && !fits(shown[index])) index -= 1;
+  const variant = shown[index];
+  const gigabytes = tier ? Math.round((resources?.memoryMib as number) / GIB) : null;
+  const space = known ? bytes((free as number) * MIB) : null;
+  let reason: string | null = null;
+  if (variant !== memoryChoice) reason = `Te recomendamos el Perfil de Rendimiento ${variantNames[variant]}: tu equipo tiene ${gigabytes} GB de RAM, pero el espacio libre en disco (${space}) no alcanza para una opción más completa.`;
+  else if (known && !fits(variant) && shown.length > 1) reason = `Te recomendamos el Perfil de Rendimiento ${variantNames[variant]}: el espacio libre en disco (${space}) es justo y es la opción más ligera.`;
+  else if (gigabytes !== null) reason = `Te recomendamos el Perfil de Rendimiento ${variantNames[variant]} porque tu equipo tiene ${gigabytes} GB de RAM.`;
+  return { variant, reason };
 }
 
 /** Stand-in sizes for the browser preview, where there is no backend to ask. */

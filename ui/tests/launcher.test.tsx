@@ -36,6 +36,7 @@ const variantOptions = [
   { id: 'standard', fileCount: 28, size: 128_307_508, sameAsPrevious: false },
   { id: 'deluxe', fileCount: 35, size: 190_000_000, sameAsPrevious: false },
 ];
+let systemResources: { memoryMib: number | null; freeDiskMib: number | null } | null = null;
 const manualFile ={ path: 'mods/manual.jar', name: 'Mod manual', fileName: 'manual.jar', folder: 'mods', projectId: 1, fileId: 2, size: 10, reason: 'manual' };
 function entry(patch: Partial<PlayEntry>): PlayEntry {
   return { instanceId: 'pack-a', requestId: 'request', phase: 'running', operation: 'play', confirmationId: null, error: null, exitCode: null, exitSuccess: null, backupRequested: false, backupOperation: null, receivedFiles: 0, reusedFiles: 0, retainedFiles: 0, ...patch };
@@ -51,6 +52,7 @@ beforeEach(() => {
   catalog = { instances: [{ ...first }, { ...first, id: 'pack-b', name: 'Otra aventura' }], stale: false, cacheWarning: null, registryWarning: null };
   play = { revision: 0, processSessionId: 'test', closeBlocked: false, gracefulStopSupported: true, instances: [] };
   backend.listeners.clear();
+  systemResources = null;
   accounts = { revision: 1, selected_account_id: 'account', login_pending: false, login_error: null, accounts: [{ metadata: { account_id: 'account', kind: 'offline', username: 'Jugador', profile_id: 'profile', oauth_client_id: null }, status: 'offline', error: null, persisted: true }] };
   backend.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     switch (command) {
@@ -68,6 +70,7 @@ beforeEach(() => {
       case 'pack_files': return { files: [manualFile], complete: false };
       case 'import_pack_file': throw 'artifact_mismatch';
       case 'instance_variants': return variantOptions;
+      case 'system_resources': if (!systemResources) throw 'storage_unavailable'; return systemResources;
       case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': case 'open_instance_folder': return;
       default: throw new Error(`Unexpected test command: ${command}`);
     }
@@ -535,6 +538,54 @@ test('an instance that offers only Standard installs without any question', asyn
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(backend.invoke).toHaveBeenCalledWith('begin_install', expect.objectContaining({ instanceId: 'pack-a' }));
   expect(backend.invoke.mock.calls.some(([command]) => command === 'instance_variants')).toBe(false);
+});
+
+test('the variant that suits the machine is preselected, marked and explained', async () => {
+  catalog.instances[0] = { ...first, ...withVariants, localState: 'not_installed', hasInstallationManifest: false, installedSource: null };
+  systemResources = { memoryMib: 4096, freeDiskMib: 500 * 1024 };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
+  const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
+  await within(dialog).findByText(/28 archivos/);
+  expect(await within(dialog).findByText('Te recomendamos el Perfil de Rendimiento Ligero porque tu equipo tiene 4 GB de RAM.')).toBeTruthy();
+  expect((within(dialog).getByRole('radio', { name: /^Ligero/ }) as HTMLInputElement).checked).toBe(true);
+  expect(within(dialog.querySelector('label:has(input[value="lite"])') as HTMLElement).getByText('Recomendada')).toBeTruthy();
+  expect(dialog.querySelectorAll('.variant-chip').length).toBe(1);
+  // The player can still choose another one.
+  await user.click(within(dialog).getByRole('radio', { name: /^Estándar/ }));
+  await user.click(within(dialog).getByRole('button', { name: 'Instalar', exact: true }));
+  expect(backend.invoke).toHaveBeenCalledWith('begin_install', expect.objectContaining({ variant: 'standard' }));
+});
+
+test('a machine with 12 GB or more is offered Mejorado, and one that could not be read keeps Standard', async () => {
+  catalog.instances[0] = { ...first, ...withVariants, localState: 'not_installed', hasInstallationManifest: false, installedSource: null };
+  systemResources = { memoryMib: 16 * 1024, freeDiskMib: 500 * 1024 };
+  const user = userEvent.setup(); const view = mount();
+  await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
+  const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
+  await within(dialog).findByText(/28 archivos/);
+  await waitFor(() => expect((within(dialog).getByRole('radio', { name: /^Mejorado/ }) as HTMLInputElement).checked).toBe(true));
+  await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  view.unmount();
+  systemResources = null;
+  mount();
+  await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
+  const unread = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
+  await within(unread).findByText(/28 archivos/);
+  expect((within(unread).getByRole('radio', { name: /^Estándar/ }) as HTMLInputElement).checked).toBe(true);
+  expect(unread.querySelector('.variant-reason')).toBeNull();
+});
+
+test('the Rendimiento tab marks the recommended variant but keeps the installed one selected', async () => {
+  catalog.instances[0] = { ...first, ...withVariants, installedVariant: 'standard' };
+  systemResources = { memoryMib: 2048, freeDiskMib: 500 * 1024 };
+  const user = userEvent.setup(); mount();
+  await openVariantTab(user);
+  await screen.findByText(/28 archivos/);
+  expect(await screen.findByText('Te recomendamos el Perfil de Rendimiento Ligero porque tu equipo tiene 2 GB de RAM.')).toBeTruthy();
+  expect(screen.getByText('Recomendada')).toBeTruthy();
+  expect((screen.getByRole('radio', { name: 'Estándar' }) as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole('button', { name: 'Cambiar rendimiento' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 async function openVariantTab(user: ReturnType<typeof userEvent.setup>) {

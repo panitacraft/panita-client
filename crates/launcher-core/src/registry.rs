@@ -67,7 +67,13 @@ impl InstallationRecord {
         self.last_catalog.validate()?;
         let mut resolved = self.last_catalog.clone();
         resolved.source = self.resolved_source.clone();
-        if let CatalogSource::Vanilla { minecraft_version } = &resolved.source {
+        // The entry may already pin a newer game version than the installation. The
+        // installed source is checked against its own game version, not the entry's.
+        if let CatalogSource::Vanilla { minecraft_version }
+        | CatalogSource::Custom {
+            minecraft_version, ..
+        } = &resolved.source
+        {
             resolved.minecraft_version = Some(minecraft_version.clone());
         }
         resolved.validate()?;

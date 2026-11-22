@@ -7,13 +7,13 @@ import { optionSizeText, variantDescriptions, variantNames, variantTaglines, typ
  * radio buttons, named by their variant and described by their text. While the sizes load,
  * the cards are already in place and cannot be chosen, so nothing moves when they arrive.
  */
-export function VariantPicker({ cards, loading, selected, installed = null, recommended = false, onPick }: {
+export function VariantPicker({ cards, loading, selected, installed = null, recommended = null, onPick }: {
   cards: VariantCard[];
   loading: boolean;
   selected: Variant;
   installed?: Variant | null;
-  /** Mark Standard as the recommended choice, when installing. */
-  recommended?: boolean;
+  /** The variant that suits this machine, marked on its card. */
+  recommended?: Variant | null;
   onPick: (variant: Variant) => void;
 }) {
   const prefix = useId();
@@ -28,7 +28,7 @@ export function VariantPicker({ cards, loading, selected, installed = null, reco
           <span className="variant-icon" aria-hidden="true"><Icon /></span>
           <span className="variant-chips">
             {card.id === installed && <span className="variant-chip is-installed">Instalada</span>}
-            {card.id === 'standard' && recommended && <span className="variant-chip">Recomendada</span>}
+            {card.id === recommended && <span className="variant-chip">Recomendada</span>}
           </span>
         </span>
         <span className="variant-text" id={`${prefix}-${card.id}-text`}>
