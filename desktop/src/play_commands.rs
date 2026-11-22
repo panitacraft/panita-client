@@ -1165,6 +1165,7 @@ pub(super) async fn clean_native_cache(
     .map_err(|_| ErrorCode::StorageUnavailable)?
 }
 
+#[allow(clippy::too_many_arguments)]
 fn begin_maintenance(
     app: tauri::AppHandle,
     state: tauri::State<'_, DesktopState>,
