@@ -2175,6 +2175,7 @@ dependencies = [
  "fs2",
  "getrandom 0.4.3",
  "md5",
+ "png 0.18.1",
  "private-fs",
  "regex",
  "reqwest",
