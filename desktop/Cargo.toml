@@ -20,6 +20,7 @@ tauri-plugin-dialog = "=2.8.4"
 tauri-plugin-updater = "=2.14.0"
 fs2 = "=0.4.3"
 arboard = "=3.7.0"
+trash = "=5.4.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-registry = "=0.100.0"

@@ -385,6 +385,7 @@ pub fn run() {
             screenshot_commands::open_screenshot,
             screenshot_commands::reveal_screenshot,
             screenshot_commands::copy_screenshot,
+            screenshot_commands::delete_screenshot,
             pack_commands::import_pack_file,
             pack_commands::content_cache_size,
             pack_commands::clear_content_cache,

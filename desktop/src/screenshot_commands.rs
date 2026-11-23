@@ -123,3 +123,23 @@ pub(super) async fn copy_screenshot(
     .map_err(|_| ErrorCode::StorageUnavailable)??;
     Ok(true)
 }
+
+/// Move the screenshot to the system's recycle bin or trash so a mistake can be undone.
+/// Nothing is erased permanently here. The file is validated just before it is moved.
+#[tauri::command]
+pub(super) async fn delete_screenshot(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    instance_id: Uuid,
+    name: String,
+) -> Result<bool, ErrorCode> {
+    main_only(&window)?;
+    let paths = paths(&app)?;
+    let file = blocking(move || screenshots::locate(&paths, instance_id, &name)).await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        trash::delete(&file).map_err(|_| ErrorCode::StorageUnavailable)
+    })
+    .await
+    .map_err(|_| ErrorCode::StorageUnavailable)??;
+    Ok(true)
+}
