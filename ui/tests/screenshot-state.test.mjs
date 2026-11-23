@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  SCREENSHOTS_PER_PAGE, clampScreenshotPage, screenshotActionError, screenshotDateText, screenshotPage, screenshotPageCount, screenshotSizeText,
+  SCREENSHOTS_PER_PAGE, adjacentScreenshot, clampScreenshotPage, indexAfterRemoval, screenshotActionError, screenshotChoices, screenshotDateText, screenshotPage,
+  screenshotPageCount, screenshotPageOf, screenshotSizeText,
 } from '../src/screenshot-state.ts';
 
 const shots = count => Array.from({ length: count }, (_, index) => ({ name: `s${index}.png`, size: 1, modifiedMs: index }));
@@ -37,4 +38,24 @@ test('a rejected name asks for a refresh while other failures name the action', 
   assert.match(screenshotActionError('copy', 'storage_unavailable'), /portapapeles/);
   assert.match(screenshotActionError('open', 'storage_unavailable'), /visor de imágenes/);
   assert.match(screenshotActionError('reveal', undefined), /explorador de archivos/);
+});
+
+test('the viewer stays inside the list, goes to the next capture after a removal and finds its page', () => {
+  assert.equal(adjacentScreenshot(0, -1, 3), 0);
+  assert.equal(adjacentScreenshot(0, 1, 3), 1);
+  assert.equal(adjacentScreenshot(2, 1, 3), 2);
+  assert.equal(adjacentScreenshot(0, 1, 0), 0);
+  assert.equal(indexAfterRemoval(1, 2), 1);
+  assert.equal(indexAfterRemoval(2, 2), 1);
+  assert.equal(indexAfterRemoval(0, 0), null);
+  assert.equal(screenshotPageOf(0), 0);
+  assert.equal(screenshotPageOf(SCREENSHOTS_PER_PAGE - 1), 0);
+  assert.equal(screenshotPageOf(SCREENSHOTS_PER_PAGE), 1);
+});
+
+test('the menu lists the actions in order with Eliminar last, and a deletion failure is explained', () => {
+  assert.deepEqual(screenshotChoices.map(item => item.choice), ['view', 'open', 'reveal', 'copy', 'delete']);
+  assert.deepEqual(screenshotChoices.map(item => item.label), ['Ver', 'Abrir en el visor del sistema', 'Mostrar en la carpeta', 'Copiar imagen', 'Eliminar']);
+  assert.match(screenshotActionError('delete', 'storage_busy'), /papelera/);
+  assert.match(screenshotActionError('delete', 'invalid_data'), /ya no está disponible/);
 });

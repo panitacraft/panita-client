@@ -1,7 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { Screenshot, ScreenshotAction, ScreenshotList } from './screenshot-state';
 
-const commands: Record<ScreenshotAction, string> = { open: 'open_screenshot', reveal: 'reveal_screenshot', copy: 'copy_screenshot' };
+const commands: Record<ScreenshotAction, string> = { open: 'open_screenshot', reveal: 'reveal_screenshot', copy: 'copy_screenshot', delete: 'delete_screenshot' };
 
 /** The player's screenshots, newest first. Empty outside the app. */
 export function loadScreenshots(instanceId: string): Promise<ScreenshotList> {
