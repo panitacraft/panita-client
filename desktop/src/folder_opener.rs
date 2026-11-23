@@ -1,4 +1,4 @@
-//! Open backend-resolved folders without leaking AppImage libraries into host tools.
+//! Open backend-resolved folders and files without leaking AppImage libraries into host tools.
 use launcher_core::error::ErrorCode;
 use std::path::PathBuf;
 

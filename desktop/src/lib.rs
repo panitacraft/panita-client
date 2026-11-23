@@ -15,6 +15,7 @@ mod linux_desktop;
 mod pack_commands;
 mod play_commands;
 mod protocol;
+mod screenshot_commands;
 mod settings_commands;
 mod tray;
 mod update_commands;
@@ -379,6 +380,11 @@ pub fn run() {
             pack_commands::open_instance_folder,
             pack_commands::instance_folder_path,
             pack_commands::pack_version_names,
+            screenshot_commands::list_screenshots,
+            screenshot_commands::screenshot_image,
+            screenshot_commands::open_screenshot,
+            screenshot_commands::reveal_screenshot,
+            screenshot_commands::copy_screenshot,
             pack_commands::import_pack_file,
             pack_commands::content_cache_size,
             pack_commands::clear_content_cache,
