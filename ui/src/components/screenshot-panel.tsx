@@ -171,7 +171,6 @@ export function ScreenshotPanel({ instanceId }: { instanceId: string }) {
     {list !== null && screenshots.length === 0 && <div className="screenshot-empty" role="status">
       <ImageOff aria-hidden="true" />
       <h3>Aún no hay capturas</h3>
-      <p>Las capturas que hagas dentro de Minecraft con la tecla F2 aparecerán aquí.</p>
     </div>}
     {screenshots.length > 0 && <ul ref={grid} className="screenshot-grid" aria-label="Capturas de la instancia">
       {screenshotPage(screenshots, current).map(screenshot => <ScreenshotCard key={screenshot.name} instanceId={instanceId} screenshot={screenshot} onChoice={choose} />)}

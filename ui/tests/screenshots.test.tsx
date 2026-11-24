@@ -91,8 +91,8 @@ test('right-clicking a capture offers its actions with simple words and runs the
   const name = list.screenshots[0].name;
   await rightClick(user, name);
   expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map(item => item.textContent))
-    .toEqual(['Ver', 'Abrir en el visor del sistema', 'Mostrar en la carpeta', 'Copiar imagen', 'Eliminar']);
-  await user.click(screen.getByRole('menuitem', { name: 'Abrir en el visor del sistema' }));
+    .toEqual(['Ver', 'Abrir en otra app', 'Mostrar en la carpeta', 'Copiar imagen', 'Eliminar']);
+  await user.click(screen.getByRole('menuitem', { name: 'Abrir en otra app' }));
   await rightClick(user, name);
   await user.click(await screen.findByRole('menuitem', { name: 'Mostrar en la carpeta' }));
   await rightClick(user, name);
@@ -122,7 +122,7 @@ test('a failed action is reported in a toast, and a vanished file refreshes the 
   failure = { open_screenshot: 'invalid_data' };
   const before = calls('list_screenshots').length;
   await rightClick(user, name);
-  await user.click(await screen.findByRole('menuitem', { name: 'Abrir en el visor del sistema' }));
+  await user.click(await screen.findByRole('menuitem', { name: 'Abrir en otra app' }));
   expect(await screen.findByText(/ya no está disponible/)).toBeTruthy();
   await waitFor(() => expect(calls('list_screenshots').length).toBe(before + 1));
 });
@@ -172,7 +172,7 @@ test('the viewer has the quick actions and shows the copy toast inside itself', 
   expect(await within(viewer()).findByText('Imagen copiada al portapapeles.')).toBeTruthy();
   await user.click(within(viewer()).getByRole('button', { name: 'Mostrar en la carpeta' }));
   expect(backend.invoke).toHaveBeenCalledWith('reveal_screenshot', { instanceId: 'pack-a', name });
-  await user.click(within(viewer()).getByRole('button', { name: 'Abrir en el visor del sistema' }));
+  await user.click(within(viewer()).getByRole('button', { name: 'Abrir en otra app' }));
   expect(backend.invoke).toHaveBeenCalledWith('open_screenshot', { instanceId: 'pack-a', name });
 });
 
