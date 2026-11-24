@@ -2298,6 +2298,7 @@ dependencies = [
  "chrono",
  "fs2",
  "getrandom 0.4.3",
+ "image",
  "md5",
  "png 0.18.1",
  "private-fs",

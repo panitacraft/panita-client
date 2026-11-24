@@ -23,8 +23,10 @@ pub const MAX_LISTED: usize = 500;
 const MAX_SCANNED: usize = 20_000;
 /// Largest image read into memory, for the gallery, the clipboard or both.
 pub const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
-/// Largest image decoded for the clipboard (an 8K by 8K capture).
-const MAX_PIXELS: u64 = 8192 * 8192;
+/// Largest side of an image decoded for the clipboard (an 8K by 8K capture at most).
+const MAX_SIDE: u32 = 8192;
+/// Memory the decoder may allocate for one image.
+const MAX_DECODE_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -221,38 +223,24 @@ pub fn read_rgba(paths: &AppPaths, instance: Uuid, name: &str) -> Result<Rgba, C
 }
 
 fn decode_png(bytes: &[u8]) -> Result<Rgba, CoreError> {
-    let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = decoder.read_info().map_err(|_| invalid())?;
-    let (width, height) = reader.info().size();
-    if width == 0 || height == 0 || u64::from(width) * u64::from(height) > MAX_PIXELS {
-        return Err(invalid());
-    }
-    let mut buffer = vec![0; reader.output_buffer_size().ok_or_else(invalid)?];
-    let frame = reader.next_frame(&mut buffer).map_err(|_| invalid())?;
-    let data = buffer.get(..frame.buffer_size()).ok_or_else(invalid)?;
-    let pixel_count = width as usize * height as usize;
-    let mut pixels = Vec::with_capacity(pixel_count * 4);
-    match frame.color_type {
-        png::ColorType::Rgba => pixels.extend_from_slice(data),
-        png::ColorType::Rgb => data.chunks_exact(3).for_each(|p| {
-            pixels.extend_from_slice(&[p[0], p[1], p[2], 255]);
-        }),
-        png::ColorType::GrayscaleAlpha => data.chunks_exact(2).for_each(|p| {
-            pixels.extend_from_slice(&[p[0], p[0], p[0], p[1]]);
-        }),
-        png::ColorType::Grayscale => data.iter().for_each(|&g| {
-            pixels.extend_from_slice(&[g, g, g, 255]);
-        }),
-        png::ColorType::Indexed => return Err(invalid()),
-    }
-    if pixels.len() != pixel_count * 4 {
+    // The image crate does the pixel conversion inside its own (optimized) code, which keeps
+    // copying quick even in development builds. Oversized images are refused before decoding.
+    let mut reader =
+        image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(MAX_SIDE);
+    limits.max_image_height = Some(MAX_SIDE);
+    limits.max_alloc = Some(MAX_DECODE_BYTES);
+    reader.limits(limits);
+    let rgba = reader.decode().map_err(|_| invalid())?.into_rgba8();
+    let (width, height) = rgba.dimensions();
+    if width == 0 || height == 0 {
         return Err(invalid());
     }
     Ok(Rgba {
         width,
         height,
-        pixels,
+        pixels: rgba.into_raw(),
     })
 }
 
