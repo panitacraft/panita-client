@@ -74,7 +74,7 @@ export function ScreenshotViewer({ instanceId, items, index, working, notice, on
         <Button variant="secondary" size="icon" aria-label="Captura siguiente" disabled={!next} onClick={() => step(1)}><ChevronRight aria-hidden="true" /></Button>
       </div>
       <div className="screenshot-viewer-actions">
-        <Button variant="secondary" size="sm" disabled={working} onClick={() => onAction('open', current)}><ExternalLink aria-hidden="true" />Abrir en otra app</Button>
+        <Button variant="secondary" size="sm" disabled={working} onClick={() => onAction('open', current)}><ExternalLink aria-hidden="true" />Abrir en fotos</Button>
         <Button variant="secondary" size="sm" disabled={working} onClick={() => onAction('reveal', current)}><FolderOpen aria-hidden="true" />Mostrar en la carpeta</Button>
         <Button variant="secondary" size="sm" disabled={working} onClick={() => onAction('copy', current)}><Copy aria-hidden="true" />Copiar imagen</Button>
         <Button variant="destructive" size="sm" disabled={working} onClick={() => onAction('delete', current)}><Trash2 aria-hidden="true" />Eliminar</Button>

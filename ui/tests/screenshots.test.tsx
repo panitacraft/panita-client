@@ -86,7 +86,8 @@ test('captures are listed with their image, centered name and size, scoped to th
   expect(container.querySelector('.screenshot-meta strong')?.textContent).toBe(list.screenshots[0].name);
   // The old per-card action buttons are gone; the actions live in the menu.
   expect(screen.queryByRole('button', { name: /^Abrir / })).toBeNull();
-  expect(screen.getByText('3 capturas de esta instancia, de la más reciente a la más antigua.')).toBeTruthy();
+  // No count or other subtitle: the grid is the whole panel.
+  expect(screen.queryByText(/capturas de esta instancia/)).toBeNull();
 });
 
 test('right-clicking a capture offers its actions with simple words and runs them by name only', async () => {
@@ -94,8 +95,8 @@ test('right-clicking a capture offers its actions with simple words and runs the
   const name = list.screenshots[0].name;
   await rightClick(user, name);
   expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map(item => item.textContent))
-    .toEqual(['Ver', 'Abrir en otra app', 'Mostrar en la carpeta', 'Copiar imagen', 'Eliminar']);
-  await user.click(screen.getByRole('menuitem', { name: 'Abrir en otra app' }));
+    .toEqual(['Ver', 'Abrir en fotos', 'Mostrar en la carpeta', 'Copiar imagen', 'Eliminar']);
+  await user.click(screen.getByRole('menuitem', { name: 'Abrir en fotos' }));
   await rightClick(user, name);
   await user.click(await screen.findByRole('menuitem', { name: 'Mostrar en la carpeta' }));
   await rightClick(user, name);
@@ -125,7 +126,7 @@ test('a failed action is reported in a toast, and a vanished file refreshes the 
   failure = { open_screenshot: 'invalid_data' };
   const before = calls('list_screenshots').length;
   await rightClick(user, name);
-  await user.click(await screen.findByRole('menuitem', { name: 'Abrir en otra app' }));
+  await user.click(await screen.findByRole('menuitem', { name: 'Abrir en fotos' }));
   expect(await screen.findByText(/ya no está disponible/)).toBeTruthy();
   await waitFor(() => expect(calls('list_screenshots').length).toBe(before + 1));
 });
@@ -175,7 +176,7 @@ test('the viewer has the quick actions and shows the copy toast inside itself', 
   expect(await within(viewer()).findByText('Imagen copiada al portapapeles.')).toBeTruthy();
   await user.click(within(viewer()).getByRole('button', { name: 'Mostrar en la carpeta' }));
   expect(backend.invoke).toHaveBeenCalledWith('reveal_screenshot', { instanceId: 'pack-a', name });
-  await user.click(within(viewer()).getByRole('button', { name: 'Abrir en otra app' }));
+  await user.click(within(viewer()).getByRole('button', { name: 'Abrir en fotos' }));
   expect(backend.invoke).toHaveBeenCalledWith('open_screenshot', { instanceId: 'pack-a', name });
 });
 
@@ -261,7 +262,6 @@ test('a new capture appears by itself and the open gallery never asks to be refr
   await tick();
   expect(await screen.findByRole('button', { name: `Ver ${fresh.name}` })).toBeTruthy();
   expect(screen.getAllByRole('listitem').length).toBe(4);
-  expect(screen.getByText('4 capturas de esta instancia, de la más reciente a la más antigua.')).toBeTruthy();
   // A capture deleted outside the launcher disappears as well.
   list = { screenshots: shots(1), truncated: false };
   await tick();

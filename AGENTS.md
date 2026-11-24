@@ -387,7 +387,7 @@ Owner request, GitHub issue 50. The instance settings carry a Capturas tab betwe
 Minecraft and Rendimiento that lists the selected instance's
 `minecraft/screenshots/*.png`, newest first. Clicking a thumbnail opens an in-app viewer
 (a native modal dialog; Escape closes it and Left/Right step through the list). Right-clicking
-a thumbnail, or its overflow button, opens a menu: Ver, Abrir en otra app,
+a thumbnail, or its overflow button, opens a menu: Ver, Abrir en fotos,
 Mostrar en la carpeta, Copiar imagen and Eliminar. A successful copy or deletion is
 confirmed with a toast. The open tab refreshes itself (owner request, 2026-11-23): it
 re-reads the folder every 3 seconds while the window is visible and when it regains focus,

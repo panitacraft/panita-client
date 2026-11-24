@@ -55,7 +55,7 @@ test('the viewer stays inside the list, goes to the next capture after a removal
 
 test('the menu lists the actions in order with Eliminar last, and a deletion failure is explained', () => {
   assert.deepEqual(screenshotChoices.map(item => item.choice), ['view', 'open', 'reveal', 'copy', 'delete']);
-  assert.deepEqual(screenshotChoices.map(item => item.label), ['Ver', 'Abrir en otra app', 'Mostrar en la carpeta', 'Copiar imagen', 'Eliminar']);
+  assert.deepEqual(screenshotChoices.map(item => item.label), ['Ver', 'Abrir en fotos', 'Mostrar en la carpeta', 'Copiar imagen', 'Eliminar']);
   assert.match(screenshotActionError('delete', 'storage_busy'), /papelera/);
   assert.match(screenshotActionError('delete', 'invalid_data'), /ya no está disponible/);
 });

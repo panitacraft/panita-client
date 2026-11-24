@@ -205,8 +205,8 @@ export function Launcher() {
             {settingsTabs.map(([value, label]) => <Button key={value} className="rounded-b-none" variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
           </div>}
           <div hidden={settingsScope === 'global' ? settingsTab !== 'game' : variantTab || screenshotsTab}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
-          {screenshotsTab && selected && <ScreenshotPanel key={selected.id} instanceId={selected.id} />}
-          {variantTab && selected && <VariantPanel instance={selected} stale={(catalog.kind === 'ready' ? catalog.stale : true) || unverified} onStarted={() => setPage('library')} />}
+          {screenshotsTab && selected && <div><ScreenshotPanel key={selected.id} instanceId={selected.id} /></div>}
+          {variantTab && selected && <div><VariantPanel instance={selected} stale={(catalog.kind === 'ready' ? catalog.stale : true) || unverified} onStarted={() => setPage('library')} /></div>}
           <div hidden={settingsScope !== 'global' || settingsTab !== 'storage'}><CachePanel openRequest={cacheRequest} /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'general'}><GeneralPanel /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'diagnostics'}>{settingsScope === 'global' && settingsTab === 'diagnostics' && <DiagnosticsPanel />}</div>

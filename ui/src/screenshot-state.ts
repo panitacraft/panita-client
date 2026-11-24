@@ -13,7 +13,7 @@ export type ScreenshotChoice = 'view' | ScreenshotAction;
 /** The menu entries, in order, in simple Spanish. Deleting only moves the file to the trash. */
 export const screenshotChoices: readonly { choice: ScreenshotChoice; label: string }[] = [
   { choice: 'view', label: 'Ver' },
-  { choice: 'open', label: 'Abrir en otra app' },
+  { choice: 'open', label: 'Abrir en fotos' },
   { choice: 'reveal', label: 'Mostrar en la carpeta' },
   { choice: 'copy', label: 'Copiar imagen' },
   { choice: 'delete', label: 'Eliminar' },

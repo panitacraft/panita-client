@@ -186,9 +186,6 @@ export function ScreenshotPanel({ instanceId }: { instanceId: string }) {
   const current = clampScreenshotPage(page, screenshots.length);
   return <section className="screenshot-panel" aria-labelledby="screenshot-heading">
     <h2 id="screenshot-heading" className="sr-only">Capturas</h2>
-    <div className="screenshot-toolbar">
-      <p>{screenshots.length === 0 ? 'Las capturas de pantalla de Minecraft de esta instancia.' : `${screenshots.length} ${screenshots.length === 1 ? 'captura' : 'capturas'} de esta instancia, de la más reciente a la más antigua.`}</p>
-    </div>
     {error && <div role="alert"><p className="account-error">No pudimos leer las capturas. {error}</p><button type="button" onClick={() => setAttempt(previous => previous + 1)}>Reintentar</button></div>}
     {list === null && !error && <p className="screenshot-empty" role="status"><LoaderCircle className="spin" aria-hidden="true" />Cargando capturas…</p>}
     {list !== null && screenshots.length === 0 && <div className="screenshot-empty" role="status">

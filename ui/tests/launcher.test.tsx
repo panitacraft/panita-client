@@ -604,6 +604,7 @@ test('the variant is changed from a tab of the instance settings, as an update o
   await openVariantTab(user);
   const lite = await screen.findByRole('radio', { name: 'Ligero' });
   await screen.findByText(/28 archivos/);
+  expect(document.querySelector('.settings-tabs ~ div:not([hidden]) > section.variant-panel')).toBeTruthy();
   // The installed variant is marked and cannot be "changed" to itself.
   expect(screen.getByText('Instalada')).toBeTruthy();
   expect((screen.getByRole('button', { name: 'Cambiar rendimiento' }) as HTMLButtonElement).disabled).toBe(true);
@@ -653,6 +654,8 @@ test('the instance settings put Capturas between Minecraft and Rendimiento', asy
   expect(await openInstanceSettings(user)).toEqual(['Minecraft', 'Capturas', 'Rendimiento']);
   await user.click(screen.getByRole('tab', { name: 'Capturas' }));
   expect(await screen.findByRole('heading', { name: 'Aún no hay capturas' })).toBeTruthy();
+  // The stylesheet joins a tab's panel to the tab bar only when the panel is a section inside a div.
+  expect(document.querySelector('.settings-tabs ~ div:not([hidden]) > section.screenshot-panel')).toBeTruthy();
   expect(backend.invoke).toHaveBeenCalledWith('list_screenshots', { instanceId: 'pack-a' });
   // The Minecraft settings are hidden, not removed, so unsaved edits survive the tab change.
   await user.click(screen.getByRole('tab', { name: 'Minecraft' }));
