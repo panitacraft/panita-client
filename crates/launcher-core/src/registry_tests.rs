@@ -34,7 +34,7 @@ fn installed_loader_hint_reports_the_recorded_version_and_omits_tombstones() {
     std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
 }
 
-fn entry(id: Uuid) -> CatalogInstance {
+pub(crate) fn entry(id: Uuid) -> CatalogInstance {
     CatalogInstance {
         id,
         slug: "vanilla-actual".to_owned(),
@@ -48,6 +48,7 @@ fn entry(id: Uuid) -> CatalogInstance {
         banner_url: None,
         sort_order: 10,
         updated_at: "2026-10-16T00:00:00Z".to_owned(),
+        variants: crate::catalog::standard_only(),
         source: CatalogSource::Vanilla {
             minecraft_version: "1.21.1".to_owned(),
         },
@@ -671,4 +672,114 @@ fn registry_removed_and_offline_views_do_not_invent_installations() {
     );
     assert!(!views[0].compatible);
     assert_eq!(views[0].local_state, InstallationState::NotInstalled);
+}
+
+#[test]
+fn the_installed_variant_is_reported_for_an_active_pack_and_not_for_a_tombstone() {
+    use crate::catalog::Variant;
+    use crate::minecraft::{maintenance, play::tests};
+    use crate::modpack::state::{PackIdentity, PackState};
+    let (paths, accounts, id) = tests::fixture();
+    drop(accounts);
+    tests::complete_installation(&paths, id);
+    let mut manifest = maintenance::installation_manifest(&paths, id)
+        .unwrap_or_else(|_| panic!("manifest"))
+        .unwrap_or_else(|| panic!("installed"));
+    // Vanilla carries no pack, so it has no variant.
+    assert_eq!(installed_variant(&manifest), None);
+    manifest.pack = Some(PackState {
+        schema: 1,
+        id,
+        source: PackIdentity::Custom {
+            version_id: Uuid::new_v4(),
+            published_at: "2026-10-25T20:54:25Z".into(),
+            label: None,
+            variant: Variant::Deluxe,
+        },
+        minecraft_version: "1.21.1".into(),
+        loader: "neoforge".into(),
+        loader_version: "21.1.264".into(),
+        files: Vec::new(),
+        consumed_defaults: Default::default(),
+        skipped_configuration: Vec::new(),
+        pending: Vec::new(),
+    });
+    manifest.schema_version = 2;
+    assert_eq!(installed_variant(&manifest), Some(Variant::Deluxe));
+    // Uninstalling leaves the pack state behind as history; nothing is installed from it.
+    manifest.schema_version = 3;
+    assert_eq!(installed_variant(&manifest), None);
+    std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+}
+
+fn custom_entry(id: Uuid, minecraft: &str, version: Uuid) -> CatalogInstance {
+    let mut catalog = entry(id);
+    catalog.minecraft_version = Some(minecraft.to_owned());
+    catalog.source = CatalogSource::Custom {
+        minecraft_version: minecraft.to_owned(),
+        loader: "fabric".to_owned(),
+        current_version_id: Some(version),
+        label: Some("1.0.0".to_owned()),
+        published_at: Some("2026-11-20T10:00:00Z".to_owned()),
+    };
+    catalog
+}
+
+fn custom_installation(id: Uuid, minecraft: &str) -> InstallationRecord {
+    let last_catalog = custom_entry(id, minecraft, Uuid::new_v4());
+    InstallationRecord {
+        resolved_source: last_catalog.source.clone(),
+        last_catalog,
+        ..installed(id)
+    }
+}
+
+#[test]
+fn a_custom_pin_on_another_minecraft_version_is_remembered_and_the_installation_stays() {
+    let (paths, registry) = temporary();
+    let id = Uuid::new_v4();
+    let record = custom_installation(id, "26.1.2");
+    assert!(registry.save(&record).is_ok());
+    let next = custom_entry(id, "26.3", Uuid::new_v4());
+    assert!(
+        registry
+            .remember_catalog(std::slice::from_ref(&next))
+            .is_ok()
+    );
+    let stored = registry
+        .get(id)
+        .unwrap_or_else(|_| panic!("get"))
+        .unwrap_or_else(|| panic!("record"));
+    assert_eq!(stored.last_catalog, next);
+    // The installation keeps the source it was installed from until an update publishes.
+    assert_eq!(stored.resolved_source, record.resolved_source);
+    // The record on disk must still decode, so later reads do not report it as damaged.
+    let directory = paths.instance(id).unwrap_or_else(|_| panic!("path"));
+    let name = InstanceRegistry::record_name(&directory);
+    let bytes = std::fs::read(directory.join(name)).unwrap_or_default();
+    assert!(InstallationRecord::decode(&bytes, id).is_ok());
+    assert!(registry.load().is_ok());
+    std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
+}
+
+#[test]
+fn a_new_custom_version_of_the_same_game_and_loader_is_remembered() {
+    // The catalog carries the loader name only, so a loader version change never reaches it.
+    let (paths, registry) = temporary();
+    let id = Uuid::new_v4();
+    let record = custom_installation(id, "26.1.2");
+    assert!(registry.save(&record).is_ok());
+    let next = custom_entry(id, "26.1.2", Uuid::new_v4());
+    assert!(
+        registry
+            .remember_catalog(std::slice::from_ref(&next))
+            .is_ok()
+    );
+    let stored = registry
+        .get(id)
+        .unwrap_or_else(|_| panic!("get"))
+        .unwrap_or_else(|| panic!("record"));
+    assert_eq!(stored.last_catalog, next);
+    assert_eq!(stored.resolved_source, record.resolved_source);
+    std::fs::remove_dir_all(paths.root()).unwrap_or_else(|_| panic!("cleanup"));
 }

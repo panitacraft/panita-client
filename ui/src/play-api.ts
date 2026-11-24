@@ -1,12 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 
 type InstanceRequest = { instanceId: string; requestId: string };
+export type UpdateArguments = { from_version: string; to_version: string; backup_worlds: boolean; move_aside?: boolean; from_variant?: string; to_variant?: string };
 export type PlayArguments = {
   begin_play: InstanceRequest;
-  begin_install: InstanceRequest;
+  begin_install: InstanceRequest & { variant?: string };
   begin_repair: InstanceRequest;
   begin_uninstall: InstanceRequest & { deleteInstance?: boolean };
-  begin_update: InstanceRequest & { update: { from_version: string; to_version: string; backup_worlds: boolean; move_aside?: boolean } };
+  begin_update: InstanceRequest & { update: UpdateArguments };
   cancel_play: InstanceRequest;
   confirm_play: InstanceRequest & { confirmationId: string };
   stop_game: InstanceRequest & { force: boolean };

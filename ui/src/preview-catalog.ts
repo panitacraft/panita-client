@@ -19,6 +19,10 @@ export interface CatalogInstance {
   installedSource?: PackSource | null;
   /** Exact loader from the validated local installation, never inferred from a catalog pin. */
   installedLoader?: { name: string; version: string } | null;
+  /** Variants the instance offers, ordered; absent means Standard only. */
+  variants?: string[];
+  /** The variant a pack installation was made from. */
+  installedVariant?: string | null;
 }
 
 export interface PackSource {

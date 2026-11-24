@@ -44,6 +44,8 @@ fn request(world: &World, next: &Manifest, move_aside: bool) -> UpdateRequest {
         to_version: next.version_id.to_string(),
         backup_worlds: false,
         move_aside,
+        from_variant: None,
+        to_variant: None,
     }
 }
 
@@ -922,4 +924,326 @@ fn a_first_install_is_not_a_pack_and_not_missing() {
     // An instance with no directory yet is the state of every first install.
     assert_eq!(is_pack(&world.paths, Uuid::new_v4()).ok(), Some(false));
     cleanup(&world);
+}
+
+/// The same published version, reduced to one variant. A version is immutable, so a
+/// variant is a fixed subset of its files under the version's own id.
+fn variant_of_version(
+    base: &Manifest,
+    variant: Variant,
+    files: Vec<serde_json::Value>,
+    world: &World,
+) -> Manifest {
+    let mut other = manifest(world.id, files, None);
+    other.version_id = base.version_id;
+    other.variant = variant;
+    other.archives = base.archives.clone();
+    other
+}
+
+fn variant_request(world: &World, next: &Manifest, from: Variant, to: Variant) -> UpdateRequest {
+    UpdateRequest {
+        from_variant: Some(from),
+        to_variant: Some(to),
+        ..request(world, next, false)
+    }
+}
+
+#[tokio::test]
+async fn a_variant_change_keeps_the_pin_and_removes_only_what_the_launcher_installed() {
+    let world = world();
+    let pair = installed_pair(&world).await;
+    assert_eq!(variant_of(&pack(&world)), Variant::Standard);
+    put(&world, "mods/mine.jar", b"the player's own mod");
+    put(&world, "saves/world/level.dat", b"a world");
+    let pin = pin_of(&pack(&world));
+
+    // Standard to Lite: the same version, with only b.
+    let lite = variant_of_version(
+        &pair.first,
+        Variant::Lite,
+        vec![mod_json("mods/b.jar", B)],
+        &world,
+    );
+    remember(&world, &lite);
+    let nothing = server(routes(&[]));
+    let report = updated(
+        update_with(
+            &world,
+            Plan::custom(&lite).unwrap_or_else(|_| panic!("plan")),
+            variant_request(&world, &lite, Variant::Standard, Variant::Lite),
+            &nothing,
+        )
+        .await,
+    );
+    assert_eq!((report.added, report.replaced, report.removed), (0, 0, 2));
+    assert!(!exists(&world, "mods/a.jar"));
+    assert!(!exists(&world, "mods/c.jar"));
+    assert_eq!(read(&world, "mods/b.jar"), B);
+    assert_eq!(read(&world, "mods/mine.jar"), b"the player's own mod");
+    assert_eq!(read(&world, "saves/world/level.dat"), b"a world");
+    // Configuration that was applied stays: it is the player's from then on.
+    assert_eq!(read(&world, "options.txt"), OPTIONS);
+    assert_eq!(variant_of(&pack(&world)), Variant::Lite);
+    assert_eq!(pin_of(&pack(&world)), pin);
+    assert!(nothing.requests().is_empty());
+    assert_eq!(state(&world), Some(InstallationState::Installed));
+    no_transaction(&world);
+
+    // Lite back to Standard restores only what Lite did not have.
+    let download = server(routes(&[("a.jar", A1), ("c.jar", C)]));
+    let report = updated(
+        update_with(
+            &world,
+            Plan::custom(&pair.first).unwrap_or_else(|_| panic!("plan")),
+            variant_request(&world, &pair.first, Variant::Lite, Variant::Standard),
+            &download,
+        )
+        .await,
+    );
+    assert_eq!((report.added, report.replaced, report.removed), (2, 0, 0));
+    assert_eq!(read(&world, "mods/a.jar"), A1);
+    assert_eq!(read(&world, "mods/c.jar"), C);
+    assert_eq!(read(&world, "mods/mine.jar"), b"the player's own mod");
+    assert_eq!(variant_of(&pack(&world)), Variant::Standard);
+    // Both files were verified into the shared cache by the first installation, so
+    // going back needs no download at all.
+    assert!(download.requests().is_empty());
+    no_transaction(&world);
+    cleanup(&world);
+}
+
+#[tokio::test]
+async fn a_variant_change_never_deletes_a_file_the_player_edited() {
+    let world = world();
+    let pair = installed_pair(&world).await;
+    put(&world, "mods/a.jar", b"the player's edited mod");
+    let lite = variant_of_version(
+        &pair.first,
+        Variant::Lite,
+        vec![mod_json("mods/b.jar", B)],
+        &world,
+    );
+    remember(&world, &lite);
+    let nothing = server(routes(&[]));
+    let report = updated(
+        update_with(
+            &world,
+            Plan::custom(&lite).unwrap_or_else(|_| panic!("plan")),
+            variant_request(&world, &lite, Variant::Standard, Variant::Lite),
+            &nothing,
+        )
+        .await,
+    );
+    // The unedited c goes; the edited a stays as the player's file.
+    assert_eq!(report.removed, 1);
+    assert_eq!(report.released, ["mods/a.jar"]);
+    assert_eq!(read(&world, "mods/a.jar"), b"the player's edited mod");
+    assert!(!exists(&world, "mods/c.jar"));
+    assert!(
+        pack(&world)
+            .files
+            .iter()
+            .all(|file| file.path != "mods/a.jar")
+    );
+    cleanup(&world);
+}
+
+#[tokio::test]
+async fn a_variant_request_must_match_the_installed_and_the_planned_variant() {
+    let world = world();
+    let pair = installed_pair(&world).await;
+    let lite = variant_of_version(
+        &pair.first,
+        Variant::Lite,
+        vec![mod_json("mods/b.jar", B)],
+        &world,
+    );
+    let plan = || Plan::custom(&lite).unwrap_or_else(|_| panic!("plan"));
+    let nothing = server(routes(&[]));
+    // The plan is Lite, but the request does not name it: the player never agreed.
+    let unnamed = request(&world, &lite, false);
+    assert_eq!(
+        code(update_with(&world, plan(), unnamed, &nothing).await),
+        Some(ErrorCode::UpdateSelectionChanged)
+    );
+    // The request was made for a variant that is not the installed one.
+    let stale = variant_request(&world, &lite, Variant::Deluxe, Variant::Lite);
+    assert_eq!(
+        code(update_with(&world, plan(), stale, &nothing).await),
+        Some(ErrorCode::UpdateSelectionChanged)
+    );
+    // The request names Standard but the plan is Lite.
+    let mismatch = variant_request(&world, &lite, Variant::Standard, Variant::Standard);
+    assert_eq!(
+        code(update_with(&world, plan(), mismatch, &nothing).await),
+        Some(ErrorCode::UpdateSelectionChanged)
+    );
+    assert_eq!(variant_of(&pack(&world)), Variant::Standard);
+    assert_eq!(read(&world, "mods/a.jar"), A1);
+    no_transaction(&world);
+    cleanup(&world);
+}
+
+fn offering(variants: &[Variant]) -> CatalogInstance {
+    let mut catalog = crate::registry::tests::entry(Uuid::new_v4());
+    catalog.variants = variants.to_vec();
+    catalog
+}
+
+fn asked(
+    from: &str,
+    to: &str,
+    from_variant: Option<Variant>,
+    to_variant: Option<Variant>,
+) -> UpdateRequest {
+    UpdateRequest {
+        from_version: from.into(),
+        to_version: to.into(),
+        backup_worlds: false,
+        move_aside: false,
+        from_variant,
+        to_variant,
+    }
+}
+
+#[test]
+fn an_update_keeps_the_variant_and_a_retired_one_moves_to_standard_by_itself() {
+    let all = [Variant::Lite, Variant::Standard, Variant::Deluxe];
+    // A version update keeps what the player chose.
+    assert_eq!(
+        target_variant(&offering(&all), Variant::Lite, &asked("1", "2", None, None)).ok(),
+        Some(Variant::Lite)
+    );
+    // The chosen variant is no longer offered: Standard, with no question.
+    assert_eq!(
+        target_variant(
+            &offering(&[Variant::Standard, Variant::Deluxe]),
+            Variant::Lite,
+            &asked("1", "2", None, None)
+        )
+        .ok(),
+        Some(Variant::Standard)
+    );
+    // The same applies when only the variant retired and the pin did not move.
+    assert_eq!(
+        target_variant(
+            &offering(&[Variant::Standard]),
+            Variant::Deluxe,
+            &asked("1", "1", Some(Variant::Deluxe), None)
+        )
+        .ok(),
+        Some(Variant::Standard)
+    );
+    // An explicit choice is honoured only when it is offered.
+    assert_eq!(
+        target_variant(
+            &offering(&all),
+            Variant::Standard,
+            &asked("1", "1", Some(Variant::Standard), Some(Variant::Deluxe))
+        )
+        .ok(),
+        Some(Variant::Deluxe)
+    );
+    assert_eq!(
+        target_variant(
+            &offering(&[Variant::Standard]),
+            Variant::Standard,
+            &asked("1", "1", None, Some(Variant::Lite))
+        )
+        .err()
+        .map(|e| e.code()),
+        Some(ErrorCode::VariantUnavailable)
+    );
+    // The request was made for another installed variant.
+    assert_eq!(
+        target_variant(
+            &offering(&all),
+            Variant::Standard,
+            &asked("1", "2", Some(Variant::Lite), None)
+        )
+        .err()
+        .map(|e| e.code()),
+        Some(ErrorCode::UpdateSelectionChanged)
+    );
+    // Neither the pin nor the variant changes: there is nothing to apply.
+    assert!(
+        target_variant(
+            &offering(&all),
+            Variant::Standard,
+            &asked("1", "1", None, Some(Variant::Standard))
+        )
+        .is_err()
+    );
+}
+
+/// Record the installation the way a custom install does: the entry and the
+/// installed source both name the first manifest's game version and pin.
+fn record_as_custom(world: &World, first: &Manifest) {
+    let registry = InstanceRegistry::new(world.paths.clone());
+    let mut record = registry
+        .get(world.id)
+        .unwrap_or_default()
+        .unwrap_or_else(|| panic!("record"));
+    let source = CatalogSource::Custom {
+        minecraft_version: first.minecraft_version.clone(),
+        loader: first.loader.clone(),
+        current_version_id: Some(first.version_id),
+        label: first.label.clone(),
+        published_at: Some(first.published_at.clone()),
+    };
+    record.last_catalog.minecraft_version = Some(first.minecraft_version.clone());
+    record.last_catalog.source = source.clone();
+    record.resolved_source = source;
+    assert!(registry.save(&record).is_ok());
+}
+
+#[tokio::test]
+async fn an_update_to_another_minecraft_version_completes_and_publishes_the_new_source() {
+    let world = world();
+    let mut pair = installed_pair(&world).await;
+    record_as_custom(&world, &pair.first);
+    pair.second.minecraft_version = "1.21.4".to_owned();
+    let before = pack(&world);
+    assert_eq!(before.minecraft_version, "1.21.1");
+
+    let report = updated(update_to(&world, &pair.second, &pair.server, false).await);
+    assert_eq!((report.added, report.replaced, report.removed), (1, 1, 1));
+    let lock = pack(&world);
+    assert_eq!(pin_of(&lock), pair.second.version_id.to_string());
+    assert_eq!(lock.minecraft_version, "1.21.4");
+    assert!(matches!(
+        record_source(&world),
+        Some(CatalogSource::Custom { minecraft_version, current_version_id: Some(version), .. })
+            if minecraft_version == "1.21.4" && version == pair.second.version_id
+    ));
+    // The registry still reads the record, so no catalog warning is raised afterwards.
+    assert!(InstanceRegistry::new(world.paths.clone()).load().is_ok());
+    assert_eq!(state(&world), Some(InstallationState::Installed));
+    no_transaction(&world);
+}
+
+#[tokio::test]
+async fn an_update_that_only_changes_the_loader_version_completes_and_publishes_it() {
+    let world = world();
+    let mut pair = installed_pair(&world).await;
+    record_as_custom(&world, &pair.first);
+    pair.second.loader_version = "21.1.300".to_owned();
+    assert_eq!(pack(&world).loader_version, "21.1.264");
+
+    let report = updated(update_to(&world, &pair.second, &pair.server, false).await);
+    assert_eq!((report.added, report.replaced, report.removed), (1, 1, 1));
+    let lock = pack(&world);
+    assert_eq!(pin_of(&lock), pair.second.version_id.to_string());
+    assert_eq!(lock.minecraft_version, "1.21.1");
+    assert_eq!(lock.loader, "neoforge");
+    assert_eq!(lock.loader_version, "21.1.300");
+    assert!(matches!(
+        record_source(&world),
+        Some(CatalogSource::Custom { loader, current_version_id: Some(version), .. })
+            if loader == "neoforge" && version == pair.second.version_id
+    ));
+    assert!(InstanceRegistry::new(world.paths.clone()).load().is_ok());
+    assert_eq!(state(&world), Some(InstallationState::Installed));
+    no_transaction(&world);
 }

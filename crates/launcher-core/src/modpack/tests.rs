@@ -21,6 +21,57 @@ pub(super) fn fixture() -> (Uuid, Uuid, Value) {
 }
 
 #[test]
+fn a_manifest_answers_the_variant_that_was_asked_for_and_validates_its_summaries() {
+    use crate::catalog::Variant;
+    let (id, version, value) = fixture();
+    let parse = |value: &Value, variant| {
+        Manifest::parse_variant(value.to_string().as_bytes(), id, version, variant)
+    };
+    // An answer without a variant is Standard, as an older API served it.
+    let manifest = parse(&value, Variant::Standard).unwrap_or_else(|_| panic!("standard"));
+    assert_eq!(manifest.variant, Variant::Standard);
+    assert!(manifest.variants.is_empty());
+    // An API that ignored the parameter must never be installed as another variant.
+    assert!(parse(&value, Variant::Lite).is_err());
+    let mut lite = value.clone();
+    lite["data"]["variant"] = json!("lite");
+    lite["data"]["variants"] = json!([
+        {"id": "lite", "file_count": 1, "size": 100},
+        {"id": "standard", "file_count": 2, "size": 200},
+        {"id": "deluxe", "file_count": 3, "size": 300},
+    ]);
+    let parsed = parse(&lite, Variant::Lite).unwrap_or_else(|_| panic!("lite"));
+    assert_eq!(parsed.variant, Variant::Lite);
+    assert_eq!(
+        parsed.summary(Variant::Deluxe).map(|v| v.file_count),
+        Some(3)
+    );
+    assert!(parse(&lite, Variant::Standard).is_err());
+    for bad in [
+        // The served variant is not among those offered.
+        json!([{"id": "standard", "file_count": 2, "size": 200}]),
+        // Standard is always offered.
+        json!([{"id": "lite", "file_count": 1, "size": 100}]),
+        // Unordered or repeated summaries.
+        json!([
+            {"id": "standard", "file_count": 2, "size": 200},
+            {"id": "lite", "file_count": 1, "size": 100},
+        ]),
+        json!([
+            {"id": "lite", "file_count": 1, "size": 100},
+            {"id": "lite", "file_count": 1, "size": 100},
+            {"id": "standard", "file_count": 2, "size": 200},
+        ]),
+        // A variant this launcher does not know cannot be summarized.
+        json!([{"id": "gold", "file_count": 1, "size": 100}]),
+    ] {
+        let mut broken = lite.clone();
+        broken["data"]["variants"] = bad.clone();
+        assert!(parse(&broken, Variant::Lite).is_err(), "{bad}");
+    }
+}
+
+#[test]
 fn manifests_bind_pins_and_reject_hostile_or_incomplete_content() {
     let (id, version, value) = fixture();
     let parse = |value: &Value| Manifest::parse(value.to_string().as_bytes(), id, version);
@@ -197,6 +248,7 @@ fn state_retains_deleted_defaults_and_separates_skipped_desired_content() {
             version_id: Uuid::new_v4(),
             published_at: "2026-10-25T20:54:25Z".into(),
             label: None,
+            variant: crate::catalog::Variant::Standard,
         },
         minecraft_version: "1.21.1".into(),
         loader: "neoforge".into(),
@@ -345,4 +397,41 @@ fn an_index_with_color_coded_resource_pack_names_parses() {
     files.push(file("resourcepacks/É.zip", "c.zip"));
     files.push(file("resourcepacks/é.zip", "d.zip"));
     assert!(parse(&value).is_err());
+}
+
+#[test]
+fn an_installation_made_before_variants_reads_as_standard_and_always_writes_its_variant() {
+    use crate::catalog::Variant;
+    let id = Uuid::new_v4();
+    let version = Uuid::new_v4();
+    let legacy = json!({
+        "schema": 1, "id": id,
+        "source": {"type": "custom", "version_id": version,
+            "published_at": "2026-10-25T20:54:25Z", "label": null},
+        "minecraft_version": "1.21.1", "loader": "neoforge", "loader_version": "21.1.264",
+        "files": [], "consumed_defaults": [], "skipped_configuration": []
+    });
+    let read = state::PackState::decode(legacy.to_string().as_bytes(), id)
+        .unwrap_or_else(|_| panic!("legacy state"));
+    assert!(matches!(
+        read.source,
+        state::PackIdentity::Custom {
+            variant: Variant::Standard,
+            ..
+        }
+    ));
+    // Standard is written too, so the file always says what it was installed from.
+    let written = serde_json::to_value(&read).unwrap_or_default();
+    assert_eq!(written["source"]["variant"], json!("standard"));
+    let mut lite = read.clone();
+    if let state::PackIdentity::Custom { variant, .. } = &mut lite.source {
+        *variant = Variant::Lite;
+    }
+    let written = serde_json::to_vec(&lite).unwrap_or_default();
+    let again = state::PackState::decode(&written, id).unwrap_or_else(|_| panic!("lite state"));
+    assert_eq!(again, lite);
+    // An unknown variant name is damaged data, not a Standard installation.
+    let mut unknown = serde_json::to_value(&lite).unwrap_or_default();
+    unknown["source"]["variant"] = json!("platinum");
+    assert!(state::PackState::decode(unknown.to_string().as_bytes(), id).is_err());
 }

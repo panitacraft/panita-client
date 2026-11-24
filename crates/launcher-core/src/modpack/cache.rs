@@ -1,6 +1,7 @@
 //! Identity-bound public manifest revalidation. A cache hit is content reuse,
 //! never proof of current enabled status, visibility, or Play availability.
 use super::*;
+use crate::catalog::Variant;
 use crate::panita_api::PanitaCredentials;
 use reqwest::{Client, StatusCode, header};
 use std::time::Duration;
@@ -93,11 +94,15 @@ impl ManifestClient {
     }
 
     /// Credentials only reach the Panita API. No transport retry, or fallback on
-    /// explicit missing responses.
+    /// explicit missing responses. The variant is always named, Standard included, so
+    /// the URL and any CDN copy of it are explicit. A missing answer for another
+    /// variant means the instance no longer offers it, which is not an absent
+    /// instance; a version is immutable, so a variant's content never changes.
     pub async fn fetch(
         &self,
         id: Uuid,
         version: Uuid,
+        variant: Variant,
         cached: Option<&CachedManifest>,
     ) -> Result<CachedManifest, CoreError> {
         if id.is_nil() || version.is_nil() {
@@ -105,12 +110,16 @@ impl ManifestClient {
         }
         if let Some(cached) = cached {
             cached.validate(&self.base, id, version)?;
+            if cached.manifest.variant != variant {
+                return Err(invalid());
+            }
         }
         let mut request = self
             .client
             .get(format!(
-                "{}/v1/instances/{id}/versions/{version}/manifest",
-                self.base
+                "{}/v1/instances/{id}/versions/{version}/manifest?variant={}",
+                self.base,
+                variant.as_str()
             ))
             .header(header::ACCEPT, "application/json")
             .header(header::CACHE_CONTROL, "no-cache");
@@ -146,7 +155,11 @@ impl ManifestClient {
             return cached.cloned().ok_or_else(invalid);
         }
         if response.status() == StatusCode::NOT_FOUND {
-            return Err(CoreError::new(ErrorCode::InstanceMissing));
+            return Err(CoreError::new(if variant == Variant::Standard {
+                ErrorCode::InstanceMissing
+            } else {
+                ErrorCode::VariantUnavailable
+            }));
         }
         if response.status() == StatusCode::TOO_MANY_REQUESTS || response.status().is_server_error()
         {
@@ -179,7 +192,7 @@ impl ManifestClient {
             }
             bytes.extend_from_slice(&chunk);
         }
-        let manifest = Manifest::parse(&bytes, id, version)?;
+        let manifest = Manifest::parse_variant(&bytes, id, version, variant)?;
         if cached.is_some_and(|c| c.manifest != manifest) {
             return Err(invalid());
         }
@@ -212,10 +225,15 @@ mod tests {
             base,
             auth: None,
         };
-        assert!(client.fetch(id, version, None).await.is_err());
+        assert!(
+            client
+                .fetch(id, version, Variant::Standard, None)
+                .await
+                .is_err()
+        );
         assert_eq!(
             client
-                .fetch(id, version, None)
+                .fetch(id, version, Variant::Standard, None)
                 .await
                 .err()
                 .map(|e| e.code()),
@@ -270,14 +288,24 @@ mod tests {
             auth: None,
         };
         let cached = client
-            .fetch(id, version, None)
+            .fetch(id, version, Variant::Standard, None)
             .await
             .unwrap_or_else(|_| panic!("fetch"));
-        assert!(client.fetch(id, version, Some(&cached)).await.is_ok());
-        assert!(client.fetch(id, version, Some(&cached)).await.is_err());
+        assert!(
+            client
+                .fetch(id, version, Variant::Standard, Some(&cached))
+                .await
+                .is_ok()
+        );
+        assert!(
+            client
+                .fetch(id, version, Variant::Standard, Some(&cached))
+                .await
+                .is_err()
+        );
         assert_eq!(
             client
-                .fetch(id, version, Some(&cached))
+                .fetch(id, version, Variant::Standard, Some(&cached))
                 .await
                 .err()
                 .map(|e| e.code()),
@@ -285,11 +313,72 @@ mod tests {
         );
         assert!(
             client
-                .fetch(Uuid::new_v4(), version, Some(&cached))
+                .fetch(Uuid::new_v4(), version, Variant::Standard, Some(&cached))
                 .await
                 .is_err()
         );
         task.join().unwrap_or_else(|_| panic!("server"));
+    }
+
+    #[tokio::test]
+    async fn the_variant_is_always_named_and_a_missing_one_is_not_a_missing_instance() {
+        use crate::test_http::{Reply, Server};
+        let (id, version, document) = super::super::tests::fixture();
+        let standard = document.to_string();
+        let mut lite = document.clone();
+        lite["data"]["variant"] = serde_json::json!("lite");
+        let lite = lite.to_string();
+        let server = Server::start(move |request| {
+            if request.query == "variant=standard" {
+                Reply::ok(standard.clone())
+            } else if request.query == "variant=lite" {
+                Reply::ok(lite.clone())
+            } else if request.query == "variant=deluxe" {
+                Reply::status(404)
+            } else {
+                // Without the parameter the contract would answer Standard, so any
+                // request that omits it is a defect in this client.
+                Reply::status(418)
+            }
+        });
+        let client = || {
+            let client = Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap_or_else(|_| panic!("client"));
+            ManifestClient {
+                client,
+                base: server.base().to_owned(),
+                auth: None,
+            }
+        };
+        for variant in [Variant::Standard, Variant::Lite] {
+            let fetched = client()
+                .fetch(id, version, variant, None)
+                .await
+                .unwrap_or_else(|_| panic!("{variant:?}"));
+            assert_eq!(fetched.manifest().variant, variant);
+        }
+        // A retired variant is told apart from an instance or version that is gone.
+        assert_eq!(
+            client()
+                .fetch(id, version, Variant::Deluxe, None)
+                .await
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::VariantUnavailable)
+        );
+        // A cached answer of one variant never stands in for another.
+        let cached = client()
+            .fetch(id, version, Variant::Lite, None)
+            .await
+            .unwrap_or_else(|_| panic!("lite"));
+        assert!(
+            client()
+                .fetch(id, version, Variant::Standard, Some(&cached))
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -318,7 +407,7 @@ mod tests {
         };
         assert_eq!(
             client()
-                .fetch(id, version, None)
+                .fetch(id, version, Variant::Standard, None)
                 .await
                 .err()
                 .map(|e| e.code()),
@@ -329,7 +418,7 @@ mod tests {
         assert!(
             client()
                 .with_auth(credentials)
-                .fetch(id, version, None)
+                .fetch(id, version, Variant::Standard, None)
                 .await
                 .is_ok()
         );

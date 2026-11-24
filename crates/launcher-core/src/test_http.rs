@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 #[derive(Clone)]
 pub(crate) struct Request {
     pub path: String,
+    /// The raw query string without its `?`; empty when the request has none.
+    pub query: String,
     /// Lowercased raw header block, for asserting what was never sent.
     pub headers: String,
     /// How many earlier requests asked for this same path.
@@ -155,19 +157,21 @@ fn serve(
     }
     let text = String::from_utf8_lossy(&bytes).to_lowercase();
     let original = String::from_utf8_lossy(&bytes);
-    let path = original
+    let target = original
         .split_whitespace()
         .nth(1)
         .unwrap_or_default()
-        .split('?')
-        .next()
-        .unwrap_or_default()
         .to_owned();
+    let (path, query) = match target.split_once('?') {
+        Some((path, query)) => (path.to_owned(), query.to_owned()),
+        None => (target, String::new()),
+    };
     let request = {
         let mut log = requests.lock().unwrap_or_else(|poison| poison.into_inner());
         let hit = log.iter().filter(|r| r.path == path).count();
         let request = Request {
             path,
+            query,
             headers: text,
             hit,
         };

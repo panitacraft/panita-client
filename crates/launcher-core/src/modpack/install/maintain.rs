@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::*;
 use crate::modpack::path_key;
 use crate::{
-    catalog::CatalogSource,
+    catalog::{CatalogSource, Variant},
     minecraft::{
         install::prepare_recorded,
         native_cache::{self, CleanupReport},
@@ -193,6 +193,7 @@ fn source_of(pack: &PackState) -> CatalogSource {
             version_id,
             published_at,
             label,
+            ..
         } => CatalogSource::Custom {
             minecraft_version: pack.minecraft_version.clone(),
             loader: pack.loader.clone(),
@@ -227,6 +228,19 @@ pub fn is_pack(paths: &AppPaths, id: Uuid) -> Result<bool, CoreError> {
 /// The pin string the update request names: the custom version UUID or Modrinth id.
 pub fn pin_of(pack: &PackState) -> String {
     identity_pin(&pack.source)
+}
+
+/// The variant an installed pack was made from. Only a custom pack has a choice;
+/// every other pack is Standard.
+pub fn variant_of(pack: &PackState) -> Variant {
+    identity_variant(&pack.source)
+}
+
+fn identity_variant(identity: &PackIdentity) -> Variant {
+    match identity {
+        PackIdentity::Custom { variant, .. } => *variant,
+        PackIdentity::Modrinth { .. } => Variant::Standard,
+    }
 }
 
 fn identity_pin(identity: &PackIdentity) -> String {
@@ -680,6 +694,41 @@ pub struct UpdateRequest {
     pub backup_worlds: bool,
     /// Continue past conflicts by moving the player's files to the backups.
     pub move_aside: bool,
+    /// The installed variant the request was made for. Absent means the request does
+    /// not pin it; present, it must still be the recorded one.
+    pub from_variant: Option<Variant>,
+    /// The variant to install. Absent keeps the installed one, and moves to Standard
+    /// when the instance no longer offers it.
+    pub to_variant: Option<Variant>,
+}
+
+/// The variant an update installs, from the current by-ID answer.
+///
+/// The player's variant is kept through an update. One the instance no longer offers
+/// moves to Standard on its own, with no question asked (owner decision, 2026-11-21):
+/// the pack still installs and nothing is left broken. A variant the player names
+/// explicitly must be offered. A request naming neither a new pin nor a new variant
+/// has nothing to do.
+fn target_variant(
+    catalog: &CatalogInstance,
+    installed: Variant,
+    request: &UpdateRequest,
+) -> Result<Variant, CoreError> {
+    if request.from_variant.is_some_and(|from| from != installed) {
+        return Err(CoreError::new(ErrorCode::UpdateSelectionChanged));
+    }
+    let target = request.to_variant.unwrap_or(if catalog.offers(installed) {
+        installed
+    } else {
+        Variant::Standard
+    });
+    if !catalog.offers(target) {
+        return Err(CoreError::new(ErrorCode::VariantUnavailable));
+    }
+    if request.from_version == request.to_version && target == installed {
+        return Err(invalid());
+    }
+    Ok(target)
 }
 
 fn lock_and_recover(
@@ -759,14 +808,22 @@ pub async fn update_with_catalog(
     catalog: CatalogInstance,
     auth: Option<PanitaCredentials>,
 ) -> Result<UpdateOutcome, CoreError> {
-    if id.is_nil() || request.from_version == request.to_version {
+    if id.is_nil() {
         return Err(invalid());
     }
+    let mut request = request;
     let registry = InstanceRegistry::new(paths.clone());
     registry.remember_catalog(std::slice::from_ref(&catalog))?;
     catalog.installation_allowed(
         &semver::Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| invalid())?,
     )?;
+    // A first look at the recorded variant; the runner repeats the check under the lock.
+    let installed_variant = {
+        let root = metadata_root(paths, id)?;
+        variant_of(&installed_pack(&root, id)?.pack.ok_or_else(invalid)?)
+    };
+    let target_variant = target_variant(&catalog, installed_variant, &request)?;
+    request.to_variant = Some(target_variant);
     let target = match &catalog.source {
         CatalogSource::Custom {
             current_version_id: Some(version),
@@ -783,7 +840,9 @@ pub async fn update_with_catalog(
     let downloader = PackDownloader::new()?;
     // Everything below the lock needs the plan, so resolve it first, as install does.
     let plan = match &catalog.source {
-        CatalogSource::Custom { .. } => custom_plan(&catalog, id, cancel, auth).await?,
+        CatalogSource::Custom { .. } => {
+            custom_plan(&catalog, id, target_variant, cancel, auth).await?
+        }
         _ => mrpack_plan(paths, &downloader, &catalog, cancel, pack_progress.clone()).await?,
     };
     run_update(
@@ -840,9 +899,14 @@ pub(crate) async fn run_update(
     let previous = installed_pack(&root, id)?;
     let old = previous.pack.clone().ok_or_else(invalid)?;
     let record = registry.get(id)?.ok_or_else(invalid)?;
+    let installed_variant = variant_of(&old);
     if !maintainable(&record)
         || pin_of(&old) != request.from_version
+        || request
+            .from_variant
+            .is_some_and(|from| from != installed_variant)
         || identity_pin(&plan.identity) != request.to_version
+        || identity_variant(&plan.identity) != request.to_variant.unwrap_or(installed_variant)
     {
         return Err(CoreError::new(ErrorCode::UpdateSelectionChanged));
     }
@@ -1005,10 +1069,10 @@ pub(crate) async fn run_update(
             }
             let current = read_json::<InstalledLock>(&root, "installed.json")?;
             if current.is_some_and(|current| {
-                current
-                    .pack
-                    .as_ref()
-                    .is_some_and(|pack| pin_of(pack) == request.to_version)
+                current.pack.as_ref().is_some_and(|pack| {
+                    pin_of(pack) == request.to_version
+                        && variant_of(pack) == request.to_variant.unwrap_or(installed_variant)
+                })
             }) {
                 return Ok(UpdateOutcome::Updated(UpdateReport {
                     backup: journal.backup,
@@ -1082,9 +1146,13 @@ pub async fn repair_with_catalog(
     let downloader = PackDownloader::new()?;
     // The recorded pin, exactly: never the catalog's current one.
     let plan = match &old.source {
-        PackIdentity::Custom { version_id, .. } => {
-            custom_plan_pinned(*version_id, None, id, cancel, auth).await?
-        }
+        // The recorded variant too: a retired one answers as unavailable, and the
+        // player's way out is the update, which moves the installation to Standard.
+        PackIdentity::Custom {
+            version_id,
+            variant,
+            ..
+        } => custom_plan_pinned(*version_id, None, id, *variant, cancel, auth).await?,
         PackIdentity::Modrinth {
             project_id,
             version_id,
