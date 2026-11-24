@@ -385,11 +385,15 @@ Players must never install libdecor by hand.
 
 Owner request, GitHub issue 50. The instance settings carry a Capturas tab between
 Minecraft and Rendimiento that lists the selected instance's
-`minecraft/screenshots/*.png`, newest first. Clicking a thumbnail opens an in-app viewer
+`minecraft/screenshots/*.png`, newest first, as plain thumbnails (no text beneath; the name
+is the tooltip) separated by month headings such as "Noviembre 2026" (owner requests,
+2026-11-24). The overflow button appears on hover, on keyboard focus and while its menu is
+open, never after a mouse click. Clicking a thumbnail opens an in-app viewer
 (a native modal dialog; Escape closes it and Left/Right step through the list). Right-clicking
 a thumbnail, or its overflow button, opens a menu: Ver, Abrir en fotos,
 Mostrar en la carpeta, Copiar imagen and Eliminar. A successful copy or deletion is
-confirmed with a toast. The open tab refreshes itself (owner request, 2026-11-23): it
+confirmed with a toast; a copy first shows "Copiando imagen…" because it decodes and
+re-encodes the full image. The open tab refreshes itself (owner request, 2026-11-23): it
 re-reads the folder every 3 seconds while the window is visible and when it regains focus,
 through the same validated listing, with no file watcher. Unchanged results leave the
 screen untouched, a failed quiet read keeps what is shown, and a folder that stops being

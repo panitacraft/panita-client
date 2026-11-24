@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   SCREENSHOTS_PER_PAGE, adjacentScreenshot, clampScreenshotPage, indexAfterRemoval, screenshotActionError, screenshotChoices, screenshotDateText, screenshotPage,
-  screenshotPageCount, screenshotPageOf, screenshotSizeText, sameScreenshotList,
+  screenshotPageCount, screenshotPageOf, screenshotSizeText, sameScreenshotList, groupScreenshotsByMonth,
 } from '../src/screenshot-state.ts';
 
 const shots = count => Array.from({ length: count }, (_, index) => ({ name: `s${index}.png`, size: 1, modifiedMs: index }));
@@ -68,4 +68,17 @@ test('a listing that says nothing new is recognized so the screen is left alone'
   assert.equal(sameScreenshotList(base, { screenshots: shots(2), truncated: true }), false);
   assert.equal(sameScreenshotList(base, { screenshots: [{ ...base.screenshots[0], modifiedMs: 99 }, base.screenshots[1]], truncated: false }), false);
   assert.equal(sameScreenshotList({ screenshots: [], truncated: false }, { screenshots: [], truncated: false }), true);
+});
+
+test('screenshots are grouped into month runs with Spanish headings, keeping their order', () => {
+  const at = (year, month, day, hour = 12) => ({ name: `${year}-${month}-${day}-${hour}.png`, size: 1, modifiedMs: new Date(year, month - 1, day, hour).getTime() });
+  const items = [at(2026, 11, 23, 18), at(2026, 11, 2), at(2026, 10, 31, 23), at(2026, 5, 1), at(2025, 5, 1)];
+  const groups = groupScreenshotsByMonth(items);
+  assert.deepEqual(groups.map(group => group.label), ['Noviembre 2026', 'Octubre 2026', 'Mayo 2026', 'Mayo 2025']);
+  assert.deepEqual(groups.map(group => group.items.length), [2, 1, 1, 1]);
+  assert.deepEqual(groups.flatMap(group => group.items), items);
+  assert.equal(new Set(groups.map(group => group.key)).size, 4);
+  assert.deepEqual(groupScreenshotsByMonth([]), []);
+  const undated = groupScreenshotsByMonth([{ name: 'a.png', size: 1, modifiedMs: 0 }, { name: 'b.png', size: 1, modifiedMs: 0 }]);
+  assert.deepEqual(undated.map(group => [group.label, group.items.length]), [['Sin fecha', 2]]);
 });

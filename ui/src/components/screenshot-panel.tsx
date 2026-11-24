@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useId, useRef, useState, type MouseEvent } from 'react';
 import { ChevronLeft, ChevronRight, Copy, Ellipsis, Expand, ExternalLink, FolderOpen, ImageOff, LoaderCircle, Trash2, X, type LucideIcon } from 'lucide-react';
 import { AccountDialog } from './account-dialog';
 import { ScreenshotViewer } from './screenshot-viewer';
@@ -8,8 +8,8 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { messageForError } from '../errors';
 import { loadScreenshotImage, loadScreenshots, runScreenshotAction } from '../screenshot-api';
 import {
-  SCREENSHOT_REFRESH_MS, clampScreenshotPage, indexAfterRemoval, sameScreenshotList, screenshotActionError, screenshotChoices, screenshotCopied, screenshotDateText, screenshotPage, screenshotPageCount,
-  screenshotPageOf, screenshotSizeText, screenshotTrashed,
+  SCREENSHOT_REFRESH_MS, clampScreenshotPage, indexAfterRemoval, sameScreenshotList, screenshotActionError, groupScreenshotsByMonth, screenshotChoices, screenshotCopied, screenshotCopying, screenshotPage, screenshotPageCount,
+  screenshotPageOf, screenshotTrashed,
   type Screenshot, type ScreenshotAction, type ScreenshotChoice, type ScreenshotList,
 } from '../screenshot-state';
 
@@ -49,21 +49,16 @@ function ScreenshotCard({ instanceId, screenshot, onChoice }: { instanceId: stri
     event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
   }
 
-  const date = screenshotDateText(screenshot.modifiedMs);
   return <li className="screenshot-card">
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div className="screenshot-card-body">
-          <button ref={frame} type="button" className="screenshot-frame" data-screenshot={screenshot.name} aria-label={`Ver ${screenshot.name}`} onClick={() => onChoice('view', screenshot)}>
+          <button ref={frame} type="button" className="screenshot-frame" data-screenshot={screenshot.name} aria-label={`Ver ${screenshot.name}`} title={screenshot.name} onClick={() => onChoice('view', screenshot)}>
             {source ? <img src={source} alt="" decoding="async" /> : failed
               ? <span className="screenshot-placeholder"><ImageOff aria-hidden="true" />No se pudo cargar la imagen</span>
               : <span className="screenshot-placeholder" role="status"><LoaderCircle className="spin" aria-hidden="true" /><span className="sr-only">Cargando la captura {screenshot.name}</span></span>}
           </button>
           <button type="button" className="screenshot-more" aria-label={`Más acciones para ${screenshot.name}`} onClick={openMenu}><Ellipsis aria-hidden="true" /></button>
-          <div className="screenshot-meta">
-            <strong title={screenshot.name}>{screenshot.name}</strong>
-            <small>{[date, screenshotSizeText(screenshot.size)].filter(Boolean).join(' · ')}</small>
-          </div>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent aria-label={`Acciones de ${screenshot.name}`}
@@ -96,7 +91,8 @@ export function ScreenshotPanel({ instanceId }: { instanceId: string }) {
   const [viewing, setViewing] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Screenshot | null>(null);
   const { notice, show } = useTransientNotice();
-  const grid = useRef<HTMLUListElement>(null);
+  const grid = useRef<HTMLDivElement>(null);
+  const monthId = useId();
 
   // The gallery stays current by itself: it reads the folder when it opens, every few seconds
   // while it is visible and as soon as the window comes back, which is when a screenshot taken
@@ -140,6 +136,8 @@ export function ScreenshotPanel({ instanceId }: { instanceId: string }) {
 
   async function run(action: ScreenshotAction, screenshot: Screenshot): Promise<boolean> {
     setWorking(true);
+    // Copying decodes and re-encodes the image, so say so at once instead of leaving a silent wait.
+    if (action === 'copy') show(screenshotCopying, 'progress');
     try {
       await runScreenshotAction(action, instanceId, screenshot);
       if (action === 'copy') show(screenshotCopied);
@@ -192,9 +190,14 @@ export function ScreenshotPanel({ instanceId }: { instanceId: string }) {
       <ImageOff aria-hidden="true" />
       <h3>Aún no hay capturas</h3>
     </div>}
-    {screenshots.length > 0 && <ul ref={grid} className="screenshot-grid" aria-label="Capturas de la instancia">
-      {screenshotPage(screenshots, current).map(screenshot => <ScreenshotCard key={screenshot.name} instanceId={instanceId} screenshot={screenshot} onChoice={choose} />)}
-    </ul>}
+    {screenshots.length > 0 && <div ref={grid} className="screenshot-groups">
+      {groupScreenshotsByMonth(screenshotPage(screenshots, current)).map(month => <div key={month.key} role="group" aria-labelledby={`${monthId}${month.key}`}>
+        <h3 id={`${monthId}${month.key}`} className="screenshot-month"><span>{month.label}</span></h3>
+        <ul className="screenshot-grid">
+          {month.items.map(screenshot => <ScreenshotCard key={screenshot.name} instanceId={instanceId} screenshot={screenshot} onChoice={choose} />)}
+        </ul>
+      </div>)}
+    </div>}
     {list?.truncated && <p className="screenshot-note">Mostramos las {screenshots.length} capturas más recientes. Las demás siguen en tu carpeta.</p>}
     {pages > 1 && <nav className="screenshot-pages" aria-label="Páginas de capturas">
       <Button variant="secondary" size="sm" disabled={current === 0} onClick={() => setPage(current - 1)}><ChevronLeft aria-hidden="true" />Anterior</Button>

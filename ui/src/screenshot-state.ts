@@ -73,7 +73,28 @@ export function screenshotDateText(modifiedMs: number): string {
   return new Intl.DateTimeFormat('es', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(modifiedMs));
 }
 
+export type ScreenshotMonth = { key: string; label: string; items: Screenshot[] };
+
+/**
+ * Split a newest-first list into runs that share a month, each with a Spanish heading such
+ * as "Noviembre 2026". A file without a date goes under "Sin fecha". Order is kept.
+ */
+export function groupScreenshotsByMonth(items: readonly Screenshot[]): ScreenshotMonth[] {
+  const months: ScreenshotMonth[] = [];
+  for (const item of items) {
+    const dated = Number.isFinite(item.modifiedMs) && item.modifiedMs > 0;
+    const date = new Date(item.modifiedMs);
+    const key = dated ? `${date.getFullYear()}-${date.getMonth()}` : 'unknown';
+    const last = months[months.length - 1];
+    if (last?.key === key) { last.items.push(item); continue; }
+    const name = dated ? new Intl.DateTimeFormat('es', { month: 'long' }).format(date) : '';
+    months.push({ key, label: dated ? `${name.charAt(0).toUpperCase()}${name.slice(1)} ${date.getFullYear()}` : 'Sin fecha', items: [item] });
+  }
+  return months;
+}
+
 export const screenshotCopied = 'Imagen copiada al portapapeles.';
+export const screenshotCopying = 'Copiando imagen…';
 export const screenshotTrashed = 'Captura movida a la papelera.';
 
 const failures: Record<ScreenshotAction, string> = {
