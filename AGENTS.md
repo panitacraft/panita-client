@@ -389,7 +389,11 @@ Minecraft and Rendimiento that lists the selected instance's
 (a native modal dialog; Escape closes it and Left/Right step through the list). Right-clicking
 a thumbnail, or its overflow button, opens a menu: Ver, Abrir en otra app,
 Mostrar en la carpeta, Copiar imagen and Eliminar. A successful copy or deletion is
-confirmed with a toast.
+confirmed with a toast. The open tab refreshes itself (owner request, 2026-11-23): it
+re-reads the folder every 3 seconds while the window is visible and when it regains focus,
+through the same validated listing, with no file watcher. Unchanged results leave the
+screen untouched, a failed quiet read keeps what is shown, and a folder that stops being
+valid empties the list and reports the error. It stops when the tab closes.
 
 - The frontend sends only an instance UUID and a bare file name. The core resolves every
   path through no-follow directory handles from the instance root, accepts only a plain

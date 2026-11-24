@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
-import { ChevronLeft, ChevronRight, Copy, Ellipsis, Expand, ExternalLink, FolderOpen, ImageOff, LoaderCircle, RefreshCw, Trash2, X, type LucideIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Copy, Ellipsis, Expand, ExternalLink, FolderOpen, ImageOff, LoaderCircle, Trash2, X, type LucideIcon } from 'lucide-react';
 import { AccountDialog } from './account-dialog';
 import { ScreenshotViewer } from './screenshot-viewer';
 import { TransientNotice, useTransientNotice } from './transient-notice';
@@ -8,7 +8,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
 import { messageForError } from '../errors';
 import { loadScreenshotImage, loadScreenshots, runScreenshotAction } from '../screenshot-api';
 import {
-  clampScreenshotPage, indexAfterRemoval, screenshotActionError, screenshotChoices, screenshotCopied, screenshotDateText, screenshotPage, screenshotPageCount,
+  SCREENSHOT_REFRESH_MS, clampScreenshotPage, indexAfterRemoval, sameScreenshotList, screenshotActionError, screenshotChoices, screenshotCopied, screenshotDateText, screenshotPage, screenshotPageCount,
   screenshotPageOf, screenshotSizeText, screenshotTrashed,
   type Screenshot, type ScreenshotAction, type ScreenshotChoice, type ScreenshotList,
 } from '../screenshot-state';
@@ -90,7 +90,6 @@ function ScreenshotCard({ instanceId, screenshot, onChoice }: { instanceId: stri
 export function ScreenshotPanel({ instanceId }: { instanceId: string }) {
   const [list, setList] = useState<ScreenshotList | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(0);
   const [attempt, setAttempt] = useState(0);
   const [working, setWorking] = useState(false);
@@ -99,14 +98,39 @@ export function ScreenshotPanel({ instanceId }: { instanceId: string }) {
   const { notice, show } = useTransientNotice();
   const grid = useRef<HTMLUListElement>(null);
 
+  // The gallery stays current by itself: it reads the folder when it opens, every few seconds
+  // while it is visible and as soon as the window comes back, which is when a screenshot taken
+  // in the game is most likely to be waiting. Quiet reads never flash an error.
   useEffect(() => {
-    let current = true;
-    setLoading(true); setError(null);
-    loadScreenshots(instanceId)
-      .then(next => { if (current) { setList(next); setPage(previous => clampScreenshotPage(previous, next.screenshots.length)); } })
-      .catch(cause => { if (current) setError(messageForError(cause)); })
-      .finally(() => { if (current) setLoading(false); });
-    return () => { current = false; };
+    let active = true;
+    let reading = false;
+    async function read(first: boolean) {
+      if (reading) return;
+      reading = true;
+      try {
+        const next = await loadScreenshots(instanceId);
+        if (!active) return;
+        setError(null);
+        setList(previous => sameScreenshotList(previous, next) ? previous : next);
+        setPage(previous => clampScreenshotPage(previous, next.screenshots.length));
+      } catch (cause) {
+        if (!active) return;
+        // A failed quiet read keeps what is shown, except when the folder stopped being valid.
+        if (first || cause === 'invalid_data') {
+          setError(messageForError(cause));
+          if (cause === 'invalid_data') setList({ screenshots: [], truncated: false });
+        }
+      } finally {
+        reading = false;
+      }
+    }
+    setError(null);
+    void read(true);
+    const again = () => { if (document.visibilityState === 'visible') void read(false); };
+    const timer = setInterval(again, SCREENSHOT_REFRESH_MS);
+    document.addEventListener('visibilitychange', again);
+    window.addEventListener('focus', again);
+    return () => { active = false; clearInterval(timer); document.removeEventListener('visibilitychange', again); window.removeEventListener('focus', again); };
   }, [instanceId, attempt]);
 
   const screenshots = list?.screenshots ?? [];
@@ -164,7 +188,6 @@ export function ScreenshotPanel({ instanceId }: { instanceId: string }) {
     <h2 id="screenshot-heading" className="sr-only">Capturas</h2>
     <div className="screenshot-toolbar">
       <p>{screenshots.length === 0 ? 'Las capturas de pantalla de Minecraft de esta instancia.' : `${screenshots.length} ${screenshots.length === 1 ? 'captura' : 'capturas'} de esta instancia, de la más reciente a la más antigua.`}</p>
-      <Button variant="secondary" size="sm" disabled={loading} onClick={() => setAttempt(previous => previous + 1)}><RefreshCw aria-hidden="true" />Actualizar</Button>
     </div>
     {error && <div role="alert"><p className="account-error">No pudimos leer las capturas. {error}</p><button type="button" onClick={() => setAttempt(previous => previous + 1)}>Reintentar</button></div>}
     {list === null && !error && <p className="screenshot-empty" role="status"><LoaderCircle className="spin" aria-hidden="true" />Cargando capturas…</p>}

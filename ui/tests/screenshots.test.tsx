@@ -51,7 +51,7 @@ beforeEach(() => {
     }
   });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); delete (document as { visibilityState?: string }).visibilityState; });
 
 test('an image is requested only when its card becomes visible', async () => {
   view.visible = false;
@@ -62,14 +62,17 @@ test('an image is requested only when its card becomes visible', async () => {
   await waitFor(() => expect(calls('screenshot_image').length).toBe(3));
 });
 
-test('an instance without captures shows an empty state and still allows a refresh', async () => {
+test('an instance without captures shows a plain empty state that fills in by itself', async () => {
   list = { screenshots: [], truncated: false };
   mount();
   expect(await screen.findByRole('heading', { name: 'Aún no hay capturas' })).toBeTruthy();
   expect(screen.queryByRole('list', { name: 'Capturas de la instancia' })).toBeNull();
+  expect(screen.queryByText(/tecla F2/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Actualizar' })).toBeNull();
   expect(calls('screenshot_image').length).toBe(0);
   list = { screenshots: shots(1), truncated: false };
-  await userEvent.setup().click(screen.getByRole('button', { name: 'Actualizar' }));
+  // Coming back to the window is when a new capture is most likely to be waiting.
+  act(() => { window.dispatchEvent(new Event('focus')); });
   expect(await screen.findByRole('list', { name: 'Capturas de la instancia' })).toBeTruthy();
 });
 
@@ -244,4 +247,85 @@ test('many captures are paged so only one page of images is requested', async ()
   await user.click(screen.getByRole('button', { name: 'Siguiente' }));
   expect((await screen.findAllByRole('listitem')).length).toBe(6);
   expect((screen.getByRole('button', { name: 'Siguiente' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+// Only the interval is faked, so promises and waitFor keep working with real timers.
+async function tick(ms = 3000) { await act(async () => { vi.advanceTimersByTime(ms); }); }
+
+test('a new capture appears by itself and the open gallery never asks to be refreshed', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  mount();
+  expect((await screen.findAllByRole('listitem')).length).toBe(3);
+  const fresh = { name: '2026-11-23_11.30.00.png', size: 1_000_000, modifiedMs: 1_700_000_999_000 };
+  list = { screenshots: [fresh, ...shots(3)], truncated: false };
+  await tick();
+  expect(await screen.findByRole('button', { name: `Ver ${fresh.name}` })).toBeTruthy();
+  expect(screen.getAllByRole('listitem').length).toBe(4);
+  expect(screen.getByText('4 capturas de esta instancia, de la más reciente a la más antigua.')).toBeTruthy();
+  // A capture deleted outside the launcher disappears as well.
+  list = { screenshots: shots(1), truncated: false };
+  await tick();
+  await waitFor(() => expect(screen.getAllByRole('listitem').length).toBe(1));
+});
+
+test('an unchanged folder does not reload the images', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  mount();
+  await waitFor(() => expect(calls('screenshot_image').length).toBe(3));
+  await tick(); await tick(); await tick();
+  expect(calls('list_screenshots').length).toBe(4);
+  expect(calls('screenshot_image').length).toBe(3);
+});
+
+test('the gallery does not look at the folder while the window is hidden, and catches up when it returns', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  mount();
+  await screen.findAllByRole('listitem');
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  await tick(); await tick();
+  expect(calls('list_screenshots').length).toBe(1);
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+  await waitFor(() => expect(calls('list_screenshots').length).toBe(2));
+});
+
+test('polling stops when the tab closes', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  const { unmount } = mount();
+  await screen.findAllByRole('listitem');
+  unmount();
+  await tick(); await tick();
+  expect(calls('list_screenshots').length).toBe(1);
+});
+
+test('a read that fails quietly keeps the captures, but a redirected folder empties them', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  mount();
+  expect((await screen.findAllByRole('listitem')).length).toBe(3);
+  failure = { list_screenshots: 'storage_busy' };
+  await tick();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getAllByRole('listitem').length).toBe(3);
+  failure = { list_screenshots: 'invalid_data' };
+  await tick();
+  expect((await screen.findByRole('alert')).textContent).toMatch(/No pudimos leer las capturas/);
+  expect(screen.queryAllByRole('listitem').length).toBe(0);
+  // Once the folder is valid again the next read recovers without any click.
+  failure = {};
+  await tick();
+  await waitFor(() => expect(screen.getAllByRole('listitem').length).toBe(3));
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+test('the viewer keeps showing the same capture while new ones arrive', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  const user = userEvent.setup({ advanceTimers: ms => vi.advanceTimersByTime(ms) });
+  mount();
+  const name = list.screenshots[0].name;
+  await user.click(await thumbnail(name));
+  expect(within(viewer()).getByText(/1 de 3/)).toBeTruthy();
+  list = { screenshots: [{ name: '2026-11-23_11.30.00.png', size: 1, modifiedMs: 1_700_000_999_000 }, ...shots(3)], truncated: false };
+  await tick();
+  await waitFor(() => expect(within(viewer()).getByText(/2 de 4/)).toBeTruthy());
+  expect(viewer().getAttribute('aria-label')).toBe(`Captura ${name}`);
 });

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   SCREENSHOTS_PER_PAGE, adjacentScreenshot, clampScreenshotPage, indexAfterRemoval, screenshotActionError, screenshotChoices, screenshotDateText, screenshotPage,
-  screenshotPageCount, screenshotPageOf, screenshotSizeText,
+  screenshotPageCount, screenshotPageOf, screenshotSizeText, sameScreenshotList,
 } from '../src/screenshot-state.ts';
 
 const shots = count => Array.from({ length: count }, (_, index) => ({ name: `s${index}.png`, size: 1, modifiedMs: index }));
@@ -58,4 +58,14 @@ test('the menu lists the actions in order with Eliminar last, and a deletion fai
   assert.deepEqual(screenshotChoices.map(item => item.label), ['Ver', 'Abrir en otra app', 'Mostrar en la carpeta', 'Copiar imagen', 'Eliminar']);
   assert.match(screenshotActionError('delete', 'storage_busy'), /papelera/);
   assert.match(screenshotActionError('delete', 'invalid_data'), /ya no está disponible/);
+});
+
+test('a listing that says nothing new is recognized so the screen is left alone', () => {
+  const base = { screenshots: shots(2), truncated: false };
+  assert.equal(sameScreenshotList(null, base), false);
+  assert.equal(sameScreenshotList(base, { screenshots: shots(2), truncated: false }), true);
+  assert.equal(sameScreenshotList(base, { screenshots: shots(3), truncated: false }), false);
+  assert.equal(sameScreenshotList(base, { screenshots: shots(2), truncated: true }), false);
+  assert.equal(sameScreenshotList(base, { screenshots: [{ ...base.screenshots[0], modifiedMs: 99 }, base.screenshots[1]], truncated: false }), false);
+  assert.equal(sameScreenshotList({ screenshots: [], truncated: false }, { screenshots: [], truncated: false }), true);
 });

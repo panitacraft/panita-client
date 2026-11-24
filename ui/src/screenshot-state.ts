@@ -22,6 +22,18 @@ export const screenshotChoices: readonly { choice: ScreenshotChoice; label: stri
 /** Full-size images are fetched per card, so one page stays small. */
 export const SCREENSHOTS_PER_PAGE = 12;
 
+/** How often the open gallery looks for new or removed screenshots. */
+export const SCREENSHOT_REFRESH_MS = 3000;
+
+/** Whether a fresh listing says nothing new, so the screen can keep what it already shows. */
+export function sameScreenshotList(previous: ScreenshotList | null, next: ScreenshotList): boolean {
+  return previous !== null && previous.truncated === next.truncated && previous.screenshots.length === next.screenshots.length
+    && previous.screenshots.every((item, index) => {
+      const other = next.screenshots[index];
+      return item.name === other.name && item.size === other.size && item.modifiedMs === other.modifiedMs;
+    });
+}
+
 export function screenshotPageCount(total: number): number {
   return Math.max(1, Math.ceil(total / SCREENSHOTS_PER_PAGE));
 }
