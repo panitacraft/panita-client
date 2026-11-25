@@ -12,6 +12,19 @@ use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 use uuid::Uuid;
 
+/// The smallest window the launcher supports (owner decisions: height 2026-10-30, width 2026-11-25).
+const MIN_WINDOW_WIDTH: u32 = 1060;
+const MIN_WINDOW_HEIGHT: u32 = 700;
+
+/// The size to restore for a saved window. Builds that allowed smaller windows may have
+/// saved a smaller one, which is raised to the current minimums instead of being rejected.
+fn restored_size(saved: &LauncherWindow) -> (u32, u32) {
+    (
+        saved.width.max(MIN_WINDOW_WIDTH),
+        saved.height.max(MIN_WINDOW_HEIGHT),
+    )
+}
+
 pub(super) struct WindowPreferences {
     pub initialized: bool,
     normal: LauncherWindow,
@@ -201,7 +214,10 @@ pub(super) fn restore_window(app: &tauri::AppHandle, settings: &GlobalSettings) 
     drop(memory);
     let warning = if let Some(saved) = &settings.launcher.window {
         let result = window
-            .set_size(tauri::LogicalSize::new(saved.width, saved.height.max(700)))
+            .set_size(tauri::LogicalSize::new(
+                restored_size(saved).0,
+                restored_size(saved).1,
+            ))
             .and_then(|()| {
                 if saved.maximized {
                     window.maximize()
@@ -319,6 +335,19 @@ pub(super) fn persist_window(window: &tauri::Window) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_sizes_below_the_minimums_are_raised_and_larger_ones_kept() {
+        let saved = |width, height| LauncherWindow {
+            width,
+            height,
+            maximized: false,
+        };
+        assert_eq!(restored_size(&saved(780, 520)), (1060, 700));
+        assert_eq!(restored_size(&saved(1059, 700)), (1060, 700));
+        assert_eq!(restored_size(&saved(1060, 700)), (1060, 700));
+        assert_eq!(restored_size(&saved(1600, 900)), (1600, 900));
+    }
 
     #[test]
     fn maximized_observations_keep_normal_dimensions_and_uninitialized_events_are_ignored() {

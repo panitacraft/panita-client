@@ -680,8 +680,9 @@ and individual measurements are evidence, not product guarantees.
   activation, onboarding and library screens. Keep the existing close supervision
   and preparation guards. The owner expands the rail on 2026-10-30 to at least
   six visible instances, using additional vertical space before paging. Use a
-  700-pixel minimum window height and one selected account avatar; preserve legacy smaller saved sizes by
-  clamping their restored height. A busy-launcher uninstall
+  700-pixel minimum window height, a 1060-pixel minimum window width (owner decision,
+  2026-11-25) and one selected account avatar; preserve legacy smaller saved sizes by
+  clamping their restored height and width. A busy-launcher uninstall
   warning must leave its confirmation screen available for retry, with a final
   idle check before deletion. Do not force-close the supervising launcher.
 
