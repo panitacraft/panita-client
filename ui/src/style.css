@@ -269,7 +269,44 @@
   .variant-text .variant-meta { margin-top: auto; padding-top: 8px; color: #8f8f8f; font-size: 12px; }
   .variant-reason { margin: 10px 0 0; color: #BABABA; font-size: 13px; }
   .variant-dialog .account-buttons { margin-top: 24px; }
-  .variant-panel { max-width: 960px; }
+  .screenshot-note { margin: 12px 0 0; color: #BABABA; font-size: 13px; }
+  .screenshot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
+  .screenshot-groups { display: flex; flex-direction: column; }
+  .screenshot-month { display: flex; align-items: center; gap: 16px; margin: 22px 0 14px; color: #BABABA; font-size: 15px; font-weight: 600; }
+  .screenshot-month::before, .screenshot-month::after { content: ''; flex: 1; height: 1px; background: #383838; }
+  .screenshot-groups > div:first-child .screenshot-month { margin-top: 0; }
+  .screenshot-card { min-width: 0; }
+  .screenshot-card-body { position: relative; display: flex; flex-direction: column; gap: 10px; }
+  .screenshot-frame { display: flex; align-items: center; justify-content: center; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; padding: 0; border: 1px solid #383838; border-radius: 8px; background: #101010; cursor: zoom-in; color: inherit; }
+  .screenshot-frame:hover { border-color: #515151; }
+  .screenshot-frame:focus-visible { outline: 2px solid #54A636; outline-offset: 2px; }
+  .screenshot-more { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid #515151; border-radius: 6px; background: #141414cc; color: #F9FFF8; opacity: 0; transition: opacity 120ms ease; }
+  .screenshot-more svg { width: 18px; height: 18px; }
+  /* Shown on hover, for keyboard focus only (a click must not leave it behind) and while its menu is open. */
+  .screenshot-card:hover .screenshot-more, .screenshot-card:has(:focus-visible) .screenshot-more, .screenshot-card-body[data-state='open'] .screenshot-more { opacity: 1; }
+  @media (hover: none) { .screenshot-more { opacity: 1; } }
+  .screenshot-frame img { width: 100%; height: 100%; object-fit: cover; }
+  .screenshot-placeholder { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #8f8f8f; font-size: 12px; text-align: center; }
+  .screenshot-placeholder svg { width: 22px; height: 22px; }
+  .screenshot-viewer { width: min(96vw, 1400px); height: min(94vh, 900px); max-width: none; max-height: none; padding: 0; border: 1px solid #383838; border-radius: 10px; background: #101010; color: #F9FFF8; overflow: hidden; }
+  .screenshot-viewer[open] { display: flex; flex-direction: column; }
+  .screenshot-viewer::backdrop { background: #000000d9; }
+  .screenshot-viewer-body { display: flex; flex: 1; flex-direction: column; gap: 12px; min-height: 0; padding: 14px 16px 16px; }
+  .screenshot-viewer-header { display: flex; align-items: center; justify-content: center; position: relative; min-height: 40px; }
+  .screenshot-viewer-title { display: flex; flex-direction: column; align-items: center; gap: 2px; max-width: calc(100% - 96px); text-align: center; }
+  .screenshot-viewer-title strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .screenshot-viewer-title small { color: #BABABA; font-size: 12px; }
+  .screenshot-viewer-close { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+  .screenshot-viewer-stage { display: flex; flex: 1; align-items: center; gap: 12px; min-height: 0; }
+  .screenshot-viewer-image { display: flex; flex: 1; align-items: center; justify-content: center; align-self: stretch; min-width: 0; min-height: 0; }
+  .screenshot-viewer-image img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; }
+  .screenshot-viewer-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .account-dialog.screenshot-delete p { margin: 12px 0 0; overflow-wrap: anywhere; }
+  .screenshot-pages { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 18px; color: #BABABA; font-size: 13px; }
+  .screenshot-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 260px; padding: 32px; text-align: center; color: #BABABA; }
+  .screenshot-empty > svg { width: 36px; height: 36px; color: #A4D58E; }
+  .screenshot-empty h3 { margin: 0; color: #E4FFDA; }
+  .screenshot-empty p { margin: 0; max-width: 460px; }
   .variant-panel > p { color: #BABABA; margin-bottom: 4px; }
   .variant-panel .account-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
   .variant-pending, .variant-ready { display: flex; align-items: center; gap: 8px; min-height: 18px; }
@@ -382,7 +419,7 @@
   .settings-page .page-heading > .page-back { margin-bottom: 14px; }
   .settings-page .page-heading > h1 { margin: 0; }
   .settings-page .settings-tabs { margin-top: 0; }
-  .settings-page .settings-section { padding: 20px; margin-bottom: 0; }
+  .settings-page .settings-section, .settings-page .screenshot-panel, .settings-page .variant-panel { padding: 20px; margin-bottom: 0; }
   .settings-tabs [role='tab'][aria-selected='true'] { color: #E4FFDA; border-color: #54A636; background: #253b1c; }
   .split-button:has(> .split-trigger) > .primary-play { border-radius: 7px 0 0 7px !important; }
   .settings-section > p { margin: 0 0 12px; line-height: 1.4; font-size: 12px; }
@@ -503,7 +540,7 @@
   .settings-grid { gap: 12px; }
   .settings-card { padding: 12px; }
   .settings-card-heading { margin-bottom: 10px; }
-  .settings-page .settings-section { padding: 16px; }
+  .settings-page .settings-section, .settings-page .screenshot-panel, .settings-page .variant-panel { padding: 16px; }
   .settings-advanced { margin-top: 12px; }
 }
 

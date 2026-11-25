@@ -21,3 +21,24 @@ expect_used = "deny"
 # Keep full game-file hashing practical in native development/validation builds.
 [profile.dev.package.sha1]
 opt-level = 3
+
+# Copying a screenshot decodes and re-encodes a full-size PNG. Unoptimized, that takes
+# seconds in a development build, so optimize just the crates that do the work.
+[profile.dev.package.arboard]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.png]
+opt-level = 3
+[profile.dev.package.fdeflate]
+opt-level = 3
+[profile.dev.package.flate2]
+opt-level = 3
+[profile.dev.package.miniz_oxide]
+opt-level = 3
+[profile.dev.package.crc32fast]
+opt-level = 3
+[profile.dev.package.simd-adler32]
+opt-level = 3
+[profile.dev.package.adler2]
+opt-level = 3

@@ -70,6 +70,7 @@ beforeEach(() => {
       case 'pack_files': return { files: [manualFile], complete: false };
       case 'import_pack_file': throw 'artifact_mismatch';
       case 'instance_variants': return variantOptions;
+      case 'list_screenshots': return { screenshots: [], truncated: false };
       case 'system_resources': if (!systemResources) throw 'storage_unavailable'; return systemResources;
       case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': case 'open_instance_folder': return;
       default: throw new Error(`Unexpected test command: ${command}`);
@@ -603,6 +604,7 @@ test('the variant is changed from a tab of the instance settings, as an update o
   await openVariantTab(user);
   const lite = await screen.findByRole('radio', { name: 'Ligero' });
   await screen.findByText(/28 archivos/);
+  expect(document.querySelector('.settings-tabs ~ div:not([hidden]) > section.variant-panel')).toBeTruthy();
   // The installed variant is marked and cannot be "changed" to itself.
   expect(screen.getByText('Instalada')).toBeTruthy();
   expect((screen.getByRole('button', { name: 'Cambiar rendimiento' }) as HTMLButtonElement).disabled).toBe(true);
@@ -636,6 +638,36 @@ test('an instance with one variant has no variant tab, and one that is not insta
   await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
   await screen.findByRole('heading', { name: 'Ajustes · Aventura', exact: true });
   expect(screen.queryByRole('tab', { name: 'Rendimiento' })).toBeNull();
+});
+
+async function openInstanceSettings(user: ReturnType<typeof userEvent.setup>) {
+  await screen.findByRole('button', { name: 'Jugar', exact: true });
+  await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia', exact: true }));
+  await screen.findByRole('heading', { name: 'Ajustes · Aventura', exact: true });
+  return within(screen.getByRole('tablist', { name: 'Secciones de ajustes' })).getAllByRole('tab').map(tab => tab.textContent);
+}
+
+test('the instance settings put Capturas between Minecraft and Rendimiento', async () => {
+  catalog.instances[0] = { ...first, ...withVariants, installedVariant: 'standard' };
+  const user = userEvent.setup(); mount();
+  expect(await openInstanceSettings(user)).toEqual(['Minecraft', 'Capturas', 'Rendimiento']);
+  await user.click(screen.getByRole('tab', { name: 'Capturas' }));
+  expect(await screen.findByRole('heading', { name: 'Aún no hay capturas' })).toBeTruthy();
+  // The stylesheet joins a tab's panel to the tab bar only when the panel is a section inside a div.
+  expect(document.querySelector('.settings-tabs ~ div:not([hidden]) > section.screenshot-panel')).toBeTruthy();
+  expect(backend.invoke).toHaveBeenCalledWith('list_screenshots', { instanceId: 'pack-a' });
+  // The Minecraft settings are hidden, not removed, so unsaved edits survive the tab change.
+  await user.click(screen.getByRole('tab', { name: 'Minecraft' }));
+  expect(screen.queryByRole('heading', { name: 'Aún no hay capturas' })).toBeNull();
+});
+
+test('an instance with one variant has Minecraft and Capturas tabs and global settings gain none', async () => {
+  const user = userEvent.setup(); mount();
+  expect(await openInstanceSettings(user)).toEqual(['Minecraft', 'Capturas']);
+  await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
+  const global = within(screen.getByRole('tablist', { name: 'Secciones de ajustes' })).getAllByRole('tab').map(tab => tab.textContent);
+  expect(global).toEqual(['General', 'Minecraft', 'Almacenamiento', 'Diagnóstico']);
 });
 
 test('a version update of a pack installed before variants names no variant, so the backend keeps it', async () => {

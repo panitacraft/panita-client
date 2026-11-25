@@ -381,6 +381,45 @@ Players must never install libdecor by hand.
   matched by this entry and remain unqualified.
 - These Linux behaviors are implemented but unvalidated until tested on Ubuntu x64 (§6).
 
+### 5.2 Screenshot gallery (2026-11-23)
+
+Owner request, GitHub issue 50. The instance settings carry a Capturas tab between
+Minecraft and Rendimiento that lists the selected instance's
+`minecraft/screenshots/*.png`, newest first, as plain thumbnails (no text beneath; the name
+is the tooltip) separated by month headings such as "Noviembre 2026" (owner requests,
+2026-11-24). The overflow button appears on hover, on keyboard focus and while its menu is
+open, never after a mouse click. Clicking a thumbnail opens an in-app viewer
+(a native modal dialog; Escape closes it and Left/Right step through the list). Right-clicking
+a thumbnail, or its overflow button, opens a menu: Ver, Abrir en fotos,
+Mostrar en la carpeta, Copiar imagen and Eliminar. A successful copy or deletion is
+confirmed with a toast; a copy first shows "Copiando imagen…" because it decodes and
+re-encodes the full image. The open tab refreshes itself (owner request, 2026-11-23): it
+re-reads the folder every 3 seconds while the window is visible and when it regains focus,
+through the same validated listing, with no file watcher. Unchanged results leave the
+screen untouched, a failed quiet read keeps what is shown, and a folder that stops being
+valid empties the list and reports the error. It stops when the tab closes.
+
+- The frontend sends only an instance UUID and a bare file name. The core resolves every
+  path through no-follow directory handles from the instance root, accepts only a plain
+  `.png` name with no separators, Windows reserved names or control characters, and
+  rejects linked or redirected `minecraft`/`screenshots` folders and linked files. Image
+  bytes reach the webview over IPC as a data URL, so the content security policy and the
+  Tauri capabilities are unchanged. The panel never renames or edits a screenshot.
+- Owner decision, 2026-11-23: Eliminar moves the file to the system recycle bin or trash
+  (the `trash` crate), after a confirmation dialog that names the file and focuses
+  Cancelar. It never erases permanently, never touches anything but a validated screenshot
+  and reports a failure (for example a file in use) without removing it from the list.
+- Opening uses the AppImage-safe opener of §5. Revealing uses the opener plugin (Windows
+  Explorer selection, Linux FileManager1 over D-Bus with the OpenURI portal) and opens the
+  containing folder when the file manager cannot select the file. Copying decodes the PNG
+  in Rust (bounded size and pixels) and writes it through one process-lifetime `arboard`
+  handle, because on Linux the copied image is served by that handle and disappears when it
+  is dropped or when the launcher exits.
+- Windows behavior of the path checks is covered by tests, including a junction in place
+  of the folder. Opening, revealing, copying and moving to the trash are unvalidated on a
+  real desktop, and all of it is unvalidated on Ubuntu x64 (§6). Copying under a pure Wayland session without
+  XWayland is unverified.
+
 ## Annex A. Account and Token Storage Decision
 
 This annex is an integral part of AGENTS.md. It preserves the accepted decision, rationale, recovery cases, and validation requirements from the local source document `docs/account-storage-decision.md` as of 2026-10-08. The complete policy is included below; reading a separate file is not required. Update this annex alongside any owner-approved policy changes.
