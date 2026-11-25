@@ -606,10 +606,15 @@ and individual measurements are evidence, not product guarantees.
   memory holds the target to 4096. Owner clarification, 2026-11-25: "available system
   memory" in the issue means the memory installed in the machine, so the free memory at
   the moment of launch never changes the heap. Resolution never blocks Play and writes
-  only a fixed session log note (profile, heap, basis and total MiB). The settings UI shows the
-  resolved value through `ram_preview`, which takes no input, and ends the manual
-  slider at the machine's RAM in whole gigabytes (the former 32 GiB range when it is
-  unknown) without limiting the numeric field. Windows and Linux readings are
+  only a fixed session log note (profile, heap, basis and total MiB). The settings UI
+  reads `ram_preview`, which takes no input: an instance in automatic mode shows its
+  resolved value in the numeric field and on the slider (both disabled), while the global
+  settings, where the kind of instance is unknown, keep the saved value. The explanation
+  of Automática is a short tooltip on that option (also exposed to screen readers), not
+  visible text; the numeric field, GiB value and slider share one row. The manual
+  slider ends at the machine's RAM in whole gigabytes (the former 32 GiB range when it is
+  unknown) without limiting the numeric field, and a value above it shows a warning icon
+  with a tooltip. Windows and Linux readings are
   implemented; real launches in each mode remain unvalidated until tested on Windows
   and Ubuntu x64 (§6).
 - `console_on_start` defaults to false globally; instances inherit it unless

@@ -1,13 +1,14 @@
 import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Save, MemoryStick, Monitor, Terminal, SlidersHorizontal, ChevronDown, AppWindow } from 'lucide-react';
+import { Save, MemoryStick, Monitor, Terminal, SlidersHorizontal, ChevronDown, AppWindow, TriangleAlert } from 'lucide-react';
 import { Button } from './components/ui/button';
+import { Hint } from './components/hint';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { settingsApi } from './settings-api';
 import { globalSettingsPayload, instanceSettingsPayload, settingsDraft, trayPreferences, updateSettingsDraft, type SettingsDraft, type SettingsSnapshot } from './settings-state';
 import { messageForError } from './errors';
-import { autoRamText, exceedsMachine, formatGiB, sliderMaxMib, sliderZones, type RamProfile } from './ram-state';
+import { autoRamMib, autoRamText, exceedsMachine, formatGiB, sliderMaxMib, sliderZones, type RamProfile } from './ram-state';
 import { useRamPreview, useSystemResources } from './system-api';
 
 type Selection = { id: string | null; busy: boolean; error: string | null; warning: string | null; select: (id: string) => Promise<void>; retry: () => void };
@@ -129,7 +130,11 @@ function SettingsEditor({ instanceId, ramProfile }: { instanceId: string | null;
     } finally { saving.current = false; if (mounted.current) setBusy(false); }
   }
   const prefix = instance ? 'instance-settings' : 'global-settings';
-  const ramValue = Number(draft?.ram) || 0;
+  // Automática shows what the core would use for this instance; the saved manual value stays untouched.
+  const autoMib = draft?.ramAuto ? autoRamMib(ramPreview, ramProfile) : null;
+  const ramShown = autoMib !== null ? String(autoMib) : (draft?.ram ?? '');
+  const autoText = autoRamText(ramPreview, ramProfile);
+  const ramValue = Number(ramShown) || 0;
   const sliderMax = sliderMaxMib(machineMib, ramValue);
   const zones = sliderZones(machineMib, sliderMax);
   const ramInherited = instance && draft?.inheritRam === true;
@@ -147,15 +152,22 @@ function SettingsEditor({ instanceId, ramProfile }: { instanceId: string | null;
             <div className="settings-card-heading"><h3><MemoryStick aria-hidden="true" />Memoria</h3>{instance && <InheritToggle name="Memoria" checked={draft.inheritRam} onChange={value => change({ inheritRam: value })} />}</div>
             <div className={ramInherited ? 'inherited-content' : undefined}>
             <div className="memory-mode" role="group" aria-label="Modo de memoria">
-              <button type="button" aria-pressed={draft.ramAuto} disabled={ramInherited} onClick={() => change({ ramAuto: true })}>Automática</button>
+              <Hint text={autoText}><span className="memory-mode-option"><button type="button" aria-pressed={draft.ramAuto} aria-describedby={prefix + '-auto-help'} disabled={ramInherited} onClick={() => change({ ramAuto: true })}>Automática</button></span></Hint>
               <button type="button" aria-pressed={!draft.ramAuto} disabled={ramInherited} onClick={() => change({ ramAuto: false })}>Manual</button>
             </div>
-            {draft.ramAuto && <p className="memory-auto-note" role="status">{autoRamText(ramPreview, ramProfile)}</p>}
+            <span id={prefix + '-auto-help'} className="sr-only">{autoText}</span>
             <div className={draft.ramAuto && !ramInherited ? 'inherited-content' : undefined}>
-            <div className="memory-value"><label htmlFor={prefix + '-ram'}>RAM Asignada (MiB)</label><input id={prefix + '-ram'} type="number" min="512" max="262144" step="1" required disabled={ramInherited || draft.ramAuto} value={draft.ram} onChange={event => change({ ram: event.target.value })} /><output>{formatGiB(ramValue)} GiB</output></div>
-            <input className="memory-slider" aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={sliderMax} step={RAM_SLIDER_STEP_MIB} disabled={ramInherited || draft.ramAuto} value={/^\d+$/.test(draft.ram) ? Math.min(Number(draft.ram), sliderMax) : '512'} style={{ '--ram-green': (zones.green * 100) + '%', '--ram-yellow': (zones.yellow * 100) + '%' } as CSSProperties} onChange={event => change({ ram: event.target.value })} />
-            <div className="memory-ticks" aria-hidden="true"><span>512 MiB</span><span>{formatGiB(sliderMax / 2)} GiB</span><span>{formatGiB(sliderMax)} GiB</span></div>
-            {!draft.ramAuto && exceedsMachine(ramValue, machineMib) && <p className="memory-warning">Este valor es mayor que la RAM de tu equipo ({formatGiB(sliderMax)} GiB). Minecraft podría no abrir o ir muy lento.</p>}
+            <label htmlFor={prefix + '-ram'}>RAM Asignada (MiB)</label>
+            <div className="memory-row">
+              <input id={prefix + '-ram'} type="number" min="512" max="262144" step="1" required disabled={ramInherited || draft.ramAuto} value={ramShown} onChange={event => change({ ram: event.target.value })} />
+              <output className={!draft.ramAuto && exceedsMachine(ramValue, machineMib) ? 'is-over' : undefined}>{formatGiB(ramValue)} GiB
+                {!draft.ramAuto && exceedsMachine(ramValue, machineMib) && <><Hint text={'Este valor es mayor que la RAM de tu equipo (' + formatGiB(sliderMax) + ' GiB). Minecraft podría no abrir o ir muy lento.'}><span className="memory-alert" tabIndex={0} role="img" aria-label="Aviso de memoria"><TriangleAlert aria-hidden="true" /></span></Hint><span className="sr-only">Este valor es mayor que la RAM de tu equipo ({formatGiB(sliderMax)} GiB). Minecraft podría no abrir o ir muy lento.</span></>}
+              </output>
+              <div className="memory-track">
+                <input className="memory-slider" aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={sliderMax} step={RAM_SLIDER_STEP_MIB} disabled={ramInherited || draft.ramAuto} value={/^\d+$/.test(ramShown) ? Math.min(Number(ramShown), sliderMax) : '512'} style={{ '--ram-green': (zones.green * 100) + '%', '--ram-yellow': (zones.yellow * 100) + '%' } as CSSProperties} onChange={event => change({ ram: event.target.value })} />
+                <div className="memory-ticks" aria-hidden="true"><span>512 MiB</span><span>{formatGiB(sliderMax / 2)} GiB</span><span>{formatGiB(sliderMax)} GiB</span></div>
+              </div>
+            </div>
             </div>
             </div>
           </div>

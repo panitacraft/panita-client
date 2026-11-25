@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { autoRamText, exceedsMachine, ramProfileOf, sliderMaxMib, sliderZones } from '../src/ram-state.ts';
+import { autoRamMib, autoRamText, exceedsMachine, ramProfileOf, sliderMaxMib, sliderZones } from '../src/ram-state.ts';
 
 const custom = { type: 'custom', current_version_id: 'v1' };
 const pack = (extra = {}) => ({ localState: 'installed', source: custom, installedSource: custom, installedVariant: 'deluxe', ...extra });
@@ -45,16 +45,26 @@ test('only a value above the machine RAM is flagged', () => {
   assert.equal(exceedsMachine(65536, 0), false);
 });
 
-test('the automatic line names the value for an instance and every kind for the global settings', () => {
+test('the automatic explanation is short, names no list and adds a remark only when the value was lowered', () => {
   const preview = { totalMib: 8192,
     vanilla: { mib: 4096, basis: 'target' }, lite: { mib: 4096, basis: 'target' },
     standard: { mib: 3840, basis: 'limited' }, deluxe: { mib: 3072, basis: 'floor' } };
-  assert.equal(autoRamText(preview, 'vanilla'), 'Se calculará al jugar según tu equipo. Con la RAM de tu equipo serían 4 GiB.');
-  assert.match(autoRamText(preview, 'standard'), /serían 3\.75 GiB\. Es menos de lo ideal porque tu equipo tiene poca RAM\.$/);
-  assert.match(autoRamText(preview, 'deluxe'), /serían 3 GiB\. Tu equipo tiene muy poca RAM;/);
-  const global = autoRamText(preview, null);
-  assert.match(global, /Vanilla 4 GiB, Ligero 4 GiB, Estándar 3\.75 GiB, Mejorado 3 GiB\./);
+  assert.equal(autoRamText(preview, 'vanilla'), 'Se calcula al jugar según la RAM de tu equipo.');
+  assert.equal(autoRamText(preview, 'standard'), 'Se calcula al jugar según la RAM de tu equipo. Tu equipo tiene poca RAM, así que será menos de lo ideal.');
+  assert.match(autoRamText(preview, 'deluxe'), /Tu equipo tiene muy poca RAM; se usará el mínimo/);
+  // The global settings do not know the kind of game, so they only say how the value is chosen.
+  assert.equal(autoRamText(preview, null), 'Se calcula al jugar según la RAM de tu equipo y el tipo de instancia.');
   // The reading failed: nothing about the machine is claimed.
-  assert.match(autoRamText(null, 'vanilla'), /No pudimos leer tu RAM ahora/);
+  assert.equal(autoRamText(null, 'vanilla'), 'No pudimos leer la RAM de tu equipo; se usará un valor prudente.');
   assert.match(autoRamText({ ...preview, vanilla: { mib: 4096, basis: 'unknown' } }, 'vanilla'), /valor prudente\.$/);
+});
+
+test('the automatic value is the one of the instance kind, and unknown without a reading or a kind', () => {
+  const preview = { totalMib: 8192,
+    vanilla: { mib: 4096, basis: 'target' }, lite: { mib: 4096, basis: 'target' },
+    standard: { mib: 3840, basis: 'limited' }, deluxe: { mib: 3072, basis: 'floor' } };
+  assert.equal(autoRamMib(preview, 'standard'), 3840);
+  assert.equal(autoRamMib(preview, 'vanilla'), 4096);
+  assert.equal(autoRamMib(preview, null), null);
+  assert.equal(autoRamMib(null, 'standard'), null);
 });

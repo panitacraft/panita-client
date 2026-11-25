@@ -66,26 +66,23 @@ export function exceedsMachine(ram: number, machineMib: number | null | undefine
 
 const basisNotes: Record<RamBasis, string> = {
   target: '',
-  limited: ' Es menos de lo ideal porque tu equipo tiene poca RAM.',
-  floor: ' Tu equipo tiene muy poca RAM; usaremos el mínimo para que el juego pueda abrir.',
-  unknown: ' No pudimos leer toda la RAM de tu equipo, así que usaremos un valor prudente.',
+  limited: ' Tu equipo tiene poca RAM, así que será menos de lo ideal.',
+  floor: ' Tu equipo tiene muy poca RAM; se usará el mínimo para que el juego abra.',
+  unknown: ' No pudimos leer toda la RAM; se usará un valor prudente.',
 };
 
-/** The performance profile names of variant-state, plus Vanilla. */
-const profileNames: Record<RamProfile, string> = { vanilla: 'Vanilla', lite: 'Ligero', standard: 'Estándar', deluxe: 'Mejorado' };
-const profileOrder: readonly RamProfile[] = ['vanilla', 'lite', 'standard', 'deluxe'];
+/** The automatic value for an instance of this kind, or null when it cannot be known yet. */
+export function autoRamMib(preview: RamPreview | null, profile: RamProfile | null): number | null {
+  return preview && profile ? preview[profile].mib : null;
+}
 
 /**
- * The line shown under Automática. For an instance it names that instance's value; for
- * the global settings, where the kind of game is not known, it lists every kind.
+ * The short explanation behind Automática, shown as its tooltip. An instance adds a
+ * remark only when its value had to be lowered; the global settings, where the kind of
+ * game is not known, just say how the value is chosen.
  */
 export function autoRamText(preview: RamPreview | null, profile: RamProfile | null): string {
-  if (!preview) return 'Se calculará al jugar según tu equipo. No pudimos leer tu RAM ahora, así que se usará un valor prudente.';
-  if (profile) {
-    const value = preview[profile];
-    return `Se calculará al jugar según tu equipo. Con la RAM de tu equipo serían ${formatGiB(value.mib)} GiB.${basisNotes[value.basis]}`;
-  }
-  const list = profileOrder.map(id => `${profileNames[id]} ${formatGiB(preview[id].mib)} GiB`).join(', ');
-  const worst = profileOrder.map(id => preview[id].basis).find(basis => basis === 'floor' || basis === 'unknown' || basis === 'limited') ?? 'target';
-  return `Se calculará al jugar según tu equipo y el tipo de instancia. Con la RAM de tu equipo: ${list}.${basisNotes[worst]}`;
+  if (!preview) return 'No pudimos leer la RAM de tu equipo; se usará un valor prudente.';
+  if (!profile) return 'Se calcula al jugar según la RAM de tu equipo y el tipo de instancia.';
+  return 'Se calcula al jugar según la RAM de tu equipo.' + basisNotes[preview[profile].basis];
 }

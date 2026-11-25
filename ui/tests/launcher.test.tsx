@@ -553,7 +553,8 @@ test('the variant that suits the machine is preselected, marked and explained', 
   await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
   const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
   await within(dialog).findByText(/28 archivos/);
-  expect(await within(dialog).findByText('Te recomendamos el Perfil de Rendimiento Ligero porque tu equipo tiene 4 GB de RAM.')).toBeTruthy();
+  await waitFor(() => expect(dialog.querySelector('.variant-reason')?.textContent).toBe('Te recomendamos el perfil de rendimiento Ligero porque tu equipo tiene 4 GB de RAM.'));
+  expect(dialog.querySelector('.variant-reason-name svg')).not.toBeNull();
   expect((within(dialog).getByRole('radio', { name: /^Ligero/ }) as HTMLInputElement).checked).toBe(true);
   expect(within(dialog.querySelector('label:has(input[value="lite"])') as HTMLElement).getByText('Recomendada')).toBeTruthy();
   expect(dialog.querySelectorAll('.variant-chip').length).toBe(1);
@@ -588,7 +589,7 @@ test('the Rendimiento tab marks the recommended variant but keeps the installed 
   const user = userEvent.setup(); mount();
   await openVariantTab(user);
   await screen.findByText(/28 archivos/);
-  expect(await screen.findByText('Te recomendamos el Perfil de Rendimiento Ligero porque tu equipo tiene 2 GB de RAM.')).toBeTruthy();
+  await waitFor(() => expect(document.querySelector('.variant-reason')?.textContent).toBe('Te recomendamos el perfil de rendimiento Ligero porque tu equipo tiene 2 GB de RAM.'));
   expect(screen.getByText('Recomendada')).toBeTruthy();
   expect((screen.getByRole('radio', { name: 'Estándar' }) as HTMLInputElement).checked).toBe(true);
   expect((screen.getByRole('button', { name: 'Cambiar rendimiento' }) as HTMLButtonElement).disabled).toBe(true);
@@ -729,12 +730,14 @@ test('automatic memory disables the manual controls, explains the value and keep
   expect(ram.disabled).toBe(true);
   expect((screen.getByLabelText('Control deslizante de RAM para Minecraft') as HTMLInputElement).disabled).toBe(true);
   expect(ram.value).toBe('4096');
-  expect(await screen.findByText(/Vanilla 4 GiB, Ligero 4 GiB, Estándar 6 GiB, Mejorado 8 GiB\./)).toBeTruthy();
+  // The explanation is a tooltip on the option, announced to screen readers, never a visible line.
+  expect(await screen.findByText('Se calcula al jugar según la RAM de tu equipo y el tipo de instancia.')).toBeTruthy();
+  expect(document.querySelector('.memory-auto-note')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Guardar ajustes' }));
   await waitFor(() => expect(backend.invoke).toHaveBeenCalledWith('save_global_settings', { settings: expect.objectContaining({ ram_auto: true, ram_mib: 4096 }) }));
   await user.click(manual);
   expect(ram.disabled).toBe(false);
-  expect(screen.queryByText(/Se calculará al jugar/)).toBeNull();
+  expect(screen.getByText('Se calcula al jugar según la RAM de tu equipo y el tipo de instancia.')).toBeTruthy();
 });
 
 test('automatic memory says so plainly when the machine cannot be read', async () => {
@@ -743,7 +746,7 @@ test('automatic memory says so plainly when the machine cannot be read', async (
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
   await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
   await user.click(screen.getByRole('tab', { name: 'Minecraft' }));
-  expect(await screen.findByText(/No pudimos leer tu RAM ahora/)).toBeTruthy();
+  expect(await screen.findByText(/No pudimos leer la RAM de tu equipo/)).toBeTruthy();
   expect((screen.getByRole('button', { name: 'Automática', exact: true })).getAttribute('aria-pressed')).toBe('true');
 });
 
@@ -757,7 +760,10 @@ test('an instance can choose automatic memory on its own and names its own value
   await user.click(screen.getByRole('button', { name: 'Automática', exact: true }));
   await user.click(screen.getByRole('button', { name: 'Guardar ajustes' }));
   await waitFor(() => expect(backend.invoke).toHaveBeenCalledWith('save_instance_settings', expect.objectContaining({ settings: expect.objectContaining({ ram_auto: true, ram_mib: 4096 }) })));
-  expect(await screen.findByText(/Con la RAM de tu equipo serían \d+(\.\d+)? GiB\./)).toBeTruthy();
+  expect(await screen.findByText('Se calcula al jugar según la RAM de tu equipo.')).toBeTruthy();
+  // The automatic value for this kind of instance is shown in the field and on the slider.
+  expect((screen.getByLabelText('RAM Asignada (MiB)') as HTMLInputElement).value).toBe('6144');
+  expect((screen.getByLabelText('Control deslizante de RAM para Minecraft') as HTMLInputElement).value).toBe('6144');
 });
 
 test('the memory slider stops at the RAM of this machine', async () => {
