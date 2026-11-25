@@ -435,9 +435,16 @@
   .memory-value > label { grid-column: 1 / -1; }
   .memory-value > input { width: 110px; }
   .memory-value > output { color: #BABABA; font-size: 13px; }
-  .settings-card .memory-slider { appearance: none; -webkit-appearance: none; width: 100%; height: 10px; margin: 18px 0 6px; padding: 0; border: 0; border-radius: 0; background: linear-gradient(90deg, #54A63699 0 60%, #D2AF4D99 60% 85%, #C66B6B99 85% 100%); }
+  .settings-card .memory-slider { appearance: none; -webkit-appearance: none; width: 100%; height: 10px; margin: 18px 0 6px; padding: 0; border: 0; border-radius: 0; background: linear-gradient(90deg, #54A63699 0 var(--ram-green, 60%), #D2AF4D99 var(--ram-green, 60%) var(--ram-yellow, 85%), #C66B6B99 var(--ram-yellow, 85%) 100%); }
   .memory-slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 22px; background: #E4FFDA; clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); cursor: ew-resize; }
   .memory-slider::-moz-range-thumb { width: 14px; height: 22px; border: 0; border-radius: 2px; background: #E4FFDA; cursor: ew-resize; }
+  .memory-mode { display: inline-flex; margin: 4px 0 12px; border: 1px solid #515151; border-radius: 6px; overflow: hidden; }
+  .memory-mode button { padding: 6px 14px; border: 0; background: transparent; color: #BABABA; font: inherit; font-size: 13px; cursor: pointer; }
+  .memory-mode button[aria-pressed="true"] { background: #047500; color: #F9FFF8; }
+  .memory-mode button:disabled { cursor: default; }
+  .memory-mode button:focus-visible { outline: 2px solid #54A636; outline-offset: -2px; }
+  .memory-auto-note { margin: 0 0 12px; color: #BABABA; font-size: 13px; line-height: 1.4; }
+  .memory-warning { margin: 8px 0 0; color: #D2AF4D; font-size: 12px; }
   .memory-ticks { display: flex; justify-content: space-between; padding-top: 9px; background: repeating-linear-gradient(90deg, #515151 0 1px, transparent 1px 6.25%) top / 100% 5px no-repeat; color: #BABABA; font-size: 10px; }
   .window-dimensions { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: end; }
   .window-dimensions input { width: 100%; }
