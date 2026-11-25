@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { autoRamMib, autoRamText, exceedsMachine, ramProfileOf, sliderMaxMib, sliderZones } from '../src/ram-state.ts';
+import { autoRamMib, autoRamText, exceedsMachine, ramProfileOf, sliderMaxMib, sliderScale, sliderZones } from '../src/ram-state.ts';
 
 const custom = { type: 'custom', current_version_id: 'v1' };
 const pack = (extra = {}) => ({ localState: 'installed', source: custom, installedSource: custom, installedVariant: 'deluxe', ...extra });
@@ -67,4 +67,18 @@ test('the automatic value is the one of the instance kind, and unknown without a
   assert.equal(autoRamMib(preview, 'vanilla'), 4096);
   assert.equal(autoRamMib(preview, null), null);
   assert.equal(autoRamMib(null, 'standard'), null);
+});
+
+test('the slider scale has a tick per step and puts the middle label where its value really is', () => {
+  const sixteen = sliderScale(16384);
+  assert.deepEqual([sixteen.steps, sixteen.every], [31, 1]);
+  // 8 GiB is not half way along a slider that starts at 512 MiB, so the label follows the value.
+  assert.ok(Math.abs(sixteen.midAt - (8192 - 512) / (16384 - 512)) < 1e-9);
+  assert.ok(sixteen.midAt < 0.5);
+  // Too close to an end label to show.
+  assert.equal(sliderScale(1024).midAt, null);
+  // Many steps spread their ticks so they stay apart.
+  const huge = sliderScale(262144);
+  assert.deepEqual([huge.steps, huge.every], [511, 8]);
+  assert.equal(sliderScale(32768).every, 1);
 });

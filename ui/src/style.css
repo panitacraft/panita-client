@@ -443,11 +443,8 @@
   .memory-alert:focus-visible { outline: 2px solid #D2AF4D; outline-offset: 2px; }
   .memory-alert svg { width: 16px; height: 16px; }
   .memory-modes { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
-  .memory-info { display: inline-flex; border-radius: 50%; color: #BABABA; cursor: help; }
-  .memory-info:hover, .memory-info:focus-visible { color: #E4FFDA; }
-  .memory-info:focus-visible { outline: 2px solid #54A636; outline-offset: 2px; }
-  .memory-info svg { width: 18px; height: 18px; }
-  .memory-track { min-width: 0; margin-top: 16px; }
+  /* The end labels are centred on the end ticks and stick out by about 11px, so the slider keeps room at both sides. */
+  .memory-track { min-width: 0; margin-top: 16px; padding-inline: 16px; }
   .memory-row > output.is-auto, .memory-track.is-auto { opacity: .55; }
   .settings-card .memory-slider { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 16px; margin: 0 0 2px; padding: 0; border: 0; border-radius: 999px; background: transparent; }
   .memory-slider::-webkit-slider-runnable-track { height: 8px; border-radius: 999px; background: linear-gradient(90deg, #54A636AA 0 var(--ram-green, 60%), #D2AF4DAA var(--ram-green, 60%) var(--ram-yellow, 85%), #C66B6BAA var(--ram-yellow, 85%) 100%); }
@@ -461,7 +458,12 @@
   .memory-mode button[aria-pressed="true"] { background: #047500; color: #F9FFF8; font-weight: 600; }
   .memory-mode button:disabled { cursor: default; }
   .memory-mode button:focus-visible { outline: 2px solid #54A636; outline-offset: 1px; }
-  .memory-ticks { display: flex; justify-content: space-between; color: #BABABA; font-size: 10px; }
+  .memory-mode-option { display: inline-flex; border-radius: 999px; }
+  .memory-mode button svg { width: 14px; height: 14px; margin-left: 6px; opacity: .85; }
+  /* The thumb is 16px wide, so its centre runs from 8px to 8px short of the end of the slider; ticks and labels use the same span. */
+  .memory-ticks-line { height: 5px; margin: 3px 7.5px 0; background-image: linear-gradient(90deg, #6a6a6a 1px, transparent 1px); background-repeat: repeat-x; background-size: calc((100% - 1px) * var(--every, 1) / var(--steps, 1)) 100%; }
+  .memory-ticks { position: relative; height: 14px; margin-top: 3px; color: #BABABA; font-size: 10px; }
+  .memory-ticks > span { position: absolute; top: 0; left: calc(8px + (100% - 16px) * var(--at, 0)); transform: translateX(-50%); white-space: nowrap; }
   .window-dimensions { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: end; }
   .window-dimensions input { width: 100%; }
   .window-dimensions > span { padding-bottom: 12px; color: #BABABA; }

@@ -8,7 +8,7 @@ import { TransientNotice, useTransientNotice } from './components/transient-noti
 import { settingsApi } from './settings-api';
 import { globalSettingsPayload, instanceSettingsPayload, settingsDraft, trayPreferences, updateSettingsDraft, type SettingsDraft, type SettingsSnapshot } from './settings-state';
 import { messageForError } from './errors';
-import { autoRamMib, autoRamText, exceedsMachine, formatGiB, sliderMaxMib, sliderZones, type RamProfile } from './ram-state';
+import { autoRamMib, autoRamText, exceedsMachine, formatGiB, sliderMaxMib, sliderScale, sliderZones, type RamProfile } from './ram-state';
 import { useRamPreview, useSystemResources } from './system-api';
 
 type Selection = { id: string | null; busy: boolean; error: string | null; warning: string | null; select: (id: string) => Promise<void>; retry: () => void };
@@ -137,6 +137,7 @@ function SettingsEditor({ instanceId, ramProfile }: { instanceId: string | null;
   const ramValue = Number(ramShown) || 0;
   const sliderMax = sliderMaxMib(machineMib, ramValue);
   const zones = sliderZones(machineMib, sliderMax);
+  const scale = sliderScale(sliderMax);
   const ramInherited = instance && draft?.inheritRam === true;
   const customJava = snapshot && (snapshot.instance?.java_path_override ?? snapshot.global.java_path_override);
   return <>
@@ -159,16 +160,22 @@ function SettingsEditor({ instanceId, ramProfile }: { instanceId: string | null;
               </output>
               <div className="memory-modes">
                 <div className="memory-mode" role="group" aria-label="Modo de memoria">
-                  <button type="button" aria-pressed={draft.ramAuto} disabled={ramInherited} onClick={() => change({ ramAuto: true })}>Automática</button>
+                  <Hint text={autoText}><span className="memory-mode-option"><button type="button" aria-pressed={draft.ramAuto} aria-describedby={prefix + '-auto-help'} disabled={ramInherited} onClick={() => change({ ramAuto: true })}>Automática<Info aria-hidden="true" /></button></span></Hint>
                   <button type="button" aria-pressed={!draft.ramAuto} disabled={ramInherited} onClick={() => change({ ramAuto: false })}>Manual</button>
                 </div>
-                <Hint text={autoText}><span className="memory-info" tabIndex={0} role="img" aria-label="Cómo se calcula la memoria automática" aria-describedby={prefix + '-auto-help'}><Info aria-hidden="true" /></span></Hint>
                 <span id={prefix + '-auto-help'} className="sr-only">{autoText}</span>
               </div>
             </div>
             <div className={draft.ramAuto ? 'memory-track is-auto' : 'memory-track'}>
               <input className="memory-slider" aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={sliderMax} step={RAM_SLIDER_STEP_MIB} disabled={ramInherited || draft.ramAuto} value={/^\d+$/.test(ramShown) ? Math.min(Number(ramShown), sliderMax) : '512'} style={{ '--ram-green': (zones.green * 100) + '%', '--ram-yellow': (zones.yellow * 100) + '%' } as CSSProperties} onChange={event => change({ ram: event.target.value })} />
-              <div className="memory-ticks" aria-hidden="true"><span>512 MiB</span><span>{formatGiB(sliderMax / 2)} GiB</span><span>{formatGiB(sliderMax)} GiB</span></div>
+              <div className="memory-scale" aria-hidden="true" style={{ '--steps': scale.steps, '--every': scale.every } as CSSProperties}>
+                <div className="memory-ticks-line" />
+                <div className="memory-ticks">
+                  <span style={{ '--at': 0 } as CSSProperties}>512 MiB</span>
+                  {scale.midAt !== null && <span style={{ '--at': scale.midAt } as CSSProperties}>{formatGiB(sliderMax / 2)} GiB</span>}
+                  <span style={{ '--at': 1 } as CSSProperties}>{formatGiB(sliderMax)} GiB</span>
+                </div>
+              </div>
             </div>
             </div>
           </div>

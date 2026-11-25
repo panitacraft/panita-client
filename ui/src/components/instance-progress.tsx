@@ -17,7 +17,7 @@ export function InstanceProgress({ entry, busy, onCancel, title }: { entry: Play
   const Icon = entry.operation === 'repair' ? Wrench : entry.operation === 'update' ? RefreshCw : entry.operation === 'uninstall' ? Trash2 : entry.operation === 'play' ? ShieldCheck : Download;
   return <div className="operation-card" role="status">
     <div className="operation-heading"><Icon aria-hidden="true" /><span className="operation-title">{title && <small>{title}</small>}<strong>{label}</strong></span>
-      <Hint text="Cancelar"><span className="icon-control"><Button variant="ghost" size="icon" className="bg-danger text-foreground hover:bg-danger-hover hover:text-foreground" aria-label="Cancelar operación" disabled={busy || entry.phase === 'cancelling'} onClick={onCancel}><X aria-hidden="true" /></Button></span></Hint>
+      <Hint text="Cancelar"><span className="icon-control"><Button variant="ghost" size="icon" className="border-danger bg-danger text-foreground hover:border-danger-hover hover:bg-danger-hover hover:text-foreground" aria-label="Cancelar operación" disabled={busy || entry.phase === 'cancelling'} onClick={onCancel}><X aria-hidden="true" /></Button></span></Hint>
     </div>
     {measured ? <>
       <div className="operation-metrics"><span>{formatBytes(pack.bytesDone)} / {formatBytes(pack.bytesTotal)}</span><strong>{Math.floor(fraction * 100)} %</strong></div>

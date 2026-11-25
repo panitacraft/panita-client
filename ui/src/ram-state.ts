@@ -49,6 +49,19 @@ export function sliderMaxMib(machineMib: number | null | undefined, current: num
 }
 
 /**
+ * The scale under the slider. The slider runs from 512 MiB in steps of 512 MiB, so each step is
+ * one tick (every few steps once there are more than 64, to keep them apart), and the middle
+ * label sits at the fraction of the track where that value really is. It is left out when it
+ * would crowd an end label.
+ */
+export function sliderScale(max: number): { steps: number; every: number; midAt: number | null } {
+  const span = max - SLIDER_MIN_MIB;
+  const steps = Math.max(1, Math.round(span / SLIDER_STEP_MIB));
+  const mid = span > 0 ? (max / 2 - SLIDER_MIN_MIB) / span : 0;
+  return { steps, every: Math.max(1, Math.ceil(steps / 64)), midAt: mid >= 0.2 && mid <= 0.8 ? mid : null };
+}
+
+/**
  * Where the slider's colors change, as fractions of its length. Purely visual: green while
  * the system keeps its room, yellow up to the point where it starts to suffer, red beyond.
  * The launch itself never relies on these numbers.
