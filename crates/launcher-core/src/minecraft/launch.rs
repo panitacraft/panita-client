@@ -95,6 +95,7 @@ fn launch_executable(plan: &super::plan::InstallPlan) -> &str {
 /// `game_directory` must be resolved by AppPaths::game_directory for this UUID.
 /// `memory` is the machine's current memory, read by the caller so the heap of an
 /// automatic allocation is decided from facts the caller (and its tests) control.
+#[allow(clippy::too_many_arguments)]
 pub fn build_command(
     paths: &AppPaths,
     game_directory: &Path,
