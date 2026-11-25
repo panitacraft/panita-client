@@ -723,11 +723,10 @@ test('automatic memory disables the manual controls, explains the value and keep
   await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
   await user.click(screen.getByRole('tab', { name: 'Minecraft' }));
   const ram = await screen.findByLabelText('RAM Asignada (MiB)') as HTMLInputElement;
-  const manual = screen.getByRole('button', { name: 'Manual', exact: true });
-  const auto = screen.getByRole('button', { name: 'Automática', exact: true });
-  expect([manual.getAttribute('aria-pressed'), auto.getAttribute('aria-pressed'), ram.disabled]).toEqual(['true', 'false', false]);
+  const auto = screen.getByRole('switch', { name: 'Automática' }) as HTMLInputElement;
+  expect([auto.checked, ram.disabled]).toEqual([false, false]);
   await user.click(auto);
-  expect(auto.getAttribute('aria-pressed')).toBe('true');
+  expect(auto.checked).toBe(true);
   expect(ram.disabled).toBe(true);
   expect((screen.getByLabelText('Control deslizante de RAM para Minecraft') as HTMLInputElement).disabled).toBe(true);
   expect(ram.value).toBe('4096');
@@ -736,7 +735,8 @@ test('automatic memory disables the manual controls, explains the value and keep
   expect(document.querySelector('.memory-auto-note')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Guardar ajustes' }));
   await waitFor(() => expect(backend.invoke).toHaveBeenCalledWith('save_global_settings', { settings: expect.objectContaining({ ram_auto: true, ram_mib: 4096 }) }));
-  await user.click(manual);
+  await user.click(auto);
+  expect(auto.checked).toBe(false);
   expect(ram.disabled).toBe(false);
   expect(screen.getByText('Se calcula al jugar según la RAM de tu equipo y el tipo de instancia.')).toBeTruthy();
 });
@@ -748,7 +748,7 @@ test('automatic memory says so plainly when the machine cannot be read', async (
   await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
   await user.click(screen.getByRole('tab', { name: 'Minecraft' }));
   expect(await screen.findByText(/No pudimos leer la RAM de tu equipo/)).toBeTruthy();
-  expect((screen.getByRole('button', { name: 'Automática', exact: true })).getAttribute('aria-pressed')).toBe('true');
+  expect((screen.getByRole('switch', { name: 'Automática' }) as HTMLInputElement).checked).toBe(true);
 });
 
 test('an instance can choose automatic memory on its own and names its own value', async () => {
@@ -757,8 +757,12 @@ test('an instance can choose automatic memory on its own and names its own value
   const card = await screen.findByRole('article', { name: 'Aventura' });
   await user.click(within(card).getByRole('button', { name: 'Opciones de instancia' }));
   await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia' }));
-  await user.click(await screen.findByRole('switch', { name: 'Heredar ajuste global: Memoria' }));
-  await user.click(screen.getByRole('button', { name: 'Automática', exact: true }));
+  const inherit = await screen.findByRole('switch', { name: 'Heredar ajuste global: Memoria' }) as HTMLInputElement;
+  // While the memory is inherited the instance has no choice of its own to make.
+  expect(inherit.checked).toBe(true);
+  expect(screen.queryByRole('switch', { name: 'Automática' })).toBeNull();
+  await user.click(inherit);
+  await user.click(screen.getByRole('switch', { name: 'Automática' }));
   await user.click(screen.getByRole('button', { name: 'Guardar ajustes' }));
   await waitFor(() => expect(backend.invoke).toHaveBeenCalledWith('save_instance_settings', expect.objectContaining({ settings: expect.objectContaining({ ram_auto: true, ram_mib: 4096 }) })));
   expect(await screen.findByText('Se calcula al jugar según la RAM de tu equipo.')).toBeTruthy();

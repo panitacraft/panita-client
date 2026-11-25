@@ -435,6 +435,11 @@
   .settings-card h3 svg, .settings-advanced summary svg { width: 18px; height: 18px; color: #A9E58C; }
   .settings-card label { margin-bottom: 8px; font-size: 13px; }
   .settings-card input:not([type='checkbox']) { max-width: 100%; }
+  .settings-card .memory-label-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .settings-card .memory-label-row > label:first-child { margin: 0; }
+  .settings-card .memory-auto-toggle { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; color: #BABABA; }
+  .memory-auto-toggle span { display: inline-flex; align-items: center; gap: 6px; }
+  .memory-auto-toggle svg { width: 14px; height: 14px; }
   .memory-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
   .memory-row > input { width: 96px; }
   .memory-row > output { display: inline-flex; align-items: center; gap: 6px; color: #BABABA; font-size: 13px; white-space: nowrap; }
@@ -442,7 +447,6 @@
   .memory-alert { display: inline-flex; border-radius: 4px; color: #D2AF4D; }
   .memory-alert:focus-visible { outline: 2px solid #D2AF4D; outline-offset: 2px; }
   .memory-alert svg { width: 16px; height: 16px; }
-  .memory-modes { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
   /* The end labels are centred on the end ticks and stick out by about 11px, so the slider keeps room at both sides. */
   .memory-track { min-width: 0; margin-top: 16px; padding-inline: 16px; }
   .memory-row > output.is-auto, .memory-track.is-auto { opacity: .55; }
@@ -452,14 +456,6 @@
   .memory-slider::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 16px; height: 16px; margin-top: -4px; border: 2px solid #141414; border-radius: 50%; background: #E4FFDA; box-shadow: 0 0 0 1px #A9E58C, 0 1px 4px #0008; cursor: ew-resize; }
   .memory-slider::-moz-range-thumb { box-sizing: border-box; width: 16px; height: 16px; border: 2px solid #141414; border-radius: 50%; background: #E4FFDA; box-shadow: 0 0 0 1px #A9E58C, 0 1px 4px #0008; cursor: ew-resize; }
   .memory-slider:focus-visible { outline: 2px solid #54A636; outline-offset: 4px; }
-  .memory-mode { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid #515151; border-radius: 999px; background: #1B1B1B; }
-  .memory-mode button { padding: 5px 16px; border: 0; border-radius: 999px; background: transparent; color: #BABABA; font: inherit; font-size: 13px; cursor: pointer; transition: background-color .15s, color .15s; }
-  .memory-mode button:hover:not(:disabled):not([aria-pressed="true"]) { color: #F9FFF8; }
-  .memory-mode button[aria-pressed="true"] { background: #047500; color: #F9FFF8; font-weight: 600; }
-  .memory-mode button:disabled { cursor: default; }
-  .memory-mode button:focus-visible { outline: 2px solid #54A636; outline-offset: 1px; }
-  .memory-mode-option { display: inline-flex; border-radius: 999px; }
-  .memory-mode button svg { width: 14px; height: 14px; margin-left: 6px; opacity: .85; }
   /* The thumb is 16px wide, so its centre runs from 8px to 8px short of the end of the slider; ticks and labels use the same span. */
   .memory-ticks-line { height: 5px; margin: 3px 7.5px 0; background-image: linear-gradient(90deg, #6a6a6a 1px, transparent 1px); background-repeat: repeat-x; background-size: calc((100% - 1px) * var(--every, 1) / var(--steps, 1)) 100%; }
   .memory-ticks { position: relative; height: 14px; margin-top: 3px; color: #BABABA; font-size: 10px; }

@@ -610,9 +610,11 @@ and individual measurements are evidence, not product guarantees.
   reads `ram_preview`, which takes no input: an instance in automatic mode shows its
   resolved value in the numeric field and on the slider (both disabled), while the global
   settings, where the kind of instance is unknown, keep the saved value. The explanation
-  of Automática is a short tooltip on the Automática option, marked with an info icon
-  after its name (also exposed to screen readers), not visible text; the Automática/Manual
-  pill toggle shares a row with the numeric field and GiB value, and the slider sits below
+  of Automática is a short tooltip on the Automática switch, marked with an info icon
+  after its name (also exposed to screen readers), not visible text. The switch looks
+  like "Heredar ajuste global" and sits on the label row of the numeric field; an
+  instance shows it only while its memory is not inherited. The numeric field and GiB
+  value share a row, and the slider sits below
   with a tick per 0.5 GiB step and labels placed where the thumb's centre lands. The manual
   slider ends at the machine's RAM in whole gigabytes (the former 32 GiB range when it is
   unknown) without limiting the numeric field, and a value above it shows a warning icon
