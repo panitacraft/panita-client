@@ -131,6 +131,20 @@ fn system_resources(
     Ok(hardware::resources(&root))
 }
 
+/// What an automatic RAM allocation would be right now for each kind of game. Takes no
+/// input: the machine is read here and the formula lives only in the core.
+#[tauri::command]
+fn ram_preview(
+    window: tauri::WebviewWindow,
+) -> Result<launcher_core::ram::RamPreview, launcher_core::error::ErrorCode> {
+    if window.label() != "main" {
+        return Err(launcher_core::error::ErrorCode::InvalidData);
+    }
+    Ok(launcher_core::ram::preview(
+        &launcher_core::memory::MemoryStatus::read(),
+    ))
+}
+
 #[tauri::command]
 async fn open_logs_folder(
     app: tauri::AppHandle,
@@ -330,6 +344,7 @@ pub fn run() {
             initialize,
             diagnostic_snapshot,
             system_resources,
+            ram_preview,
             open_logs_folder,
             catalog_snapshot,
             activation_commands::activation_snapshot,

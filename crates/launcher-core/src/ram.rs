@@ -135,6 +135,30 @@ pub fn resolve(profile: RamProfile, memory: &MemoryStatus) -> RamResolution {
     }
 }
 
+/// What an automatic allocation would be right now for each kind of game, for the
+/// settings screens. One reading of the machine, no input from the frontend.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RamPreview {
+    pub total_mib: Option<u64>,
+    pub available_mib: Option<u64>,
+    pub vanilla: RamResolution,
+    pub lite: RamResolution,
+    pub standard: RamResolution,
+    pub deluxe: RamResolution,
+}
+
+pub fn preview(memory: &MemoryStatus) -> RamPreview {
+    RamPreview {
+        total_mib: memory.total_mib,
+        available_mib: memory.available_mib,
+        vanilla: resolve(RamProfile::Vanilla, memory),
+        lite: resolve(RamProfile::Lite, memory),
+        standard: resolve(RamProfile::Standard, memory),
+        deluxe: resolve(RamProfile::Deluxe, memory),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,5 +314,19 @@ mod tests {
             note,
             "ram auto profile=Standard heap_mib=6144 basis=Target total_mib=8192 available_mib=unknown"
         );
+    }
+    #[test]
+    fn the_preview_matches_the_resolver_and_serializes_for_the_frontend() {
+        let machine = memory(Some(8_192), Some(5_000));
+        let preview = preview(&machine);
+        assert_eq!(preview.vanilla, resolve(RamProfile::Vanilla, &machine));
+        assert_eq!(preview.deluxe, resolve(RamProfile::Deluxe, &machine));
+        let json = serde_json::to_value(preview).unwrap_or_default();
+        assert_eq!(json["totalMib"], 8_192);
+        assert_eq!(json["standard"]["mib"], 3_840);
+        assert_eq!(json["standard"]["basis"], "limited");
+        let unknown =
+            serde_json::to_value(super::preview(&MemoryStatus::UNKNOWN)).unwrap_or_default();
+        assert!(unknown["totalMib"].is_null() && unknown["vanilla"]["basis"] == "unknown");
     }
 }
