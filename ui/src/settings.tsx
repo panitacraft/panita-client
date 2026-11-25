@@ -139,6 +139,8 @@ function SettingsEditor({ instanceId, ramProfile }: { instanceId: string | null;
   const zones = sliderZones(machineMib, sliderMax);
   const scale = sliderScale(sliderMax);
   const ramInherited = instance && draft?.inheritRam === true;
+  // Automática dims the field, GiB value and slider; an inherited memory is already dimmed as a whole.
+  const autoDim = draft?.ramAuto === true && !ramInherited;
   const customJava = snapshot && (snapshot.instance?.java_path_override ?? snapshot.global.java_path_override);
   return <>
     {!desktop && <p>Los ajustes están disponibles en la aplicación de escritorio.</p>}
@@ -155,13 +157,13 @@ function SettingsEditor({ instanceId, ramProfile }: { instanceId: string | null;
             <label htmlFor={prefix + '-ram'}>RAM Asignada (MiB)</label>
             <span id={prefix + '-auto-help'} className="sr-only">{autoText}</span>
             <div className="memory-row">
-              <input id={prefix + '-ram'} type="number" min="512" max="262144" step="1" required disabled={ramInherited || draft.ramAuto} value={ramShown} onChange={event => change({ ram: event.target.value })} />
-              <output className={[draft.ramAuto && 'is-auto', !draft.ramAuto && exceedsMachine(ramValue, machineMib) && 'is-over'].filter(Boolean).join(' ') || undefined}>{formatGiB(ramValue)} GiB
+              <input id={prefix + '-ram'} className={autoDim ? 'is-auto' : undefined} type="number" min="512" max="262144" step="1" required disabled={ramInherited || draft.ramAuto} value={ramShown} onChange={event => change({ ram: event.target.value })} />
+              <output className={[autoDim && 'is-auto', !draft.ramAuto && exceedsMachine(ramValue, machineMib) && 'is-over'].filter(Boolean).join(' ') || undefined}>{formatGiB(ramValue)} GiB
                 {!draft.ramAuto && exceedsMachine(ramValue, machineMib) && <><Hint text={'Este valor es mayor que la RAM de tu equipo (' + formatGiB(sliderMax) + ' GiB). Minecraft podría no abrir o ir muy lento.'}><span className="memory-alert" tabIndex={0} role="img" aria-label="Aviso de memoria"><TriangleAlert aria-hidden="true" /></span></Hint><span className="sr-only">Este valor es mayor que la RAM de tu equipo ({formatGiB(sliderMax)} GiB). Minecraft podría no abrir o ir muy lento.</span></>}
               </output>
               {!ramInherited && <Hint text={autoText}><label className="inherit-toggle memory-auto-toggle"><span>Automática<Info aria-hidden="true" /></span><input role="switch" aria-label="Automática" aria-describedby={prefix + '-auto-help'} type="checkbox" checked={draft.ramAuto} onChange={event => change({ ramAuto: event.target.checked })} /></label></Hint>}
             </div>
-            <div className={draft.ramAuto ? 'memory-track is-auto' : 'memory-track'}>
+            <div className={autoDim ? 'memory-track is-auto' : 'memory-track'}>
               <input className="memory-slider" aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={sliderMax} step={RAM_SLIDER_STEP_MIB} disabled={ramInherited || draft.ramAuto} value={/^\d+$/.test(ramShown) ? Math.min(Number(ramShown), sliderMax) : '512'} style={{ '--ram-green': (zones.green * 100) + '%', '--ram-yellow': (zones.yellow * 100) + '%' } as CSSProperties} onChange={event => change({ ram: event.target.value })} />
               <div className="memory-scale" aria-hidden="true" style={{ '--steps': scale.steps, '--every': scale.every } as CSSProperties}>
                 <div className="memory-ticks-line" />

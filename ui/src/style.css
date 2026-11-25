@@ -448,6 +448,7 @@
   /* The end labels are centred on the end ticks and stick out by about 11px, so the slider keeps room at both sides. */
   .memory-track { min-width: 0; margin-top: 16px; padding-inline: 16px; }
   .memory-row > output.is-auto, .memory-track.is-auto { opacity: .55; }
+  .settings-card .memory-row > input.is-auto { background: #0c0c0c; border-color: #383838; color: #8f8f8f; opacity: .6; }
   .settings-card .memory-slider { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 16px; margin: 0 0 2px; padding: 0; border: 0; border-radius: 999px; background: transparent; }
   .memory-slider::-webkit-slider-runnable-track { height: 8px; border-radius: 999px; background: linear-gradient(90deg, #54A636AA 0 var(--ram-green, 60%), #D2AF4DAA var(--ram-green, 60%) var(--ram-yellow, 85%), #C66B6BAA var(--ram-yellow, 85%) 100%); }
   .memory-slider::-moz-range-track { height: 8px; border-radius: 999px; background: linear-gradient(90deg, #54A636AA 0 var(--ram-green, 60%), #D2AF4DAA var(--ram-green, 60%) var(--ram-yellow, 85%), #C66B6BAA var(--ram-yellow, 85%) 100%); }
