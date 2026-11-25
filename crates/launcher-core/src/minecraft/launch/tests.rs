@@ -130,6 +130,7 @@ fn loader_commands_merge_child_libraries_and_keep_module_arguments_platform_spec
             &platform,
             &GlobalSettings::default(),
             &InstanceSettings::default(),
+            &crate::memory::MemoryStatus::UNKNOWN,
             LaunchIdentity {
                 account: &account,
                 minecraft_token: None,
@@ -209,6 +210,7 @@ fn loader_commands_merge_child_libraries_and_keep_module_arguments_platform_spec
                     &platform,
                     &settings,
                     &InstanceSettings::default(),
+                    &crate::memory::MemoryStatus::UNKNOWN,
                     LaunchIdentity {
                         account: &account,
                         minecraft_token: None,
@@ -239,6 +241,7 @@ fn launch_requires_current_flat_installation_schema() {
             &platform,
             &GlobalSettings::default(),
             &InstanceSettings::default(),
+            &crate::memory::MemoryStatus::UNKNOWN,
             LaunchIdentity {
                 account: &account,
                 minecraft_token: None,
@@ -274,6 +277,7 @@ fn golden_argument_array_preserves_order_spaces_and_literal_values() {
     installed.plan.version.logging = None;
     let settings = GlobalSettings {
         ram_mib: 2048,
+        ram_auto: false,
         extra_jvm_args: vec!["-Dfixture.literal=a b;$(literal)".into()],
         ..Default::default()
     };
@@ -284,6 +288,7 @@ fn golden_argument_array_preserves_order_spaces_and_literal_values() {
         &platform,
         &settings,
         &InstanceSettings::default(),
+        &crate::memory::MemoryStatus::UNKNOWN,
         LaunchIdentity {
             account: &account,
             minecraft_token: None,
@@ -332,6 +337,7 @@ fn both_pins_build_direct_arguments_for_both_platforms() {
                 &platform,
                 &GlobalSettings::default(),
                 &instance,
+                &crate::memory::MemoryStatus::UNKNOWN,
                 LaunchIdentity {
                     account: &account,
                     minecraft_token: None,
@@ -417,6 +423,7 @@ fn microsoft_identity_requires_token_and_debug_is_redacted() {
             &platform,
             &GlobalSettings::default(),
             &InstanceSettings::default(),
+            &crate::memory::MemoryStatus::UNKNOWN,
             LaunchIdentity {
                 account: &account,
                 minecraft_token: token,
@@ -452,6 +459,7 @@ fn invalid_settings_runtime_and_placeholders_fail_closed() {
             &platform,
             settings,
             &InstanceSettings::default(),
+            &crate::memory::MemoryStatus::UNKNOWN,
             LaunchIdentity {
                 account: &account,
                 minecraft_token: None,
@@ -533,6 +541,7 @@ fn legacy_cache_destinations_remain_in_launch_arguments() {
         &platform,
         &GlobalSettings::default(),
         &InstanceSettings::default(),
+        &crate::memory::MemoryStatus::UNKNOWN,
         LaunchIdentity {
             account: &account,
             minecraft_token: None,
@@ -560,6 +569,7 @@ fn built(
         platform,
         &GlobalSettings::default(),
         &InstanceSettings::default(),
+        &crate::memory::MemoryStatus::UNKNOWN,
         LaunchIdentity {
             account,
             minecraft_token: None,
@@ -630,4 +640,216 @@ fn vanilla_names_the_main_class_without_a_discord_hint() {
             .any(|arg| arg == "net.minecraft.client.main.Main")
     );
     assert!(!command.args.iter().any(|arg| arg == DISCORD_HINT));
+}
+
+mod ram {
+    use super::*;
+    use crate::catalog::Variant;
+    use crate::memory::MemoryStatus;
+    use crate::modpack::state::{PackIdentity, PackState};
+
+    fn pack(source: PackIdentity) -> PackState {
+        PackState {
+            schema: 1,
+            id: Uuid::new_v4(),
+            source,
+            minecraft_version: "1.21.1".into(),
+            loader: "neoforge".into(),
+            loader_version: "21.1.248".into(),
+            files: Vec::new(),
+            consumed_defaults: Default::default(),
+            skipped_configuration: Vec::new(),
+            pending: Vec::new(),
+        }
+    }
+
+    fn custom(variant: Variant) -> PackState {
+        pack(PackIdentity::Custom {
+            version_id: Uuid::new_v4(),
+            published_at: "2026-11-24T00:00:00Z".into(),
+            label: None,
+            variant,
+        })
+    }
+
+    fn machine(total: Option<u64>, available: Option<u64>) -> MemoryStatus {
+        MemoryStatus {
+            total_mib: total,
+            available_mib: available,
+        }
+    }
+
+    fn command_for(
+        pack: Option<PackState>,
+        global: &GlobalSettings,
+        instance: &InstanceSettings,
+        memory: &MemoryStatus,
+    ) -> LaunchCommand {
+        let (paths, directory, mut installed, platform, account) = fixture("1.21.1", "windows");
+        installed.pack = pack;
+        build_command(
+            &paths,
+            &directory,
+            &installed,
+            &platform,
+            global,
+            instance,
+            memory,
+            LaunchIdentity {
+                account: &account,
+                minecraft_token: None,
+                xuid: None,
+            },
+        )
+        .unwrap_or_else(|_| panic!("build"))
+    }
+
+    /// The single heap argument of the command, and whether it carried a log note.
+    fn launch(
+        pack: Option<PackState>,
+        global: &GlobalSettings,
+        instance: &InstanceSettings,
+        memory: &MemoryStatus,
+    ) -> (String, bool) {
+        let command = command_for(pack, global, instance, memory);
+        let heap: Vec<_> = command
+            .args
+            .iter()
+            .filter(|arg| arg.starts_with("-Xmx"))
+            .collect();
+        assert_eq!(heap.len(), 1, "exactly one heap argument");
+        (heap[0].clone(), command.ram_note.is_some())
+    }
+
+    fn auto() -> GlobalSettings {
+        GlobalSettings {
+            ram_mib: 3000,
+            ram_auto: true,
+            ..GlobalSettings::default()
+        }
+    }
+
+    fn manual(ram_mib: u32) -> GlobalSettings {
+        GlobalSettings {
+            ram_mib,
+            ram_auto: false,
+            ..GlobalSettings::default()
+        }
+    }
+
+    fn heap(pack: Option<PackState>, global: &GlobalSettings, memory: &MemoryStatus) -> String {
+        launch(pack, global, &InstanceSettings::default(), memory).0
+    }
+
+    #[test]
+    fn automatic_vanilla_follows_the_machine() {
+        let roomy = machine(Some(16_384), Some(10_240));
+        assert_eq!(
+            launch(None, &auto(), &InstanceSettings::default(), &roomy),
+            ("-Xmx4096M".into(), true)
+        );
+        // Low available memory lowers the heap, and a tiny machine still gets the floor.
+        let busy = machine(Some(8_192), Some(3_000));
+        assert_eq!(heap(None, &auto(), &busy), "-Xmx2048M");
+        let tiny = machine(Some(2_048), Some(400));
+        assert_eq!(heap(None, &auto(), &tiny), "-Xmx2048M");
+        let some_free = machine(Some(8_192), Some(4_000));
+        assert_eq!(heap(None, &auto(), &some_free), "-Xmx2816M");
+        // Unreadable memory falls back to the safe default instead of failing.
+        assert_eq!(heap(None, &auto(), &MemoryStatus::UNKNOWN), "-Xmx4096M");
+        assert_eq!(
+            heap(None, &auto(), &machine(None, Some(1_000))),
+            "-Xmx2048M"
+        );
+    }
+
+    #[test]
+    fn automatic_packs_follow_their_variant_and_the_machine() {
+        let roomy = machine(Some(32_768), Some(24_000));
+        let modrinth = pack(PackIdentity::Modrinth {
+            project_id: "project".into(),
+            version_id: "v1".into(),
+            archive_sha512: "a".repeat(128),
+            index_sha256: "b".repeat(64),
+        });
+        for (state, expected) in [
+            (custom(Variant::Lite), "-Xmx4096M"),
+            (custom(Variant::Standard), "-Xmx6144M"),
+            (custom(Variant::Deluxe), "-Xmx8192M"),
+            (modrinth, "-Xmx6144M"),
+        ] {
+            assert_eq!(heap(Some(state), &auto(), &roomy), expected);
+        }
+        // Little free memory lowers Deluxe, and below the pack floor the floor is used.
+        let some = machine(Some(8_192), Some(5_000));
+        assert_eq!(
+            heap(Some(custom(Variant::Deluxe)), &auto(), &some),
+            "-Xmx3840M"
+        );
+        let little = machine(Some(8_192), Some(2_000));
+        assert_eq!(
+            heap(Some(custom(Variant::Deluxe)), &auto(), &little),
+            "-Xmx3072M"
+        );
+        assert_eq!(
+            heap(
+                Some(custom(Variant::Standard)),
+                &auto(),
+                &MemoryStatus::UNKNOWN
+            ),
+            "-Xmx4096M"
+        );
+    }
+
+    #[test]
+    fn manual_values_are_used_as_saved_whatever_the_machine_reports() {
+        for memory in [
+            machine(Some(2_048), Some(300)),
+            MemoryStatus::UNKNOWN,
+            machine(Some(65_536), Some(60_000)),
+        ] {
+            assert_eq!(
+                launch(None, &manual(5_120), &InstanceSettings::default(), &memory),
+                ("-Xmx5120M".into(), false)
+            );
+            assert_eq!(
+                heap(Some(custom(Variant::Deluxe)), &manual(5_120), &memory),
+                "-Xmx5120M"
+            );
+        }
+    }
+
+    #[test]
+    fn the_instance_choice_beats_the_global_one_at_launch() {
+        let roomy = machine(Some(16_384), Some(10_240));
+        let at = |global: &GlobalSettings, ram_mib, ram_auto| {
+            let instance = InstanceSettings {
+                ram_mib,
+                ram_auto,
+                ..InstanceSettings::default()
+            };
+            launch(None, global, &instance, &roomy).0
+        };
+        // A manual instance value wins over an automatic global choice, with or without the flag.
+        assert_eq!(at(&auto(), Some(6_144), None), "-Xmx6144M");
+        assert_eq!(at(&auto(), Some(6_144), Some(false)), "-Xmx6144M");
+        // An automatic instance wins over a manual global value and keeps its own stored value.
+        assert_eq!(at(&manual(2_048), None, Some(true)), "-Xmx4096M");
+        assert_eq!(at(&manual(2_048), Some(6_144), Some(true)), "-Xmx4096M");
+        // Inheriting follows the global choice either way.
+        assert_eq!(at(&auto(), None, None), "-Xmx4096M");
+        assert_eq!(at(&manual(2_048), None, None), "-Xmx2048M");
+    }
+
+    #[test]
+    fn the_log_note_names_only_the_profile_the_heap_and_the_memory() {
+        let memory = machine(Some(8_192), Some(7_000));
+        let command = command_for(None, &auto(), &InstanceSettings::default(), &memory);
+        let note = command.ram_note.clone().unwrap_or_default();
+        assert_eq!(
+            note,
+            "ram auto profile=Vanilla heap_mib=4096 basis=Target total_mib=8192 available_mib=7000"
+        );
+        assert!(!note.contains("Fixture_Player"));
+    }
 }

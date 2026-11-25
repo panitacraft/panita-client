@@ -57,6 +57,7 @@ fn command(paths: &AppPaths, id: Uuid, test: &str) -> LaunchCommand {
             "--nocapture".into(),
         ],
         redactions: vec![Secret::new(TOKEN.into()).unwrap_or_else(|_| panic!("fixture secret"))],
+        ram_note: None,
     }
 }
 

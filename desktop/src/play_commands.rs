@@ -834,6 +834,11 @@ async fn start_and_monitor(
         Ok(game) => {
             // Always retain a committed child, even if cancellation arrived after
             // the atomic spawn boundary. Account removal must not kill that game.
+            if let Some(note) = game.ram_note() {
+                app.state::<DesktopState>()
+                    .logs
+                    .note(launcher_core::session_log::Level::Info, note);
+            }
             let game = Arc::new(game);
             controller.update(instance, request, |entry| {
                 entry.phase = Phase::Running;

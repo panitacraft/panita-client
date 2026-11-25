@@ -746,6 +746,7 @@ impl LaunchLease {
             changed: watch::channel(0).0,
         });
         events.push(ProcessEventKind::Started);
+        let ram_note = command.ram_note.clone();
         let redactions = Arc::new(command);
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -780,6 +781,7 @@ impl LaunchLease {
             controls,
             exit,
             events,
+            ram_note,
         })
     }
 }
@@ -800,9 +802,15 @@ pub struct RunningGame {
     controls: mpsc::Sender<Request>,
     exit: watch::Receiver<Option<GameExit>>,
     events: Arc<Events>,
+    ram_note: Option<String>,
 }
 
 impl RunningGame {
+    /// A fixed support-log note about an automatic heap size; none for a manual one.
+    pub fn ram_note(&self) -> Option<&str> {
+        self.ram_note.as_deref()
+    }
+
     /// Notifications carry only a cursor. Readers recover every retained event by page.
     pub fn output_changes(&self) -> watch::Receiver<usize> {
         self.events.changed.subscribe()

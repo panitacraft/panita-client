@@ -412,6 +412,8 @@ impl PendingPlay {
         if let Ok(index) = self.installed.plan.asset_index_path() {
             super::linux_window::publish_minecraft_icons(&self.paths, &index);
         }
+        // Read as late as possible: an automatic heap follows the memory free right now.
+        let memory = crate::memory::MemoryStatus::read();
         self.cancel.commit(|| {
             self.accounts
                 .with_play_authorization(authorization, |identity| {
@@ -422,6 +424,7 @@ impl PendingPlay {
                         &self.platform,
                         &self.global,
                         &self.settings,
+                        &memory,
                         identity,
                     )?;
                     self.lease.spawn(command, self.process, self.operation)
