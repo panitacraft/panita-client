@@ -46,12 +46,12 @@ test('only a value above the machine RAM is flagged', () => {
 });
 
 test('the automatic line names the value for an instance and every kind for the global settings', () => {
-  const preview = { totalMib: 8192, availableMib: 5000,
+  const preview = { totalMib: 8192,
     vanilla: { mib: 4096, basis: 'target' }, lite: { mib: 4096, basis: 'target' },
     standard: { mib: 3840, basis: 'limited' }, deluxe: { mib: 3072, basis: 'floor' } };
-  assert.equal(autoRamText(preview, 'vanilla'), 'Se calculará al jugar según tu equipo. Con tu RAM ahora serían 4 GiB.');
-  assert.match(autoRamText(preview, 'standard'), /serían 3\.75 GiB\. Es menos de lo ideal porque tu equipo tiene poca RAM libre ahora\.$/);
-  assert.match(autoRamText(preview, 'deluxe'), /serían 3 GiB\. Tu equipo tiene muy poca RAM libre/);
+  assert.equal(autoRamText(preview, 'vanilla'), 'Se calculará al jugar según tu equipo. Con la RAM de tu equipo serían 4 GiB.');
+  assert.match(autoRamText(preview, 'standard'), /serían 3\.75 GiB\. Es menos de lo ideal porque tu equipo tiene poca RAM\.$/);
+  assert.match(autoRamText(preview, 'deluxe'), /serían 3 GiB\. Tu equipo tiene muy poca RAM;/);
   const global = autoRamText(preview, null);
   assert.match(global, /Vanilla 4 GiB, Ligero 4 GiB, Estándar 3\.75 GiB, Mejorado 3 GiB\./);
   // The reading failed: nothing about the machine is claimed.

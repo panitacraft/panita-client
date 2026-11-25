@@ -600,12 +600,13 @@ and individual measurements are evidence, not product guarantees.
   the heap from a memory reading taken just before spawn (`launcher-core` `memory`,
   shared with the session log) and a profile taken from the installed pack: 4096 MiB
   for vanilla and Lite, 6144 for Standard and Modrinth packs, 8192 for Deluxe. The
-  ceiling is the total memory minus the larger of 2 GiB and a quarter of it, and the
-  available memory minus 1 GiB; the result is rounded down to 256 MiB and kept between
-  a floor (2048 vanilla, 3072 packs, used even when the machine cannot spare it) and a
-  16384 cap. Unreadable total memory holds the target to 4096; unreadable available
-  memory skips its limit. Resolution never blocks Play and writes only a fixed session
-  log note (profile, heap, basis, total and available MiB). The settings UI shows the
+  ceiling is the total installed memory minus the larger of 2 GiB and a quarter of it;
+  the result is rounded down to 256 MiB and kept between a floor (2048 vanilla, 3072
+  packs, used even when the machine cannot spare it) and a 16384 cap. Unreadable total
+  memory holds the target to 4096. Owner clarification, 2026-11-25: "available system
+  memory" in the issue means the memory installed in the machine, so the free memory at
+  the moment of launch never changes the heap. Resolution never blocks Play and writes
+  only a fixed session log note (profile, heap, basis and total MiB). The settings UI shows the
   resolved value through `ram_preview`, which takes no input, and ends the manual
   slider at the machine's RAM in whole gigabytes (the former 32 GiB range when it is
   unknown) without limiting the numeric field. Windows and Linux readings are

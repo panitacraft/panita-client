@@ -748,18 +748,27 @@ mod ram {
             launch(None, &auto(), &InstanceSettings::default(), &roomy),
             ("-Xmx4096M".into(), true)
         );
-        // Low available memory lowers the heap, and a tiny machine still gets the floor.
-        let busy = machine(Some(8_192), Some(3_000));
-        assert_eq!(heap(None, &auto(), &busy), "-Xmx2048M");
-        let tiny = machine(Some(2_048), Some(400));
-        assert_eq!(heap(None, &auto(), &tiny), "-Xmx2048M");
-        let some_free = machine(Some(8_192), Some(4_000));
-        assert_eq!(heap(None, &auto(), &some_free), "-Xmx2816M");
+        // A small machine lowers the heap, and a tiny one still gets the floor.
+        assert_eq!(
+            heap(None, &auto(), &machine(Some(8_192), None)),
+            "-Xmx4096M"
+        );
+        assert_eq!(
+            heap(None, &auto(), &machine(Some(4_096), None)),
+            "-Xmx2048M"
+        );
+        assert_eq!(
+            heap(None, &auto(), &machine(Some(2_048), None)),
+            "-Xmx2048M"
+        );
+        // How much is free right now does not matter, only what is installed.
+        let busy = machine(Some(16_384), Some(300));
+        assert_eq!(heap(None, &auto(), &busy), "-Xmx4096M");
         // Unreadable memory falls back to the safe default instead of failing.
         assert_eq!(heap(None, &auto(), &MemoryStatus::UNKNOWN), "-Xmx4096M");
         assert_eq!(
             heap(None, &auto(), &machine(None, Some(1_000))),
-            "-Xmx2048M"
+            "-Xmx4096M"
         );
     }
 
@@ -780,15 +789,15 @@ mod ram {
         ] {
             assert_eq!(heap(Some(state), &auto(), &roomy), expected);
         }
-        // Little free memory lowers Deluxe, and below the pack floor the floor is used.
-        let some = machine(Some(8_192), Some(5_000));
+        // An 8 GiB machine lowers Deluxe, and below the pack floor the floor is used.
+        let eight = machine(Some(8_192), Some(500));
         assert_eq!(
-            heap(Some(custom(Variant::Deluxe)), &auto(), &some),
-            "-Xmx3840M"
+            heap(Some(custom(Variant::Deluxe)), &auto(), &eight),
+            "-Xmx6144M"
         );
-        let little = machine(Some(8_192), Some(2_000));
+        let four = machine(Some(4_096), Some(3_000));
         assert_eq!(
-            heap(Some(custom(Variant::Deluxe)), &auto(), &little),
+            heap(Some(custom(Variant::Deluxe)), &auto(), &four),
             "-Xmx3072M"
         );
         assert_eq!(
@@ -848,7 +857,7 @@ mod ram {
         let note = command.ram_note.clone().unwrap_or_default();
         assert_eq!(
             note,
-            "ram auto profile=Vanilla heap_mib=4096 basis=Target total_mib=8192 available_mib=7000"
+            "ram auto profile=Vanilla heap_mib=4096 basis=Target total_mib=8192"
         );
         assert!(!note.contains("Fixture_Player"));
     }

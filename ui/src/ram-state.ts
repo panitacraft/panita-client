@@ -5,9 +5,9 @@ import type { CatalogInstance } from './preview-catalog';
 export type RamProfile = 'vanilla' | 'lite' | 'standard' | 'deluxe';
 export type RamBasis = 'target' | 'limited' | 'floor' | 'unknown';
 export type RamResolution = { mib: number; basis: RamBasis };
-/** What an automatic allocation would be right now, per profile, as the core resolves it. */
+/** What an automatic allocation would be on this machine, per profile, as the core resolves it. */
 export type RamPreview = {
-  totalMib: number | null; availableMib: number | null;
+  totalMib: number | null;
   vanilla: RamResolution; lite: RamResolution; standard: RamResolution; deluxe: RamResolution;
 };
 
@@ -66,8 +66,8 @@ export function exceedsMachine(ram: number, machineMib: number | null | undefine
 
 const basisNotes: Record<RamBasis, string> = {
   target: '',
-  limited: ' Es menos de lo ideal porque tu equipo tiene poca RAM libre ahora.',
-  floor: ' Tu equipo tiene muy poca RAM libre; usaremos el mínimo para que el juego pueda abrir.',
+  limited: ' Es menos de lo ideal porque tu equipo tiene poca RAM.',
+  floor: ' Tu equipo tiene muy poca RAM; usaremos el mínimo para que el juego pueda abrir.',
   unknown: ' No pudimos leer toda la RAM de tu equipo, así que usaremos un valor prudente.',
 };
 
@@ -83,9 +83,9 @@ export function autoRamText(preview: RamPreview | null, profile: RamProfile | nu
   if (!preview) return 'Se calculará al jugar según tu equipo. No pudimos leer tu RAM ahora, así que se usará un valor prudente.';
   if (profile) {
     const value = preview[profile];
-    return `Se calculará al jugar según tu equipo. Con tu RAM ahora serían ${formatGiB(value.mib)} GiB.${basisNotes[value.basis]}`;
+    return `Se calculará al jugar según tu equipo. Con la RAM de tu equipo serían ${formatGiB(value.mib)} GiB.${basisNotes[value.basis]}`;
   }
   const list = profileOrder.map(id => `${profileNames[id]} ${formatGiB(preview[id].mib)} GiB`).join(', ');
   const worst = profileOrder.map(id => preview[id].basis).find(basis => basis === 'floor' || basis === 'unknown' || basis === 'limited') ?? 'target';
-  return `Se calculará al jugar según tu equipo y el tipo de instancia. Con tu RAM ahora: ${list}.${basisNotes[worst]}`;
+  return `Se calculará al jugar según tu equipo y el tipo de instancia. Con la RAM de tu equipo: ${list}.${basisNotes[worst]}`;
 }

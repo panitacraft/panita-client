@@ -715,7 +715,7 @@ test('the variant cards appear at once and only their sizes wait for the backend
 const resolution = (mib: number, basis = 'target') => ({ mib, basis });
 
 test('automatic memory disables the manual controls, explains the value and keeps the saved number', async () => {
-  ramPreview = { totalMib: 16384, availableMib: 9000, vanilla: resolution(4096), lite: resolution(4096), standard: resolution(6144), deluxe: resolution(8192) };
+  ramPreview = { totalMib: 16384, vanilla: resolution(4096), lite: resolution(4096), standard: resolution(6144), deluxe: resolution(8192) };
   const user = userEvent.setup(); mount();
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
   await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
@@ -748,7 +748,7 @@ test('automatic memory says so plainly when the machine cannot be read', async (
 });
 
 test('an instance can choose automatic memory on its own and names its own value', async () => {
-  ramPreview = { totalMib: 16384, availableMib: 9000, vanilla: resolution(4096), lite: resolution(4096), standard: resolution(6144), deluxe: resolution(8192) };
+  ramPreview = { totalMib: 16384, vanilla: resolution(4096), lite: resolution(4096), standard: resolution(6144), deluxe: resolution(8192) };
   const user = userEvent.setup(); mount();
   const card = await screen.findByRole('article', { name: 'Aventura' });
   await user.click(within(card).getByRole('button', { name: 'Opciones de instancia' }));
@@ -757,7 +757,7 @@ test('an instance can choose automatic memory on its own and names its own value
   await user.click(screen.getByRole('button', { name: 'Automática', exact: true }));
   await user.click(screen.getByRole('button', { name: 'Guardar ajustes' }));
   await waitFor(() => expect(backend.invoke).toHaveBeenCalledWith('save_instance_settings', expect.objectContaining({ settings: expect.objectContaining({ ram_auto: true, ram_mib: 4096 }) })));
-  expect(await screen.findByText(/Con tu RAM ahora serían \d+(\.\d+)? GiB\./)).toBeTruthy();
+  expect(await screen.findByText(/Con la RAM de tu equipo serían \d+(\.\d+)? GiB\./)).toBeTruthy();
 });
 
 test('the memory slider stops at the RAM of this machine', async () => {
