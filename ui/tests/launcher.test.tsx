@@ -554,7 +554,8 @@ test('the variant that suits the machine is preselected, marked and explained', 
   const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
   await within(dialog).findByText(/28 archivos/);
   await waitFor(() => expect(dialog.querySelector('.variant-reason')?.textContent).toBe('Te recomendamos el perfil de rendimiento Ligero porque tu equipo tiene 4 GB de RAM.'));
-  expect(dialog.querySelector('.variant-reason-name svg')).not.toBeNull();
+  expect(dialog.querySelector('.variant-reason > svg')).not.toBeNull();
+  expect(dialog.querySelector('.variant-reason-name svg')).toBeNull();
   expect((within(dialog).getByRole('radio', { name: /^Ligero/ }) as HTMLInputElement).checked).toBe(true);
   expect(within(dialog.querySelector('label:has(input[value="lite"])') as HTMLElement).getByText('Recomendada')).toBeTruthy();
   expect(dialog.querySelectorAll('.variant-chip').length).toBe(1);
