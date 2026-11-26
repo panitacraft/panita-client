@@ -82,14 +82,15 @@ test('update conflicts explain each reason and only offer to move files aside wh
   assert.match(state.updateConflictHeading(3), /3 archivos tuyos/);
 });
 
-test('version titles name both versions and shorten raw identifiers', async () => {
+test('version labels name both versions and shorten raw identifiers', async () => {
   const state = await import('../src/pack-state.ts');
-  assert.equal(state.versionTitle({ installed: '0.1', available: '0.2' }, 'a', 'b'), 'Actualizar Modpack (v0.1 → v0.2)');
-  assert.equal(state.versionTitle(null, 'v1', 'v2'), 'Actualizar Modpack (v1 → v2)');
-  assert.equal(
-    state.versionTitle({ installed: null, available: null }, '04ac0877-11a5-4de2-9a41-a41dbb44f1ee', '9f3c1d2e-aaaa-bbbb-cccc-111122223333'),
-    'Actualizar Modpack (04ac0877… → 9f3c1d2e…)',
+  assert.deepEqual(state.versionLabels({ installed: '0.1', available: '0.2' }, 'a', 'b'), { installed: 'v0.1', available: 'v0.2' });
+  assert.deepEqual(state.versionLabels(null, 'v1', 'v2'), { installed: 'v1', available: 'v2' });
+  assert.deepEqual(
+    state.versionLabels({ installed: null, available: null }, '04ac0877-11a5-4de2-9a41-a41dbb44f1ee', '9f3c1d2e-aaaa-bbbb-cccc-111122223333'),
+    { installed: '04ac0877…', available: '9f3c1d2e…' },
   );
+  assert.deepEqual(state.versionLabels({ installed: 'Uno', available: 'Dos' }, 'a', 'b'), { installed: 'Uno', available: 'Dos' });
 });
 
 test('summaries of backed up and released files use the right number', async () => {

@@ -55,6 +55,29 @@ fn date(value: &str) -> bool {
     chrono::DateTime::parse_from_rfc3339(value).is_ok()
 }
 
+/// Release notes are shown as plain text in a prompt. The Panita API accepts up to 5000
+/// characters, so that is the most shown, whichever source they come from.
+const MAX_CHANGELOG_CHARS: usize = 5000;
+
+/// Plain, bounded release notes: control characters other than line breaks and tabs
+/// are dropped, and an empty result means the version has no notes.
+fn clean_changelog(raw: &str) -> Option<String> {
+    let cleaned: String = raw
+        .replace("\r\n", "\n")
+        .chars()
+        .filter(|ch| !ch.is_control() || matches!(ch, '\n' | '\t'))
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.chars().count() <= MAX_CHANGELOG_CHARS {
+        return Some(trimmed.to_owned());
+    }
+    let cut: String = trimmed.chars().take(MAX_CHANGELOG_CHARS).collect();
+    Some(format!("{}…", cut.trim_end()))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Origin {

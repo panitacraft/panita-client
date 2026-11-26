@@ -420,6 +420,65 @@ valid empties the list and reports the error. It stops when the tab closes.
   real desktop, and all of it is unvalidated on Ubuntu x64 (§6). Copying under a pure Wayland session without
   XWayland is unverified.
 
+### 5.3 Notices with details and update changelog (2026-11-26)
+
+Owner requests for 1.2.1-beta.2.
+
+- Outcomes of one sentence are toasts, not blocks in the page: a required instance update
+  (`update_required`, "Actualiza esta instancia antes de jugar.") is a plain toast.
+- An outcome that has a list behind it is a toast with a "Ver detalles" button that opens a modal
+  shaped like the update and uninstall prompts: the player's files in the way of an update,
+  install or repair (`pack_conflict`), files to download by hand (`manual_files_required`) and
+  what a completed operation kept or left behind (kept configuration, files moved to
+  `pack-backups`, native folders that could not be removed, including a manual native cleanup).
+  A toast with an action stays until dismissed or replaced, because it can be the only way back
+  to the decision. Pages and the instance controls no longer repeat these lists inline. Moving
+  the player's files aside is confirmed in that modal ("Continuar y guardar mis archivos") and
+  offered only for an update whose conflicts are all movable; the confirmation keeps
+  `move_aside` semantics and moves nothing before the player confirms. Persistent states, such
+  as a pack waiting for manual files (`awaiting_files`), keep their inline controls.
+- The details modal of a completed operation follows the owner's template (2026-11-26): a green
+  check, the operation's title ("Actualización completada", "Reparación completada",
+  "Instalación completada", or "Instancia desinstalada" and "Instancia eliminada"), the version
+  the instance now has as a chip (a custom pack's label or the vanilla Minecraft version, not
+  shown after an uninstall), the line "{instancia} ya está listo para jugar." (or that it was
+  uninstalled and personal data is kept), one bordered card per kind with its icon, title, count,
+  a short note and its rows (kept files, files that became the player's, files saved in
+  `pack-backups` with a button to open that folder, native folders left behind and why), and an
+  "Aceptar" footer.
+- Every modal puts its action buttons in a footer on the right, with the cancel or close action first
+  and the confirming action last (owner decision, 2026-11-26). Buttons that belong to one row of a
+  list, such as "Abrir carpeta" beside a file, stay with that row.
+- The uninstall modal uses the same layout as the update prompt (owner request, 2026-11-26): a
+  header with a red circled-minus icon, the title, the instance name in a monospace chip and a close
+  button, a checklist of what is kept, a "Eliminar también la carpeta de la
+  instancia" switch (off by default), and a footer with Cancelar and "Desinstalar". Turning the switch
+  on shows a red callout with the exact folder, what is lost and a separate "Entiendo que perderé
+  todos los datos de esta instancia" switch inside it, and the button becomes "Eliminar instancia",
+  enabled only after that acknowledgement; the confirmation rules of §4.3 are unchanged.
+- A cancelled operation shows no status chip beside the instance badges: it leaves the
+  installation as it was, and the Instalar or Jugar button already says what to do.
+- The update prompt follows the owner's template (2026-11-26): a header with "Actualizar modpack"
+  (or "Actualizar Minecraft"), the installed and new versions as chips and a close button; for packs a
+  "Notas de la versión" card; a checklist of what is kept; a "Copia de seguridad de mis mundos"
+  switch marked "Recomendado" and on by default; and a footer with Cancelar and "Actualizar a
+  {version}" with the reload icon. The prompt shows no warning box about opening worlds in another
+  version (owner decision, 2026-11-26, superseding Annex B's explanation requirement for this
+  prompt); the world backup stays the default and the only safeguard it offers. Both versions are
+  named at once from the labels the catalog already carries for a custom pack; the notes and any
+  name only the backend knows (a Modrinth version number) arrive when its answer does, so the
+  notes card says it is loading until then. The notes are plain bounded text (5000
+  characters, the API's limit; control characters removed; never rendered as markup). Modrinth
+  packs show the changelog fetched from Modrinth for the pinned version. Custom packs show the
+  `changelog` of the published version's manifest (owner decision, 2026-11-26): the launcher reads
+  that field from the raw `GET /v1/instances/{id}/versions/{versionId}/manifest` answer, with the
+  session when there is one, only when the prompt opens. It is never added to the parsed
+  `Manifest`, the cached manifest or any installation record, so no disk format changes and cached
+  manifests stay valid. A missing field, a failed request or an empty text means no notes ("El
+  autor no ha publicado notas para esta versión."). Vanilla has no notes card. The API's
+  published manifest did not carry `changelog` when this was written (it exists on the admin
+  version endpoints only), so custom packs show no notes until the API adds it to the manifest.
+
 ## Annex A. Account and Token Storage Decision
 
 This annex is an integral part of AGENTS.md. It preserves the accepted decision, rationale, recovery cases, and validation requirements from the local source document `docs/account-storage-decision.md` as of 2026-10-08. The complete policy is included below; reading a separate file is not required. Update this annex alongside any owner-approved policy changes.
@@ -566,9 +625,10 @@ and individual measurements are evidence, not product guarantees.
   only after ZIP read-back verification, identifying the instance and installed
   version at backup time. Reject linked/redirected entries, unsafe names, and
   detected source changes. Preserve incomplete directories without a completed receipt.
-- Backups exclude account data. Updating never restores or deletes worlds. Explain
-  that opening a world in another Minecraft version can change it and reverting
-  game files cannot undo those changes. Reinstalling against a changed catalog pin
+- Backups exclude account data. Updating never restores or deletes worlds. Opening a
+  world in another Minecraft version can change it and reverting game files cannot
+  undo those changes; the update prompt no longer says so (§5.3, owner decision,
+  2026-11-26). Reinstalling against a changed catalog pin
   uses the same explicit version-transition/backup workflow. Full player-data
   removal and shared-cache cleanup remain outside these maintenance controls.
 - Repair/Uninstall controls require an active recorded installation plan; damaged

@@ -8,6 +8,26 @@ function Fixture() {
 }
 afterEach(() => { cleanup(); vi.useRealTimers(); });
 
+function ActionFixture({ onDetails }: { onDetails: () => void }) {
+  const toast = useTransientNotice();
+  return <><button onClick={() => toast.show('Hay archivos tuyos.', 'error', { label: 'Ver detalles', onClick: onDetails })}>Avisar</button><TransientNotice notice={toast.notice} /></>;
+}
+
+test('a toast with an action stays until dismissed and runs the action once per click', () => {
+  vi.useFakeTimers();
+  const onDetails = vi.fn();
+  render(<ActionFixture onDetails={onDetails} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Avisar' }));
+  act(() => { vi.advanceTimersByTime(60_000); });
+  expect(screen.getByText('Hay archivos tuyos.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  expect(onDetails).toHaveBeenCalledTimes(1);
+  // Opening the details does not dismiss it: the player can come back to it.
+  expect(screen.getByText('Hay archivos tuyos.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
+  expect(screen.queryByText('Hay archivos tuyos.')).toBeNull();
+});
+
 test('copy notices expire, repeated copies restart the timer, and notices include an icon', () => {
   vi.useFakeTimers();
   render(<Fixture />);

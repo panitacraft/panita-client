@@ -85,7 +85,11 @@ test('instance options require an installed plan while keeping damaged and runni
 });
 
 test('a newer published pack version offers Update between exact pins and never installs implicitly', () => {
-  assert.deepEqual(updateTarget(pack, false), { fromVersion: 'v1', toVersion: 'v2', pack: true });
+  assert.deepEqual(updateTarget(pack, false), { fromVersion: 'v1', toVersion: 'v2', pack: true, labels: { installed: '0.2', available: '0.2' } });
+  // A custom pack's readable names travel with the target; a pack without any (or a Modrinth one) carries none.
+  const named = { ...pack, source: { ...custom('v2'), label: ' 1.1.0 ' }, installedSource: { ...custom('v1'), label: null } };
+  assert.deepEqual(updateTarget(named, false)?.labels, { installed: null, available: '1.1.0' });
+  assert.equal('labels' in updateTarget({ ...pack, source: { ...custom('v2'), label: null }, installedSource: { ...custom('v1'), label: null } }, false), false);
   assert.equal(canInstall(pack, false), false);
   // Modrinth packs use their own version ids.
   const hosted = { ...pack, source: modrinth('b'), installedSource: modrinth('a') };

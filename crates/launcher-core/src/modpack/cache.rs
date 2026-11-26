@@ -93,6 +93,85 @@ impl ManifestClient {
         self
     }
 
+    /// The manifest request. Credentials only reach the Panita API.
+    fn request(&self, id: Uuid, version: Uuid, variant: Variant) -> reqwest::RequestBuilder {
+        let request = self
+            .client
+            .get(format!(
+                "{}/v1/instances/{id}/versions/{version}/manifest?variant={}",
+                self.base,
+                variant.as_str()
+            ))
+            .header(header::ACCEPT, "application/json")
+            .header(header::CACHE_CONTROL, "no-cache");
+        match &self.auth {
+            Some(auth) => auth.apply(request),
+            None => request,
+        }
+    }
+
+    /// The release notes of a published version, read from its manifest for the update
+    /// prompt. The answer is checked to be for this instance and version but never
+    /// parsed into a `Manifest`, cached or stored: only the prompt reads it, and a
+    /// version is immutable. Standard is asked because every variant of a version
+    /// shares its notes. `None` means the version has no notes.
+    pub async fn changelog(&self, id: Uuid, version: Uuid) -> Result<Option<String>, CoreError> {
+        if id.is_nil() || version.is_nil() {
+            return Err(invalid());
+        }
+        let started = std::time::Instant::now();
+        let sent = self.request(id, version, Variant::Standard).send().await;
+        crate::network_log::api_result(
+            "panita-catalog",
+            "GET",
+            "/v1/instances/{id}/versions/{version}/manifest",
+            started,
+            sent.as_ref().map(|reply| reply.status().as_u16()),
+            true,
+        );
+        let mut response = sent.map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?;
+        match response.status() {
+            StatusCode::OK => {}
+            StatusCode::NOT_FOUND => return Err(CoreError::new(ErrorCode::InstanceMissing)),
+            status if status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error() => {
+                return Err(CoreError::new(ErrorCode::ServiceUnavailable));
+            }
+            _ => return Err(invalid()),
+        }
+        if response
+            .content_length()
+            .is_some_and(|n| n > MAX_DOCUMENT_BYTES as u64)
+        {
+            return Err(invalid());
+        }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| CoreError::new(ErrorCode::NetworkUnavailable))?
+        {
+            if chunk.len() > MAX_DOCUMENT_BYTES - bytes.len() {
+                return Err(invalid());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        let document: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+        let data = document.get("data").ok_or_else(invalid)?;
+        let names = |key: &str, expected: Uuid| {
+            data.get(key)
+                .and_then(serde_json::Value::as_str)
+                .and_then(|value| Uuid::parse_str(value).ok())
+                == Some(expected)
+        };
+        if !names("instance_id", id) || !names("version_id", version) {
+            return Err(invalid());
+        }
+        Ok(data
+            .get("changelog")
+            .and_then(serde_json::Value::as_str)
+            .and_then(clean_changelog))
+    }
+
     /// Credentials only reach the Panita API. No transport retry, or fallback on
     /// explicit missing responses. The variant is always named, Standard included, so
     /// the URL and any CDN copy of it are explicit. A missing answer for another
@@ -114,18 +193,7 @@ impl ManifestClient {
                 return Err(invalid());
             }
         }
-        let mut request = self
-            .client
-            .get(format!(
-                "{}/v1/instances/{id}/versions/{version}/manifest?variant={}",
-                self.base,
-                variant.as_str()
-            ))
-            .header(header::ACCEPT, "application/json")
-            .header(header::CACHE_CONTROL, "no-cache");
-        if let Some(auth) = &self.auth {
-            request = auth.apply(request);
-        }
+        let mut request = self.request(id, version, variant);
         let validator = cached.and_then(|c| c.etag.as_deref());
         if let Some(etag) = validator {
             request = request.header(header::IF_NONE_MATCH, etag);
@@ -378,6 +446,90 @@ mod tests {
                 .fetch(id, version, Variant::Standard, Some(&cached))
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_release_notes_come_from_the_manifest_without_becoming_part_of_it() {
+        use crate::test_http::{Reply, Server};
+        let (id, version, document) = super::super::tests::fixture();
+        let mut noted = document.clone();
+        noted["data"]["changelog"] =
+            serde_json::json!("- Nuevo minimapa\r\n- Se actualiza \u{7}Create");
+        let mut blank = document.clone();
+        blank["data"]["changelog"] = serde_json::json!("  \n ");
+        let mut other = noted.clone();
+        other["data"]["version_id"] = serde_json::json!(Uuid::new_v4());
+        // A manifest that carries the notes still parses, and equals the one without them,
+        // so a cached copy never disagrees with a fresh answer because of them.
+        let with_notes = Manifest::parse(noted.to_string().as_bytes(), id, version)
+            .unwrap_or_else(|_| panic!("noted"));
+        let without = Manifest::parse(document.to_string().as_bytes(), id, version)
+            .unwrap_or_else(|_| panic!("plain"));
+        assert_eq!(with_notes, without);
+        let (noted, blank, other, plain) = (
+            noted.to_string(),
+            blank.to_string(),
+            other.to_string(),
+            document.to_string(),
+        );
+        // The server routes by the first path segment, which each client carries in its base.
+        let server = Server::start(move |request| match request.path.split('/').nth(1) {
+            Some("noted") => Reply::ok(noted.clone()),
+            Some("blank") => Reply::ok(blank.clone()),
+            Some("other") => Reply::ok(other.clone()),
+            Some("plain") => Reply::ok(plain.clone()),
+            Some("gone") => Reply::status(404),
+            _ => Reply::status(503),
+        });
+        let ask = |tail: &str| ManifestClient {
+            client: Client::builder()
+                .no_proxy()
+                .build()
+                .unwrap_or_else(|_| panic!("client")),
+            base: format!("{}/{tail}", server.base()),
+            auth: None,
+        };
+        assert_eq!(
+            ask("noted")
+                .changelog(id, version)
+                .await
+                .ok()
+                .flatten()
+                .as_deref(),
+            Some("- Nuevo minimapa\n- Se actualiza Create")
+        );
+        for tail in ["blank", "plain"] {
+            assert_eq!(
+                ask(tail).changelog(id, version).await.ok(),
+                Some(None),
+                "{tail}"
+            );
+        }
+        // The answer must be for the version that was asked.
+        assert_eq!(
+            ask("other")
+                .changelog(id, version)
+                .await
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::InvalidData)
+        );
+        assert_eq!(
+            ask("gone")
+                .changelog(id, version)
+                .await
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::InstanceMissing)
+        );
+        assert_eq!(
+            ask("busy")
+                .changelog(id, version)
+                .await
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::ServiceUnavailable)
         );
     }
 

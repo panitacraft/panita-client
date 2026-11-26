@@ -36,6 +36,8 @@ const variantOptions = [
   { id: 'standard', fileCount: 28, size: 128_307_508, sameAsPrevious: false },
   { id: 'deluxe', fileCount: 35, size: 190_000_000, sameAsPrevious: false },
 ];
+let changelog: string | null = null;
+let namesGate: Promise<void> | undefined;
 let systemResources: { memoryMib: number | null; freeDiskMib: number | null } | null = null;
 let settingsRamAuto: boolean | undefined;
 let ramPreview: Record<string, unknown> | null = null;
@@ -54,7 +56,7 @@ beforeEach(() => {
   catalog = { instances: [{ ...first }, { ...first, id: 'pack-b', name: 'Otra aventura' }], stale: false, cacheWarning: null, registryWarning: null };
   play = { revision: 0, processSessionId: 'test', closeBlocked: false, gracefulStopSupported: true, instances: [] };
   backend.listeners.clear();
-  systemResources = null;
+  systemResources = null; changelog = null; namesGate = undefined;
   settingsRamAuto = undefined; ramPreview = null;
   accounts = { revision: 1, selected_account_id: 'account', login_pending: false, login_error: null, accounts: [{ metadata: { account_id: 'account', kind: 'offline', username: 'Jugador', profile_id: 'profile', oauth_client_id: null }, status: 'offline', error: null, persisted: true }] };
   backend.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
@@ -71,13 +73,13 @@ beforeEach(() => {
       case 'instance_folder_path': return 'C:\\Synthetic\\PanitaClient\\instances\\aventura';
       case 'begin_uninstall': return;
       case 'content_cache_size': return 0;
-      case 'pack_version_names': return { installed: 'Uno', available: 'Dos' };
+      case 'pack_version_names': await namesGate; return { installed: 'Uno', available: 'Dos', changelog };
       case 'pack_files': return { files: [manualFile], complete: false };
       case 'import_pack_file': throw 'artifact_mismatch';
       case 'instance_variants': return variantOptions;
       case 'list_screenshots': return { screenshots: [], truncated: false };
       case 'system_resources': if (!systemResources) throw 'storage_unavailable'; return systemResources;
-      case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': case 'open_instance_folder': return;
+      case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': case 'open_instance_folder': case 'open_curseforge_project': return;
       default: throw new Error(`Unexpected test command: ${command}`);
     }
   });
@@ -94,8 +96,8 @@ test('refreshing a selected vanilla instance replaces Play with a mandatory upda
   expect(screen.queryByRole('button', { name: 'Jugar', exact: true })).toBeNull();
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(update);
-  expect(screen.getByRole('dialog', { name: 'Actualizar Minecraft (1.21.1 → 1.21.2)' })).toBeTruthy();
-  expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByRole('dialog', { name: 'Actualizar Minecraft' })).toBeTruthy();
+  expect((screen.getByLabelText(/^Copia de seguridad de mis mundos/) as HTMLInputElement).checked).toBe(true);
 });
 
 test('the running primary action stays available and crashes use the branded dialog', async () => {
@@ -142,11 +144,14 @@ test('mandatory pack updates open a modal and require explicit world-backup cons
   const update = await screen.findByRole('button', { name: 'Actualizar…' });
   expect(screen.queryByRole('button', { name: 'Jugar', exact: true })).toBeNull();
   await user.click(update);
-  await screen.findByText('Actualizar Modpack (Uno → Dos)');
-  expect(screen.getByRole('dialog', { name: 'Actualizar Modpack (Uno → Dos)' })).toBeTruthy();
-  expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
+  const dialog = await screen.findByRole('dialog', { name: 'Actualizar modpack' });
+  // The header names both versions as chips, and the confirm button names the one being installed.
+  await within(dialog).findByText('Uno');
+  expect(within(dialog).getByText('Dos')).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: 'Actualizar a Dos' })).toBeTruthy();
+  expect((screen.getByLabelText(/^Copia de seguridad de mis mundos/) as HTMLInputElement).checked).toBe(true);
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
-  await user.click(screen.getByRole('button', { name: 'Actualizar', exact: true }));
+  await user.click(screen.getByRole('button', { name: /^Actualizar a / }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({ instanceId: 'pack-a', update: { from_version: 'v1', to_version: 'v2', backup_worlds: true } }));
 });
 
@@ -200,15 +205,262 @@ test('running controls survive navigation and force stop never happens without c
   expect(screen.queryByRole('button', { name: 'Confirmar cierre forzoso' })).toBeNull();
 });
 
-test('update conflicts require explicit set-aside consent before retrying', async () => {
+test('update conflicts are a toast, and set-aside consent is asked in a confirmation modal', async () => {
   catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
   const user = userEvent.setup(); mount();
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
   await emit(entry({ phase: 'failed', operation: 'update', error: 'pack_conflict', packConflicts: [{ path: 'mods/player.jar', reason: 'occupied' }] }));
-  expect(screen.getByText('mods/player.jar')).toBeTruthy();
+  const toast = await screen.findByText('Hay 1 archivo tuyo que estorba a la actualización.');
+  expect(toast.closest('.transient-notice')).not.toBeNull();
+  // The list and the raw error text no longer sit in the page.
+  expect(screen.queryByText('mods/player.jar')).toBeNull();
+  expect(screen.queryByText(/Ya existen archivos tuyos/)).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  const dialog = screen.getByRole('dialog', { name: 'Hay 1 archivo tuyo que estorba a la actualización' });
+  expect(within(dialog).getByText('mods/player.jar')).toBeTruthy();
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
+  // Cancelling changes nothing and leaves the toast to come back to.
+  await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
   await user.click(screen.getByRole('button', { name: 'Continuar y guardar mis archivos' }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({ update: { from_version: 'v1', to_version: 'v2', backup_worlds: true, move_aside: true } }));
+});
+
+test('the conflict toast leaves once the player starts the update it was about', async () => {
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'failed', operation: 'update', error: 'pack_conflict', packConflicts: [{ path: 'mods/player.jar', reason: 'occupied' }] }));
+  await screen.findByText('Hay 1 archivo tuyo que estorba a la actualización.');
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  await user.click(screen.getByRole('button', { name: 'Continuar y guardar mis archivos' }));
+  // Nothing has started yet, so the toast stays; it goes when the new operation does.
+  expect(screen.queryByText('Hay 1 archivo tuyo que estorba a la actualización.')).not.toBeNull();
+  await emit(entry({ requestId: 'again', phase: 'installing', operation: 'update' }));
+  await waitFor(() => expect(screen.queryByText('Hay 1 archivo tuyo que estorba a la actualización.')).toBeNull());
+  expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull();
+});
+
+test('a details toast of a finished operation leaves when that instance starts another one', async () => {
+  mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update', packSkipped: ['options.txt'] }));
+  await screen.findByRole('button', { name: 'Ver detalles' });
+  await emit(entry({ requestId: 'next', phase: 'installing', operation: 'repair' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull());
+});
+
+test('modal footers read the same way: cancel first, the confirming action last', async () => {
+  const labels = (dialog: HTMLElement) => [...dialog.querySelectorAll('.account-buttons > button, .update-foot > button')].map(button => button.textContent);
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  // Uninstall
+  await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Desinstalar…' }));
+  const uninstall = await screen.findByRole('dialog', { name: 'Desinstalar instancia' });
+  expect(labels(uninstall)).toEqual(['Cancelar', 'Desinstalar']);
+  await user.click(within(uninstall).getByRole('button', { name: 'Cancelar' }));
+  // Update
+  await user.click(screen.getByRole('button', { name: 'Actualizar…' }));
+  const update = await screen.findByRole('dialog', { name: 'Actualizar modpack' });
+  expect(labels(update)).toEqual(['Cancelar', 'Actualizar a Dos']);
+  await user.click(within(update).getByRole('button', { name: 'Cancelar' }));
+  // Details of an operation, and a completed one with a single action
+  await emit(entry({ phase: 'failed', operation: 'update', error: 'pack_conflict', packConflicts: [{ path: 'mods/a.jar', reason: 'occupied' }] }));
+  await user.click(await screen.findByRole('button', { name: 'Ver detalles' }));
+  expect(labels(screen.getByRole('dialog'))).toEqual(['Cancelar', 'Continuar y guardar mis archivos']);
+});
+
+test('the completion modal keeps its single action on the right like every other footer', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update', packSkipped: ['options.txt'] }));
+  await user.click(await screen.findByRole('button', { name: 'Ver detalles' }));
+  const footer = screen.getByRole('dialog', { name: 'Actualización completada' }).querySelector('.update-foot');
+  expect(footer?.classList.contains('is-start')).toBe(false);
+});
+
+test('conflicts that moving files aside cannot fix offer no continue button', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'failed', operation: 'install', error: 'pack_conflict', packConflicts: [{ path: 'mods', reason: 'blocked' }] }));
+  await user.click(await screen.findByRole('button', { name: 'Ver detalles' }));
+  const dialog = screen.getByRole('dialog', { name: 'Hay 1 archivo tuyo que estorba a la instalación' });
+  expect(within(dialog).queryByRole('button', { name: 'Continuar y guardar mis archivos' })).toBeNull();
+  expect(within(dialog).getByText(/Mueve esa carpeta o enlace/)).toBeTruthy();
+  await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
+  await user.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
+  expect(screen.queryByText('Hay 1 archivo tuyo que estorba a la instalación.')).toBeNull();
+});
+
+test('a required update is a toast without details instead of a block in the page', async () => {
+  mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'failed', operation: 'play', error: 'update_required' }));
+  const toast = await screen.findByText('Actualiza esta instancia antes de jugar.');
+  expect(toast.closest('.transient-notice')).not.toBeNull();
+  expect(document.querySelector('.account-error')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull();
+});
+
+test('missing manual files are a toast whose details open the download buttons', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'failed', operation: 'update', error: 'manual_files_required', packAwaiting: [manualFile as never] }));
+  await screen.findByText('Falta 1 archivo que debes descargar tú mismo.');
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  const dialog = screen.getByRole('dialog', { name: 'Falta 1 archivo que debes descargar tú mismo' });
+  expect(within(dialog).getByText('Mod manual')).toBeTruthy();
+  await user.click(within(dialog).getByRole('button', { name: 'Abrir CurseForge' }));
+  expect(backend.invoke).toHaveBeenCalledWith('open_curseforge_project', { projectId: 1 });
+  await user.click(within(dialog).getByRole('button', { name: 'Abrir carpeta' }));
+  expect(backend.invoke).toHaveBeenCalledWith('open_instance_folder', { instanceId: 'pack-a', folder: 'mods' });
+});
+
+test('kept files after an update are announced once, with their list one click away', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update', packSkipped: ['options.txt', 'config/paperdoll.json'], packBackedUp: ['mods/a.jar'] }));
+  await screen.findByText('Aventura: Actualización completada. Algunos de tus archivos se conservaron.');
+  // The lists are not repeated in the page while the modal is closed.
+  expect(screen.queryByText('options.txt')).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  const dialog = screen.getByRole('dialog', { name: 'Actualización completada' });
+  // The header says the instance is ready and which version it now has; the name is not part of the title.
+  expect(within(dialog).getByText('Dos')).toBeTruthy();
+  expect(within(dialog).getByText(/ya está listo para jugar\./).textContent).toBe('Aventura ya está listo para jugar.');
+  // One card per kind, each with its count and rows.
+  const kept = within(dialog).getByRole('group', { name: 'Archivos conservados' });
+  expect(within(kept).getByText('2')).toBeTruthy();
+  expect(within(kept).getByText('options.txt')).toBeTruthy();
+  expect(within(kept).getByText('config/paperdoll.json')).toBeTruthy();
+  const saved = within(dialog).getByRole('group', { name: 'Archivos guardados' });
+  expect(within(saved).getByText('mods/a.jar')).toBeTruthy();
+  await user.click(within(saved).getByRole('button', { name: 'Abrir copias de archivos' }));
+  expect(backend.invoke).toHaveBeenCalledWith('open_instance_folder', { instanceId: 'pack-a', folder: 'pack-backups' });
+  await user.click(within(dialog).getByRole('button', { name: 'Aceptar' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  // Accepting is reading what the toast pointed to, so the toast goes with it.
+  expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull();
+  expect(screen.queryByText(/Algunos de tus archivos se conservaron/)).toBeNull();
+});
+
+test('the toast of a completed operation also closes with its own dismiss button', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update', packSkipped: ['options.txt'] }));
+  await screen.findByRole('button', { name: 'Ver detalles' });
+  await user.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
+  expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull();
+});
+
+test('leftover native folders after an update are listed with their reason in the same modal', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update', nativeCleanup: { cleanedGenerations: 1, retainedGenerations: 1, untrackedGenerations: 0, details: [{ directory: 'natives/old', reason: 'accessFailure' }] } }));
+  await screen.findByText(/Quedaron carpetas nativas antiguas sin eliminar\./);
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  const natives = within(screen.getByRole('dialog', { name: 'Actualización completada' })).getByRole('group', { name: 'Carpetas nativas antiguas' });
+  expect(within(natives).getByText('natives/old')).toBeTruthy();
+  expect(within(natives).getByText(/No se pudo eliminar/)).toBeTruthy();
+});
+
+test('an uninstall that left something behind says so without a version', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'uninstalled', operation: 'uninstall', nativeCleanup: { cleanedGenerations: 0, retainedGenerations: 1, untrackedGenerations: 0, details: [{ directory: 'natives/old', reason: 'accessFailure' }] } }));
+  await user.click(await screen.findByRole('button', { name: 'Ver detalles' }));
+  const dialog = screen.getByRole('dialog', { name: 'Instancia desinstalada' });
+  expect(within(dialog).getByText(/se desinstaló\./)).toBeTruthy();
+  expect(dialog.querySelector('.version-chip')).toBeNull();
+});
+
+test('a completed operation with nothing to explain keeps the plain toast', async () => {
+  mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update' }));
+  await screen.findByText('Aventura: Actualización completada.');
+  expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull();
+});
+
+test('a cancelled installation leaves no status chip beside the instance badges', async () => {
+  catalog.instances[0] = { ...first, localState: 'cancelled', installedSource: null, hasInstallationManifest: false };
+  mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  const hero = screen.getByRole('article', { name: 'Aventura' });
+  expect(within(hero).queryByText('Operación cancelada')).toBeNull();
+  expect(hero.querySelector('.instance-status')).toBeNull();
+  expect(within(hero).getByRole('button', { name: 'Instalar', exact: true })).toBeTruthy();
+});
+
+test('the update prompt shows the new version\'s release notes as plain text', async () => {
+  changelog = '- Nuevas misiones\n- <b>Menos</b> lag';
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  const notes = await screen.findByLabelText('Notas de la versión');
+  expect(notes.textContent).toBe(changelog);
+  expect(notes.querySelector('b')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Notas de la versión' })).toBeTruthy();
+});
+
+test('the update prompt says so when the new version has no release notes', async () => {
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  await screen.findByText('El autor no ha publicado notas para esta versión.');
+  expect(screen.queryByLabelText('Notas de la versión')).toBeNull();
+});
+
+test('a vanilla update does not claim to have release notes', async () => {
+  catalog.instances[0] = { ...first, source: { type: 'vanilla' }, installedSource: null, installedVersion: '1.21.1', minecraftVersion: '1.21.2', localState: 'installed' };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…', exact: true }));
+  const dialog = await screen.findByRole('dialog', { name: 'Actualizar Minecraft' });
+  expect(screen.queryByRole('heading', { name: 'Notas de la versión' })).toBeNull();
+  // Vanilla versions are named as they are, without the pack's "v" prefix.
+  expect(within(dialog).getByText('1.21.1')).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: 'Actualizar a 1.21.2' })).toBeTruthy();
+});
+
+test('the update prompt names both versions from the catalog before the backend answers, then adds the notes', async () => {
+  let release = () => {};
+  namesGate = new Promise<void>(resolve => { release = resolve; });
+  changelog = '- Nuevas misiones';
+  catalog.instances[0] = { ...first, localState: 'update_available',
+    source: { ...first.source, label: '1.1.0' }, installedSource: { ...first.installedSource, label: '1.0.0', current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Actualizar modpack' });
+  // The backend is still waiting, yet the readable names and the confirm button are already right.
+  expect(within(dialog).getByText('v1.0.0')).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: 'Actualizar a v1.1.0' })).toBeTruthy();
+  expect(within(dialog).getByText('Buscando las novedades…')).toBeTruthy();
+  await act(async () => { release(); });
+  expect((await within(dialog).findByLabelText('Notas de la versión')).textContent).toBe('- Nuevas misiones');
+});
+
+test('the update prompt has no world warning box and its confirm button uses the reload icon', async () => {
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Actualizar modpack' });
+  expect(within(dialog).queryByText(/no revierte esos cambios/)).toBeNull();
+  expect(within(dialog).getByRole('button', { name: /^Actualizar a / }).querySelector('.lucide-refresh-cw')).not.toBeNull();
+});
+
+test('the update prompt can be closed from its header without starting anything', async () => {
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Actualizar modpack' });
+  await user.click(within(dialog).getByRole('switch', { name: /^Copia de seguridad de mis mundos/ }));
+  await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
 });
 
 test('missing and failed artwork use a local fallback without removing controls', async () => {
@@ -388,8 +640,8 @@ test('browser update preview permits inspection while desktop actions stay disab
   const user = userEvent.setup(); mount();
   await user.click(await screen.findByRole('button', { name: 'Modpack con actualización: Actualización disponible' }));
   await user.click(screen.getByRole('button', { name: 'Actualizar…', exact: true }));
-  expect((screen.getByRole('button', { name: 'Actualizar', exact: true }) as HTMLButtonElement).disabled).toBe(true);
-  expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole('button', { name: /^Actualizar a / }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText(/^Copia de seguridad de mis mundos/) as HTMLInputElement).checked).toBe(true);
   await user.click(screen.getByRole('button', { name: 'Cancelar', exact: true }));
   expect(screen.queryByRole('dialog')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Opciones de instancia' }));
@@ -404,13 +656,13 @@ test('cancelling the update modal never starts an update and restores the defaul
   const user = userEvent.setup(); mount();
   const trigger = await screen.findByRole('button', { name: 'Actualizar…', exact: true });
   await user.click(trigger);
-  await user.click(screen.getByLabelText('Crear copia de mis mundos (recomendado)'));
+  await user.click(screen.getByLabelText(/^Copia de seguridad de mis mundos/));
   const dialog = screen.getByRole('dialog');
   fireEvent(dialog, new Event('cancel', { bubbles: false, cancelable: true }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(trigger);
-  expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText(/^Copia de seguridad de mis mundos/) as HTMLInputElement).checked).toBe(true);
 });
 
 
@@ -420,6 +672,8 @@ test('uninstall defaults to preserving player files and sends an explicit false 
   await user.click(within(article).getByRole('button', { name: 'Opciones de instancia' }));
   await user.click(screen.getByRole('menuitem', { name: 'Desinstalar…' }));
   const dialog = screen.getByRole('dialog', { name: 'Desinstalar instancia' });
+  // The instance is named in a chip beside the title, outside the dialog's name.
+  expect(dialog.querySelector('.name-chip')?.textContent).toBe('Aventura');
   expect((within(dialog).getByLabelText('Eliminar también la carpeta de la instancia') as HTMLInputElement).checked).toBe(false);
   expect(within(dialog).queryByRole('button', { name: 'Eliminar instancia', exact: true })).toBeNull();
   await user.click(within(dialog).getByRole('button', { name: 'Desinstalar', exact: true }));
@@ -632,6 +886,7 @@ test('a conflict while changing the variant can be retried from the instance pag
   await user.click(await screen.findByRole('radio', { name: 'Ligero' }));
   await user.click(screen.getByRole('button', { name: 'Cambiar rendimiento' }));
   await emit(entry({ operation: 'update', phase: 'failed', error: 'pack_conflict', packConflicts: [{ path: 'mods/a.jar', reason: 'occupied' }] }));
+  await user.click(await screen.findByRole('button', { name: 'Ver detalles' }));
   await user.click(await screen.findByRole('button', { name: 'Continuar y guardar mis archivos' }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({
     update: { from_version: 'v2', to_version: 'v2', backup_worlds: false, from_variant: 'standard', to_variant: 'lite', move_aside: true },
@@ -681,7 +936,7 @@ test('a version update of a pack installed before variants names no variant, so 
   catalog.instances[0] = { ...first, ...withVariants, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
   const user = userEvent.setup(); mount();
   await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
-  await user.click(screen.getByRole('button', { name: 'Actualizar', exact: true }));
+  await user.click(screen.getByRole('button', { name: /^Actualizar a / }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({ update: { from_version: 'v1', to_version: 'v2', backup_worlds: true } }));
 });
 

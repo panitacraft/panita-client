@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { instanceStatus, visibleSelection, safeArtwork, instanceRailCapacity } from '../src/launcher-state.ts';
+import { instanceStatus, visibleSelection, safeArtwork, instanceRailCapacity, showsStatusChip } from '../src/launcher-state.ts';
+
+test('a cancelled operation gets no chip, while real problems and live work still do', () => {
+  const instance = { localState: 'cancelled', availability: 'enabled' };
+  assert.equal(instanceStatus(instance), 'Operación cancelada');
+  assert.equal(showsStatusChip(instanceStatus(instance)), false);
+  assert.equal(showsStatusChip(instanceStatus(instance), true), false);
+  for (const quiet of ['Sin instalar', 'Lista para jugar', 'Actualización disponible']) assert.equal(showsStatusChip(quiet), false, quiet);
+  for (const shown of ['Necesita reparación', 'La operación falló', 'Faltan archivos', 'Deshabilitada']) assert.equal(showsStatusChip(shown, true), true, shown);
+  // The hero has its own progress, the rail hint keeps naming it.
+  assert.equal(showsStatusChip('Actualizando', true), false);
+  assert.equal(showsStatusChip('Actualizando'), true);
+});
 
 test('the rail fits complete cards and only reserves arrows when the catalog overflows', () => {
   assert.equal(instanceRailCapacity(455, 7), 6);

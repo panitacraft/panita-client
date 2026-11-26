@@ -346,7 +346,7 @@ export function ActivationPanel() {
     </div>
     {confirming && <AccountDialog title="Cerrar sesión de Panitacraft" onCancel={() => setConfirming(false)}>
       <p>¿Cerrar la sesión de Panitacraft en este equipo? Tus perfiles de Minecraft se conservan.</p>
-      <div className="account-buttons"><Button variant="destructive" disabled={activation.busy === 'sign_out_activation'} onClick={() => { setConfirming(false); void activation.signOut(); }}><LogOut aria-hidden="true" />Cerrar sesión</Button><Button variant="outline" onClick={() => setConfirming(false)}><X aria-hidden="true" />Cancelar</Button></div>
+      <div className="account-buttons"><Button variant="outline" onClick={() => setConfirming(false)}><X aria-hidden="true" />Cancelar</Button><Button variant="destructive" disabled={activation.busy === 'sign_out_activation'} onClick={() => { setConfirming(false); void activation.signOut(); }}><LogOut aria-hidden="true" />Cerrar sesión</Button></div>
     </AccountDialog>}
   </section>;
 }

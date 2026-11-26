@@ -22,7 +22,8 @@ import { CachePanel, PackPanel } from './pack';
 import { VariantPanel } from './components/variant-panel';
 import { ScreenshotPanel } from './components/screenshot-panel';
 import { CrashNotifications } from './game-output';
-import { instanceStatus, visibleSelection, type LauncherPage } from './launcher-state';
+import { instanceStatus, showsStatusChip, visibleSelection, type LauncherPage } from './launcher-state';
+import { installedVersionLabel } from './notice-state';
 import { CatalogArtwork } from './components/catalog-artwork';
 import { Button } from './components/ui/button';
 import { AccountAvatar } from './components/account-avatar';
@@ -114,7 +115,7 @@ export function Launcher() {
           <strong>{instance.name}</strong>
           <p>{instance.description}</p>
           <div className="instance-tags"><InstanceBadges instance={instance} updateAvailable={instance.localState === 'update_available'} />
-            {!['Sin instalar', 'Lista para jugar', 'Actualización disponible'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className={`instance-status ${instance.availability === 'disabled' ? 'status-warning' : ''}`}>{instance.availability === 'disabled' && <LockKeyhole aria-hidden="true" />}{['Instalando', 'Reparando', 'Actualizando'].includes(instanceStatus(instance, liveEntry(instance.id))) && <LoaderCircle className="spin" aria-hidden="true" />}{instanceStatus(instance, liveEntry(instance.id))}</span>}
+            {showsStatusChip(instanceStatus(instance, liveEntry(instance.id))) && <span className={`instance-status ${instance.availability === 'disabled' ? 'status-warning' : ''}`}>{instance.availability === 'disabled' && <LockKeyhole aria-hidden="true" />}{['Instalando', 'Reparando', 'Actualizando'].includes(instanceStatus(instance, liveEntry(instance.id))) && <LoaderCircle className="spin" aria-hidden="true" />}{instanceStatus(instance, liveEntry(instance.id))}</span>}
           </div>
         </div>}><Button variant="ghost"
           className={`rail-instance size-13 p-0 ${instance.id === selectedId && page === 'library' ? 'is-selected' : ''} ${instance.availability === 'disabled' ? 'is-disabled' : ''}`}
@@ -154,7 +155,7 @@ export function Launcher() {
 
       <div id="launcher-content" tabIndex={-1} className="launcher-content">
         <div className="launcher-notices">
-          <PlayNotice names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} />
+          <PlayNotice names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} versions={Object.fromEntries(instances.flatMap(instance => { const label = installedVersionLabel(instance); return label ? [[instance.id, label]] : []; }))} />
           {preferences?.error && <div role="alert" className="catalog-notice"><p>{preferences.error}</p><Button variant="secondary" disabled={preferences.busy} onClick={preferences.retry}>Reintentar preferencias</Button></div>}
           {preferences?.warning && <p role="alert">{preferences.warning}</p>}
           {refreshError && catalog.kind === 'ready' && <p role="alert">No pudimos actualizar las instancias. {refreshError}</p>}
@@ -179,7 +180,7 @@ export function Launcher() {
                 <p>{instance.description}</p>
                 <div className="instance-tags">
                   <InstanceBadges instance={instance} showLoaderHint showVariant />
-                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible', 'Instalando', 'Reparando', 'Actualizando', 'Preparando inicio', 'Cerrando Minecraft'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
+                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : showsStatusChip(instanceStatus(instance, liveEntry(instance.id)), true) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
                 </div>
               </div>
             </div>
@@ -189,7 +190,7 @@ export function Launcher() {
               {instance.availability === 'unverified' && <p role="status">No pudimos verificar el estado de esta instancia.</p>}
               {!instance.compatible && <p role="status">Necesitas Panita Client {instance.minLauncherVersion} o una versión posterior.</p>}
               {!instance.supported && <p role="status">Este tipo de instancia todavía no es compatible.</p>}
-              <PlayControls onPackCache={() => { openSettings('global'); setSettingsTab('storage'); setCacheRequest(value => value + 1); }} instanceId={instance.id} removalPending={instance.removalPending} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} variants={instanceVariants(instance)} withdrawnVariant={withdrawnVariant(instance, catalog.stale || unverified)} automaticSwitch={automaticVariantSwitch(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available' || liveEntry(instance.id)?.phase === 'installed')} />
+              <PlayControls instanceName={instance.name} onPackCache={() => { openSettings('global'); setSettingsTab('storage'); setCacheRequest(value => value + 1); }} instanceId={instance.id} removalPending={instance.removalPending} optionsAllowed={canOpenInstanceOptions(instance)} installAllowed={canInstall(instance, catalog.stale || unverified)} updateTarget={updateTarget(instance, catalog.stale || unverified)} variants={instanceVariants(instance)} withdrawnVariant={withdrawnVariant(instance, catalog.stale || unverified)} automaticSwitch={automaticVariantSwitch(instance, catalog.stale || unverified)} repairAllowed={canRepair(instance, catalog.stale || unverified)} uninstallAllowed={canUninstall(instance)} pack={isPack(instance)} cleanupAllowed={instance.hasInstallationManifest && instance.localState !== 'running'} onSettings={() => openSettings('instance')} allowed={instance.compatible && instance.supported && instance.availability !== 'disabled' && instance.availability !== 'missing' && (instance.localState === 'installed' || instance.localState === 'update_available' || liveEntry(instance.id)?.phase === 'installed')} />
               <PackPanel instanceId={instance.id} awaiting={instance.localState === 'awaiting_files'} onChanged={() => setCatalogAttempt(previous => previous + 1)} />
             </div>
           </article>)}
