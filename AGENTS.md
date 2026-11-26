@@ -504,15 +504,15 @@ the Minecraft log viewer, only as the two explicit player actions below.
 
 ### 5.5 Skin and cape manager (2026-11-26)
 
-Owner request, GitHub issue 51, for 1.3.0-beta.1. A "Skins y capas" page, opened from the main
-toolbar, manages the skin, arm model and cape of the selected Microsoft account. Each Microsoft
-row of the accounts page also has an "Editar skin" button beside its options menu (owner request,
-2026-11-26); on an account that is not selected it selects that account first, because the page
-always works on the selected one.
+Owner request, GitHub issue 51, for 1.3.0-beta.1. A "Skins y capas" page manages the skin, arm
+model and cape of the selected Microsoft account. It opens from an "Aspectos" button with a palette
+icon beside the options menu of each Microsoft row on the accounts page (owner request, 2026-11-26;
+the main toolbar has no entry). On an account that is not selected the button selects that account
+first, because the page always works on the selected one.
 
 - Only an authenticated Microsoft account can use it. The core refuses every operation for an
-  offline account (`microsoft_account_required`), so hiding the toolbar entry is a convenience and
-  not the boundary. The page offers nothing to an offline account except an explanation.
+  offline account (`microsoft_account_required`), so hiding the button on offline rows is a convenience
+  and not the boundary. The page offers nothing to an offline account except an explanation.
 - A "look" is a skin file, its arm model (classic or slim) and a cape or none. The library keeps
   at most 100 looks, shared by every Microsoft account on this computer. Looks, the capes the account
   owns and the last known state of each profile live in `skins.json` (disk schema 1,
