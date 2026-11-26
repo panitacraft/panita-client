@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import type { RamPreview } from './ram-state';
 import type { SystemResources } from './variant-state';
 
 /** Memory and free disk space; null outside the app or when they cannot be read. */
@@ -21,4 +22,22 @@ export function useSystemResources(): SystemResources | null {
     return () => { current = false; };
   }, []);
   return resources;
+}
+
+/** What an automatic RAM allocation would be right now; null outside the app or when it cannot be read. */
+export function loadRamPreview(): Promise<RamPreview | null> {
+  if (!isTauri()) return Promise.resolve(null);
+  return invoke<RamPreview>('ram_preview').catch(() => null);
+}
+
+/** The preview, read each time the caller appears since free memory changes. */
+export function useRamPreview(active: boolean): RamPreview | null {
+  const [preview, setPreview] = useState<RamPreview | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    let current = true;
+    void loadRamPreview().then(next => { if (current) setPreview(next); });
+    return () => { current = false; };
+  }, [active]);
+  return preview;
 }

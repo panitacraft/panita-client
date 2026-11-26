@@ -11,6 +11,9 @@ pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
 struct SettingsDocument {
     schema: u32,
     ram_mib: u32,
+    /// Absent in files written before automatic RAM; they keep their manual value.
+    #[serde(default)]
+    ram_auto: bool,
     jvm_args: Vec<String>,
     java_path: Option<String>,
     game_window: WindowSize,
@@ -74,6 +77,10 @@ pub struct WindowSize {
 pub struct GlobalSettings {
     pub schema_version: u32,
     pub ram_mib: u32,
+    /// Resolve the heap at launch from the machine and the game instead of using
+    /// `ram_mib`, which is kept so switching back restores the player's value.
+    #[serde(default)]
+    pub ram_auto: bool,
     pub extra_jvm_args: Vec<String>,
     pub java_path_override: Option<String>,
     pub window_size: WindowSize,
@@ -88,6 +95,9 @@ impl Default for GlobalSettings {
         Self {
             schema_version: SETTINGS_SCHEMA_VERSION,
             ram_mib: 4096,
+            // A fresh installation starts automatic; files that predate the option
+            // read as manual, so no saved value changes.
+            ram_auto: true,
             extra_jvm_args: Vec::new(),
             java_path_override: None,
             window_size: WindowSize {
@@ -131,6 +141,7 @@ impl GlobalSettings {
             let settings = Self {
                 schema_version: SETTINGS_SCHEMA_VERSION,
                 ram_mib: document.ram_mib,
+                ram_auto: document.ram_auto,
                 extra_jvm_args: document.jvm_args,
                 java_path_override: document.java_path,
                 window_size: document.game_window,
@@ -159,6 +170,7 @@ impl GlobalSettings {
         let document = SettingsDocument {
             schema: 3,
             ram_mib: self.ram_mib,
+            ram_auto: self.ram_auto,
             jvm_args: self.extra_jvm_args.clone(),
             java_path: self.java_path_override.clone(),
             game_window: self.window_size.clone(),
@@ -307,6 +319,10 @@ fn validate_jvm_argument(arg: &str) -> Result<(), CoreError> {
 pub struct InstanceSettings {
     pub schema_version: u32,
     pub ram_mib: Option<u32>,
+    /// `Some(true)` is automatic, `Some(false)` manual. Without it an instance with a
+    /// `ram_mib` is manual and one without inherits the global choice.
+    #[serde(default)]
+    pub ram_auto: Option<bool>,
     pub extra_jvm_args: Option<Vec<String>>,
     pub java_path_override: Option<String>,
     pub window_size: Option<WindowSize>,
@@ -321,6 +337,9 @@ pub(crate) struct StoredOverrides {
     #[serde(alias = "schema_version")]
     schema: u32,
     ram_mib: Option<u32>,
+    /// Written only when the instance chose, so untouched instances stay readable by older builds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ram_auto: Option<bool>,
     #[serde(alias = "extra_jvm_args")]
     jvm_args: Option<Vec<String>>,
     #[serde(alias = "java_path_override")]
@@ -338,6 +357,7 @@ pub(crate) fn serialize_overrides<S: serde::Serializer>(
     StoredOverrides {
         schema: value.schema_version,
         ram_mib: value.ram_mib,
+        ram_auto: value.ram_auto,
         jvm_args: value.extra_jvm_args.clone(),
         java_path: value.java_path_override.clone(),
         game_window: value.window_size.clone(),
@@ -353,6 +373,7 @@ pub(crate) fn deserialize_overrides<'de, D: serde::Deserializer<'de>>(
     Ok(InstanceSettings {
         schema_version: stored.schema,
         ram_mib: stored.ram_mib,
+        ram_auto: stored.ram_auto,
         extra_jvm_args: stored.jvm_args,
         java_path_override: stored.java_path,
         window_size: stored.game_window,
@@ -365,6 +386,7 @@ impl Default for InstanceSettings {
         Self {
             schema_version: 1,
             ram_mib: None,
+            ram_auto: None,
             extra_jvm_args: None,
             java_path_override: None,
             window_size: None,
@@ -390,6 +412,11 @@ impl InstanceSettings {
         GlobalSettings {
             schema_version: SETTINGS_SCHEMA_VERSION,
             ram_mib: self.ram_mib.unwrap_or(global.ram_mib),
+            ram_auto: match (self.ram_auto, self.ram_mib) {
+                (Some(choice), _) => choice,
+                (None, Some(_)) => false,
+                (None, None) => global.ram_auto,
+            },
             extra_jvm_args: self
                 .extra_jvm_args
                 .clone()
@@ -640,6 +667,100 @@ mod tests {
         let effective = instance.effective(&global);
         assert_eq!(effective.ram_mib, 6144);
         assert_eq!(effective.window_size, global.window_size);
+    }
+
+    #[test]
+    fn automatic_ram_is_on_for_a_new_installation_and_off_for_saved_values() {
+        let (paths, store) = isolated_store();
+        // No file: the default is automatic.
+        assert!(GlobalSettings::load(&store).is_ok_and(|settings| settings.ram_auto));
+        // Every older spelling keeps its saved memory as a manual value.
+        let schema3 = br#"{"schema": 3, "ram_mib": 6144, "jvm_args": [], "java_path": null, "game_window": {"width": 1280, "height": 720}, "console_on_start": false, "launcher": {"selected_instance": null, "window": null}}"#;
+        let legacy = br#"{"schema_version":1,"ram_mib":8192,"extra_jvm_args":[],"java_path_override":null,"window_size":{"width":1024,"height":768}}"#;
+        for (bytes, ram) in [(schema3.as_slice(), 6144), (legacy.as_slice(), 8192)] {
+            let loaded = GlobalSettings::decode(bytes).unwrap_or_else(|_| panic!("old document"));
+            assert!(!loaded.ram_auto);
+            assert_eq!(loaded.ram_mib, ram);
+        }
+        // Choosing automatic keeps the manual value, and both survive the disk format.
+        let chosen = GlobalSettings {
+            ram_mib: 6144,
+            ram_auto: true,
+            ..GlobalSettings::default()
+        };
+        assert!(chosen.save_launch_settings(&store).is_ok());
+        let text = String::from_utf8_lossy(
+            &store
+                .read("settings.json")
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+        )
+        .into_owned();
+        assert!(text.contains("\"ram_auto\": true") && text.contains("\"ram_mib\": 6144"));
+        assert_eq!(GlobalSettings::load(&store).ok(), Some(chosen));
+        drop(store);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[test]
+    fn instance_ram_choice_always_beats_the_global_one() {
+        let manual_global = GlobalSettings {
+            ram_mib: 4096,
+            ram_auto: false,
+            ..GlobalSettings::default()
+        };
+        let auto_global = GlobalSettings {
+            ram_auto: true,
+            ..manual_global.clone()
+        };
+        let case = |ram_mib, ram_auto| InstanceSettings {
+            ram_mib,
+            ram_auto,
+            ..InstanceSettings::default()
+        };
+        // (instance ram_mib, instance ram_auto) -> (automatic, manual value) for each global.
+        let expectations = [
+            (case(None, None), (false, 4096), (true, 4096)),
+            // A manual value saved before the option existed stays manual.
+            (case(Some(6144), None), (false, 6144), (false, 6144)),
+            (case(Some(6144), Some(false)), (false, 6144), (false, 6144)),
+            // Choosing automatic keeps the manual value for when the player switches back.
+            (case(Some(6144), Some(true)), (true, 6144), (true, 6144)),
+            (case(None, Some(true)), (true, 4096), (true, 4096)),
+            (case(None, Some(false)), (false, 4096), (false, 4096)),
+        ];
+        for (instance, manual, auto) in expectations {
+            let on_manual = instance.effective(&manual_global);
+            assert_eq!(
+                (on_manual.ram_auto, on_manual.ram_mib),
+                manual,
+                "{instance:?}"
+            );
+            let on_auto = instance.effective(&auto_global);
+            assert_eq!((on_auto.ram_auto, on_auto.ram_mib), auto, "{instance:?}");
+        }
+    }
+
+    #[test]
+    fn instance_ram_choice_is_written_only_when_made_and_old_files_still_load() {
+        let disk = |value: &InstanceSettings| {
+            serialize_overrides(value, serde_json::value::Serializer)
+                .unwrap_or_else(|_| panic!("encode"))
+        };
+        let untouched = disk(&InstanceSettings::default());
+        assert!(untouched.get("ram_auto").is_none(), "{untouched}");
+        let chosen = InstanceSettings {
+            ram_auto: Some(true),
+            ..InstanceSettings::default()
+        };
+        let written = disk(&chosen);
+        assert_eq!(written.get("ram_auto"), Some(&serde_json::json!(true)));
+        let restored = deserialize_overrides(written).unwrap_or_else(|_| panic!("decode"));
+        assert_eq!(restored.ram_auto, Some(true));
+        let old = serde_json::json!({"schema":1,"ram_mib":6144,"jvm_args":null,"java_path":null,"game_window":null});
+        let old = deserialize_overrides(old).unwrap_or_else(|_| panic!("old"));
+        assert_eq!((old.ram_auto, old.ram_mib), (None, Some(6144)));
     }
 
     #[test]

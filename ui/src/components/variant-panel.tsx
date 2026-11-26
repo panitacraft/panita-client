@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, TriangleAlert } from 'lucide-react';
 import { Button } from './ui/button';
 import { VariantPicker } from './variant-picker';
+import { VariantReason } from './variant-reason';
 import { messageForError } from '../errors';
 import type { CatalogInstance } from '../preview-catalog';
 import { usePlayControl } from '../play';
@@ -66,11 +67,11 @@ export function VariantPanel({ instance, stale, onStarted }: { instance: Catalog
     <p>Descargaremos lo que falte y quitaremos solo los archivos que instalamos nosotros. Tus mundos, mods añadidos y ajustes editados se conservan.</p>
     {error && <div role="alert"><p className="account-error">No pudimos consultar los niveles de rendimiento. {error}</p><button type="button" onClick={() => setAttempt(previous => previous + 1)}>Reintentar</button></div>}
     {loading && <p className="sr-only" role="status">Consultando los niveles de rendimiento…</p>}
-    {recommendation?.reason && <p className="variant-reason">{recommendation.reason}</p>}
+    {recommendation?.reason && <VariantReason recommendation={recommendation} />}
     <VariantPicker cards={cards} loading={loading} selected={selected} installed={installed} recommended={recommendation?.variant ?? null} onPick={setPicked} />
     <div className="account-buttons">
       <Button disabled={loading || !!error || working || unchanged || !isTauri()} onClick={() => void apply()}><RefreshCw aria-hidden="true" />Cambiar rendimiento</Button>
+      {working && <p className="variant-busy" role="status"><TriangleAlert aria-hidden="true" />Hay una operación en curso en esta instancia. Espera a que termine.</p>}
     </div>
-    {working && <p role="status">Hay una operación en curso en esta instancia. Espera a que termine.</p>}
   </section>;
 }

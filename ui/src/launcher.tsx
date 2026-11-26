@@ -15,10 +15,12 @@ import { installationRefreshKey } from './play-state';
 import { canInstall, canOpenInstanceOptions, canRepair, canUninstall, isPack, updateTarget } from './library-state';
 import { automaticVariantSwitch, hasVariantChoice, instanceVariants, withdrawnVariant } from './variant-state';
 import { SettingsPanel, usePreferences } from './settings';
+import { ramProfileOf } from './ram-state';
 import { GeneralPanel, VersionBadge } from './update';
 import { DiagnosticsPanel } from './diagnostics';
 import { CachePanel, PackPanel } from './pack';
 import { VariantPanel } from './components/variant-panel';
+import { ScreenshotPanel } from './components/screenshot-panel';
 import { CrashNotifications } from './game-output';
 import { instanceStatus, visibleSelection, type LauncherPage } from './launcher-state';
 import { CatalogArtwork } from './components/catalog-artwork';
@@ -46,7 +48,7 @@ export function Launcher() {
   const [page, setPage] = useState<LauncherPage>('library');
   const [cacheRequest, setCacheRequest] = useState(0);
   const [settingsScope, setSettingsScope] = useState<'global' | 'instance'>('global');
-  const [settingsTab, setSettingsTab] = useState<'general' | 'game' | 'storage' | 'diagnostics' | 'variant'>('general');
+  const [settingsTab, setSettingsTab] = useState<'general' | 'game' | 'storage' | 'diagnostics' | 'screenshots' | 'variant'>('general');
   const [accountView, setAccountView] = useState<AccountsView | null>(null);
   const [instancePage, setInstancePage] = useState(0);
   const [version, setVersion] = useState(__APP_VERSION__);
@@ -62,8 +64,9 @@ export function Launcher() {
   const selected = instances.find(instance => instance.id === selectedId);
   const settingsTabs: readonly (readonly [typeof settingsTab, string])[] = settingsScope === 'global'
     ? [['general', 'General'], ['game', 'Minecraft'], ['storage', 'Almacenamiento'], ['diagnostics', 'Diagnóstico']]
-    : selected && hasVariantChoice(selected) ? [['game', 'Minecraft'], ['variant', 'Rendimiento']] : [];
+    : selected ? [['game', 'Minecraft'], ['screenshots', 'Capturas'], ...(hasVariantChoice(selected) ? [['variant', 'Rendimiento'] as const] : [])] : [];
   const variantTab = settingsScope === 'instance' && settingsTab === 'variant' && !!selected && hasVariantChoice(selected);
+  const screenshotsTab = settingsScope === 'instance' && settingsTab === 'screenshots' && !!selected;
   const selectedAccount = accountView?.accounts.find(account => account.metadata.account_id === accountView.selected_account_id);
   const { rail, capacity } = useInstanceRail(instances.length);
   const pageCount = Math.ceil(instances.length / capacity);
@@ -202,8 +205,9 @@ export function Launcher() {
           {settingsTabs.length > 0 && <div className="settings-tabs" role="tablist" aria-label="Secciones de ajustes">
             {settingsTabs.map(([value, label]) => <Button key={value} className="rounded-b-none" variant={settingsTab === value ? 'secondary' : 'ghost'} role="tab" aria-selected={settingsTab === value} onClick={() => setSettingsTab(value)}>{label}</Button>)}
           </div>}
-          <div hidden={settingsScope === 'global' ? settingsTab !== 'game' : variantTab}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} /></div>
-          {variantTab && selected && <VariantPanel instance={selected} stale={(catalog.kind === 'ready' ? catalog.stale : true) || unverified} onStarted={() => setPage('library')} />}
+          <div hidden={settingsScope === 'global' ? settingsTab !== 'game' : variantTab || screenshotsTab}><SettingsPanel instanceId={selectedId} name={selected?.name ?? null} local={selected?.hasInstallationManifest ?? false} scope={settingsScope} ramProfile={ramProfileOf(selected)} /></div>
+          {screenshotsTab && selected && <div><ScreenshotPanel key={selected.id} instanceId={selected.id} /></div>}
+          {variantTab && selected && <div><VariantPanel instance={selected} stale={(catalog.kind === 'ready' ? catalog.stale : true) || unverified} onStarted={() => setPage('library')} /></div>}
           <div hidden={settingsScope !== 'global' || settingsTab !== 'storage'}><CachePanel openRequest={cacheRequest} /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'general'}><GeneralPanel /></div>
           <div hidden={settingsScope !== 'global' || settingsTab !== 'diagnostics'}>{settingsScope === 'global' && settingsTab === 'diagnostics' && <DiagnosticsPanel />}</div>

@@ -93,22 +93,13 @@ fn cpu_name() -> String {
     "unknown".to_owned()
 }
 
-#[cfg(windows)]
+/// Total and available bytes, from the launcher's shared memory probe.
 fn memory() -> (Option<u64>, Option<u64>) {
-    match winsafe::GlobalMemoryStatusEx() {
-        Ok(status) => (Some(status.ullTotalPhys), Some(status.ullAvailPhys)),
-        Err(_) => (None, None),
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn memory() -> (Option<u64>, Option<u64>) {
-    linux_text::memory(&std::fs::read_to_string("/proc/meminfo").unwrap_or_default())
-}
-
-#[cfg(not(any(windows, target_os = "linux")))]
-fn memory() -> (Option<u64>, Option<u64>) {
-    (None, None)
+    let status = launcher_core::memory::MemoryStatus::read();
+    (
+        status.total_mib.map(|value| value * MIB),
+        status.available_mib.map(|value| value * MIB),
+    )
 }
 
 #[cfg(windows)]
@@ -163,19 +154,6 @@ mod linux_text {
             )
     }
 
-    /// Total and available bytes from the kibibyte fields of /proc/meminfo.
-    pub(super) fn memory(meminfo: &str) -> (Option<u64>, Option<u64>) {
-        let field = |name: &str| {
-            meminfo
-                .lines()
-                .find_map(|line| line.strip_prefix(name))
-                .and_then(|rest| rest.trim_start_matches(':').split_whitespace().next())
-                .and_then(|value| value.parse::<u64>().ok())
-                .map(|kib| kib * 1024)
-        };
-        (field("MemTotal"), field("MemAvailable"))
-    }
-
     pub(super) fn gpu(uevent: &str) -> Option<String> {
         let value = |key: &str| uevent.lines().find_map(|line| line.strip_prefix(key));
         let driver = value("DRIVER=")?;
@@ -213,15 +191,6 @@ model name	: AMD Ryzen 7 5800X 8-Core Processor
             "AMD Ryzen 7 5800X 8-Core Processor"
         );
         assert_eq!(linux_text::cpu_name("Hardware : x"), "unknown");
-        let meminfo = "MemTotal:       16318464 kB
-MemFree:  100 kB
-MemAvailable:   9000000 kB
-";
-        assert_eq!(
-            linux_text::memory(meminfo),
-            (Some(16318464 * 1024), Some(9000000 * 1024))
-        );
-        assert_eq!(linux_text::memory("garbage"), (None, None));
         assert_eq!(
             linux_text::gpu(
                 "DRIVER=nvidia

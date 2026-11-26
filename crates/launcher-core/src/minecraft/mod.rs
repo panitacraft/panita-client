@@ -21,6 +21,7 @@ pub mod plan;
 pub mod play;
 pub mod process;
 pub mod runtime;
+pub mod screenshots;
 pub mod support;
 pub(crate) mod transaction;
 pub mod update;

@@ -15,6 +15,7 @@ mod linux_desktop;
 mod pack_commands;
 mod play_commands;
 mod protocol;
+mod screenshot_commands;
 mod settings_commands;
 mod tray;
 mod update_commands;
@@ -128,6 +129,20 @@ fn system_resources(
         .app_data_dir()
         .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?;
     Ok(hardware::resources(&root))
+}
+
+/// What an automatic RAM allocation would be right now for each kind of game. Takes no
+/// input: the machine is read here and the formula lives only in the core.
+#[tauri::command]
+fn ram_preview(
+    window: tauri::WebviewWindow,
+) -> Result<launcher_core::ram::RamPreview, launcher_core::error::ErrorCode> {
+    if window.label() != "main" {
+        return Err(launcher_core::error::ErrorCode::InvalidData);
+    }
+    Ok(launcher_core::ram::preview(
+        &launcher_core::memory::MemoryStatus::read(),
+    ))
 }
 
 #[tauri::command]
@@ -329,6 +344,7 @@ pub fn run() {
             initialize,
             diagnostic_snapshot,
             system_resources,
+            ram_preview,
             open_logs_folder,
             catalog_snapshot,
             activation_commands::activation_snapshot,
@@ -379,6 +395,12 @@ pub fn run() {
             pack_commands::open_instance_folder,
             pack_commands::instance_folder_path,
             pack_commands::pack_version_names,
+            screenshot_commands::list_screenshots,
+            screenshot_commands::screenshot_image,
+            screenshot_commands::open_screenshot,
+            screenshot_commands::reveal_screenshot,
+            screenshot_commands::copy_screenshot,
+            screenshot_commands::delete_screenshot,
             pack_commands::import_pack_file,
             pack_commands::content_cache_size,
             pack_commands::clear_content_cache,

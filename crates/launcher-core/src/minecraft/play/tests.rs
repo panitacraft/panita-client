@@ -245,7 +245,8 @@ fn local() -> CatalogInstance {
     }
 }
 
-pub(crate) fn fixture() -> (AppPaths, Arc<AccountController>, Uuid) {
+/// A temporary data root holding one registered instance, without any account.
+pub(crate) fn registered_instance() -> (AppPaths, Uuid) {
     let paths = AppPaths::new(std::env::temp_dir().join(format!("panita-play-{}", Uuid::new_v4())))
         .unwrap_or_else(|_| panic!("paths"));
     let catalog = local();
@@ -262,6 +263,11 @@ pub(crate) fn fixture() -> (AppPaths, Arc<AccountController>, Uuid) {
             settings: InstanceSettings::default(),
         })
         .unwrap_or_else(|_| panic!("registry"));
+    (paths, id)
+}
+
+pub(crate) fn fixture() -> (AppPaths, Arc<AccountController>, Uuid) {
+    let (paths, id) = registered_instance();
     let repository =
         AccountRepository::new(PrivateStore::open(&paths).unwrap_or_else(|_| panic!("store")));
     let accounts = Arc::new(

@@ -1,0 +1,398 @@
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { ScreenshotPanel } from '../src/components/screenshot-panel';
+import { TooltipProvider } from '../src/components/ui/tooltip';
+import type { ScreenshotList } from '../src/screenshot-state';
+
+const backend = vi.hoisted(() => ({ native: true, invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => backend.native, invoke: backend.invoke }));
+
+const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]).buffer;
+let list: ScreenshotList;
+let failure: Record<string, unknown>;
+let hold: Promise<unknown> | null;
+
+function shots(count: number) {
+  return Array.from({ length: count }, (_, index) => ({ name: `2026-11-23_10.${String(59 - index).padStart(2, '0')}.00.png`, size: 2_000_000, modifiedMs: 1_700_000_000_000 - index * 60_000 }));
+}
+function mount() { return render(<TooltipProvider><ScreenshotPanel instanceId="pack-a" /></TooltipProvider>); }
+const calls = (command: string) => backend.invoke.mock.calls.filter(([name]) => name === command);
+const thumbnail = (name: string) => screen.findByRole('button', { name: `Ver ${name}` });
+const viewer = () => screen.getByRole('dialog', { name: /^Captura 2026/ });
+async function rightClick(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.pointer({ keys: '[MouseRight]', target: await thumbnail(name) });
+}
+
+// Cards fetch their image when they scroll into view; the tests choose whether that happens.
+const view = { visible: true, observers: [] as Array<() => void> };
+class FakeIntersectionObserver {
+  constructor(private callback: (entries: { isIntersecting: boolean }[]) => void) {}
+  observe() {
+    const show = () => this.callback([{ isIntersecting: true }]);
+    if (view.visible) queueMicrotask(show); else view.observers.push(show);
+  }
+  disconnect() {}
+}
+
+beforeEach(() => {
+  vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
+  view.visible = true; view.observers = [];
+  backend.native = true;
+  list = { screenshots: shots(3), truncated: false };
+  failure = {};
+  hold = null;
+  backend.invoke.mockReset();
+  backend.invoke.mockImplementation(async (command: string) => {
+    if (command === 'copy_screenshot' && hold) await hold;
+    if (command in failure) throw failure[command];
+    switch (command) {
+      case 'list_screenshots': return list;
+      case 'screenshot_image': return png;
+      case 'open_screenshot': case 'reveal_screenshot': case 'copy_screenshot': case 'delete_screenshot': return true;
+      default: throw new Error(`Unexpected test command: ${command}`);
+    }
+  });
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.useRealTimers(); delete (document as { visibilityState?: string }).visibilityState; });
+
+test('an image is requested only when its card becomes visible', async () => {
+  view.visible = false;
+  mount();
+  await screen.findAllByRole('listitem');
+  expect(calls('screenshot_image').length).toBe(0);
+  await act(async () => { view.observers.forEach(show => show()); });
+  await waitFor(() => expect(calls('screenshot_image').length).toBe(3));
+});
+
+test('an instance without captures shows a plain empty state that fills in by itself', async () => {
+  list = { screenshots: [], truncated: false };
+  mount();
+  expect(await screen.findByRole('heading', { name: 'Aún no hay capturas' })).toBeTruthy();
+  expect(screen.queryAllByRole('listitem').length).toBe(0);
+  expect(screen.queryByText(/tecla F2/)).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Actualizar' })).toBeNull();
+  expect(calls('screenshot_image').length).toBe(0);
+  list = { screenshots: shots(1), truncated: false };
+  // Coming back to the window is when a new capture is most likely to be waiting.
+  act(() => { window.dispatchEvent(new Event('focus')); });
+  expect((await screen.findAllByRole('listitem')).length).toBe(1);
+});
+
+test('captures are listed as plain thumbnails under a month heading, scoped to the instance', async () => {
+  const { container } = mount();
+  const cards = await screen.findAllByRole('listitem');
+  expect(cards.length).toBe(3);
+  expect(backend.invoke).toHaveBeenCalledWith('list_screenshots', { instanceId: 'pack-a' });
+  await waitFor(() => expect(cards[0].querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/png;base64,/));
+  // No name, date or size under a thumbnail; the name is its tooltip and accessible name.
+  expect(container.querySelector('.screenshot-meta')).toBeNull();
+  expect(screen.queryByText(list.screenshots[0].name)).toBeNull();
+  expect(screen.queryByText(/MB/)).toBeNull();
+  expect(cards[0].querySelector('button')?.getAttribute('title')).toBe(list.screenshots[0].name);
+  expect(screen.getByRole('heading', { name: 'Noviembre 2023' })).toBeTruthy();
+  // The old per-card action buttons are gone; the actions live in the menu.
+  expect(screen.queryByRole('button', { name: /^Abrir / })).toBeNull();
+  // No count or other subtitle: the grid is the whole panel.
+  expect(screen.queryByText(/capturas de esta instancia/)).toBeNull();
+});
+
+test('right-clicking a capture offers its actions with simple words and runs them by name only', async () => {
+  const user = userEvent.setup(); mount();
+  const name = list.screenshots[0].name;
+  await rightClick(user, name);
+  expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map(item => item.textContent))
+    .toEqual(['Ver', 'Abrir en fotos', 'Mostrar en la carpeta', 'Copiar imagen', 'Eliminar']);
+  await user.click(screen.getByRole('menuitem', { name: 'Abrir en fotos' }));
+  await rightClick(user, name);
+  await user.click(await screen.findByRole('menuitem', { name: 'Mostrar en la carpeta' }));
+  await rightClick(user, name);
+  await user.click(await screen.findByRole('menuitem', { name: 'Copiar imagen' }));
+  for (const command of ['open_screenshot', 'reveal_screenshot', 'copy_screenshot']) {
+    expect(backend.invoke).toHaveBeenCalledWith(command, { instanceId: 'pack-a', name });
+  }
+  // A successful copy is confirmed with a toast.
+  expect(await screen.findByText('Imagen copiada al portapapeles.')).toBeTruthy();
+});
+
+test('the overflow button opens the same menu for keyboard and touch', async () => {
+  const user = userEvent.setup(); mount();
+  const name = list.screenshots[1].name;
+  await user.click(await screen.findByRole('button', { name: `Más acciones para ${name}` }));
+  await user.click(await screen.findByRole('menuitem', { name: 'Copiar imagen' }));
+  expect(backend.invoke).toHaveBeenCalledWith('copy_screenshot', { instanceId: 'pack-a', name });
+});
+
+test('a failed action is reported in a toast, and a vanished file refreshes the list', async () => {
+  const user = userEvent.setup(); mount();
+  const name = list.screenshots[0].name;
+  failure = { copy_screenshot: 'storage_unavailable' };
+  await rightClick(user, name);
+  await user.click(await screen.findByRole('menuitem', { name: 'Copiar imagen' }));
+  expect(await screen.findByText(/No pudimos copiar la imagen al portapapeles/)).toBeTruthy();
+  failure = { open_screenshot: 'invalid_data' };
+  const before = calls('list_screenshots').length;
+  await rightClick(user, name);
+  await user.click(await screen.findByRole('menuitem', { name: 'Abrir en fotos' }));
+  expect(await screen.findByText(/ya no está disponible/)).toBeTruthy();
+  await waitFor(() => expect(calls('list_screenshots').length).toBe(before + 1));
+});
+
+test('clicking a thumbnail opens the viewer, and Escape or the close button closes it', async () => {
+  const user = userEvent.setup(); mount();
+  await user.click(await thumbnail(list.screenshots[0].name));
+  const dialog = viewer();
+  expect(within(dialog).getByText(/1 de 3/)).toBeTruthy();
+  await waitFor(() => expect(dialog.querySelector('img')?.getAttribute('src')).toMatch(/^data:image\/png/));
+  fireEvent(dialog, new Event('cancel', { cancelable: true }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Captura 2026/ })).toBeNull());
+  await user.click(await thumbnail(list.screenshots[0].name));
+  await user.click(within(viewer()).getByRole('button', { name: 'Cerrar' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Captura 2026/ })).toBeNull());
+});
+
+test('the viewer steps through every capture with the arrow keys and does not wrap', async () => {
+  const user = userEvent.setup(); mount();
+  await user.click(await thumbnail(list.screenshots[0].name));
+  const dialog = viewer();
+  const previous = within(dialog).getByRole('button', { name: 'Captura anterior' }) as HTMLButtonElement;
+  const next = within(dialog).getByRole('button', { name: 'Captura siguiente' }) as HTMLButtonElement;
+  expect(previous.disabled).toBe(true);
+  fireEvent.keyDown(dialog, { key: 'ArrowRight' });
+  expect(within(viewer()).getByText(/2 de 3/)).toBeTruthy();
+  expect(viewer().getAttribute('aria-label')).toBe(`Captura ${list.screenshots[1].name}`);
+  fireEvent.keyDown(viewer(), { key: 'ArrowRight' });
+  fireEvent.keyDown(viewer(), { key: 'ArrowRight' });
+  expect(within(viewer()).getByText(/3 de 3/)).toBeTruthy();
+  expect((within(viewer()).getByRole('button', { name: 'Captura siguiente' }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.keyDown(viewer(), { key: 'ArrowLeft' });
+  expect(within(viewer()).getByText(/2 de 3/)).toBeTruthy();
+  await user.click(next);
+  expect(within(viewer()).getByText(/3 de 3/)).toBeTruthy();
+  // The neighbours were requested ahead of time and the current one is shown.
+  await waitFor(() => expect(viewer().querySelector('img')).toBeTruthy());
+});
+
+test('the viewer has the quick actions and shows the copy toast inside itself', async () => {
+  const user = userEvent.setup(); mount();
+  const name = list.screenshots[0].name;
+  await user.click(await thumbnail(name));
+  await user.click(within(viewer()).getByRole('button', { name: 'Copiar imagen' }));
+  expect(backend.invoke).toHaveBeenCalledWith('copy_screenshot', { instanceId: 'pack-a', name });
+  // The page's toast sits under a modal dialog, so the viewer carries its own.
+  expect(await within(viewer()).findByText('Imagen copiada al portapapeles.')).toBeTruthy();
+  await user.click(within(viewer()).getByRole('button', { name: 'Mostrar en la carpeta' }));
+  expect(backend.invoke).toHaveBeenCalledWith('reveal_screenshot', { instanceId: 'pack-a', name });
+  await user.click(within(viewer()).getByRole('button', { name: 'Abrir en fotos' }));
+  expect(backend.invoke).toHaveBeenCalledWith('open_screenshot', { instanceId: 'pack-a', name });
+});
+
+test('deleting asks first, names the file, and only moves it to the trash after confirming', async () => {
+  const user = userEvent.setup(); mount();
+  const name = list.screenshots[0].name;
+  await rightClick(user, name);
+  await user.click(await screen.findByRole('menuitem', { name: 'Eliminar' }));
+  const confirm = await screen.findByRole('dialog', { name: 'Mover a la papelera' });
+  expect(within(confirm).getByText(new RegExp(name.replace(/\./g, '\\.')))).toBeTruthy();
+  // The safe choice has the focus, and cancelling changes nothing.
+  await user.click(within(confirm).getByRole('button', { name: 'Cancelar' }));
+  expect(calls('delete_screenshot').length).toBe(0);
+  expect(screen.getAllByRole('listitem').length).toBe(3);
+  await rightClick(user, name);
+  await user.click(await screen.findByRole('menuitem', { name: 'Eliminar' }));
+  await user.click(within(await screen.findByRole('dialog', { name: 'Mover a la papelera' })).getByRole('button', { name: 'Mover a la papelera' }));
+  expect(backend.invoke).toHaveBeenCalledWith('delete_screenshot', { instanceId: 'pack-a', name });
+  await waitFor(() => expect(screen.getAllByRole('listitem').length).toBe(2));
+  expect(await screen.findByText('Captura movida a la papelera.')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: `Ver ${name}` })).toBeNull();
+});
+
+test('a failed deletion keeps the capture and says so', async () => {
+  const user = userEvent.setup(); mount();
+  failure = { delete_screenshot: 'storage_busy' };
+  await rightClick(user, list.screenshots[0].name);
+  await user.click(await screen.findByRole('menuitem', { name: 'Eliminar' }));
+  await user.click(within(await screen.findByRole('dialog', { name: 'Mover a la papelera' })).getByRole('button', { name: 'Mover a la papelera' }));
+  expect(await screen.findByText(/No pudimos mover la captura a la papelera/)).toBeTruthy();
+  expect(screen.getAllByRole('listitem').length).toBe(3);
+});
+
+test('deleting from the viewer moves on to the next capture and closes after the last one', async () => {
+  list = { screenshots: shots(2), truncated: false };
+  const user = userEvent.setup(); mount();
+  await user.click(await thumbnail(list.screenshots[0].name));
+  await user.click(within(viewer()).getByRole('button', { name: 'Eliminar' }));
+  await user.click(within(await screen.findByRole('dialog', { name: 'Mover a la papelera' })).getByRole('button', { name: 'Mover a la papelera' }));
+  await waitFor(() => expect(viewer().getAttribute('aria-label')).toBe(`Captura ${list.screenshots[1].name}`));
+  expect(within(viewer()).getByText(/1 de 1/)).toBeTruthy();
+  await user.click(within(viewer()).getByRole('button', { name: 'Eliminar' }));
+  await user.click(within(await screen.findByRole('dialog', { name: 'Mover a la papelera' })).getByRole('button', { name: 'Mover a la papelera' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: /^Captura 2026/ })).toBeNull());
+  expect(await screen.findByRole('heading', { name: 'Aún no hay capturas' })).toBeTruthy();
+});
+
+test('a failed listing offers a retry and a thumbnail that cannot load keeps its menu', async () => {
+  failure = { list_screenshots: 'storage_unavailable' };
+  const user = userEvent.setup(); mount();
+  expect((await screen.findByRole('alert')).textContent).toMatch(/No pudimos leer las capturas/);
+  failure = { screenshot_image: 'invalid_data' };
+  await user.click(screen.getByRole('button', { name: 'Reintentar' }));
+  expect(await screen.findAllByText('No se pudo cargar la imagen')).toHaveLength(3);
+  await rightClick(user, list.screenshots[0].name);
+  expect(await screen.findByRole('menuitem', { name: 'Eliminar' })).toBeTruthy();
+});
+
+test('many captures are paged so only one page of images is requested', async () => {
+  list = { screenshots: shots(30), truncated: true };
+  const user = userEvent.setup(); mount();
+  expect((await screen.findAllByRole('listitem')).length).toBe(12);
+  expect(screen.getByText('Página 1 de 3')).toBeTruthy();
+  expect(screen.getByText('Mostramos las 30 capturas más recientes. Las demás siguen en tu carpeta.')).toBeTruthy();
+  await waitFor(() => expect(calls('screenshot_image').length).toBe(12));
+  await user.click(screen.getByRole('button', { name: 'Siguiente' }));
+  expect(screen.getByText('Página 2 de 3')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Anterior' })).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Siguiente' }));
+  expect((await screen.findAllByRole('listitem')).length).toBe(6);
+  expect((screen.getByRole('button', { name: 'Siguiente' }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+// Only the interval is faked, so promises and waitFor keep working with real timers.
+async function tick(ms = 3000) { await act(async () => { vi.advanceTimersByTime(ms); }); }
+
+test('a new capture appears by itself and the open gallery never asks to be refreshed', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  mount();
+  expect((await screen.findAllByRole('listitem')).length).toBe(3);
+  const fresh = { name: '2026-11-23_11.30.00.png', size: 1_000_000, modifiedMs: 1_700_000_999_000 };
+  list = { screenshots: [fresh, ...shots(3)], truncated: false };
+  await tick();
+  expect(await screen.findByRole('button', { name: `Ver ${fresh.name}` })).toBeTruthy();
+  expect(screen.getAllByRole('listitem').length).toBe(4);
+  // A capture deleted outside the launcher disappears as well.
+  list = { screenshots: shots(1), truncated: false };
+  await tick();
+  await waitFor(() => expect(screen.getAllByRole('listitem').length).toBe(1));
+});
+
+test('an unchanged folder does not reload the images', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  mount();
+  await waitFor(() => expect(calls('screenshot_image').length).toBe(3));
+  await tick(); await tick(); await tick();
+  expect(calls('list_screenshots').length).toBe(4);
+  expect(calls('screenshot_image').length).toBe(3);
+});
+
+test('the gallery does not look at the folder while the window is hidden, and catches up when it returns', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  mount();
+  await screen.findAllByRole('listitem');
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+  await tick(); await tick();
+  expect(calls('list_screenshots').length).toBe(1);
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+  act(() => { document.dispatchEvent(new Event('visibilitychange')); });
+  await waitFor(() => expect(calls('list_screenshots').length).toBe(2));
+});
+
+test('polling stops when the tab closes', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  const { unmount } = mount();
+  await screen.findAllByRole('listitem');
+  unmount();
+  await tick(); await tick();
+  expect(calls('list_screenshots').length).toBe(1);
+});
+
+test('a read that fails quietly keeps the captures, but a redirected folder empties them', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  mount();
+  expect((await screen.findAllByRole('listitem')).length).toBe(3);
+  failure = { list_screenshots: 'storage_busy' };
+  await tick();
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getAllByRole('listitem').length).toBe(3);
+  failure = { list_screenshots: 'invalid_data' };
+  await tick();
+  expect((await screen.findByRole('alert')).textContent).toMatch(/No pudimos leer las capturas/);
+  expect(screen.queryAllByRole('listitem').length).toBe(0);
+  // Once the folder is valid again the next read recovers without any click.
+  failure = {};
+  await tick();
+  await waitFor(() => expect(screen.getAllByRole('listitem').length).toBe(3));
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+test('the viewer keeps showing the same capture while new ones arrive', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  const user = userEvent.setup({ advanceTimers: ms => vi.advanceTimersByTime(ms) });
+  mount();
+  const name = list.screenshots[0].name;
+  await user.click(await thumbnail(name));
+  expect(within(viewer()).getByText(/1 de 3/)).toBeTruthy();
+  list = { screenshots: [{ name: '2026-11-23_11.30.00.png', size: 1, modifiedMs: 1_700_000_999_000 }, ...shots(3)], truncated: false };
+  await tick();
+  await waitFor(() => expect(within(viewer()).getByText(/2 de 4/)).toBeTruthy());
+  expect(viewer().getAttribute('aria-label')).toBe(`Captura ${name}`);
+});
+
+test('copying says so at once and is replaced by the confirmation, or by the error', async () => {
+  const user = userEvent.setup(); mount();
+  const name = list.screenshots[0].name;
+  let release: (value?: unknown) => void = () => {};
+  hold = new Promise(resolve => { release = resolve; });
+  await rightClick(user, name);
+  await user.click(await screen.findByRole('menuitem', { name: 'Copiar imagen' }));
+  // Still working: the player already sees that something is happening.
+  expect(await screen.findByText('Copiando imagen…')).toBeTruthy();
+  expect(screen.queryByText('Imagen copiada al portapapeles.')).toBeNull();
+  await act(async () => { release(); });
+  expect(await screen.findByText('Imagen copiada al portapapeles.')).toBeTruthy();
+  expect(screen.queryByText('Copiando imagen…')).toBeNull();
+  // A failure replaces the progress message too, so it never hangs on screen.
+  failure = { copy_screenshot: 'storage_unavailable' };
+  await rightClick(user, name);
+  await user.click(await screen.findByRole('menuitem', { name: 'Copiar imagen' }));
+  expect(await screen.findByText(/No pudimos copiar la imagen al portapapeles/)).toBeTruthy();
+  expect(screen.queryByText('Copiando imagen…')).toBeNull();
+});
+
+test('the viewer shows the copying progress inside itself', async () => {
+  const user = userEvent.setup(); mount();
+  let release: (value?: unknown) => void = () => {};
+  hold = new Promise(resolve => { release = resolve; });
+  await user.click(await thumbnail(list.screenshots[0].name));
+  await user.click(within(viewer()).getByRole('button', { name: 'Copiar imagen' }));
+  expect(await within(viewer()).findByText('Copiando imagen…')).toBeTruthy();
+  await act(async () => { release(); });
+  expect(await within(viewer()).findByText('Imagen copiada al portapapeles.')).toBeTruthy();
+});
+
+const local = (year: number, month: number, day: number, hour = 12) => new Date(year, month - 1, day, hour).getTime();
+
+test('captures are separated by month, newest first, each under its own heading', async () => {
+  list = { screenshots: [
+    { name: 'a.png', size: 1, modifiedMs: local(2026, 11, 23, 18) },
+    { name: 'b.png', size: 1, modifiedMs: local(2026, 11, 2) },
+    { name: 'c.png', size: 1, modifiedMs: local(2026, 10, 31, 23) },
+    { name: 'd.png', size: 1, modifiedMs: local(2026, 5, 1) },
+  ], truncated: false };
+  mount();
+  await screen.findAllByRole('listitem');
+  expect(screen.getAllByRole('heading', { level: 3 }).map(heading => heading.textContent)).toEqual(['Noviembre 2026', 'Octubre 2026', 'Mayo 2026']);
+  const november = screen.getByRole('group', { name: 'Noviembre 2026' });
+  expect(within(november).getAllByRole('listitem').length).toBe(2);
+  expect(within(screen.getByRole('group', { name: 'Octubre 2026' })).getByRole('button', { name: 'Ver c.png' })).toBeTruthy();
+  expect(within(screen.getByRole('group', { name: 'Mayo 2026' })).getByRole('button', { name: 'Ver d.png' })).toBeTruthy();
+});
+
+test('a month that continues onto the next page gets its heading again', async () => {
+  list = { screenshots: Array.from({ length: 14 }, (_, index) => ({ name: `s${index}.png`, size: 1, modifiedMs: local(2026, 11, 20, 23 - index) })), truncated: false };
+  const user = userEvent.setup(); mount();
+  expect((await screen.findAllByRole('listitem')).length).toBe(12);
+  expect(screen.getAllByRole('heading', { name: 'Noviembre 2026' }).length).toBe(1);
+  await user.click(screen.getByRole('button', { name: 'Siguiente' }));
+  expect((await screen.findAllByRole('listitem')).length).toBe(2);
+  expect(screen.getAllByRole('heading', { name: 'Noviembre 2026' }).length).toBe(1);
+});

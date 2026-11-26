@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use super::DesktopState;
 
-fn paths(app: &tauri::AppHandle) -> Result<AppPaths, ErrorCode> {
+pub(super) fn paths(app: &tauri::AppHandle) -> Result<AppPaths, ErrorCode> {
     AppPaths::new(
         app.path()
             .app_data_dir()
@@ -27,7 +27,7 @@ fn paths(app: &tauri::AppHandle) -> Result<AppPaths, ErrorCode> {
     .map_err(|error| error.code())
 }
 
-fn main_only(window: &tauri::WebviewWindow) -> Result<(), ErrorCode> {
+pub(super) fn main_only(window: &tauri::WebviewWindow) -> Result<(), ErrorCode> {
     if window.label() == "main" {
         Ok(())
     } else {
@@ -55,7 +55,7 @@ fn list(remaining: &[PendingFile]) -> Value {
     json!({"files": files_json(remaining), "complete": remaining.is_empty()})
 }
 
-async fn blocking<T: Send + 'static>(
+pub(super) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, launcher_core::error::CoreError> + Send + 'static,
 ) -> Result<T, ErrorCode> {
     tauri::async_runtime::spawn_blocking(work)

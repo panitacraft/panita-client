@@ -7,7 +7,7 @@ function snapshot(instance = null) {
     global: { schema_version: 2, ram_mib: 4096, extra_jvm_args: ['-Dlabel=value with spaces'], java_path_override: null, show_console_on_start: false,
       window_size: { width: 1280, height: 720 }, launcher: { selected_instance_id: 'selected', window: { width: 1000, height: 600, maximized: true } } } };
 }
-const inherited = () => ({ schema_version: 1, ram_mib: null, extra_jvm_args: null, java_path_override: null, window_size: null, show_console_on_start: null });
+const inherited = () => ({ schema_version: 1, ram_mib: null, ram_auto: null, extra_jvm_args: null, java_path_override: null, window_size: null, show_console_on_start: null });
 
 test('automatic console settings preserve inheritance and explicit on/off overrides', () => {
   const global = snapshot();
@@ -59,7 +59,7 @@ test('instance overrides keep their own RAM and window without copying inherited
   assert.equal(draft.inheritWindow, false);
   assert.equal(draft.inheritJvm, true);
   Object.assign(draft, updateSettingsDraft(draft, { ram: '8192' }, view));
-  assert.deepEqual(instanceSettingsPayload(draft, view), { ...view.instance, ram_mib: 8192 });
+  assert.deepEqual(instanceSettingsPayload(draft, view), { ...view.instance, ram_mib: 8192, ram_auto: false });
   Object.assign(draft, updateSettingsDraft(draft, { inheritRam: true }, view));
   draft.ram = 'invalid unused input';
   assert.equal(instanceSettingsPayload(draft, view).ram_mib, null);
@@ -123,4 +123,67 @@ test('a stored custom Java override is removed only by an explicit edit in its o
   assert.equal(instanceSettingsPayload(instanceDraft, instanceView).java_path_override, '/custom/bin/java');
   instanceDraft.clearJava = true;
   assert.equal(instanceSettingsPayload(instanceDraft, instanceView).java_path_override, null);
+});
+
+test('automatic RAM: a saved global value stays manual, switching keeps the number and saves both', () => {
+  const view = snapshot();
+  assert.equal(settingsDraft(view).ramAuto, false, 'data without the option is manual');
+  let draft = updateSettingsDraft(settingsDraft(view), { ramAuto: true }, view);
+  assert.equal(draft.ram, '4096', 'the manual value is kept');
+  assert.equal(draft.jvm, '-Dlabel=value with spaces', 'no heap argument while automatic');
+  let payload = globalSettingsPayload(draft, view);
+  assert.equal(payload.ram_auto, true);
+  assert.equal(payload.ram_mib, 4096);
+  draft = updateSettingsDraft(draft, { ramAuto: false }, view);
+  assert.equal(draft.jvm, '-Xmx4096M\n-Dlabel=value with spaces');
+  payload = globalSettingsPayload(draft, view);
+  assert.equal(payload.ram_auto, false);
+  // A global value that was already automatic opens automatic.
+  const auto = snapshot();
+  auto.global.ram_auto = true;
+  assert.equal(settingsDraft(auto).ramAuto, true);
+});
+
+test('automatic RAM: typing a heap argument while automatic chooses manual with that value', () => {
+  const view = snapshot();
+  view.global.ram_auto = true;
+  const draft = updateSettingsDraft(settingsDraft(view), { jvm: '-Xmx6G\n-Dlabel=value with spaces' }, view);
+  assert.equal(draft.ramAuto, false);
+  assert.equal(draft.ram, '6144');
+  assert.equal(globalSettingsPayload(draft, view).ram_mib, 6144);
+  // A heap argument that survived in automatic mode is refused instead of silently ignored.
+  assert.throws(() => globalSettingsPayload({ ...settingsDraft(view), jvm: '-Xmx6G' }, view), /invalid_data/);
+});
+
+test('automatic RAM: an instance choice beats the global one in every combination and legacy values stay manual', () => {
+  const globalAuto = (instance) => { const view = snapshot(instance); view.global.ram_auto = true; return view; };
+  // Inheriting follows the global choice.
+  assert.equal(settingsDraft(globalAuto(inherited())).ramAuto, true);
+  assert.equal(settingsDraft(globalAuto(inherited())).inheritRam, true);
+  assert.equal(settingsDraft(snapshot(inherited())).ramAuto, false);
+  // A manual value saved before the option existed is not turned automatic by the global choice.
+  const legacy = globalAuto({ ...inherited(), ram_auto: undefined, ram_mib: 6144 });
+  assert.equal(settingsDraft(legacy).ramAuto, false);
+  assert.equal(settingsDraft(legacy).inheritRam, false);
+  assert.equal(instanceSettingsPayload(settingsDraft(legacy), legacy).ram_auto, false);
+  // Explicit choices, with or without a stored value.
+  const explicitManual = globalAuto({ ...inherited(), ram_mib: 6144, ram_auto: false });
+  assert.equal(settingsDraft(explicitManual).ramAuto, false);
+  const explicitAuto = snapshot({ ...inherited(), ram_mib: 6144, ram_auto: true });
+  const draft = settingsDraft(explicitAuto);
+  assert.deepEqual([draft.ramAuto, draft.ram, draft.inheritRam], [true, '6144', false]);
+  assert.deepEqual(instanceSettingsPayload(draft, explicitAuto), { ...explicitAuto.instance });
+  // Choosing automatic for one instance writes an explicit choice and keeps the value.
+  const view = snapshot(inherited());
+  let next = updateSettingsDraft(settingsDraft(view), { inheritRam: false }, view);
+  next = updateSettingsDraft(next, { ramAuto: true }, view);
+  const payload = instanceSettingsPayload(next, view);
+  assert.deepEqual([payload.ram_auto, payload.ram_mib], [true, 4096]);
+  // Going back to inheriting clears both and follows the global choice again.
+  const back = updateSettingsDraft(next, { inheritRam: true }, view);
+  assert.deepEqual([instanceSettingsPayload(back, view).ram_auto, instanceSettingsPayload(back, view).ram_mib], [null, null]);
+  assert.equal(back.ramAuto, false);
+  const backAuto = updateSettingsDraft(next, { inheritRam: true }, globalAuto(inherited()));
+  assert.equal(backAuto.ramAuto, true);
+  assert.equal(backAuto.jvm, '-Dlabel=value with spaces');
 });

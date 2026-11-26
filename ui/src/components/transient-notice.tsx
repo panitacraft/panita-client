@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CircleAlert, CircleCheck, LoaderCircle } from 'lucide-react';
 
-type Notice = { message: string; tone: 'success' | 'error' | 'progress' };
+export type TransientNoticeState = { message: string; tone: 'success' | 'error' | 'progress' };
+type Notice = TransientNoticeState;
 
 /** Keep confirmations outside the layout; repeat actions restart the expiry timer. */
 export function useTransientNotice() {

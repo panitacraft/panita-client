@@ -9,7 +9,9 @@ use super::install::InstalledLock;
 use super::{Platform, arguments, invalid, substitute};
 use crate::accounts::{AccountInfo, AccountKind, Secret};
 use crate::error::{CoreError, ErrorCode};
+use crate::memory::MemoryStatus;
 use crate::paths::AppPaths;
+use crate::ram::{self, RamProfile};
 use crate::settings::{GlobalSettings, InstanceSettings};
 
 /// Backend-only credentials. Microsoft credentials must come from current Play
@@ -27,6 +29,8 @@ pub struct LaunchCommand {
     pub(crate) directory: PathBuf,
     pub(crate) args: Vec<String>,
     pub(crate) redactions: Vec<Secret>,
+    /// Fixed log note, present only when the heap was resolved automatically.
+    pub(crate) ram_note: Option<String>,
 }
 
 impl std::fmt::Debug for LaunchCommand {
@@ -89,6 +93,9 @@ fn launch_executable(plan: &super::plan::InstallPlan) -> &str {
 /// integrity, runtime overrides, authentication, catalog status and locking are
 /// separate preflight responsibilities. No files are changed or processes run.
 /// `game_directory` must be resolved by AppPaths::game_directory for this UUID.
+/// `memory` is the machine's current memory, read by the caller so the heap of an
+/// automatic allocation is decided from facts the caller (and its tests) control.
+#[allow(clippy::too_many_arguments)]
 pub fn build_command(
     paths: &AppPaths,
     game_directory: &Path,
@@ -96,6 +103,7 @@ pub fn build_command(
     platform: &Platform,
     global: &GlobalSettings,
     instance: &InstanceSettings,
+    memory: &MemoryStatus,
     identity: LaunchIdentity<'_>,
 ) -> Result<LaunchCommand, CoreError> {
     let plan = &installed.plan;
@@ -124,6 +132,9 @@ pub fn build_command(
     instance.validate()?;
     let settings = instance.effective(global);
     settings.validate_launch()?;
+    let profile = RamProfile::of(installed.pack.as_ref());
+    let automatic_ram = settings.ram_auto.then(|| ram::resolve(profile, memory));
+    let heap_mib = automatic_ram.map_or(settings.ram_mib, |resolved| resolved.mib);
     let account = identity.account;
     if account.account_id.is_nil()
         || account.profile_id.is_nil()
@@ -266,6 +277,7 @@ pub fn build_command(
             } else {
                 Vec::new()
             },
+            ram_note: automatic_ram.map(|resolved| resolved.note(profile, memory)),
         };
         if let Some(loader) = loader {
             for argument in loader.jvm_arguments() {
@@ -283,7 +295,7 @@ pub fn build_command(
             )?);
         }
         command.args.extend(settings.extra_jvm_args.clone());
-        command.args.push(format!("-Xmx{}M", settings.ram_mib));
+        command.args.push(format!("-Xmx{heap_mib}M"));
         if loader.is_some()
             && !command
                 .args

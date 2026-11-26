@@ -396,6 +396,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 &platform,
                 &global,
                 &settings,
+                &launcher_core::memory::MemoryStatus::read(),
                 LaunchIdentity {
                     account: &account,
                     minecraft_token: None,
