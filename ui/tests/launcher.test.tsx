@@ -273,12 +273,42 @@ test('kept files after an update are announced once, with their list one click a
   // The lists are not repeated in the page while the modal is closed.
   expect(screen.queryByText('options.txt')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
-  const dialog = screen.getByRole('dialog', { name: 'Aventura: Actualización completada' });
-  expect(within(dialog).getByText('options.txt')).toBeTruthy();
-  expect(within(dialog).getByText('config/paperdoll.json')).toBeTruthy();
-  expect(within(dialog).getByText('mods/a.jar')).toBeTruthy();
-  await user.click(within(dialog).getByRole('button', { name: 'Abrir copias de archivos' }));
+  const dialog = screen.getByRole('dialog', { name: 'Actualización completada' });
+  // The header says the instance is ready and which version it now has; the name is not part of the title.
+  expect(within(dialog).getByText('Dos')).toBeTruthy();
+  expect(within(dialog).getByText(/ya está listo para jugar\./).textContent).toBe('Aventura ya está listo para jugar.');
+  // One card per kind, each with its count and rows.
+  const kept = within(dialog).getByRole('group', { name: 'Archivos conservados' });
+  expect(within(kept).getByText('2')).toBeTruthy();
+  expect(within(kept).getByText('options.txt')).toBeTruthy();
+  expect(within(kept).getByText('config/paperdoll.json')).toBeTruthy();
+  const saved = within(dialog).getByRole('group', { name: 'Archivos guardados' });
+  expect(within(saved).getByText('mods/a.jar')).toBeTruthy();
+  await user.click(within(saved).getByRole('button', { name: 'Abrir copias de archivos' }));
   expect(backend.invoke).toHaveBeenCalledWith('open_instance_folder', { instanceId: 'pack-a', folder: 'pack-backups' });
+  await user.click(within(dialog).getByRole('button', { name: 'Aceptar' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+test('leftover native folders after an update are listed with their reason in the same modal', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update', nativeCleanup: { cleanedGenerations: 1, retainedGenerations: 1, untrackedGenerations: 0, details: [{ directory: 'natives/old', reason: 'accessFailure' }] } }));
+  await screen.findByText(/Quedaron carpetas nativas antiguas sin eliminar\./);
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  const natives = within(screen.getByRole('dialog', { name: 'Actualización completada' })).getByRole('group', { name: 'Carpetas nativas antiguas' });
+  expect(within(natives).getByText('natives/old')).toBeTruthy();
+  expect(within(natives).getByText(/No se pudo eliminar/)).toBeTruthy();
+});
+
+test('an uninstall that left something behind says so without a version', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'uninstalled', operation: 'uninstall', nativeCleanup: { cleanedGenerations: 0, retainedGenerations: 1, untrackedGenerations: 0, details: [{ directory: 'natives/old', reason: 'accessFailure' }] } }));
+  await user.click(await screen.findByRole('button', { name: 'Ver detalles' }));
+  const dialog = screen.getByRole('dialog', { name: 'Instancia desinstalada' });
+  expect(within(dialog).getByText(/se desinstaló\./)).toBeTruthy();
+  expect(dialog.querySelector('.version-chip')).toBeNull();
 });
 
 test('a completed operation with nothing to explain keeps the plain toast', async () => {

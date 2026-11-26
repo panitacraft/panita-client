@@ -9,7 +9,7 @@ import { TransientNotice, useTransientNotice } from './components/transient-noti
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { messageForError } from './errors';
-import { acceptPlaySnapshot, playActive, type PlaySnapshot } from './play-state';
+import { acceptPlaySnapshot, playActive, type PlayEntry, type PlaySnapshot } from './play-state';
 import { useLauncherUpdate } from './update';
 import { blocksPlay } from './update-state';
 import type { UpdateTarget } from './library-state';
@@ -61,12 +61,19 @@ export function PlayProvider({ children }: { children: ReactNode }) {
   return <PlayContext.Provider value={{ snapshot, error, act, lastUpdate: id => updates.current.get(id) ?? null }}>{children}</PlayContext.Provider>;
 }
 
-export function PlayNotice({ names = {} }: { names?: Record<string, string> }) {
+/** What a finished operation is called in its details modal. */
+function heading(entry: PlayEntry): string {
+  if (entry.phase === 'uninstalled') return entry.eraseRequested ? 'Instancia eliminada' : 'Instancia desinstalada';
+  return entry.operation === 'update' ? 'Actualización completada' : entry.operation === 'repair' ? 'Reparación completada' : 'Instalación completada';
+}
+
+/** `versions` holds what each instance has installed, read live so the modal shows the version the operation left. */
+export function PlayNotice({ names = {}, versions = {} }: { names?: Record<string, string>; versions?: Record<string, string> }) {
   const play = useContext(PlayContext);
   const toast = useTransientNotice();
   const seen = useRef(new Set<string>());
   // What a finished operation kept or left behind, told by a toast and read in a modal.
-  const [completion, setCompletion] = useState<{ instanceId: string; title: string; details: CompletionDetails } | null>(null);
+  const [completion, setCompletion] = useState<{ instanceId: string; heading: string; outcome: 'ready' | 'removed'; details: CompletionDetails } | null>(null);
   const [completionError, setCompletionError] = useState<string | null>(null);
   useEffect(() => {
     for (const entry of play?.snapshot?.instances ?? []) {
@@ -82,12 +89,12 @@ export function PlayNotice({ names = {} }: { names?: Record<string, string> }) {
       if (!details) { toast.show(prefix + message); continue; }
       toast.show(`${prefix}${message} ${completionNote(details)}`, 'success', {
         label: 'Ver detalles',
-        onClick: () => { setCompletionError(null); setCompletion({ instanceId: entry.instanceId, title: prefix + message.replace(/\.$/, ''), details }); },
+        onClick: () => { setCompletionError(null); setCompletion({ instanceId: entry.instanceId, heading: heading(entry), outcome: entry.phase === 'installed' ? 'ready' : 'removed', details }); },
       });
     }
   }, [play?.snapshot, toast.show, names]);
   return <><TransientNotice notice={toast.notice} />
-    {completion && <CompletionDialog title={completion.title} details={completion.details} busy={!isTauri()} error={completionError} onClose={() => setCompletion(null)}
+    {completion && <CompletionDialog heading={completion.heading} name={names[completion.instanceId] ?? null} outcome={completion.outcome} version={versions[completion.instanceId] ?? null} details={completion.details} busy={!isTauri()} error={completionError} onClose={() => setCompletion(null)}
       onOpenBackups={() => { setCompletionError(null); void invoke('open_instance_folder', { instanceId: completion.instanceId, folder: 'pack-backups' }).catch(cause => setCompletionError(messageForError(cause))); }} />}
     {play?.error && <p role="alert">{play.error}</p>}
     {play?.snapshot?.closeBlocked && <p className="catalog-notice" role="alert">No pudimos cerrar esta ventana. Cancela la instalación o el inicio pendiente y vuelve a intentarlo. Puedes minimizar esta ventana.</p>}

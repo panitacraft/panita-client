@@ -1,7 +1,18 @@
 import { messageForError } from './errors';
 import type { NativeCleanupReport } from './native-cleanup-state';
-import { conflictHeading, manualHeading } from './pack-state';
+import { conflictHeading, manualHeading, tagVersion } from './pack-state';
 import { playActive, type PlayEntry } from './play-state';
+import type { CatalogInstance } from './preview-catalog';
+
+/** The version an instance has installed, as its completion prompt shows it: a custom pack's label, or a vanilla Minecraft version. */
+export function installedVersionLabel(instance: CatalogInstance): string | null {
+  const source = instance.installedSource;
+  if (source?.type === 'custom') {
+    const label = source.label?.trim();
+    return label ? tagVersion(label) : null;
+  }
+  return instance.installedVersion;
+}
 
 /**
  * Outcomes that are announced with a toast instead of a block in the page. A toast holds one

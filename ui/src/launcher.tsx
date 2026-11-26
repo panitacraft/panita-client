@@ -23,6 +23,7 @@ import { VariantPanel } from './components/variant-panel';
 import { ScreenshotPanel } from './components/screenshot-panel';
 import { CrashNotifications } from './game-output';
 import { instanceStatus, showsStatusChip, visibleSelection, type LauncherPage } from './launcher-state';
+import { installedVersionLabel } from './notice-state';
 import { CatalogArtwork } from './components/catalog-artwork';
 import { Button } from './components/ui/button';
 import { AccountAvatar } from './components/account-avatar';
@@ -154,7 +155,7 @@ export function Launcher() {
 
       <div id="launcher-content" tabIndex={-1} className="launcher-content">
         <div className="launcher-notices">
-          <PlayNotice names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} />
+          <PlayNotice names={Object.fromEntries(instances.map(instance => [instance.id, instance.name]))} versions={Object.fromEntries(instances.flatMap(instance => { const label = installedVersionLabel(instance); return label ? [[instance.id, label]] : []; }))} />
           {preferences?.error && <div role="alert" className="catalog-notice"><p>{preferences.error}</p><Button variant="secondary" disabled={preferences.busy} onClick={preferences.retry}>Reintentar preferencias</Button></div>}
           {preferences?.warning && <p role="alert">{preferences.warning}</p>}
           {refreshError && catalog.kind === 'ready' && <p role="alert">No pudimos actualizar las instancias. {refreshError}</p>}

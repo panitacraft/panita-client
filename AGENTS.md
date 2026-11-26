@@ -437,6 +437,15 @@ Owner requests for 1.2.1-beta.2.
   offered only for an update whose conflicts are all movable; the confirmation keeps
   `move_aside` semantics and moves nothing before the player confirms. Persistent states, such
   as a pack waiting for manual files (`awaiting_files`), keep their inline controls.
+- The details modal of a completed operation follows the owner's template (2026-11-26): a green
+  check, the operation's title ("Actualización completada", "Reparación completada",
+  "Instalación completada", or "Instancia desinstalada" and "Instancia eliminada"), the version
+  the instance now has as a chip (a custom pack's label or the vanilla Minecraft version, not
+  shown after an uninstall), the line "{instancia} ya está listo para jugar." (or that it was
+  uninstalled and personal data is kept), one bordered card per kind with its icon, title, count,
+  a short note and its rows (kept files, files that became the player's, files saved in
+  `pack-backups` with a button to open that folder, native folders left behind and why), and an
+  "Aceptar" footer.
 - A cancelled operation shows no status chip beside the instance badges: it leaves the
   installation as it was, and the Instalar or Jugar button already says what to do.
 - The update prompt follows the owner's template (2026-11-26): a header with "Actualizar modpack"

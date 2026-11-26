@@ -90,11 +90,15 @@ export function conflictHeading(count: number, operation: string): string {
   return count === 1 ? `Hay 1 archivo tuyo que estorba a ${target}` : `Hay ${count} archivos tuyos que estorban a ${target}`;
 }
 
+/** A version name as the player reads it: a plain number such as 1.2.0 gets a "v" in front, any other name stays as written. */
+export function tagVersion(name: string): string {
+  return /^\d[\w.+-]*$/.test(name) ? `v${name}` : name;
+}
+
 /** What the update prompt calls the two versions: readable names, or shortened identifiers until they are known. */
 export function versionLabels(names: VersionNames | null, from: string, to: string): { installed: string; available: string } {
   const shown = (name: string | null | undefined, id: string) => name ?? (id.length > 12 ? `${id.slice(0, 8)}…` : id);
-  const tagged = (name: string) => (/^\d[\w.+-]*$/.test(name) ? `v${name}` : name);
-  return { installed: tagged(shown(names?.installed, from)), available: tagged(shown(names?.available, to)) };
+  return { installed: tagVersion(shown(names?.installed, from)), available: tagVersion(shown(names?.available, to)) };
 }
 
 export function backedUpSummary(paths: string[]): string {

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ExternalLink, FolderOpen, ShieldCheck, TriangleAlert, X } from 'lucide-react';
+import { Archive, CircleCheck, ExternalLink, FileText, FolderOpen, Shield, ShieldCheck, TriangleAlert, Wrench, X } from 'lucide-react';
 import { AccountDialog } from './account-dialog';
 import { Button } from './ui/button';
 import { nativeCleanupSummary, nativeRetentionReason, type NativeCleanupReport } from '../native-cleanup-state';
@@ -18,10 +18,6 @@ export function DetailsDialog({ title, onClose, closeLabel = 'Cerrar', children,
       <Button variant="secondary" onClick={onClose}><X aria-hidden="true" />{closeLabel}</Button>
     </div>
   </AccountDialog>;
-}
-
-function PathList({ label, paths }: { label: string; paths: string[] }) {
-  return <ul className="detail-files" aria-label={label}>{paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>;
 }
 
 /** Player files that are in the way. Continuing is offered only when moving them aside can work. */
@@ -74,19 +70,48 @@ export function NativeCleanupSection({ report }: { report: NativeCleanupReport }
   </>;
 }
 
-/** Everything a finished operation kept or left behind, one section per kind. */
-export function CompletionDialog({ title, details, busy, error, onOpenBackups, onClose }: {
-  title: ReactNode; details: CompletionDetails; busy: boolean; error: string | null; onOpenBackups: () => void; onClose: () => void;
+/** One kind of thing a finished operation kept or left behind: an icon and title, how many, a short note, and the rows. */
+function DetailCard({ icon, title, count, note, children, foot }: { icon: ReactNode; title: string; count: number; note: string; children: ReactNode; foot?: ReactNode }) {
+  return <div className="detail-card" role="group" aria-label={title}>
+    <div className="detail-card-head">{icon}<h3>{title}</h3><span className="detail-card-count" aria-label={`${count} en total`}>{count}</span></div>
+    <p className="detail-card-note">{note}</p>
+    <ul className="detail-card-rows">{children}</ul>
+    {foot && <div className="detail-card-foot">{foot}</div>}
+  </div>;
+}
+
+function PathRows({ paths }: { paths: string[] }) {
+  return <>{paths.map(path => <li key={path}><FileText aria-hidden="true" /><code>{path}</code></li>)}</>;
+}
+
+/**
+ * What a finished operation kept or left behind, as the owner's template shows it: a header
+ * that says the instance is ready (with the version it now has), then one card per kind.
+ */
+export function CompletionDialog({ heading, name, outcome, version, details, busy, error, onOpenBackups, onClose }: {
+  heading: string; name: string | null; outcome: 'ready' | 'removed'; version: string | null; details: CompletionDetails;
+  busy: boolean; error: string | null; onOpenBackups: () => void; onClose: () => void;
 }) {
-  return <DetailsDialog title={title} onClose={onClose}>
-    {details.skipped.length > 0 && <div><p className="detail-intro">{skippedSummary(details.skipped)}</p><PathList label="Archivos conservados" paths={details.skipped} /></div>}
-    {details.released.length > 0 && <div><p className="detail-intro">{releasedSummary(details.released)}</p><PathList label="Archivos que ahora son tuyos" paths={details.released} /></div>}
-    {details.backedUp.length > 0 && <div>
-      <p className="detail-intro">{backedUpSummary(details.backedUp)}</p>
-      <PathList label="Archivos guardados" paths={details.backedUp} />
-      <div className="account-buttons"><Button variant="secondary" size="sm" disabled={busy} onClick={onOpenBackups}><FolderOpen aria-hidden="true" />Abrir copias de archivos</Button></div>
-    </div>}
-    {details.natives && <div><NativeCleanupSection report={details.natives} /></div>}
+  const who = name ? <strong>{name}</strong> : 'La instancia';
+  return <AccountDialog className="update-dialog update-modal" titleClassName="dialog-title" onCancel={onClose}
+    title={<><CircleCheck aria-hidden="true" />{heading}</>}
+    aside={outcome === 'ready' && version ? <span className="version-chip is-new">{version}</span> : undefined}>
+    <p className="done-sub">{outcome === 'ready' ? <>{who} ya está listo para jugar.</> : <>{who} se desinstaló. Tus datos personales se conservan.</>}</p>
+    {details.skipped.length > 0 && <DetailCard icon={<Shield aria-hidden="true" />} title="Archivos conservados" count={details.skipped.length} note={skippedSummary(details.skipped)}>
+      <PathRows paths={details.skipped} />
+    </DetailCard>}
+    {details.released.length > 0 && <DetailCard icon={<ShieldCheck aria-hidden="true" />} title="Ahora son tuyos" count={details.released.length} note={releasedSummary(details.released)}>
+      <PathRows paths={details.released} />
+    </DetailCard>}
+    {details.backedUp.length > 0 && <DetailCard icon={<Archive aria-hidden="true" />} title="Archivos guardados" count={details.backedUp.length} note={backedUpSummary(details.backedUp)}
+      foot={<Button variant="secondary" size="sm" disabled={busy} onClick={onOpenBackups}><FolderOpen aria-hidden="true" />Abrir copias de archivos</Button>}>
+      <PathRows paths={details.backedUp} />
+    </DetailCard>}
+    {details.natives && <DetailCard icon={<Wrench aria-hidden="true" />} title="Carpetas nativas antiguas" count={Math.max(details.natives.details.length, details.natives.retainedGenerations)}
+      note={`${nativeCleanupSummary(details.natives)} Cierra los programas que usen esas carpetas y vuelve a intentar «Limpiar nativos antiguos».`}>
+      {details.natives.details.map(detail => <li key={detail.directory}><FolderOpen aria-hidden="true" /><span><code>{detail.directory}</code><br />{nativeRetentionReason(detail.reason)}</span></li>)}
+    </DetailCard>}
     {error && <p className="account-error" role="alert">{error}</p>}
-  </DetailsDialog>;
+    <div className="update-foot"><Button onClick={onClose}>Aceptar</Button></div>
+  </AccountDialog>;
 }
