@@ -14,8 +14,8 @@ export function DetailsDialog({ title, onClose, closeLabel = 'Cerrar', children,
   return <AccountDialog className="update-dialog" titleClassName="dialog-title" title={title} onCancel={onClose}>
     {children}
     <div className="account-buttons">
-      {actions}
       <Button variant="secondary" onClick={onClose}><X aria-hidden="true" />{closeLabel}</Button>
+      {actions}
     </div>
   </AccountDialog>;
 }
@@ -112,6 +112,6 @@ export function CompletionDialog({ heading, name, outcome, version, details, bus
       {details.natives.details.map(detail => <li key={detail.directory}><FolderOpen aria-hidden="true" /><span><code>{detail.directory}</code><br />{nativeRetentionReason(detail.reason)}</span></li>)}
     </DetailCard>}
     {error && <p className="account-error" role="alert">{error}</p>}
-    <div className="update-foot is-start"><Button onClick={onClose}><Check aria-hidden="true" />Aceptar</Button></div>
+    <div className="update-foot"><Button onClick={onClose}><Check aria-hidden="true" />Aceptar</Button></div>
   </AccountDialog>;
 }

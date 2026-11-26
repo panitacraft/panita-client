@@ -312,7 +312,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     </div>}
     {forceQuestion && entry?.requestId === forceQuestion && <AccountDialog title="Cerrar Minecraft" onCancel={() => setForceQuestion(null)}>
       <p>Se cerrará el juego inmediatamente. Puedes perder cambios sin guardar.</p>
-      <div className="account-buttons"><Button variant="destructive" disabled={busy} onClick={() => { setForceQuestion(null); void act('stop_game', { requestId: entry.requestId, force: true }); }}><Square aria-hidden="true" />Confirmar cierre forzoso</Button><Button variant="outline" onClick={() => setForceQuestion(null)}><X aria-hidden="true" />Cancelar</Button></div>
+      <div className="account-buttons"><Button variant="outline" onClick={() => setForceQuestion(null)}><X aria-hidden="true" />Cancelar</Button><Button variant="destructive" disabled={busy} onClick={() => { setForceQuestion(null); void act('stop_game', { requestId: entry.requestId, force: true }); }}><Square aria-hidden="true" />Confirmar cierre forzoso</Button></div>
     </AccountDialog>}
     <div className="instance-actions">
     <div className="split-button" role="group" aria-label="Controles de la instancia">
@@ -369,8 +369,8 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         <label className="backup-choice"><input type="checkbox" checked={eraseConfirmed} onChange={event => setEraseConfirmed(event.target.checked)} /><span>Entiendo que perderé todos los datos de esta instancia</span></label>
       </div>}
       <div className="account-buttons">
-        <Button variant="destructive" disabled={busy || !isTauri() || !play?.snapshot || (removalPending && !deleteInstance) || (deleteInstance && (!eraseConfirmed || !instanceFolder))} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID(), deleteInstance }); }}><Trash2 aria-hidden="true" />{deleteInstance ? 'Eliminar instancia' : 'Desinstalar'}</Button>
         <Button variant="secondary" disabled={busy} onClick={() => setUninstallQuestion(false)}><X aria-hidden="true" />Cancelar</Button>
+        <Button variant="destructive" disabled={busy || !isTauri() || !play?.snapshot || (removalPending && !deleteInstance) || (deleteInstance && (!eraseConfirmed || !instanceFolder))} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID(), deleteInstance }); }}><Trash2 aria-hidden="true" />{deleteInstance ? 'Eliminar instancia' : 'Desinstalar'}</Button>
       </div>
     </>}
     </dialog>

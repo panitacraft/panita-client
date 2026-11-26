@@ -209,8 +209,8 @@ export function ScreenshotPanel({ instanceId }: { instanceId: string }) {
     {pendingDelete && <AccountDialog title="Mover a la papelera" className="screenshot-delete" onCancel={() => setPendingDelete(null)}>
       <p>«{pendingDelete.name}» se moverá a la papelera de tu sistema. Podrás restaurarla desde allí.</p>
       <div className="account-buttons">
-        <Button variant="destructive" disabled={working} onClick={() => void confirmDelete(pendingDelete)}><Trash2 aria-hidden="true" />Mover a la papelera</Button>
         <Button variant="secondary" autoFocus disabled={working} onClick={() => setPendingDelete(null)}><X aria-hidden="true" />Cancelar</Button>
+        <Button variant="destructive" disabled={working} onClick={() => void confirmDelete(pendingDelete)}><Trash2 aria-hidden="true" />Mover a la papelera</Button>
       </div>
     </AccountDialog>}
     {viewIndex < 0 && !pendingDelete && <TransientNotice notice={notice} />}

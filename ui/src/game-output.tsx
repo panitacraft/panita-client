@@ -53,9 +53,9 @@ export function CrashNotifications({ names }: { names: Record<string, string> })
     <p>Revisa el registro para conocer la causa. Puede que Minecraft no haya creado un informe.</p>
     {notice && <p role="status">{notice}</p>}
     <div className="account-buttons">
+      <Button variant="ghost" onClick={() => dialog.current?.close()}><X aria-hidden="true" />Cerrar</Button>
       <Button variant="outline" disabled={busy} onClick={() => void open('open_crash_reports')}><FolderOpen aria-hidden="true" />Informes de fallos</Button>
       <Button disabled={busy} onClick={() => void open('open_game_log')}><FileText aria-hidden="true" />Ver registro</Button>
-      <Button variant="ghost" onClick={() => dialog.current?.close()}><X aria-hidden="true" />Cerrar</Button>
     </div>
   </dialog>;
 }

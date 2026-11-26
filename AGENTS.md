@@ -446,6 +446,9 @@ Owner requests for 1.2.1-beta.2.
   a short note and its rows (kept files, files that became the player's, files saved in
   `pack-backups` with a button to open that folder, native folders left behind and why), and an
   "Aceptar" footer.
+- Every modal puts its action buttons in a footer on the right, with the cancel or close action first
+  and the confirming action last (owner decision, 2026-11-26). Buttons that belong to one row of a
+  list, such as "Abrir carpeta" beside a file, stay with that row.
 - A cancelled operation shows no status chip beside the instance badges: it leaves the
   installation as it was, and the Instalar or Jugar button already says what to do.
 - The update prompt follows the owner's template (2026-11-26): a header with "Actualizar modpack"

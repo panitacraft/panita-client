@@ -252,6 +252,37 @@ test('a details toast of a finished operation leaves when that instance starts a
   await waitFor(() => expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull());
 });
 
+test('modal footers read the same way: cancel first, the confirming action last', async () => {
+  const labels = (dialog: HTMLElement) => [...dialog.querySelectorAll('.account-buttons > button, .update-foot > button')].map(button => button.textContent);
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  // Uninstall
+  await user.click(within(screen.getByRole('article', { name: 'Aventura' })).getByRole('button', { name: 'Opciones de instancia' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Desinstalar…' }));
+  const uninstall = await screen.findByRole('dialog', { name: 'Desinstalar instancia' });
+  expect(labels(uninstall)).toEqual(['Cancelar', 'Desinstalar']);
+  await user.click(within(uninstall).getByRole('button', { name: 'Cancelar' }));
+  // Update
+  await user.click(screen.getByRole('button', { name: 'Actualizar…' }));
+  const update = await screen.findByRole('dialog', { name: 'Actualizar modpack' });
+  expect(labels(update)).toEqual(['Cancelar', 'Actualizar a Dos']);
+  await user.click(within(update).getByRole('button', { name: 'Cancelar' }));
+  // Details of an operation, and a completed one with a single action
+  await emit(entry({ phase: 'failed', operation: 'update', error: 'pack_conflict', packConflicts: [{ path: 'mods/a.jar', reason: 'occupied' }] }));
+  await user.click(await screen.findByRole('button', { name: 'Ver detalles' }));
+  expect(labels(screen.getByRole('dialog'))).toEqual(['Cancelar', 'Continuar y guardar mis archivos']);
+});
+
+test('the completion modal keeps its single action on the right like every other footer', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update', packSkipped: ['options.txt'] }));
+  await user.click(await screen.findByRole('button', { name: 'Ver detalles' }));
+  const footer = screen.getByRole('dialog', { name: 'Actualización completada' }).querySelector('.update-foot');
+  expect(footer?.classList.contains('is-start')).toBe(false);
+});
+
 test('conflicts that moving files aside cannot fix offer no continue button', async () => {
   const user = userEvent.setup(); mount();
   await screen.findByRole('heading', { name: 'Aventura', exact: true });

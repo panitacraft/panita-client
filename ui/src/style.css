@@ -110,7 +110,7 @@
   .account-dialog { width: min(480px, calc(100vw - 40px)); text-align: left; }
   .account-dialog label { display: block; margin: 22px 0 8px; }
   .account-dialog input { width: 100%; }
-  .account-dialog .account-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+  .account-dialog .account-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 20px; }
   .account-dialog .account-buttons button { min-width: 100px; }
   .accounts-section .profile-list { list-style: none; padding: 0; margin-top: 16px; gap: 0; }
   .profile-list .profile-row, .panita-profile { display: flex; align-items: center; gap: 16px; padding: 12px 0; border: 0; border-bottom: 1px solid #333; border-radius: 0; background: transparent; }
@@ -143,6 +143,8 @@
   .detail-files li { margin: 0; overflow-wrap: anywhere; }
   .detail-files code { color: #E4FFDA; }
   .detail-files .account-buttons { margin-top: 6px; }
+  /* Buttons that belong to one row of a list stay with it; only a dialog's footer sits on the right. */
+  .detail-files li .account-buttons { justify-content: flex-start; }
   .changelog { max-height: 180px; margin: 8px 0 0; padding: 12px 14px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #383838; border-radius: 8px; background: #141414; font: inherit; font-size: 13px; line-height: 1.5; color: #BABABA; scrollbar-width: thin; scrollbar-color: #515151 transparent; }
   /* Update prompt: header with version chips, notes card, checklist, warning, backup switch and a footer that spans the dialog. */
   .update-modal { width: min(600px, calc(100vw - 40px)); padding-bottom: 0; text-align: left; }
@@ -174,7 +176,6 @@
   .update-switch:checked { border-color: #4caf50; background: #4caf50; }
   .update-switch:checked::before { transform: translateX(14px); background: #fff; }
   .update-switch:focus-visible { outline: 2px solid #a9e58c; outline-offset: 3px; }
-  .update-foot.is-start { justify-content: flex-start; }
   .done-sub { margin: -14px 0 18px 36px; font-size: 13px; color: #8f8f8f; }
   .done-sub strong { color: #E4E4E4; }
   .detail-card { margin: 0 0 14px; overflow: hidden; border: 1px solid #383838; border-radius: 12px; background: #141414; }
@@ -382,7 +383,7 @@
   @keyframes variant-spin { to { transform: rotate(360deg); } }
   @keyframes variant-fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .variant-spinner, .variant-ready { animation: none; } }
-  .update-dialog .account-buttons { margin-top: 24px; }
+  .update-dialog .account-buttons { justify-content: flex-end; margin-top: 24px; }
   .page-heading > p { color: #BABABA; }
   .utility-page > section, .utility-page > div > section { background: #1B1B1B; border: 1px solid #383838; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
   .empty-state { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; min-height: 340px; text-align: center; padding: 40px; }
@@ -558,7 +559,7 @@
   .crash-dialog h2 > svg { color: #FCA5A5; flex-shrink: 0; width: 24px; height: 24px; }
   .crash-details { border: 1px solid #383838; border-radius: 8px; background: #141414; padding: 10px 14px; margin: 18px 0; }
   .crash-summary { max-height: 180px; font-weight: 400; font-size: 11px; line-height: 1.6; text-align: left; }
-  .crash-dialog .account-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+  .crash-dialog .account-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; }
   @media (max-width: 900px) { .instance-workspace, .instance-hero { padding-inline: 28px; } .log-row { grid-template-columns: 90px 130px 90px minmax(0, 1fr); gap: 8px; } .log-toolbar { gap: 12px; } }
 }
 
