@@ -1,0 +1,275 @@
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { SkinsPage } from '../src/skins';
+import { TooltipProvider } from '../src/components/ui/tooltip';
+import type { AccountView } from '../src/account-state';
+import type { SkinsView } from '../src/skin-state';
+
+const backend = vi.hoisted(() => ({ native: true, invoke: vi.fn() }));
+vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => backend.native, invoke: backend.invoke }));
+vi.mock('@tauri-apps/api/event', () => ({ listen: async () => () => {} }));
+// The real renderer needs WebGL. The stand-in exposes what it was asked to show, which is what a
+// preview that "updates in real time" means for this page.
+vi.mock('../src/components/skin-viewer', async importOriginal => {
+  const original = await importOriginal<typeof import('../src/components/skin-viewer')>();
+  return {
+    ...original,
+    SkinViewer3D: (props: { skin: string | null; model: string; cape: string | null; animation: string }) =>
+      <div data-testid="viewer" data-skin={props.skin ?? ''} data-model={props.model} data-cape={props.cape ?? ''} data-animation={props.animation} />,
+  };
+});
+
+const hash = (letter: string) => letter.repeat(64);
+const image = (key: string) => `data:image/png;base64,${btoa(key)}`;
+const account = (kind: 'microsoft' | 'offline'): AccountView => ({
+  metadata: { account_id: 'acc', kind, username: 'PlayerOne', profile_id: 'p1', oauth_client_id: kind === 'microsoft' ? 'client' : null },
+  status: kind === 'microsoft' ? 'ready' : 'offline', error: null, persisted: true,
+});
+const look = (id: string, overrides: Partial<SkinsView['library'][number]> = {}) => ({ id, name: `Look ${id}`, model: 'classic' as const, texture: hash(id), cape: null, createdMs: 1, ...overrides });
+
+let view: SkinsView;
+let failure: Record<string, unknown>;
+let issued: number;
+
+function baseView(): SkinsView {
+  return {
+    profileId: 'p1', profileName: 'PlayerOne', syncedMs: Date.now(), incomplete: false, matchingLook: null,
+    current: { custom: true, texture: hash('a'), model: 'classic', cape: 'cape-a' },
+    capes: [{ id: 'cape-a', alias: 'Migrator', cached: true, active: true }, { id: 'cape-b', alias: 'Vanilla', cached: true, active: false }],
+    library: [look('b'), look('c', { model: 'slim', cape: 'cape-b' })],
+  };
+}
+const calls = (command: string) => backend.invoke.mock.calls.filter(([name]) => name === command).map(([, args]) => args);
+const viewer = () => screen.getByTestId('viewer');
+const mount = (kind: 'microsoft' | 'offline' = 'microsoft') => render(<TooltipProvider><SkinsPage account={account(kind)} onBack={() => {}} /></TooltipProvider>);
+
+beforeEach(() => {
+  backend.native = true;
+  view = baseView();
+  failure = {};
+  issued = 0;
+  backend.invoke.mockReset();
+  backend.invoke.mockImplementation(async (command: string, args: Record<string, unknown> = {}) => {
+    if (command in failure) throw failure[command];
+    switch (command) {
+      case 'skins_snapshot': case 'skins_sync': return view;
+      case 'skin_texture': return new TextEncoder().encode(String(args.key)).buffer;
+      case 'skins_apply': {
+        const request = args.request as { lookId: string | null; capeChange?: { id: string | null } };
+        const chosen = view.library.find(item => item.id === request.lookId);
+        const cape = request.capeChange ? request.capeChange.id : view.current?.cape ?? null;
+        const current = { custom: true, texture: chosen?.texture ?? view.current?.texture ?? null, model: chosen?.model ?? view.current?.model ?? 'classic' as const, cape };
+        view = { ...view, current, capes: view.capes.map(item => ({ ...item, active: item.id === cape })),
+          matchingLook: view.library.find(item => item.texture === current.texture && item.model === current.model && item.cape === current.cape)?.id ?? null };
+        return view;
+      }
+      case 'skins_add_look': {
+        const id = `new${(issued += 1)}`;
+        view = { ...view, library: [look(id, { name: String(args.name), model: args.model as 'classic' | 'slim', cape: args.cape as string | null, texture: hash('n') }), ...view.library] };
+        return { id, view };
+      }
+      case 'skins_save_current': {
+        const saved = look('s', { name: String(args.name), texture: view.current?.texture ?? hash('a'), cape: view.current?.cape ?? null });
+        view = { ...view, library: [saved, ...view.library], matchingLook: 's' };
+        return { id: 's', view };
+      }
+      case 'skins_delete_look': view = { ...view, library: view.library.filter(item => item.id !== args.id) }; return view;
+      default: throw new Error(`Unexpected test command: ${command}`);
+    }
+  });
+});
+afterEach(cleanup);
+
+test('the library opens from disk first and then synchronises with the account', async () => {
+  mount();
+  expect(await screen.findByRole('button', { name: /^Look b/ })).toBeTruthy();
+  await waitFor(() => expect(calls('skins_sync')).toHaveLength(1));
+  expect(calls('skins_snapshot')).toHaveLength(1);
+  expect(viewer().dataset.skin).toBe(image(hash('a')));
+  expect(viewer().dataset.cape).toBe(image('cape-a'));
+  expect(viewer().dataset.model).toBe('classic');
+  expect(screen.getByText('Tu aspecto actual')).toBeTruthy();
+});
+
+test('an offline account never reaches the backend and is told why', async () => {
+  mount('offline');
+  expect(await screen.findByText('Necesitas una cuenta de Microsoft')).toBeTruthy();
+  expect(backend.invoke).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: /Añadir skin/ })).toBeNull();
+});
+
+test('outside the desktop app the page explains where it works', async () => {
+  backend.native = false;
+  mount();
+  expect(await screen.findByText('Disponible en la aplicación de escritorio')).toBeTruthy();
+  expect(backend.invoke).not.toHaveBeenCalled();
+});
+
+test('previewing a saved look updates the 3D view at once and applying sends exactly what changed', async () => {
+  const user = userEvent.setup();
+  mount();
+  await user.click(await screen.findByRole('button', { name: /^Look c/ }));
+  expect(viewer().dataset.skin).toBe(image(hash('c')));
+  expect(viewer().dataset.model).toBe('slim');
+  expect(viewer().dataset.cape).toBe(image('cape-b'));
+  expect(screen.getByText('Sin aplicar')).toBeTruthy();
+  expect(calls('skins_apply')).toHaveLength(0);
+  await user.click(screen.getByRole('button', { name: 'Aplicar a mi cuenta' }));
+  await waitFor(() => expect(calls('skins_apply')).toEqual([{ request: { lookId: 'c', capeChange: { id: 'cape-b' } } }]));
+  expect(await screen.findByText('Cambios aplicados a tu cuenta.')).toBeTruthy();
+  expect(screen.queryByText('Sin aplicar')).toBeNull();
+  expect(screen.getByText('Activa')).toBeTruthy();
+});
+
+test('toggling a cape previews it and discarding returns to the account', async () => {
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole('button', { name: /^Look b/ });
+  const capes = within(screen.getByRole('group', { name: 'Capa de tu cuenta' }));
+  await user.click(capes.getByRole('button', { name: /Vanilla/ }));
+  expect(viewer().dataset.cape).toBe(image('cape-b'));
+  await user.click(capes.getByRole('button', { name: /Sin capa/ }));
+  expect(viewer().dataset.cape).toBe('');
+  await user.click(screen.getByRole('button', { name: 'Descartar' }));
+  expect(viewer().dataset.cape).toBe(image('cape-a'));
+  expect(calls('skins_apply')).toHaveLength(0);
+  await user.click(capes.getByRole('button', { name: /Sin capa/ }));
+  await user.click(screen.getByRole('button', { name: 'Aplicar a mi cuenta' }));
+  await waitFor(() => expect(calls('skins_apply')).toEqual([{ request: { lookId: null, capeChange: { id: null } } }]));
+});
+
+test('a current look that is not saved can be saved, and then stops being offered', async () => {
+  const user = userEvent.setup();
+  mount();
+  expect(await screen.findByText('Tu aspecto actual no está guardado')).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Guardar' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Guardar en mi biblioteca' });
+  const name = within(dialog).getByLabelText('Nombre') as HTMLInputElement;
+  expect(name.value).toBe('Skin de PlayerOne');
+  await user.clear(name);
+  await user.type(name, 'Mi aspecto');
+  await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
+  await waitFor(() => expect(calls('skins_save_current')).toEqual([{ name: 'Mi aspecto' }]));
+  await waitFor(() => expect(screen.queryByText('Tu aspecto actual no está guardado')).toBeNull());
+  expect(screen.getByRole('button', { name: /^Mi aspecto/ })).toBeTruthy();
+});
+
+test('a look that already matches the account is not offered for saving', async () => {
+  view = { ...baseView(), matchingLook: 'b' };
+  mount();
+  await screen.findByRole('button', { name: /^Look b/ });
+  expect(screen.queryByText('Tu aspecto actual no está guardado')).toBeNull();
+});
+
+test('adding a skin previews the file, model and cape before saving and can apply it in one step', async () => {
+  const user = userEvent.setup({ applyAccept: false });
+  mount();
+  await user.click(await screen.findByRole('button', { name: /Añadir skin/ }));
+  const dialog = await screen.findByRole('dialog', { name: 'Añadir skin' });
+  const scope = within(dialog);
+  expect((scope.getByRole('button', { name: 'Guardar' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((scope.getByRole('button', { name: 'Guardar y aplicar' }) as HTMLButtonElement).disabled).toBe(true);
+
+  // A file that is not a PNG is refused in the interface, before anything is sent.
+  const input = scope.getByLabelText('Archivo de skin') as HTMLInputElement;
+  await user.upload(input, new File(['x'], 'foto.jpg', { type: 'image/jpeg' }));
+  expect(await scope.findByText('Elige un archivo PNG.')).toBeTruthy();
+
+  const bytes = new Uint8Array([137, 80, 78, 71]);
+  await user.upload(input, new File([bytes], 'mi-skin.png', { type: 'image/png' }));
+  expect(await scope.findByText('mi-skin.png')).toBeTruthy();
+  expect(scope.getByTestId('viewer').dataset.skin).toBe(`data:image/png;base64,${btoa(String.fromCharCode(...bytes))}`);
+  expect(scope.getByTestId('viewer').dataset.model).toBe('classic');
+
+  await user.click(scope.getByRole('radio', { name: 'Delgado (Alex)' }));
+  expect(scope.getByTestId('viewer').dataset.model).toBe('slim');
+  await user.click(scope.getByRole('button', { name: /Vanilla/ }));
+  expect(scope.getByTestId('viewer').dataset.cape).toBe(image('cape-b'));
+  await user.clear(scope.getByLabelText('Nombre'));
+  await user.type(scope.getByLabelText('Nombre'), 'Mi skin');
+  await user.click(scope.getByRole('button', { name: 'Guardar y aplicar' }));
+
+  await waitFor(() => expect(calls('skins_add_look')).toEqual([{ name: 'Mi skin', model: 'slim', cape: 'cape-b', png: btoa(String.fromCharCode(...bytes)) }]));
+  await waitFor(() => expect(calls('skins_apply')).toEqual([{ request: { lookId: 'new1' } }]));
+  expect(await screen.findByText('Skin guardada y aplicada a tu cuenta.')).toBeTruthy();
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+test('a rejected skin file keeps the dialog open with the reason and saves nothing', async () => {
+  const user = userEvent.setup({ applyAccept: false });
+  failure = { skins_add_look: 'invalid_skin' };
+  mount();
+  await user.click(await screen.findByRole('button', { name: /Añadir skin/ }));
+  const dialog = await screen.findByRole('dialog', { name: 'Añadir skin' });
+  await user.upload(within(dialog).getByLabelText('Archivo de skin'), new File([new Uint8Array([1, 2, 3])], 'rota.png', { type: 'image/png' }));
+  await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
+  expect(await within(dialog).findByText(/no es una skin válida/)).toBeTruthy();
+  expect(screen.getByRole('dialog', { name: 'Añadir skin' })).toBeTruthy();
+  expect(calls('skins_apply')).toHaveLength(0);
+});
+
+test('editing keeps the saved image unless a new file is chosen', async () => {
+  const user = userEvent.setup();
+  backend.invoke.mockImplementation(async (command: string, args: Record<string, unknown> = {}) => {
+    if (command === 'skins_snapshot' || command === 'skins_sync') return view;
+    if (command === 'skin_texture') return new TextEncoder().encode(String(args.key)).buffer;
+    if (command === 'skins_edit_look') { view = { ...view, library: view.library.map(item => item.id === args.id ? { ...item, name: String(args.name), model: args.model as 'classic' | 'slim', cape: args.cape as string | null } : item) }; return view; }
+    throw new Error(`Unexpected test command: ${command}`);
+  });
+  mount();
+  await user.click(await screen.findByRole('button', { name: 'Más acciones para Look c' }));
+  await user.click(await screen.findByRole('menuitem', { name: 'Editar' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Editar skin' });
+  const scope = within(dialog);
+  expect((scope.getByLabelText('Nombre') as HTMLInputElement).value).toBe('Look c');
+  expect((scope.getByRole('radio', { name: 'Delgado (Alex)' }) as HTMLInputElement).checked).toBe(true);
+  expect(scope.getByTestId('viewer').dataset.cape).toBe(image('cape-b'));
+  await user.click(scope.getByRole('radio', { name: 'Clásico (Steve)' }));
+  expect(scope.getByTestId('viewer').dataset.model).toBe('classic');
+  await user.click(scope.getByRole('button', { name: 'Guardar' }));
+  await waitFor(() => expect(calls('skins_edit_look')).toEqual([{ id: 'c', name: 'Look c', model: 'classic', cape: 'cape-b', png: null }]));
+});
+
+test('deleting asks first, says the account is untouched and then removes the look', async () => {
+  const user = userEvent.setup();
+  mount();
+  await user.click(await screen.findByRole('button', { name: 'Más acciones para Look b' }));
+  await user.click(await screen.findByRole('menuitem', { name: 'Eliminar' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Eliminar de la biblioteca' });
+  expect(within(dialog).getByText(/no cambia/)).toBeTruthy();
+  expect(calls('skins_delete_look')).toHaveLength(0);
+  await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  expect(calls('skins_delete_look')).toHaveLength(0);
+  await user.click(await screen.findByRole('button', { name: 'Más acciones para Look b' }));
+  await user.click(await screen.findByRole('menuitem', { name: 'Eliminar' }));
+  await user.click(within(await screen.findByRole('dialog', { name: 'Eliminar de la biblioteca' })).getByRole('button', { name: 'Eliminar' }));
+  await waitFor(() => expect(calls('skins_delete_look')).toEqual([{ id: 'b' }]));
+  await waitFor(() => expect(screen.queryByRole('button', { name: /^Look b/ })).toBeNull());
+});
+
+test('a failed synchronisation keeps the saved library and says so', async () => {
+  failure = { skins_sync: 'network_unavailable' };
+  mount();
+  expect(await screen.findByRole('button', { name: /^Look b/ })).toBeTruthy();
+  expect(await screen.findByText(/No pudimos sincronizar con Minecraft/)).toBeTruthy();
+  expect(viewer().dataset.skin).toBe(image(hash('a')));
+});
+
+test('a failed apply is reported and the page shows what the backend now holds', async () => {
+  const user = userEvent.setup();
+  mount();
+  await user.click(await screen.findByRole('button', { name: /^Look c/ }));
+  failure = { skins_apply: 'service_unavailable' };
+  await user.click(screen.getByRole('button', { name: 'Aplicar a mi cuenta' }));
+  expect(await screen.findByText(/no está disponible por ahora/)).toBeTruthy();
+  expect(calls('skins_snapshot').length).toBeGreaterThanOrEqual(2);
+});
+
+test('an account without a skin of its own says so instead of showing an empty viewer', async () => {
+  view = { ...baseView(), current: { custom: false, texture: null, model: 'classic', cape: null }, capes: [], library: [] };
+  mount();
+  expect(await screen.findByText(/skin predeterminada de Minecraft/)).toBeTruthy();
+  expect(screen.queryByTestId('viewer')).toBeNull();
+  expect(screen.getByText('Aún no has guardado ninguna skin. Añade un archivo PNG para empezar.')).toBeTruthy();
+});

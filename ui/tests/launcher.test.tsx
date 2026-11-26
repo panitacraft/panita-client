@@ -78,6 +78,7 @@ beforeEach(() => {
       case 'import_pack_file': throw 'artifact_mismatch';
       case 'instance_variants': return variantOptions;
       case 'list_screenshots': return { screenshots: [], truncated: false };
+      case 'skins_snapshot': case 'skins_sync': return { profileId: 'profile', profileName: 'Otro', current: { custom: false, texture: null, model: 'classic', cape: null }, capes: [], library: [], matchingLook: null, syncedMs: null, incomplete: false };
       case 'system_resources': if (!systemResources) throw 'storage_unavailable'; return systemResources;
       case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': case 'open_instance_folder': case 'open_curseforge_project': return;
       default: throw new Error(`Unexpected test command: ${command}`);
@@ -489,6 +490,27 @@ test('the rail shows only the selected account and opens management to change it
   expect(screen.getByRole('heading', { name: 'Aventura', exact: true })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Acerca de Panita Client' })).toBeNull();
   expect(screen.getByText('v0.2.0-alpha')).toBeTruthy();
+});
+
+test('the skins entry is offered only to a selected Microsoft account and opens the manager', async () => {
+  accounts.accounts.push({ ...accounts.accounts[0], metadata: { ...accounts.accounts[0].metadata, account_id: 'second', kind: 'microsoft', username: 'Otro', oauth_client_id: null }, status: 'ready' });
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('button', { name: 'Ajustes Globales' });
+  // The selected account is offline: no entry, and the backend is never asked about skins.
+  expect(screen.queryByRole('button', { name: 'Skins y capas' })).toBeNull();
+  expect(backend.invoke.mock.calls.some(([command]) => String(command).startsWith('skins_'))).toBe(false);
+
+  await user.click(await screen.findByRole('button', { name: 'Gestionar cuenta: Jugador' }));
+  const row = screen.getByText('Otro').closest('li')!;
+  await user.click(within(row).getByRole('button', { name: 'Opciones de Otro' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Seleccionar', exact: true }));
+  const entry = await screen.findByRole('button', { name: 'Skins y capas' });
+  await user.click(entry);
+  expect(await screen.findByRole('heading', { name: 'Skins y capas' })).toBeTruthy();
+  await waitFor(() => expect(backend.invoke.mock.calls.some(([command]) => command === 'skins_snapshot')).toBe(true));
+  expect(entry.getAttribute('aria-current')).toBe('page');
+  await user.click(screen.getByRole('button', { name: 'Instancias', exact: true }));
+  expect(screen.queryByRole('heading', { name: 'Skins y capas' })).toBeNull();
 });
 
 test('offline avatars stay local and Microsoft avatar failures use the same local default', () => {

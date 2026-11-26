@@ -382,6 +382,92 @@
   .screenshot-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 260px; padding: 32px; text-align: center; color: #BABABA; }
   .screenshot-empty > svg { width: 36px; height: 36px; color: #A4D58E; }
   .screenshot-empty h3 { margin: 0; color: #E4FFDA; }
+
+  /* Skins and capes */
+  .skins-layout { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .utility-page .skins-layout > section { margin: 0; padding: 20px; max-width: none; }
+  .skins-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .skins-section-head h2 { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .skins-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .skins-pending { flex-shrink: 0; border: 1px solid #515151; border-radius: 4px; padding: 2px 8px; color: #BABABA; font-size: 11px; font-weight: 600; }
+  .skins-viewer { height: 380px; overflow: hidden; border: 1px solid #383838; border-radius: 10px; background: #101010; }
+  .skin-viewer-3d { position: relative; width: 100%; height: 100%; }
+  .skin-viewer-3d canvas { display: block; cursor: grab; touch-action: none; }
+  .skin-viewer-3d canvas:active { cursor: grabbing; }
+  .skin-viewer-state, .skin-viewer-fallback { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #BABABA; font-size: 13px; text-align: center; }
+  .skin-viewer-fallback p { margin: 0; }
+  .skins-default { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%; padding: 24px; color: #BABABA; text-align: center; }
+  .skins-default img { width: 64px; height: 64px; image-rendering: pixelated; }
+  .skins-default p { margin: 0; }
+  .skins-viewer-controls { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+  .skins-subheading { margin: 18px 0 8px; color: #BABABA; font-size: 14px; }
+  .skins-apply { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+  .skins-sync { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: #BABABA; font-size: 12px; }
+  .skins-sync svg { width: 14px; height: 14px; }
+  .skins-unsaved { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; padding: 12px; border: 1px dashed #515151; border-radius: 10px; background: #151515; }
+  .skins-unsaved > div { flex: 1; min-width: 0; }
+  .skins-unsaved p { margin: 2px 0 0; color: #BABABA; font-size: 13px; line-height: 1.4; }
+  .skins-unsaved .skin-thumbnail { width: 32px; height: 64px; }
+  .skins-library-empty, .skins-loading { color: #BABABA; text-align: center; }
+  .skins-library-empty { margin: 32px 0; }
+  .skins-loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 48px 0; }
+  .utility-page > section.skins-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 24px; color: #BABABA; text-align: center; }
+  .skins-empty > svg { width: 36px; height: 36px; color: #A4D58E; }
+  .skins-empty h2 { margin: 0; color: #E4FFDA; }
+  .skins-empty p { margin: 0; max-width: 460px; }
+  div.skins-empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 40px 24px; color: #BABABA; text-align: center; }
+  div.skins-empty > svg { width: 36px; height: 36px; color: #FCA5A5; }
+
+  .skin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+  .skin-card { position: relative; min-width: 0; margin: 0; }
+  .skin-card-main { flex-direction: column; justify-content: flex-start; gap: 6px; width: 100%; padding: 16px 8px 12px; border: 1px solid #383838; border-radius: 10px; background: #151515; font-weight: 400; }
+  .skin-card-main:not(:disabled):hover { border-color: #515151; background: #1b1b1b; }
+  .skin-card-main[aria-pressed='true'] { border-color: #54A636; background: #1c2a17; box-shadow: inset 0 0 0 1px #54A636; }
+  .skin-card-name { max-width: 100%; overflow: hidden; color: #F9FFF8; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+  .skin-card-meta { color: #BABABA; font-size: 12px; }
+  .skin-card-badge { position: absolute; top: 8px; left: 8px; }
+  .skin-more { position: absolute; top: 6px; right: 6px; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid #515151; border-radius: 6px; background: #141414cc; color: #F9FFF8; opacity: 0; transition: opacity 120ms ease; }
+  .skin-more svg { width: 16px; height: 16px; }
+  .skin-card:hover .skin-more, .skin-card:has(:focus-visible) .skin-more, .skin-more[data-state='open'] { opacity: 1; }
+  @media (hover: none) { .skin-more { opacity: 1; } }
+  .skin-thumbnail { display: grid; place-items: center; width: 64px; height: 128px; }
+  .skin-thumbnail canvas { width: 100%; height: 100%; image-rendering: pixelated; }
+  .skin-placeholder { display: flex; flex-direction: column; align-items: center; gap: 6px; color: #8f8f8f; font-size: 12px; text-align: center; }
+  .skin-placeholder svg { width: 22px; height: 22px; }
+
+  .cape-picker { display: flex; flex-wrap: wrap; gap: 8px; }
+  .cape-picker .skin-hint { align-self: center; margin: 0; }
+  .cape-tile { flex-direction: column; justify-content: flex-start; gap: 6px; width: 76px; padding: 8px 6px; border: 1px solid #383838; border-radius: 8px; background: #151515; color: #BABABA; font-size: 11px; font-weight: 500; line-height: 1.2; text-align: center; }
+  .cape-tile > span:last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cape-tile[aria-pressed='true'] { border-color: #54A636; background: #1c2a17; color: #E4FFDA; }
+  .cape-thumbnail { display: grid; place-items: center; width: 40px; height: 64px; color: #8f8f8f; }
+  .cape-thumbnail canvas { width: 100%; height: 100%; image-rendering: pixelated; }
+  .cape-thumbnail svg { width: 22px; height: 22px; }
+
+  .segmented { display: inline-flex; overflow: hidden; border: 1px solid #515151; border-radius: 8px; }
+  .segmented label { position: relative; display: inline-flex; align-items: center; margin: 0; padding: 7px 12px; background: #1b1b1b; color: #BABABA; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .segmented label + label { border-left: 1px solid #515151; }
+  .segmented label.is-selected { background: #253b1c; color: #E4FFDA; }
+  .segmented label:has(input:focus-visible) { outline: .75px solid #E4FFDA; outline-offset: -3px; }
+  .segmented input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .segmented label:has(input:disabled) { cursor: not-allowed; opacity: .5; }
+
+  .account-dialog.skin-dialog { width: min(820px, calc(100vw - 40px)); max-width: none; }
+  .skin-dialog-body { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 24px; }
+  .skin-dialog-preview { position: relative; height: 380px; overflow: hidden; border: 1px solid #383838; border-radius: 10px; background: #101010; }
+  .skin-dialog-empty { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; padding: 24px; color: #BABABA; font-size: 13px; text-align: center; pointer-events: none; }
+  .skin-dialog-fields input:not([type='radio']):not([type='file']) { width: 100%; }
+  .skin-dialog-fields > label { margin-top: 0; }
+  .skin-field-label { margin: 18px 0 8px; color: #BABABA; font-size: 13px; font-weight: 600; }
+  .skin-file { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .skin-file-name { min-width: 0; overflow: hidden; color: #BABABA; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+  .skin-hint { margin: 6px 0 0; color: #8f8f8f; font-size: 12px; line-height: 1.4; }
+  .skin-problem { color: #FCA5A5; }
+  .account-dialog.skin-save-dialog { width: min(440px, calc(100vw - 40px)); }
+  .account-dialog.skin-delete p { margin: 12px 0 0; overflow-wrap: anywhere; }
+  @media (max-width: 900px) {
+    .skins-layout, .skin-dialog-body { grid-template-columns: minmax(0, 1fr); }
+  }
   .screenshot-empty p { margin: 0; max-width: 460px; }
   .variant-panel > p { color: #BABABA; margin-bottom: 4px; }
   .variant-panel .account-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 12px; }

@@ -21,6 +21,7 @@
     "lucide-react": "1.63.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "skinview3d": "3.4.2",
     "tailwind-merge": "3.7.0"
   },
   "devDependencies": {
