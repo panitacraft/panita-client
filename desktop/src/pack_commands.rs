@@ -223,8 +223,9 @@ pub(super) async fn open_instance_folder(
         .map(|_| true)
 }
 
-/// Readable names for the installed and the available version of a pack, for the
-/// update prompt. A failed lookup falls back to the plain identifiers.
+/// Readable names for the installed and the available version of a pack and the
+/// release notes of the available one, for the update prompt. A failed lookup falls
+/// back to the plain identifiers and no notes.
 #[tauri::command]
 pub(super) async fn pack_version_names(
     app: tauri::AppHandle,
@@ -267,15 +268,21 @@ pub(super) async fn pack_version_names(
     {
         let lookup = async {
             let client = ModrinthClient::new().ok()?;
-            let from = client.version_number(from).await.ok()?;
-            let to = client.version_number(to).await.ok()?;
+            let from = client.version_info(from).await.ok()?;
+            let to = client.version_info(to).await.ok()?;
             Some((from, to))
         };
         if let Some((from, to)) = lookup.await {
-            return Ok(json!({"installed": from, "available": to}));
+            return Ok(json!({
+                "installed": from.number,
+                "available": to.number,
+                "changelog": to.changelog,
+            }));
         }
     }
-    Ok(json!({"installed": installed, "available": available}))
+    // Custom packs name their versions through the catalog, which carries no release
+    // notes yet, so the prompt shows no changelog for them.
+    Ok(json!({"installed": installed, "available": available, "changelog": null}))
 }
 
 #[tauri::command]
