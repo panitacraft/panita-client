@@ -34,7 +34,7 @@ test('clearing previous logs asks first, then reports what was removed and what 
   backend.clear.mockResolvedValueOnce({ removed: 3, failed: 1 });
   fireEvent.click(screen.getByRole('button', { name: 'Borrar registros anteriores' }));
   fireEvent.click(screen.getByRole('button', { name: 'Borrar' }));
-  const alert = await screen.findByRole('alert');
+  const alert = await screen.findByText(/^Se borraron 3/);
   expect(alert.textContent).toBe('Se borraron 3 registros anteriores. No pudimos borrar 1 archivo; puede estar en uso.');
   expect(backend.clear).toHaveBeenCalledTimes(1);
   backend.clear.mockResolvedValueOnce({ removed: 0, failed: 0 });

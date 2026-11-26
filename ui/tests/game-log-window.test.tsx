@@ -59,9 +59,9 @@ test('export and copy send the complete history, ignoring filters and a cleared 
   render(<GameLogWindow instanceId="fixture" requestId="run" />);
   await screen.findByText('Message 2500');
   await user.click(screen.getByRole('button', { name: 'Limpiar vista' }));
-  await user.click(screen.getByRole('button', { name: 'Exportar .txt' }));
+  await user.click(screen.getByRole('button', { name: 'Exportar' }));
   expect((await screen.findByText('Registro exportado.')).textContent).toBe('Registro exportado.');
-  await user.click(screen.getByRole('button', { name: 'Copiar todo' }));
+  await user.click(screen.getByRole('button', { name: 'Copiar' }));
   expect(await screen.findByText('Registro copiado al portapapeles.')).toBeTruthy();
   expect(sent.map(item => item.command)).toEqual(['export_game_log', 'copy_game_log']);
   for (const { text } of sent) {
@@ -81,7 +81,7 @@ test('a failed export is reported without losing the log', async () => {
   });
   const { container } = render(<GameLogWindow instanceId="fixture" requestId="run" />);
   await screen.findByText('Message 2500');
-  await user.click(screen.getByRole('button', { name: 'Exportar .txt' }));
-  await waitFor(() => expect(container.querySelector('.log-feedback[role="alert"]')).toBeTruthy());
+  await user.click(screen.getByRole('button', { name: 'Exportar' }));
+  await waitFor(() => expect(container.querySelector('.transient-notice.notice-error')).toBeTruthy());
   expect(screen.getByText('Message 2500')).toBeTruthy();
 });

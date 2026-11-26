@@ -4,6 +4,7 @@ import { isTauri } from '@tauri-apps/api/core';
 import { clearOldLogs, loadDiagnostics, openLogsFolder, type ClearedLogs } from './diagnostic-api';
 import { diagnosticText, visibleDiagnosticRecords, type DiagnosticSnapshot } from './diagnostic-state';
 import { messageForError } from './errors';
+import { TransientNotice, useTransientNotice } from './components/transient-notice';
 
 function formatTime(at: number): string {
   return new Date(at).toLocaleString('es', { dateStyle: 'short', timeStyle: 'medium', hour12: false });
@@ -26,13 +27,13 @@ function DiagnosticViewer() {
   const [folderError, setFolderError] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
-  const [clearResult, setClearResult] = useState<{ text: string; failed: boolean } | null>(null);
+  const toast = useTransientNotice();
   async function clearPrevious() {
-    setClearing(true); setClearResult(null);
+    setClearing(true); toast.clear();
     try {
       const result = await clearOldLogs();
-      setClearResult({ text: clearedLogsMessage(result), failed: result.failed > 0 });
-    } catch { setClearResult({ text: 'No pudimos borrar los registros anteriores.', failed: true }); }
+      toast.show(clearedLogsMessage(result), result.failed > 0 ? 'error' : 'success');
+    } catch { toast.show('No pudimos borrar los registros anteriores.', 'error'); }
     finally { setClearing(false); setConfirmClear(false); }
   }
   useEffect(() => {
@@ -53,14 +54,14 @@ function DiagnosticViewer() {
     {folderError && <p role="alert">No pudimos abrir la carpeta de registros.</p>}
     <div className="diagnostic-toolbar"><span><Activity aria-hidden="true" />{snapshot?.records.length ?? 0} {snapshot?.records.length === 1 ? 'evento' : 'eventos'}</span><label><input type="checkbox" checked={errorsOnly} onChange={event => setErrorsOnly(event.target.checked)} />Solo problemas</label>
     <div className="diagnostic-actions"><button type="button" disabled={!isTauri()} onClick={() => { setFolderError(false); openLogsFolder().catch(() => setFolderError(true)); }}><FolderOpen aria-hidden="true" />Abrir carpeta de registros</button>
-    <button type="button" disabled={clearing || !isTauri()} onClick={() => { setClearResult(null); setConfirmClear(true); }}><Trash2 aria-hidden="true" />Borrar registros anteriores</button>
+    <button type="button" disabled={clearing || !isTauri()} onClick={() => { toast.clear(); setConfirmClear(true); }}><Trash2 aria-hidden="true" />Borrar registros anteriores</button>
     <button type="button" disabled={busy || !isTauri()} onClick={() => setAttempt(value => value + 1)}><RefreshCw aria-hidden="true" />Actualizar registro</button></div></div>
     {confirmClear && <div role="group" aria-label="Confirmar borrado de registros anteriores" className="diagnostic-confirm">
       <p>Se borrarán los archivos de registro de sesiones anteriores. El registro de esta sesión (latest.log) se conserva. Esta acción no se puede deshacer.</p>
       <div className="diagnostic-actions"><button type="button" disabled={clearing} onClick={() => setConfirmClear(false)}>Cancelar</button>
       <button type="button" disabled={clearing} onClick={() => void clearPrevious()}><Trash2 aria-hidden="true" />Borrar</button></div>
     </div>}
-    {clearResult && <p role={clearResult.failed ? 'alert' : 'status'}>{clearResult.text}</p>}
+    <TransientNotice notice={toast.notice} />
     {busy && <p role="status">Cargando registro…</p>}
     {error && <p role="alert">No pudimos actualizar el registro. Puedes reintentar; conservamos la última lectura.</p>}
     {snapshot && !snapshot.records.length && <p role="status">{isTauri() ? 'Todavía no hay eventos disponibles.' : 'El registro está disponible en la aplicación de escritorio.'}</p>}
