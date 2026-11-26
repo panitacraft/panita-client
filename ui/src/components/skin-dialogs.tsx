@@ -84,7 +84,7 @@ export function SkinDialog({ view, look, busy, error, notice, onCancel, onSave }
     <form noValidate onSubmit={event => { event.preventDefault(); submit(false); }}>
       <div className="skin-dialog-body">
         <div className="skin-dialog-preview">
-          <SkinViewer3D skin={skinUrl} model={model} cape={capeImage.url} animation="idle" spin={!prefersReducedMotion()} label="Vista previa de la skin"
+          <SkinViewer3D skin={skinUrl} model={model} cape={capeImage.url} playing={!prefersReducedMotion()} label="Vista previa de la skin"
             fallback={<SkinThumbnail texture={look?.texture ?? null} model={model} label="Vista previa" />} />
           {!skinUrl && <p className="skin-dialog-empty">Elige un archivo PNG para ver tu skin en 3D.</p>}
         </div>

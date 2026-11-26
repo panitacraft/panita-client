@@ -504,12 +504,12 @@ test('the Aspectos button opens the manager from a Microsoft account row, and th
   expect(screen.queryByRole('button', { name: 'Aspectos de Jugador' })).toBeNull();
   // Another Microsoft account is selected first, then the editor opens on it.
   await user.click(await screen.findByRole('button', { name: 'Aspectos de Otro' }));
-  expect(await screen.findByRole('heading', { name: 'Skins y capas' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: /^Aspectos/ })).toBeTruthy();
   expect(backend.invoke).toHaveBeenCalledWith('select_account', { accountId: 'second' });
   await waitFor(() => expect(backend.invoke.mock.calls.some(([command]) => command === 'skins_snapshot')).toBe(true));
   expect(screen.queryByRole('button', { name: 'Skins y capas' })).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Instancias', exact: true }));
-  expect(screen.queryByRole('heading', { name: 'Skins y capas' })).toBeNull();
+  expect(screen.queryByRole('heading', { name: /^Aspectos/ })).toBeNull();
 });
 
 test('offline avatars stay local and Microsoft avatar failures use the same local default', () => {

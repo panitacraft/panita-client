@@ -1,16 +1,11 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { LoaderCircle } from 'lucide-react';
-import type { SkinViewer as Viewer } from 'skinview3d';
+import type { SkinViewer as Viewer, WalkingAnimation } from 'skinview3d';
 import type { SkinModel } from '../skin-state';
+import { DEFAULT_YAW } from '../skin-angles';
 import { decodeImage } from '../use-texture';
 
-export type ViewerAnimation = 'none' | 'idle' | 'walking' | 'running' | 'wave';
-
-export const viewerAnimations: readonly (readonly [ViewerAnimation, string])[] = [
-  ['idle', 'Reposo'], ['walking', 'Caminar'], ['running', 'Correr'], ['wave', 'Saludar'],
-];
-
-/** Players who ask the system for less motion get a still pose and no automatic turning. */
+/** Players who ask the system for less motion get a still pose until they press play. */
 export const prefersReducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 /** One step of keyboard rotation, in radians. */
@@ -18,26 +13,27 @@ const KEY_TURN = Math.PI / 12;
 
 /**
  * An interactive 3D player. It loads its renderer only when first shown, so the launcher starts
- * without it, and it shows `fallback` when the machine cannot provide WebGL. The player turns by
- * dragging, or with the arrow keys when the view has focus. Textures arrive as data URLs, which the
- * content security policy already allows. Every change of skin, model, cape or animation is applied
- * to the same renderer, so previews are immediate.
+ * without it, and it shows `fallback` when the machine cannot provide WebGL. The player starts at the
+ * three-quarter angle of the saved skins and turns by dragging, or with the arrow keys when the view
+ * has focus. It walks in place without moving its head, and `playing` pauses and resumes that walk.
+ * Textures arrive as data URLs, which the content security policy already allows. Every change of
+ * skin, model or cape is applied to the same renderer, so previews are immediate.
  */
-export function SkinViewer3D({ skin, model, cape, animation, spin, paused = false, label, fallback }: {
+export function SkinViewer3D({ skin, model, cape, playing, suspended = false, label, fallback }: {
   skin: string | null;
   model: SkinModel;
   cape: string | null;
-  animation: ViewerAnimation;
-  spin: boolean;
-  /** Stop rendering while the view is not visible. */
-  paused?: boolean;
+  /** Whether the walking animation runs; false holds the current pose. */
+  playing: boolean;
+  /** Stop rendering altogether while the view is not visible. */
+  suspended?: boolean;
   label: string;
   fallback?: ReactNode;
 }) {
   const frame = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const viewer = useRef<Viewer | null>(null);
-  const library = useRef<typeof import('skinview3d') | null>(null);
+  const walk = useRef<WalkingAnimation | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   // Image loads can finish out of order; only the latest request of each kind may apply.
   const latest = useRef({ skin: 0, cape: 0 });
@@ -53,10 +49,16 @@ export function SkinViewer3D({ skin, model, cape, animation, spin, paused = fals
         const box = frame.current;
         if (disposed || !element || !box) return;
         const { width, height } = box.getBoundingClientRect();
-        created = new module.SkinViewer({ canvas: element, width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)), zoom: 0.85, fov: 40, enableControls: true });
+        created = new module.SkinViewer({ canvas: element, width: Math.max(1, Math.round(width)), height: Math.max(1, Math.round(height)), zoom: 0.56, fov: 40, enableControls: true });
         created.controls.enableZoom = false;
         created.controls.enablePan = false;
-        library.current = module;
+        created.autoRotate = false;
+        created.playerWrapper.rotation.y = DEFAULT_YAW;
+        // The head stays still: only the legs, arms and cape move.
+        const walking = new module.WalkingAnimation();
+        walking.headBobbing = false;
+        created.animation = walking;
+        walk.current = walking;
         viewer.current = created;
         observer = new ResizeObserver(() => {
           const size = box.getBoundingClientRect();
@@ -74,7 +76,7 @@ export function SkinViewer3D({ skin, model, cape, animation, spin, paused = fals
       observer?.disconnect();
       created?.dispose();
       viewer.current = null;
-      library.current = null;
+      walk.current = null;
     };
   }, []);
 
@@ -103,23 +105,13 @@ export function SkinViewer3D({ skin, model, cape, animation, spin, paused = fals
   }, [status, cape]);
 
   useEffect(() => {
-    const player = viewer.current;
-    const module = library.current;
-    if (status !== 'ready' || !player || !module) return;
-    const reduced = prefersReducedMotion();
-    player.animation = reduced || animation === 'none' ? null
-      : animation === 'walking' ? new module.WalkingAnimation()
-      : animation === 'running' ? new module.RunningAnimation()
-      : animation === 'wave' ? new module.WaveAnimation()
-      : new module.IdleAnimation();
-    player.autoRotate = spin && !reduced;
-    player.autoRotateSpeed = 0.8;
-  }, [status, animation, spin]);
+    if (status === 'ready' && walk.current) walk.current.paused = !playing;
+  }, [status, playing]);
 
   useEffect(() => {
     const player = viewer.current;
-    if (status === 'ready' && player) player.renderPaused = paused;
-  }, [status, paused]);
+    if (status === 'ready' && player) player.renderPaused = suspended;
+  }, [status, suspended]);
 
   function turn(event: KeyboardEvent<HTMLCanvasElement>) {
     const player = viewer.current;

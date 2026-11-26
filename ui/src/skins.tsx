@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ArrowLeft, Check, CircleAlert, Ellipsis, LoaderCircle, Pencil, Plus, RefreshCw, RotateCw, Save, Trash2, Undo2, UserRound } from 'lucide-react';
+import { ArrowLeft, Ban, Check, CircleAlert, CirclePlus, Ellipsis, LoaderCircle, Pause, Pencil, Play, RefreshCw, Save, Search, Trash2, Undo2, UserRound } from 'lucide-react';
 import type { AccountView } from './account-state';
-import { DeleteLookDialog, CapePicker, SaveCurrentDialog, SkinDialog, type LookDraft } from './components/skin-dialogs';
+import { DeleteLookDialog, SaveCurrentDialog, SkinDialog, type LookDraft } from './components/skin-dialogs';
+import { CapePicture, SkinPicture } from './components/skin-picture';
 import { SkinThumbnail } from './components/skin-thumbnails';
-import { SkinViewer3D, prefersReducedMotion, viewerAnimations, type ViewerAnimation } from './components/skin-viewer';
+import { SkinViewer3D, prefersReducedMotion } from './components/skin-viewer';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
@@ -13,38 +14,52 @@ import { Hint } from './components/hint';
 import { messageForError } from './errors';
 import { addLook, applySkins, deleteLook, editLook, loadSkins, saveCurrentLook, syncSkins } from './skin-api';
 import {
-  applyRequestOf, canSaveCurrent, isDirty, modelShortLabels, noSelection, pickCape, pickLook, previewOf, syncedText, validSelection,
-  type LookView, type Selection, type SkinsView,
+  applyRequestOf, canSaveCurrent, filterCapes, filterLooks, isDirty, noSelection, pickCape, pickLook, previewOf, syncedText, validSelection,
+  type CapeView, type LookView, type Selection, type SkinModel, type SkinsView,
 } from './skin-state';
 import { useTextureUrl } from './use-texture';
 import defaultSkin from './assets/default-skin.svg';
 
 type Dialog = { kind: 'add' } | { kind: 'edit'; id: string } | { kind: 'save-current' } | { kind: 'delete'; id: string };
+type Tab = 'skins' | 'capes';
 
 /** Whether the selected account can use the manager: only authenticated Microsoft accounts can. */
 export const canManageSkins = (account: AccountView | undefined) => account?.metadata.kind === 'microsoft';
 
-function LookCard({ look, view, selected, busy, onPick, onApply, onEdit, onDelete }: {
-  look: LookView; view: SkinsView; selected: boolean; busy: boolean;
+/** The green check that marks what the account wears now. */
+function WornMark({ label }: { label: string }) {
+  return <span className="skin-card-check" role="img" aria-label={label}><Check aria-hidden="true" /></span>;
+}
+
+function LookCard({ look, active, selected, busy, onPick, onApply, onEdit, onDelete }: {
+  look: LookView; active: boolean; selected: boolean; busy: boolean;
   onPick: () => void; onApply: () => void; onEdit: () => void; onDelete: () => void;
 }) {
-  const active = view.matchingLook === look.id;
   return <li className="skin-card">
-    <button type="button" className="skin-card-main" aria-pressed={selected} onClick={onPick}>
-      <SkinThumbnail texture={look.texture} model={look.model} label={look.name} />
+    <button type="button" className="skin-card-main" aria-pressed={selected} aria-label={look.name} onClick={onPick}>
+      <span className="skin-card-art"><SkinPicture texture={look.texture} model={look.model} label={look.name} /></span>
       <span className="skin-card-name" title={look.name}>{look.name}</span>
-      <span className="skin-card-meta">{modelShortLabels[look.model]}{look.cape ? ' · Con capa' : ''}</span>
     </button>
-    {active && <span className="active-badge skin-card-badge"><Check aria-hidden="true" />Activa</span>}
+    {active && <WornMark label="Skin activa" />}
     <DropdownMenu>
       <DropdownMenuTrigger asChild><button type="button" className="skin-more" aria-label={`Más acciones para ${look.name}`}><Ellipsis aria-hidden="true" /></button></DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="start">
         <DropdownMenuItem disabled={busy || active} onSelect={onApply}><Check />Aplicar a mi cuenta</DropdownMenuItem>
         <DropdownMenuItem onSelect={onEdit}><Pencil />Editar</DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onDelete}><Trash2 />Eliminar</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  </li>;
+}
+
+function CapeCard({ cape, worn, selected, wearer, model, onPick }: { cape: CapeView; worn: boolean; selected: boolean; wearer: string | null; model: SkinModel; onPick: () => void }) {
+  return <li className="skin-card">
+    <button type="button" className="skin-card-main" aria-pressed={selected} aria-label={cape.alias} onClick={onPick}>
+      <span className="skin-card-art"><CapePicture id={cape.id} cached={cape.cached} wearer={wearer} model={model} label={cape.alias} /></span>
+      <span className="skin-card-name" title={cape.alias}>{cape.alias}</span>
+    </button>
+    {worn && <WornMark label="Capa activa" />}
   </li>;
 }
 
@@ -65,9 +80,9 @@ export function SkinsPage({ account, onBack }: { account: AccountView | undefine
   const [busy, setBusy] = useState(false);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [dialogError, setDialogError] = useState<string | null>(null);
-  const reduced = prefersReducedMotion();
-  const [animation, setAnimation] = useState<ViewerAnimation>(reduced ? 'none' : 'idle');
-  const [spin, setSpin] = useState(!reduced);
+  const [tab, setTab] = useState<Tab>('skins');
+  const [query, setQuery] = useState('');
+  const [playing, setPlaying] = useState(!prefersReducedMotion());
   const { notice, show } = useTransientNotice();
   const current = useRef<string | null>(null);
   current.current = profileId;
@@ -202,88 +217,96 @@ export function SkinsPage({ account, onBack }: { account: AccountView | undefine
   }
 
   const open = (next: Dialog | null) => { setDialogError(null); setDialog(next); };
+  const choose = (next: Tab) => { setTab(next); setQuery(''); };
   const preview = view ? previewOf(view, selection) : null;
   const dirty = view ? isDirty(view, selection) : false;
   const skinImage = useTextureUrl('skin', preview?.texture ?? null);
   const previewCape = view?.capes.find(cape => cape.id === preview?.cape);
   const capeImage = useTextureUrl('cape', preview?.cape && previewCape?.cached ? preview.cape : null);
-  const previewLook = view?.library.find(look => look.id === selection.lookId);
   const editing = dialog?.kind === 'edit' ? view?.library.find(look => look.id === dialog.id) : undefined;
   const deleting = dialog?.kind === 'delete' ? view?.library.find(look => look.id === dialog.id) : undefined;
   const dialogNotice = dialog ? notice : null;
+  const looks = view ? filterLooks(view.library, query) : [];
+  const capes = view ? filterCapes(view.capes, query) : [];
+  const searching = query.trim() !== '';
 
   const heading = <div className="page-heading">
     <Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={onBack}><ArrowLeft aria-hidden="true" />Instancias</Button>
-    <h1>Skins y capas</h1>
-    <p>{account && profileId ? `Cambia el aspecto de ${account.metadata.username} en Minecraft. Se aplica a tu cuenta de Microsoft y se verá en cualquier servidor.` : 'Cambia el aspecto de tu cuenta de Minecraft.'}</p>
+    <h1>Aspectos{account && profileId && <span className="page-heading-name"> · {account.metadata.username}</span>}</h1>
+    <p>Personaliza tu personaje y cambia de estilo cuando quieras.</p>
   </div>;
 
   if (!desktop || !profileId) {
     return <>{heading}<section className="skins-empty" role="status"><UserRound aria-hidden="true" />
       <h2>{desktop ? 'Necesitas una cuenta de Microsoft' : 'Disponible en la aplicación de escritorio'}</h2>
-      <p>{desktop ? 'Las skins y capas solo se pueden gestionar con una cuenta de Microsoft. Las cuentas No-Premium no tienen un perfil en Minecraft.' : 'La gestión de skins está disponible en la aplicación de escritorio.'}</p>
+      <p>{desktop ? 'Los aspectos solo se pueden gestionar con una cuenta de Microsoft. Las cuentas No-Premium no tienen un perfil en Minecraft.' : 'La gestión de aspectos está disponible en la aplicación de escritorio.'}</p>
     </section></>;
   }
 
   return <>
     {heading}
     {error && <div role="alert" className="skins-empty"><CircleAlert aria-hidden="true" /><p className="account-error">{error}</p><Button variant="secondary" onClick={() => setAttempt(value => value + 1)}>Reintentar</Button></div>}
-    {!view && !error && <p className="skins-loading" role="status"><LoaderCircle className="spin" aria-hidden="true" />Cargando tus skins…</p>}
+    {!view && !error && <p className="skins-loading" role="status"><LoaderCircle className="spin" aria-hidden="true" />Cargando tus aspectos…</p>}
     {view && preview && <div className="skins-layout">
-      <section className="skins-stage" aria-labelledby="skins-preview-heading">
-        <div className="skins-section-head">
-          <h2 id="skins-preview-heading">{previewLook ? previewLook.name : 'Tu aspecto actual'}</h2>
-          {dirty && <span className="skins-pending">Sin aplicar</span>}
-        </div>
+      <section className="skins-stage" aria-label="Vista previa">
         <div className="skins-viewer">
           {preview.custom
-            ? <SkinViewer3D skin={skinImage.url} model={preview.model} cape={capeImage.url} animation={animation} spin={spin} label={`Vista 3D de ${previewLook?.name ?? 'tu skin'}`}
+            ? <SkinViewer3D skin={skinImage.url} model={preview.model} cape={capeImage.url} playing={playing} label={`Vista 3D de ${view.library.find(look => look.id === selection.lookId)?.name ?? 'tu skin'}`}
                 fallback={<SkinThumbnail texture={preview.texture} model={preview.model} label="Tu skin" />} />
             : <div className="skins-default"><img src={defaultSkin} alt="" aria-hidden="true" /><p>Tu cuenta usa la skin predeterminada de Minecraft. Elige una de tu biblioteca o añade una nueva.</p></div>}
+          {dirty && <span className="skins-pending">Sin aplicar</span>}
+          {preview.custom && <Hint text={playing ? 'Pausar la animación' : 'Reanudar la animación'}>
+            <Button variant="secondary" size="icon" className="skins-play" aria-pressed={!playing} aria-label={playing ? 'Pausar animación' : 'Reanudar animación'} onClick={() => setPlaying(value => !value)}>
+              {playing ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
+            </Button>
+          </Hint>}
+          {dirty && <div className="skins-apply" role="group" aria-label="Cambios sin aplicar">
+            <Button variant="outline" disabled={busy} onClick={() => setSelection(noSelection)}><Undo2 aria-hidden="true" />Descartar</Button>
+            <Button disabled={busy} onClick={() => void apply()}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <Check aria-hidden="true" />}Aplicar a mi cuenta</Button>
+          </div>}
         </div>
-        {preview.custom && <div className="skins-viewer-controls">
-          <div className="segmented" role="radiogroup" aria-label="Animación">
-            {viewerAnimations.map(([value, label]) => <label key={value} className={animation === value ? 'is-selected' : undefined}>
-              <input type="radio" name="skin-animation" value={value} checked={animation === value} disabled={reduced} onChange={() => setAnimation(value)} />{label}
-            </label>)}
-          </div>
-          <Hint text={spin ? 'Detener el giro automático' : 'Girar automáticamente'}>
-            <Button variant="secondary" size="icon" aria-pressed={spin} aria-label="Giro automático" disabled={reduced} onClick={() => setSpin(value => !value)}><RotateCw aria-hidden="true" /></Button>
-          </Hint>
-        </div>}
-        <h3 className="skins-subheading">Capa</h3>
-        <CapePicker name="Capa de tu cuenta" view={view} value={preview.cape} onChange={id => setSelection(pickCape(view, selection, id))} />
-        {dirty && <div className="skins-apply" role="group" aria-label="Cambios sin aplicar">
-          <Button variant="outline" disabled={busy} onClick={() => setSelection(noSelection)}><Undo2 aria-hidden="true" />Descartar</Button>
-          <Button disabled={busy} onClick={() => void apply()}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <Check aria-hidden="true" />}Aplicar a mi cuenta</Button>
-        </div>}
       </section>
 
-      <section className="skins-library" aria-labelledby="skins-library-heading">
-        <div className="skins-section-head">
-          <h2 id="skins-library-heading">Mi biblioteca</h2>
-          <div className="skins-actions">
-            <Hint text="Sincronizar con Minecraft"><Button variant="secondary" size="icon" aria-label="Sincronizar con Minecraft" disabled={syncing || busy} onClick={() => void sync(false)}>{syncing ? <LoaderCircle className="spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}</Button></Hint>
-            <Button disabled={busy} onClick={() => open({ kind: 'add' })}><Plus aria-hidden="true" />Añadir skin</Button>
+      <section className="skins-library" aria-label="Biblioteca">
+        <div className="skins-toolbar">
+          <div className="aspect-tabs" role="tablist" aria-label="Tipo de aspecto">
+            <button type="button" role="tab" id="aspect-tab-skins" aria-selected={tab === 'skins'} aria-controls="aspect-panel" onClick={() => choose('skins')}>Skins<span className="aspect-count">{view.library.length}</span></button>
+            <button type="button" role="tab" id="aspect-tab-capes" aria-selected={tab === 'capes'} aria-controls="aspect-panel" onClick={() => choose('capes')}>Capas<span className="aspect-count">{view.capes.length}</span></button>
           </div>
+          <label className="skins-search"><Search aria-hidden="true" />
+            <input type="search" value={query} placeholder={tab === 'skins' ? 'Buscar skin' : 'Buscar capa'} aria-label={tab === 'skins' ? 'Buscar skin' : 'Buscar capa'} autoComplete="off" onChange={event => setQuery(event.target.value)} />
+          </label>
+          <Hint text="Sincronizar con Minecraft"><Button variant="ghost" size="icon" aria-label="Sincronizar con Minecraft" disabled={syncing || busy} onClick={() => void sync(false)}>{syncing ? <LoaderCircle className="spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}</Button></Hint>
         </div>
-        <p className="skins-sync" role="status">
-          {syncFailed ? <><CircleAlert aria-hidden="true" />No pudimos sincronizar con Minecraft. Mostramos lo último guardado.</> : syncing ? <><LoaderCircle className="spin" aria-hidden="true" />Sincronizando con Minecraft…</> : syncedText(view.syncedMs)}
-        </p>
-        {view.incomplete && !syncing && <p className="skins-sync">Algunas imágenes no se pudieron guardar todavía. Se reintentará al sincronizar.</p>}
-        {canSaveCurrent(view) && <div className="skins-unsaved" role="status">
-          <SkinThumbnail texture={view.current?.texture ?? null} model={view.current?.model ?? 'classic'} label="Tu aspecto actual" />
-          <div><strong>Tu aspecto actual no está guardado</strong><p>Guárdalo para volver a él cuando quieras, con su capa.</p></div>
-          <Button variant="secondary" disabled={busy} onClick={() => open({ kind: 'save-current' })}><Save aria-hidden="true" />Guardar</Button>
-        </div>}
-        {view.library.length === 0
-          ? <p className="skins-library-empty">Aún no has guardado ninguna skin. Añade un archivo PNG para empezar.</p>
-          : <ul className="skin-grid">
-            {view.library.map(look => <LookCard key={look.id} look={look} view={view} busy={busy} selected={selection.lookId === look.id}
+
+        <div className="skins-scroll" role="tabpanel" id="aspect-panel" aria-labelledby={`aspect-tab-${tab}`}>
+          {tab === 'skins' && canSaveCurrent(view) && !searching && <div className="skins-unsaved" role="status">
+            <span className="skin-card-art"><SkinPicture texture={view.current?.texture ?? null} model={view.current?.model ?? 'classic'} label="Tu aspecto actual" /></span>
+            <div><strong>Tu aspecto actual no está guardado</strong><p>Guárdalo para volver a él cuando quieras, con su capa.</p></div>
+            <Button variant="secondary" disabled={busy} onClick={() => open({ kind: 'save-current' })}><Save aria-hidden="true" />Guardar</Button>
+          </div>}
+          {tab === 'skins' && <ul className="skin-grid">
+            {!searching && <li className="skin-card"><button type="button" className="skin-card-main skin-card-new" disabled={busy} onClick={() => open({ kind: 'add' })}><CirclePlus aria-hidden="true" /><span className="skin-card-name">Nuevo skin</span></button></li>}
+            {looks.map(look => <LookCard key={look.id} look={look} busy={busy} active={view.matchingLook === look.id} selected={selection.lookId === look.id}
               onPick={() => setSelection(pickLook(selection, look.id))}
               onApply={() => void apply({ lookId: look.id }, `«${look.name}» se aplicó a tu cuenta.`)}
               onEdit={() => open({ kind: 'edit', id: look.id })} onDelete={() => open({ kind: 'delete', id: look.id })} />)}
           </ul>}
+          {tab === 'capes' && <ul className="skin-grid">
+            {!searching && <li className="skin-card"><button type="button" className="skin-card-main skin-card-new" aria-pressed={preview.cape === null} aria-label="Sin capa" onClick={() => setSelection(pickCape(view, selection, null))}><Ban aria-hidden="true" /><span className="skin-card-name">Sin capa</span></button>
+              {view.current?.cape == null && view.current && <WornMark label="Sin capa activa" />}</li>}
+            {capes.map(cape => <CapeCard key={cape.id} cape={cape} worn={view.current?.cape === cape.id} selected={preview.cape === cape.id}
+              wearer={view.current?.custom ? view.current.texture : null} model={view.current?.model ?? 'classic'} onPick={() => setSelection(pickCape(view, selection, cape.id))} />)}
+          </ul>}
+          {tab === 'skins' && view.library.length === 0 && !searching && <p className="skins-library-empty">Aún no has guardado ninguna skin. Elige «Nuevo skin» para añadir un archivo PNG.</p>}
+          {tab === 'capes' && view.capes.length === 0 && <p className="skins-library-empty">Tu cuenta no tiene capas.</p>}
+          {searching && (tab === 'skins' ? looks.length === 0 : capes.length === 0) && <p className="skins-library-empty">Nada coincide con «{query.trim()}».</p>}
+        </div>
+
+        <p className="skins-sync" role="status">
+          {syncFailed ? <><CircleAlert aria-hidden="true" />No pudimos sincronizar con Minecraft. Mostramos lo último guardado.</> : syncing ? <><LoaderCircle className="spin" aria-hidden="true" />Sincronizando con Minecraft…</> : syncedText(view.syncedMs)}
+          {view.incomplete && !syncing && ' · Algunas imágenes se guardarán en la próxima sincronización.'}
+        </p>
       </section>
     </div>}
 

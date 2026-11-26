@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  MAX_LOOK_NAME, MAX_SKIN_FILE_BYTES, applyRequestOf, canSaveCurrent, isDirty, lookCape, lookNameProblem, noSelection, pickCape, pickLook, previewOf,
+  MAX_LOOK_NAME, MAX_SKIN_FILE_BYTES, applyRequestOf, filterCapes, filterLooks, matchesSearch, canSaveCurrent, isDirty, lookCape, lookNameProblem, noSelection, pickCape, pickLook, previewOf,
   skinFileProblem, suggestedLookName, syncedText, validSelection,
 } from '../src/skin-state.ts';
 
@@ -125,4 +125,13 @@ test('the synchronisation age reads naturally', () => {
   assert.equal(syncedText(now - 5 * 60_000, now), 'Sincronizado hace 5 min');
   assert.equal(syncedText(now - 3 * 3_600_000, now), 'Sincronizado hace 3 h');
   assert.match(syncedText(now - 3 * 86_400_000, now), /\d/);
+});
+
+test('search ignores case and accents, and an empty search matches everything', () => {
+  assert.equal(matchesSearch('Árbol', 'arb'), true);
+  assert.equal(matchesSearch('arbol', 'ÁRB'), true);
+  assert.equal(matchesSearch('Caballero', 'arb'), false);
+  assert.equal(matchesSearch('Cualquiera', '   '), true);
+  assert.deepEqual(filterLooks([look('b', { name: 'Pirata' }), look('c', { name: 'Astronauta' })], 'pir').map(item => item.id), ['b']);
+  assert.deepEqual(filterCapes([{ id: 'x', alias: 'Migrator', cached: true, active: false }, { id: 'y', alias: 'Vanilla', cached: true, active: false }], 'van').map(item => item.id), ['y']);
 });

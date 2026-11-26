@@ -148,3 +148,14 @@ export function syncedText(ms: number | null, now = Date.now()): string {
   if (hours < 24) return `Sincronizado hace ${hours} h`;
   return new Intl.DateTimeFormat('es', { dateStyle: 'medium' }).format(new Date(ms));
 }
+
+const fold = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+/** Whether a name matches what the player typed, ignoring case and accents. An empty search matches all. */
+export function matchesSearch(name: string, query: string): boolean {
+  const wanted = fold(query.trim());
+  return wanted === '' || fold(name).includes(wanted);
+}
+
+export const filterLooks = (library: readonly LookView[], query: string) => library.filter(look => matchesSearch(look.name, query));
+export const filterCapes = (capes: readonly CapeView[], query: string) => capes.filter(cape => matchesSearch(cape.alias, query));

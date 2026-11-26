@@ -1,0 +1,88 @@
+import { beforeEach, expect, test, vi } from 'vitest';
+
+type Render = { skin: string; model: string; cape: string | null; yaw: number };
+const fake = vi.hoisted(() => ({ created: 0, renders: [] as Render[], active: 0, overlap: false }));
+
+// A stand-in for the 3D library: it records what was drawn and notices two renders at once.
+vi.mock('skinview3d', () => ({
+  SkinViewer: class {
+    canvas = { toDataURL: () => `picture-${fake.renders.length}` };
+    playerWrapper = { rotation: { y: 0 } };
+    animation: unknown = 'unset';
+    skin = ''; model = ''; cape: string | null = null;
+    constructor() { fake.created += 1; }
+    loadSkin(image: { name: string }, options: { model: string }) { this.skin = image.name; this.model = options.model; }
+    loadCape(image: { name: string }) { this.cape = image.name; }
+    resetCape() { this.cape = null; }
+    render() {
+      fake.active += 1;
+      if (fake.active > 1) fake.overlap = true;
+      fake.renders.push({ skin: this.skin, model: this.model, cape: this.cape, yaw: this.playerWrapper.rotation.y });
+      fake.active -= 1;
+    }
+  },
+}));
+vi.mock('../src/use-texture', () => ({
+  decodeImage: async (url: string) => {
+    await new Promise(resolve => setTimeout(resolve, url.length % 3));
+    if (url === 'broken') throw new Error('unreadable');
+    return { name: url };
+  },
+}));
+
+const load = () => import('../src/skin-renderer');
+const request = (key: string, extra: Partial<{ skin: string; model: 'classic' | 'slim'; cape: string | null; yaw: number }> = {}) =>
+  ({ key, skin: `skin-${key}`, model: 'classic' as const, cape: null, yaw: -0.5, ...extra });
+
+beforeEach(() => {
+  vi.resetModules();
+  fake.created = 0; fake.renders = []; fake.active = 0; fake.overlap = false;
+});
+
+test('one hidden player draws every picture, in turn, with the asked model, cape and angle', async () => {
+  const { renderThumbnail } = await load();
+  const pictures = await Promise.all([
+    renderThumbnail(request('a')),
+    renderThumbnail(request('b', { model: 'slim', yaw: 3.5, cape: 'cape-b' })),
+    renderThumbnail(request('c')),
+  ]);
+  expect(fake.created).toBe(1);
+  expect(fake.overlap).toBe(false);
+  expect(fake.renders).toEqual([
+    { skin: 'skin-a', model: 'default', cape: null, yaw: -0.5 },
+    { skin: 'skin-b', model: 'slim', cape: 'cape-b', yaw: 3.5 },
+    { skin: 'skin-c', model: 'default', cape: null, yaw: -0.5 },
+  ]);
+  expect(new Set(pictures).size).toBe(3);
+});
+
+test('a picture is drawn once however many cards ask for it, and is then served from memory', async () => {
+  const { renderThumbnail, cachedThumbnail } = await load();
+  expect(cachedThumbnail('a')).toBeUndefined();
+  const [first, second] = await Promise.all([renderThumbnail(request('a')), renderThumbnail(request('a'))]);
+  expect(first).toBe(second);
+  expect(fake.renders).toHaveLength(1);
+  expect(cachedThumbnail('a')).toBe(first);
+  await renderThumbnail(request('a'));
+  expect(fake.renders).toHaveLength(1);
+  // The same skin at another angle or on another model is another picture.
+  await renderThumbnail(request('a-slim', { model: 'slim' }));
+  expect(fake.renders).toHaveLength(2);
+});
+
+test('a picture that cannot be drawn fails alone, is not remembered, and the others still come', async () => {
+  const { renderThumbnail, cachedThumbnail } = await load();
+  const results = await Promise.allSettled([renderThumbnail(request('x', { skin: 'broken' })), renderThumbnail(request('y'))]);
+  expect(results.map(result => result.status)).toEqual(['rejected', 'fulfilled']);
+  expect(cachedThumbnail('x')).toBeUndefined();
+  // Asking again tries again instead of replaying the failure.
+  expect(await renderThumbnail(request('x'))).toMatch(/^picture-/);
+  expect(cachedThumbnail('x')).toBeDefined();
+});
+
+test('memory stays bounded: the oldest pictures are forgotten first', async () => {
+  const { renderThumbnail, cachedThumbnail } = await load();
+  for (let index = 0; index < 250; index += 1) await renderThumbnail(request(`k${index}`));
+  expect(cachedThumbnail('k0')).toBeUndefined();
+  expect(cachedThumbnail('k249')).toBeDefined();
+});
