@@ -534,12 +534,23 @@ first, because the page always works on the selected one.
   also synchronises when it opens and on explicit request. Failures are silent in the background and
   shown as "last saved" on the page. Applying a look or a cape records what the service answers, even
   after a partial failure. Calls are serialized by one gate per process.
+- The page follows the owner's layout (2026-11-26): a heading "Aspectos · {player}"; the 3D preview
+  on the left; on the right "Skins" and "Capas" tabs with their counts, a search box that ignores case
+  and accents, a sync button and a grid of cards. The Skins grid starts with a dashed "Nuevo skin" card
+  (there is no separate add button) and marks the look the account wears with a green check; the Capas
+  grid starts with "Sin capa". Choosing a card previews it; a bar over the preview offers "Descartar" and
+  "Aplicar a mi cuenta" while something is unapplied. Unsaved current looks are offered above the grid.
 - The preview is an interactive 3D player (`skinview3d`, loaded lazily so the launcher starts
-  without it) that turns by dragging or with the arrow keys and plays idle, walking, running and wave
-  animations. It follows the player's reduced-motion setting and falls back to a flat picture when
-  WebGL is unavailable. Textures reach the webview as data URLs, so the content security policy and
-  the Tauri capabilities are unchanged. The skin file is chosen with the page's own file input and
-  sent as base64; no path crosses IPC.
+  without it). It starts at the three-quarter angle `DEFAULT_YAW` (`ui/src/skin-angles.ts`), walks in
+  place without moving its head (`headBobbing` off), and turns only when the player drags it or uses the
+  arrow keys; there is no animation picker and no automatic rotation. A pause/play button in the preview
+  stops and resumes the walk, which starts paused for players who ask the system for reduced motion.
+- Library cards are 3D pictures at that same angle (capes are drawn from behind, hanging on the skin
+  the account wears), not flat front views. One hidden player renders them in turn and keeps each as a
+  cached image, because a WebGL context per card would exhaust the browser's limit. Without WebGL the
+  preview and the cards fall back to flat pictures. Textures reach the webview as data URLs, so the
+  content security policy and the Tauri capabilities are unchanged. The skin file is chosen with the
+  page's own file input and sent as base64; no path crosses IPC.
 - Verified by tests with an in-memory service, a loopback service and a mocked webview. Not
   validated against a live Microsoft account, in the installed product, or on Ubuntu x64 (§6).
 
