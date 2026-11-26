@@ -312,6 +312,18 @@ test('kept files after an update are announced once, with their list one click a
   expect(backend.invoke).toHaveBeenCalledWith('open_instance_folder', { instanceId: 'pack-a', folder: 'pack-backups' });
   await user.click(within(dialog).getByRole('button', { name: 'Aceptar' }));
   expect(screen.queryByRole('dialog')).toBeNull();
+  // Accepting is reading what the toast pointed to, so the toast goes with it.
+  expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull();
+  expect(screen.queryByText(/Algunos de tus archivos se conservaron/)).toBeNull();
+});
+
+test('the toast of a completed operation also closes with its own dismiss button', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update', packSkipped: ['options.txt'] }));
+  await screen.findByRole('button', { name: 'Ver detalles' });
+  await user.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
+  expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull();
 });
 
 test('leftover native folders after an update are listed with their reason in the same modal', async () => {

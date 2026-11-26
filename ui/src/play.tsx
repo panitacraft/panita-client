@@ -102,7 +102,7 @@ export function PlayNotice({ names = {}, versions = {} }: { names?: Record<strin
     }
   }, [play?.snapshot, toast.show, toast.clear, names]);
   return <><TransientNotice notice={toast.notice} />
-    {completion && <CompletionDialog heading={completion.heading} name={names[completion.instanceId] ?? null} outcome={completion.outcome} version={versions[completion.instanceId] ?? null} details={completion.details} busy={!isTauri()} error={completionError} onClose={() => setCompletion(null)}
+    {completion && <CompletionDialog heading={completion.heading} name={names[completion.instanceId] ?? null} outcome={completion.outcome} version={versions[completion.instanceId] ?? null} details={completion.details} busy={!isTauri()} error={completionError} onClose={() => { setCompletion(null); detailsToast.current = null; toast.clear(); }}
       onOpenBackups={() => { setCompletionError(null); void invoke('open_instance_folder', { instanceId: completion.instanceId, folder: 'pack-backups' }).catch(cause => setCompletionError(messageForError(cause))); }} />}
     {play?.error && <p role="alert">{play.error}</p>}
     {play?.snapshot?.closeBlocked && <p className="catalog-notice" role="alert">No pudimos cerrar esta ventana. Cancela la instalación o el inicio pendiente y vuelve a intentarlo. Puedes minimizar esta ventana.</p>}
