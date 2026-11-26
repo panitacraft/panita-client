@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ArrowRight, ArrowUp, Check, ChevronDown, CircleArrowUp, Download, List, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, TriangleAlert } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, CircleArrowUp, Download, List, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, TriangleAlert } from 'lucide-react';
 import { InstanceProgress } from './components/instance-progress';
 import { AccountDialog } from './components/account-dialog';
 import { VariantDialog } from './components/variant-dialog';
@@ -18,7 +18,7 @@ import { previewOptions, withdrawnVariantText, type Variant, type VariantChange,
 import { nativeCleanupSummary, type NativeCleanupReport } from './native-cleanup-state';
 import { ConflictsDialog, CompletionDialog, DetailsDialog, ManualFilesDialog, NativeCleanupSection } from './components/notice-details';
 import { completionDetails, completionNote, entryNotice, type CompletionDetails } from './notice-state';
-import { conflictsResolvable, unknownVersionNames, versionLabels, type VersionNames } from './pack-state';
+import { conflictsResolvable, versionLabels, type VersionNames } from './pack-state';
 
 type PlayContextValue = {
   snapshot: PlaySnapshot | null;
@@ -255,10 +255,16 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     if (!updateTarget) return;
     setUpdateQuestion({ ...updateTarget, backupWorlds: true });
     if (updateTarget.pack) {
-      // Until the lookup answers the prompt says it is loading; a failure or the browser preview means no names and no notes.
-      setNames(null);
-      if (isTauri()) void invoke<VersionNames>('pack_version_names', { instanceId }).then(setNames).catch(() => setNames(unknownVersionNames));
-      else setNames(unknownVersionNames);
+      // The catalog already names the versions of a custom pack, so the prompt shows them at once; the notes
+      // (`changelog` undefined) and any name only the backend knows (a Modrinth version number) arrive with its
+      // answer, which waits on the network. A failure or the browser preview leaves the names and no notes.
+      const seeded: VersionNames = { installed: updateTarget.labels?.installed ?? null, available: updateTarget.labels?.available ?? null, changelog: undefined };
+      setNames(seeded);
+      if (isTauri()) {
+        void invoke<VersionNames>('pack_version_names', { instanceId })
+          .then(answer => setNames({ installed: answer.installed ?? seeded.installed, available: answer.available ?? seeded.available, changelog: answer.changelog ?? null }))
+          .catch(() => setNames({ ...seeded, changelog: null }));
+      } else setNames({ ...seeded, changelog: null });
     }
   }
 
@@ -346,7 +352,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       </div>
     </>}
     </dialog>
-    <dialog ref={updateDialog} className="update-dialog update-modal" aria-labelledby={instanceId + '-update-title'} aria-describedby={instanceId + '-update-warning'} onCancel={() => setUpdateQuestion(null)} onClose={() => { if (!updateDialog.current?.open) setUpdateQuestion(null); }}>
+    <dialog ref={updateDialog} className="update-dialog update-modal" aria-labelledby={instanceId + '-update-title'} onCancel={() => setUpdateQuestion(null)} onClose={() => { if (!updateDialog.current?.open) setUpdateQuestion(null); }}>
     {updateQuestion && updateLabels && <>
       <div className="update-head">
         <h2 id={instanceId + '-update-title'} className="dialog-title"><CircleArrowUp aria-hidden="true" />{updateQuestion.pack ? 'Actualizar modpack' : 'Actualizar Minecraft'}</h2>
@@ -355,8 +361,8 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       </div>
       {updateQuestion.pack && <div className="update-card">
         <h3 id={instanceId + '-notes-title'}><List aria-hidden="true" />Notas de la versión</h3>
-        {names === null ? <p className="update-card-empty" role="status">Buscando las novedades…</p>
-          : names.changelog ? <pre className="changelog" tabIndex={0} aria-labelledby={instanceId + '-notes-title'}>{names.changelog}</pre>
+        {names?.changelog === undefined ? <p className="update-card-empty" role="status">Buscando las novedades…</p>
+          : names?.changelog ? <pre className="changelog" tabIndex={0} aria-labelledby={instanceId + '-notes-title'}>{names?.changelog}</pre>
           : <p className="update-card-empty">El autor no ha publicado notas para esta versión.</p>}
       </div>}
       <ul className="update-checks">
@@ -364,7 +370,6 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         <li><Check aria-hidden="true" />{updateQuestion.pack ? 'Tus mundos, mods añadidos y ajustes personalizados se conservan.' : 'Tus mundos y ajustes se conservan.'}</li>
       </ul>
       {updateQuestion.pack && withdrawnVariant && <p className="update-callout"><TriangleAlert aria-hidden="true" /><span>{withdrawnVariantText(withdrawnVariant)}</span></p>}
-      <p id={instanceId + '-update-warning'} className="update-callout"><TriangleAlert aria-hidden="true" /><span>Abrir un mundo con la nueva versión puede modificarlo. <strong>Volver a {updateLabels.installed} no revierte esos cambios.</strong></span></p>
       <div className="update-backup">
         <label htmlFor={instanceId + '-update-backup'}><span>Copia de seguridad de mis mundos</span><span className="update-chip">Recomendado</span></label>
         <input id={instanceId + '-update-backup'} className="update-switch" role="switch" type="checkbox" checked={updateQuestion.backupWorlds} onChange={event => setUpdateQuestion({ ...updateQuestion, backupWorlds: event.target.checked })} />
@@ -376,7 +381,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
           setUpdateQuestion(null);
           setLastBackup(choice.backupWorlds);
           void act('begin_update', { requestId: crypto.randomUUID(), update: { from_version: choice.fromVersion, to_version: choice.toVersion, backup_worlds: choice.backupWorlds } });
-        }}><ArrowUp aria-hidden="true" />Actualizar a {updateLabels.available}</Button>
+        }}><RefreshCw aria-hidden="true" />Actualizar a {updateLabels.available}</Button>
       </div>
     </>}
     </dialog>

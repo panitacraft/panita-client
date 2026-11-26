@@ -37,6 +37,7 @@ const variantOptions = [
   { id: 'deluxe', fileCount: 35, size: 190_000_000, sameAsPrevious: false },
 ];
 let changelog: string | null = null;
+let namesGate: Promise<void> | undefined;
 let systemResources: { memoryMib: number | null; freeDiskMib: number | null } | null = null;
 let settingsRamAuto: boolean | undefined;
 let ramPreview: Record<string, unknown> | null = null;
@@ -55,7 +56,7 @@ beforeEach(() => {
   catalog = { instances: [{ ...first }, { ...first, id: 'pack-b', name: 'Otra aventura' }], stale: false, cacheWarning: null, registryWarning: null };
   play = { revision: 0, processSessionId: 'test', closeBlocked: false, gracefulStopSupported: true, instances: [] };
   backend.listeners.clear();
-  systemResources = null; changelog = null;
+  systemResources = null; changelog = null; namesGate = undefined;
   settingsRamAuto = undefined; ramPreview = null;
   accounts = { revision: 1, selected_account_id: 'account', login_pending: false, login_error: null, accounts: [{ metadata: { account_id: 'account', kind: 'offline', username: 'Jugador', profile_id: 'profile', oauth_client_id: null }, status: 'offline', error: null, persisted: true }] };
   backend.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
@@ -72,7 +73,7 @@ beforeEach(() => {
       case 'instance_folder_path': return 'C:\\Synthetic\\PanitaClient\\instances\\aventura';
       case 'begin_uninstall': return;
       case 'content_cache_size': return 0;
-      case 'pack_version_names': return { installed: 'Uno', available: 'Dos', changelog };
+      case 'pack_version_names': await namesGate; return { installed: 'Uno', available: 'Dos', changelog };
       case 'pack_files': return { files: [manualFile], complete: false };
       case 'import_pack_file': throw 'artifact_mismatch';
       case 'instance_variants': return variantOptions;
@@ -148,7 +149,6 @@ test('mandatory pack updates open a modal and require explicit world-backup cons
   await within(dialog).findByText('Uno');
   expect(within(dialog).getByText('Dos')).toBeTruthy();
   expect(within(dialog).getByRole('button', { name: 'Actualizar a Dos' })).toBeTruthy();
-  expect(within(dialog).getByText(/Volver a Uno no revierte esos cambios/)).toBeTruthy();
   expect((screen.getByLabelText(/^Copia de seguridad de mis mundos/) as HTMLInputElement).checked).toBe(true);
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(screen.getByRole('button', { name: /^Actualizar a / }));
@@ -327,7 +327,32 @@ test('a vanilla update does not claim to have release notes', async () => {
   // Vanilla versions are named as they are, without the pack's "v" prefix.
   expect(within(dialog).getByText('1.21.1')).toBeTruthy();
   expect(within(dialog).getByRole('button', { name: 'Actualizar a 1.21.2' })).toBeTruthy();
-  expect(within(dialog).getByText(/Volver a 1.21.1 no revierte esos cambios/)).toBeTruthy();
+});
+
+test('the update prompt names both versions from the catalog before the backend answers, then adds the notes', async () => {
+  let release = () => {};
+  namesGate = new Promise<void>(resolve => { release = resolve; });
+  changelog = '- Nuevas misiones';
+  catalog.instances[0] = { ...first, localState: 'update_available',
+    source: { ...first.source, label: '1.1.0' }, installedSource: { ...first.installedSource, label: '1.0.0', current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Actualizar modpack' });
+  // The backend is still waiting, yet the readable names and the confirm button are already right.
+  expect(within(dialog).getByText('v1.0.0')).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: 'Actualizar a v1.1.0' })).toBeTruthy();
+  expect(within(dialog).getByText('Buscando las novedades…')).toBeTruthy();
+  await act(async () => { release(); });
+  expect((await within(dialog).findByLabelText('Notas de la versión')).textContent).toBe('- Nuevas misiones');
+});
+
+test('the update prompt has no world warning box and its confirm button uses the reload icon', async () => {
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Actualizar modpack' });
+  expect(within(dialog).queryByText(/no revierte esos cambios/)).toBeNull();
+  expect(within(dialog).getByRole('button', { name: /^Actualizar a / }).querySelector('.lucide-refresh-cw')).not.toBeNull();
 });
 
 test('the update prompt can be closed from its header without starting anything', async () => {

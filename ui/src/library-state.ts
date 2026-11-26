@@ -21,7 +21,8 @@ export function canInstall(instance: CatalogInstance, stale: boolean): boolean {
     && (instance.installedVersion === null || instance.installedVersion === instance.minecraftVersion);
 }
 
-export type UpdateTarget = { fromVersion: string; toVersion: string; pack?: boolean };
+/** `labels` are the readable version names the catalog already carries, so the prompt names the versions without waiting for the backend. */
+export type UpdateTarget = { fromVersion: string; toVersion: string; pack?: boolean; labels?: { installed: string | null; available: string | null } };
 export function updateTarget(instance: CatalogInstance, stale: boolean): UpdateTarget | null {
   if (instance.removalPending) return null;
   if (isPack(instance)) {
@@ -30,7 +31,9 @@ export function updateTarget(instance: CatalogInstance, stale: boolean): UpdateT
     const to = packPin(instance.source);
     if (stale || instance.availability !== 'enabled' || !instance.compatible || !instance.supported
       || !['installed', 'update_available', 'needs_repair', 'failed', 'cancelled'].includes(instance.localState) || !from || !to || from === to) return null;
-    return { fromVersion: from, toVersion: to, pack: true };
+    const named = (source: PackSource | null | undefined) => (source?.type === 'custom' ? source.label?.trim() || null : null);
+    const labels = { installed: named(instance.installedSource), available: named(instance.source) };
+    return { fromVersion: from, toVersion: to, pack: true, ...(labels.installed || labels.available ? { labels } : {}) };
   }
   if (stale || instance.availability !== 'enabled' || !instance.compatible || !instance.supported
     || !['installed', 'update_available', 'not_installed', 'failed', 'cancelled', 'needs_repair'].includes(instance.localState) || !instance.installedVersion || !instance.minecraftVersion

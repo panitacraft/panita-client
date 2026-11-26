@@ -441,10 +441,14 @@ Owner requests for 1.2.1-beta.2.
   installation as it was, and the Instalar or Jugar button already says what to do.
 - The update prompt follows the owner's template (2026-11-26): a header with "Actualizar modpack"
   (or "Actualizar Minecraft"), the installed and new versions as chips and a close button; for packs a
-  "Notas de la versión" card; a checklist of what is kept; an amber warning that opening a world
-  with the new version can change it and that going back to the installed version does not
-  revert that; a "Copia de seguridad de mis mundos" switch marked "Recomendado" and on by default;
-  and a footer with Cancelar and "Actualizar a {version}". The notes are plain bounded text (5000
+  "Notas de la versión" card; a checklist of what is kept; a "Copia de seguridad de mis mundos"
+  switch marked "Recomendado" and on by default; and a footer with Cancelar and "Actualizar a
+  {version}" with the reload icon. The prompt shows no warning box about opening worlds in another
+  version (owner decision, 2026-11-26, superseding Annex B's explanation requirement for this
+  prompt); the world backup stays the default and the only safeguard it offers. Both versions are
+  named at once from the labels the catalog already carries for a custom pack; the notes and any
+  name only the backend knows (a Modrinth version number) arrive when its answer does, so the
+  notes card says it is loading until then. The notes are plain bounded text (5000
   characters, the API's limit; control characters removed; never rendered as markup). Modrinth
   packs show the changelog fetched from Modrinth for the pinned version. Custom packs show the
   `changelog` of the published version's manifest (owner decision, 2026-11-26): the launcher reads
@@ -602,9 +606,10 @@ and individual measurements are evidence, not product guarantees.
   only after ZIP read-back verification, identifying the instance and installed
   version at backup time. Reject linked/redirected entries, unsafe names, and
   detected source changes. Preserve incomplete directories without a completed receipt.
-- Backups exclude account data. Updating never restores or deletes worlds. Explain
-  that opening a world in another Minecraft version can change it and reverting
-  game files cannot undo those changes. Reinstalling against a changed catalog pin
+- Backups exclude account data. Updating never restores or deletes worlds. Opening a
+  world in another Minecraft version can change it and reverting game files cannot
+  undo those changes; the update prompt no longer says so (§5.3, owner decision,
+  2026-11-26). Reinstalling against a changed catalog pin
   uses the same explicit version-transition/backup workflow. Full player-data
   removal and shared-cache cleanup remain outside these maintenance controls.
 - Repair/Uninstall controls require an active recorded installation plan; damaged

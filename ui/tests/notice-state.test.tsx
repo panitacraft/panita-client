@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { completionDetails, completionNote, entryNotice } from '../src/notice-state';
-import { conflictHeading, unknownVersionNames } from '../src/pack-state';
+import { conflictHeading } from '../src/pack-state';
 import type { PlayEntry } from '../src/play-state';
 
 const entry = (patch: Record<string, unknown>) => ({ instanceId: 'a', requestId: 'r', phase: 'failed', operation: 'update', error: null, ...patch }) as unknown as PlayEntry;
@@ -43,6 +43,3 @@ test('the conflict heading names what the files are in the way of', () => {
   expect(conflictHeading(3, 'repair')).toBe('Hay 3 archivos tuyos que estorban a la instalación');
 });
 
-test('unknown version names carry no notes', () => {
-  expect(unknownVersionNames).toEqual({ installed: null, available: null, changelog: null });
-});

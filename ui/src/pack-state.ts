@@ -14,10 +14,8 @@ export type CacheDetail = { directory: string; reason: string };
 export type CacheReport = { removedEntries: number; removedBytes: number; retainedEntries: number; details: CacheDetail[] };
 
 export type PackConflict = { path: string; reason: 'edited' | 'occupied' | 'blocked' };
-/** Readable names of the two versions of an update and the release notes of the new one, when it has any. */
+/** Readable names of the two versions of an update and the release notes of the new one. `changelog` is undefined while the notes are still being fetched, null when there are none. */
 export type VersionNames = { installed: string | null; available: string | null; changelog?: string | null };
-/** What the update prompt shows when the lookup failed or was never made. */
-export const unknownVersionNames: VersionNames = { installed: null, available: null, changelog: null };
 
 const number = new Intl.NumberFormat('es', { maximumFractionDigits: 1 });
 
