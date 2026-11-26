@@ -538,19 +538,35 @@ first, because the page always works on the selected one.
   on the left; on the right "Skins" and "Capas" tabs with their counts, a search box that ignores case
   and accents, a sync button and a grid of cards. The Skins grid starts with a dashed "Nuevo skin" card
   (there is no separate add button) and marks the look the account wears with a green check; the Capas
-  grid starts with "Sin capa". Choosing a card previews it; a bar over the preview offers "Descartar" and
-  "Aplicar a mi cuenta" while something is unapplied. Unsaved current looks are offered above the grid.
+  grid starts with "Sin capa". Choosing a card previews it; the preview is labelled "Vista previa" and a
+  bar over it offers "Descartar" and "Aplicar" while something is unapplied. Right-clicking any card
+  opens the launcher's own menu (Vista previa, Aplicar, and for saved skins Editar and Eliminar) instead
+  of the browser's.
+- The reminder "Aspecto actual sin guardar" (owner decision, 2026-11-26) appears above the skin grid only
+  when no saved look has the skin and arm model the account wears; a different cape does not count. The
+  player can dismiss it with an X; the dismissal is remembered per skin and model in the window's local
+  storage (a preference, like the motion setting), and another unsaved skin asks again. The card of the
+  worn skin is marked as active by the same skin-only rule, preferring the look whose cape also matches.
 - The preview is an interactive 3D player (`skinview3d`, loaded lazily so the launcher starts
-  without it). It starts at the three-quarter angle `DEFAULT_YAW` (`ui/src/skin-angles.ts`), walks in
-  place without moving its head (`headBobbing` off), and turns only when the player drags it or uses the
-  arrow keys; there is no animation picker and no automatic rotation. A pause/play button in the preview
-  stops and resumes the walk, which starts paused for players who ask the system for reduced motion.
+  without it). It starts at the three-quarter angle `DEFAULT_YAW` (`ui/src/skin-angles.ts`), turned toward
+  the right of the screen (owner decision, 2026-11-26), walks in place without moving its head
+  (`headBobbing` off), and turns only when the player drags it or uses the arrow keys; there is no
+  animation picker and no automatic rotation. A pause/play button in the preview stops and resumes the
+  walk, which starts paused for players who ask the system for reduced motion. An "Élitros" switch shows
+  the previewed cape as elytra, drawn from the cape image as the game does; it needs a cape, because the
+  library has no elytra texture of its own, and is disabled without one.
 - Library cards are 3D pictures at that same angle (capes are drawn from behind, hanging on the skin
   the account wears), not flat front views. One hidden player renders them in turn and keeps each as a
   cached image, because a WebGL context per card would exhaust the browser's limit. Without WebGL the
   preview and the cards fall back to flat pictures. Textures reach the webview as data URLs, so the
   content security policy and the Tauri capabilities are unchanged. The skin file is chosen with the
   page's own file input and sent as base64; no path crosses IPC.
+- The accounts page and the rail show the skin the account wears from the cached texture, not from an
+  online render service that keeps the old skin for a while (owner request, 2026-11-26): the rail avatar
+  is the face drawn from the texture and the bust beside a Microsoft account is a 3D picture from the
+  same shared renderer, framed on the head. The launcher learns the worn skin from the Aspectos page and
+  from the background synchronisation, and reads it once for the selected account; an account it knows
+  nothing about, or a failed read, keeps the online picture.
 - Verified by tests with an in-memory service, a loopback service and a mocked webview. Not
   validated against a live Microsoft account, in the installed product, or on Ubuntu x64 (§6).
 
