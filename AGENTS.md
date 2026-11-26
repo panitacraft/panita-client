@@ -484,7 +484,7 @@ Owner requests for 1.2.1-beta.2.
 Owner request for 1.2.1-beta.3. It supersedes the earlier "no copying or export" limit of §5 for
 the Minecraft log viewer, only as the two explicit player actions below.
 
-- The log window has "Exportar .txt" and "Copiar todo". Both act on the complete retained history of
+- The log window has "Exportar" and "Copiar". Both act on the complete retained history of
   that execution, ignoring the search, level filters and a cleared view. The window reads it through
   the same bounded 500-event pages as the viewer, formats it as the viewer does (Log4j time,
   thread/level and logger prefixes, plain stderr marked) and hands the text to the core once.
@@ -492,7 +492,10 @@ the Minecraft log viewer, only as the two explicit player actions below.
   there; cancelling writes nothing. Copy uses the process-lifetime clipboard handle of §5.2. Both
   accept text only from the matching log window of a retained execution, bounded to 256 MiB. The
   text is the already redacted output; nothing is persisted, uploaded or exported automatically.
-- The launcher diagnostics tab has "Borrar registros anteriores" (see Annex B, session log files).
+- Each outcome of these actions, and of "Borrar registros anteriores" on the launcher diagnostics tab
+  (see Annex B, session log files), is a transient toast, never a message left in the page (owner
+  decision, 2026-11-26). Button labels carry no redundant words: the export is a text file by its
+  save dialog and the copy always covers the complete log.
 - These behaviors are verified by tests; the save dialog, clipboard and file deletion are
   unvalidated on a real desktop and on Ubuntu x64 (§6).
 
