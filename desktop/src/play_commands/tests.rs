@@ -648,3 +648,37 @@ fn the_start_note_names_both_versions_and_ignores_unsafe_text() {
     assert!(text.contains("from_variant=unchanged to_variant=lite backup_worlds=true"));
     assert!(!text.contains('\n'));
 }
+
+#[test]
+fn the_start_line_reaches_the_session_file_with_the_instance_and_both_versions() {
+    use launcher_core::minecraft::update::UpdateRequest;
+    use launcher_core::session_log::Level;
+    let directory = std::env::temp_dir().join(format!("panita-start-line-{}", Uuid::new_v4()));
+    assert!(std::fs::create_dir_all(&directory).is_ok());
+    let logs = BoundedLog::default();
+    let file = logs
+        .attach_file(&directory, ProcessSessionId::new(), &[])
+        .unwrap_or_else(|| panic!("session file"));
+    let (instance, from, to) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let request = UpdateRequest {
+        from_version: from.to_string(),
+        to_version: to.to_string(),
+        backup_worlds: false,
+        move_aside: false,
+        from_variant: None,
+        to_variant: None,
+    };
+    logs.note(
+        Level::Info,
+        &describe_start(OperationKind::Update, instance, Some(&request)),
+    );
+    let written = std::fs::read_to_string(&file).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&directory);
+    assert!(
+        written.contains(&format!(
+            "update started instance={instance} from_version={from} to_version={to} "
+        )),
+        "{written}"
+    );
+    assert!(!written.contains("[redacted]"), "{written}");
+}

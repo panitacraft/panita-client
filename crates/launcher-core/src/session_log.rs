@@ -251,7 +251,16 @@ fn redact_with_homes(text: &str, homes: &[String]) -> String {
     for word in cleaned.split_whitespace() {
         let lower = word.to_ascii_lowercase();
         // Instance and operation UUIDs identify support cases and are not secrets.
-        let identifier = uuid::Uuid::parse_str(word).is_ok();
+        // Also when it follows a short field name, as in `instance=<uuid>`: the word is
+        // otherwise long enough to be taken for an opaque secret.
+        let identifier = uuid::Uuid::parse_str(word).is_ok()
+            || word.split_once('=').is_some_and(|(name, value)| {
+                name.len() <= 32
+                    && name
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                    && uuid::Uuid::parse_str(value).is_ok()
+            });
         let opaque = looks_like_serial(word)
             || word.matches('.').count() == 2 && word.len() > 40 && lower.starts_with("ey")
             || (word.len() >= 32
@@ -367,6 +376,30 @@ mod tests {
             redact_with_homes("/home/anabel", &["/ho".to_owned()]),
             "/home/anabel",
             "short homes are ignored"
+        );
+    }
+
+    #[test]
+    fn support_identifiers_next_to_a_field_name_survive_but_opaque_values_do_not() {
+        let id = "b1d2f3a4-0000-4000-8000-000000000000";
+        let out = redact(&format!(
+            "update started instance={id} from_version={id} to_version={id} backup_worlds=true"
+        ));
+        assert_eq!(
+            out,
+            format!(
+                "update started instance={id} from_version={id} to_version={id} backup_worlds=true"
+            )
+        );
+        let secret = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+        assert_eq!(redact(&format!("token={secret}")), "[redacted]");
+        assert_eq!(
+            redact(&format!("a-key-with-dashes-in-it={id}")),
+            "[redacted]"
+        );
+        assert_eq!(
+            redact(&format!("bearer instance={id}")),
+            "bearer [redacted]"
         );
     }
 
