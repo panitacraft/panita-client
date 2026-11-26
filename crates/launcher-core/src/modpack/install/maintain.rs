@@ -804,6 +804,39 @@ fn apply_step(
     Ok(())
 }
 
+/// The pack version a person would recognise: its published label when it has one
+/// (spaces become `_` so the log stays one field per word), otherwise the pin.
+fn readable_version(identity: &PackIdentity) -> String {
+    let named = match identity {
+        PackIdentity::Custom { label, .. } => label.as_deref(),
+        PackIdentity::Modrinth { .. } => None,
+    };
+    let text = named.map_or_else(
+        || identity_pin(identity),
+        |label| label.split_whitespace().collect::<Vec<_>>().join("_"),
+    );
+    text.chars()
+        .filter(|ch| !ch.is_control())
+        .take(64)
+        .collect()
+}
+
+/// What an update moves between, in words: the pack labels and the game and loader
+/// versions on each side. Written once the update is resolved, so a later failure can
+/// be read against it. The version pins themselves are logged where the update starts.
+fn describe_transition(old: &PackState, plan: &Plan) -> String {
+    format!(
+        "update plan from_label={} to_label={} loader={} minecraft={}->{} loader_version={}->{}",
+        readable_version(&old.source),
+        readable_version(&plan.identity),
+        plan.loader,
+        old.minecraft_version,
+        plan.minecraft_version,
+        old.loader_version,
+        plan.loader_version,
+    )
+}
+
 /// Record a recovery action in the session log; the text is fixed vocabulary plus a
 /// game-relative path, never a URL or a message from the operating system.
 fn note_heal(what: &str) {
@@ -1077,6 +1110,10 @@ pub(crate) async fn run_update(
     if old.loader != plan.kind.name() {
         return Err(CoreError::new(ErrorCode::UnsupportedInstance));
     }
+    crate::network_log::note(
+        crate::session_log::Level::Info,
+        &describe_transition(&old, &plan),
+    );
     let game = GameDir::open(&root.join("minecraft"))?;
     let gathered = gather(
         paths,

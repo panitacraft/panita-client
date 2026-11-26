@@ -1445,3 +1445,36 @@ async fn a_pack_archive_that_is_not_a_valid_archive_is_named_as_such() {
     no_transaction(&world);
     cleanup(&world);
 }
+
+#[tokio::test]
+async fn the_transition_note_uses_labels_and_game_versions_instead_of_pins() {
+    let world = world();
+    let pair = installed_pair(&world).await;
+    let old = pack(&world);
+    let plan = Plan::custom(&pair.second).unwrap_or_else(|_| panic!("plan"));
+    let text = describe_transition(&old, &plan);
+    assert_eq!(
+        text,
+        "update plan from_label=0.2 to_label=0.2 loader=neoforge \
+         minecraft=1.21.1->1.21.1 loader_version=21.1.264->21.1.264"
+    );
+    // The note must survive the session log's redaction untouched.
+    assert_eq!(crate::session_log::redact(&text), text);
+    // A label with spaces stays one field per word; no label falls back to the pin.
+    let mut spaced = old.clone();
+    spaced.source = PackIdentity::Custom {
+        version_id: Uuid::new_v4(),
+        published_at: "2026-10-25T20:54:25Z".into(),
+        label: Some("Season 3 beta".into()),
+        variant: Variant::Standard,
+    };
+    assert_eq!(readable_version(&spaced.source), "Season_3_beta");
+    let modrinth = PackIdentity::Modrinth {
+        project_id: "AANobbMI".into(),
+        version_id: "gC2ptp4P".into(),
+        archive_sha512: "a".repeat(128),
+        index_sha256: "b".repeat(64),
+    };
+    assert_eq!(readable_version(&modrinth), "gC2ptp4P");
+    cleanup(&world);
+}
