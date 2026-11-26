@@ -505,7 +505,10 @@ the Minecraft log viewer, only as the two explicit player actions below.
 ### 5.5 Skin and cape manager (2026-11-26)
 
 Owner request, GitHub issue 51, for 1.3.0-beta.1. A "Skins y capas" page, opened from the main
-toolbar, manages the skin, arm model and cape of the selected Microsoft account.
+toolbar, manages the skin, arm model and cape of the selected Microsoft account. Each Microsoft
+row of the accounts page also has an "Editar skin" button beside its options menu (owner request,
+2026-11-26); on an account that is not selected it selects that account first, because the page
+always works on the selected one.
 
 - Only an authenticated Microsoft account can use it. The core refuses every operation for an
   offline account (`microsoft_account_required`), so hiding the toolbar entry is a convenience and
