@@ -2,6 +2,7 @@ import { Download, X, Wrench, RefreshCw, Trash2, ShieldCheck } from 'lucide-reac
 import type { PlayEntry } from '../play-state';
 import { formatBytes, packProgressFraction } from '../pack-state';
 import { Button } from './ui/button';
+import { Hint } from './hint';
 
 export function InstanceProgress({ entry, busy, onCancel, title }: { entry: PlayEntry; busy: boolean; onCancel: () => void; title?: string }) {
   const pack = entry.packProgress;
@@ -16,7 +17,7 @@ export function InstanceProgress({ entry, busy, onCancel, title }: { entry: Play
   const Icon = entry.operation === 'repair' ? Wrench : entry.operation === 'update' ? RefreshCw : entry.operation === 'uninstall' ? Trash2 : entry.operation === 'play' ? ShieldCheck : Download;
   return <div className="operation-card" role="status">
     <div className="operation-heading"><Icon aria-hidden="true" /><span className="operation-title">{title && <small>{title}</small>}<strong>{label}</strong></span>
-      <Button variant="ghost" size="icon" aria-label="Cancelar operación" disabled={busy || entry.phase === 'cancelling'} onClick={onCancel}><X aria-hidden="true" /></Button>
+      <Hint text="Cancelar"><span className="icon-control"><Button variant="ghost" size="icon" className="hover:border-danger hover:bg-danger hover:text-foreground" aria-label="Cancelar operación" disabled={busy || entry.phase === 'cancelling'} onClick={onCancel}><X aria-hidden="true" /></Button></span></Hint>
     </div>
     {measured ? <>
       <div className="operation-metrics"><span>{formatBytes(pack.bytesDone)} / {formatBytes(pack.bytesTotal)}</span><strong>{Math.floor(fraction * 100)} %</strong></div>

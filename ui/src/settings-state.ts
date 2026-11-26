@@ -1,6 +1,9 @@
 export type WindowSize = { width: number; height: number };
 export type GlobalLaunchSettings = {
-  schema_version: number; ram_mib: number; extra_jvm_args: string[];
+  schema_version: number; ram_mib: number;
+  /** Resolve the heap at launch from the machine; ram_mib is kept for when the player returns to manual. Absent in old data: manual. */
+  ram_auto?: boolean;
+  extra_jvm_args: string[];
   java_path_override: string | null; window_size: WindowSize;
   show_console_on_start: boolean;
 };
@@ -12,7 +15,10 @@ export type GlobalSettings = GlobalLaunchSettings & {
 };
 export type TrayPreferences = { closeToTray: boolean; hideOnGameStart: boolean; reopenOnGameExit: boolean };
 export type InstanceSettings = {
-  schema_version: number; ram_mib: number | null; extra_jvm_args: string[] | null;
+  schema_version: number; ram_mib: number | null;
+  /** True is automatic, false manual; absent or null with a ram_mib is manual, without one it inherits. */
+  ram_auto?: boolean | null;
+  extra_jvm_args: string[] | null;
   java_path_override: string | null; window_size: WindowSize | null;
   show_console_on_start: boolean | null;
 };
@@ -23,19 +29,36 @@ export type SettingsSnapshot = {
 };
 export type SettingsDraft = {
   ram: string; width: string; height: string; jvm: string;
+  /** Automatic memory: the heap is decided at launch, and the manual value in ram is only kept. */
+  ramAuto: boolean;
   inheritRam: boolean; inheritWindow: boolean; inheritJvm: boolean;
   clearJava: boolean;
   showConsole: boolean; inheritConsole: boolean;
 } & TrayPreferences;
 
+/** The memory choice an instance resolves to; its own choice beats the global one, an older manual value stays manual. */
+function instanceRamAuto(snapshot: SettingsSnapshot): boolean {
+  const { global, instance } = snapshot;
+  if (instance?.ram_auto != null) return instance.ram_auto;
+  if (instance?.ram_mib != null) return false;
+  return global.ram_auto ?? false;
+}
+
+/** The editable JVM text: the heap argument only while the memory is manual. */
+function jvmText(ram: string, auto: boolean, extras: readonly string[]): string {
+  return [...(auto ? [] : [`-Xmx${ram}M`]), ...extras].join('\n');
+}
+
 export function settingsDraft(snapshot: SettingsSnapshot): SettingsDraft {
   const { global, instance } = snapshot;
+  const ramAuto = instanceRamAuto(snapshot);
   return {
     ram: String(instance?.ram_mib ?? global.ram_mib),
+    ramAuto,
     width: String(instance?.window_size?.width ?? global.window_size.width),
     height: String(instance?.window_size?.height ?? global.window_size.height),
-    jvm: [`-Xmx${instance?.ram_mib ?? global.ram_mib}M`, ...(instance?.extra_jvm_args ?? global.extra_jvm_args)].join('\n'),
-    inheritRam: instance?.ram_mib == null,
+    jvm: jvmText(String(instance?.ram_mib ?? global.ram_mib), ramAuto, instance?.extra_jvm_args ?? global.extra_jvm_args),
+    inheritRam: instance?.ram_mib == null && instance?.ram_auto == null,
     inheritWindow: instance?.window_size == null,
     inheritJvm: instance?.extra_jvm_args == null,
     clearJava: false,
@@ -73,7 +96,7 @@ function memoryArgument(arg: string): number | null {
 function extraArguments(draft: SettingsDraft): string[] {
   const args = jvmArguments(draft.jvm);
   const memory = args.filter(arg => arg.startsWith('-Xmx'));
-  if (memory.length > 1 || (memory.length === 1 && memoryArgument(memory[0]) !== integer(draft.ram, 512, 262144))) throw new Error('invalid_data');
+  if (memory.length > 1 || (memory.length === 1 && (draft.ramAuto || memoryArgument(memory[0]) !== integer(draft.ram, 512, 262144)))) throw new Error('invalid_data');
   const extras = args.filter(arg => !arg.startsWith('-Xmx'));
   if (extras.length > 64) throw new Error('invalid_data');
   return extras;
@@ -83,17 +106,18 @@ function extraArguments(draft: SettingsDraft): string[] {
 export function updateSettingsDraft(draft: SettingsDraft, patch: Partial<SettingsDraft>, snapshot: SettingsSnapshot): SettingsDraft {
   const next = { ...draft, ...patch };
   if (patch.inheritConsole === true) next.showConsole = snapshot.global.show_console_on_start ?? false;
-  if (patch.inheritRam === true) next.ram = String(snapshot.global.ram_mib);
-  if (patch.inheritJvm === true) next.jvm = [`-Xmx${next.ram}M`, ...snapshot.global.extra_jvm_args].join('\n');
-  if (patch.ram !== undefined || patch.inheritRam === true) {
-    next.jvm = [`-Xmx${next.ram}M`, ...next.jvm.split(/\r?\n/).filter(line => !line.startsWith('-Xmx') && line.length > 0)].join('\n');
+  if (patch.inheritRam === true) { next.ram = String(snapshot.global.ram_mib); next.ramAuto = snapshot.global.ram_auto ?? false; }
+  if (patch.inheritJvm === true) next.jvm = jvmText(next.ram, next.ramAuto, snapshot.global.extra_jvm_args);
+  if (patch.ram !== undefined || patch.inheritRam === true || patch.ramAuto !== undefined) {
+    next.jvm = jvmText(next.ram, next.ramAuto, next.jvm.split(/\r?\n/).filter(line => !line.startsWith('-Xmx') && line.length > 0));
   } else if (patch.jvm !== undefined) {
     const args = next.jvm.split(/\r?\n/).filter(Boolean);
     const memory = args.filter(arg => arg.startsWith('-Xmx'));
     if (memory.length === 1) {
       try {
         const ram = memoryArgument(memory[0]);
-        if (ram !== null) { next.ram = String(ram); if (next.ram !== draft.ram) next.inheritRam = false; }
+        // Typing a heap argument is choosing a manual value, even while the memory was automatic.
+        if (ram !== null) { next.ram = String(ram); if (next.ram !== draft.ram || draft.ramAuto) { next.inheritRam = false; next.ramAuto = false; } }
       } catch { /* Preserve an incomplete edit for correction; save will reject it. */ }
     }
     const extras = args.filter(arg => !arg.startsWith('-Xmx'));
@@ -104,7 +128,7 @@ export function updateSettingsDraft(draft: SettingsDraft, patch: Partial<Setting
 
 export function globalSettingsPayload(draft: SettingsDraft, snapshot: SettingsSnapshot): GlobalLaunchSettings {
   return {
-    schema_version: 2, ram_mib: integer(draft.ram, 512, 262144),
+    schema_version: 2, ram_mib: integer(draft.ram, 512, 262144), ram_auto: draft.ramAuto,
     window_size: { width: integer(draft.width, 320, 16384), height: integer(draft.height, 240, 16384) },
     extra_jvm_args: extraArguments(draft),
     java_path_override: draft.clearJava ? null : snapshot.global.java_path_override,
@@ -115,7 +139,8 @@ export function globalSettingsPayload(draft: SettingsDraft, snapshot: SettingsSn
 export function instanceSettingsPayload(draft: SettingsDraft, snapshot: SettingsSnapshot): InstanceSettings {
   const extras = extraArguments({ ...draft, ram: draft.inheritRam ? String(snapshot.global.ram_mib) : draft.ram });
   return {
-    schema_version: 1, ram_mib: draft.inheritRam ? null : integer(draft.ram, 512, 262144),
+    // An explicit choice is always written so it keeps beating the global one; inheriting writes neither value.
+    schema_version: 1, ram_mib: draft.inheritRam ? null : integer(draft.ram, 512, 262144), ram_auto: draft.inheritRam ? null : draft.ramAuto,
     window_size: draft.inheritWindow ? null : { width: integer(draft.width, 320, 16384), height: integer(draft.height, 240, 16384) },
     extra_jvm_args: draft.inheritJvm ? null : extras,
     java_path_override: draft.clearJava ? null : snapshot.instance?.java_path_override ?? null,

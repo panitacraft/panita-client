@@ -265,6 +265,7 @@ pub fn launch(paths: &AppPaths, cancel: &Cancellation) -> Result<RunningGame, Co
         &platform,
         &GlobalSettings::default(),
         &InstanceSettings::default(),
+        &crate::memory::MemoryStatus::read(),
         super::launch::LaunchIdentity {
             account: &account,
             minecraft_token: None,

@@ -1,0 +1,84 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { autoRamMib, autoRamText, exceedsMachine, ramProfileOf, sliderMaxMib, sliderScale, sliderZones } from '../src/ram-state.ts';
+
+const custom = { type: 'custom', current_version_id: 'v1' };
+const pack = (extra = {}) => ({ localState: 'installed', source: custom, installedSource: custom, installedVariant: 'deluxe', ...extra });
+
+test('the profile follows what is installed: vanilla, Modrinth as Standard, custom packs by variant', () => {
+  assert.equal(ramProfileOf(null), null);
+  assert.equal(ramProfileOf({ source: undefined }), 'vanilla');
+  assert.equal(ramProfileOf({ source: { type: 'vanilla' } }), 'vanilla');
+  assert.equal(ramProfileOf({ source: { type: 'modrinth', pack_version_id: 'x' } }), 'standard');
+  assert.equal(ramProfileOf(pack()), 'deluxe');
+  assert.equal(ramProfileOf(pack({ installedVariant: 'lite' })), 'lite');
+  // Before installing, or after uninstalling, a custom pack is sized as Standard.
+  assert.equal(ramProfileOf(pack({ localState: 'not_installed' })), 'standard');
+  assert.equal(ramProfileOf(pack({ installedSource: null })), 'standard');
+});
+
+test('the slider ends at the machine RAM in whole gigabytes and keeps its old range when it is unknown', () => {
+  assert.equal(sliderMaxMib(16318, 4096), 16384);
+  assert.equal(sliderMaxMib(8000, 4096), 8192);
+  assert.equal(sliderMaxMib(32000, 99999), 31744, "a known machine ignores the saved value");
+  // A tiny or odd reading never collapses the slider.
+  assert.equal(sliderMaxMib(300, 4096), 1024);
+  for (const unreadable of [null, undefined, 0, -5, NaN]) {
+    assert.equal(sliderMaxMib(unreadable, 4096), 32768);
+    assert.equal(sliderMaxMib(unreadable, 65536), 65536);
+  }
+});
+
+test('the color zones leave the system its room and never invert', () => {
+  assert.deepEqual(sliderZones(null, 32768), { green: 0.6, yellow: 0.85 });
+  for (const machine of [2048, 4096, 8192, 16384, 65536]) {
+    const max = Math.round(machine / 1024) * 1024;
+    const { green, yellow } = sliderZones(machine, max);
+    assert.ok(green > 0 && green < yellow && yellow <= 0.85, String(machine));
+  }
+});
+
+test('only a value above the machine RAM is flagged', () => {
+  assert.equal(exceedsMachine(16384, 16318), false);
+  assert.equal(exceedsMachine(17408, 16318), true);
+  assert.equal(exceedsMachine(65536, null), false);
+  assert.equal(exceedsMachine(65536, 0), false);
+});
+
+test('the automatic explanation is short, names no list and adds a remark only when the value was lowered', () => {
+  const preview = { totalMib: 8192,
+    vanilla: { mib: 4096, basis: 'target' }, lite: { mib: 4096, basis: 'target' },
+    standard: { mib: 3840, basis: 'limited' }, deluxe: { mib: 3072, basis: 'floor' } };
+  assert.equal(autoRamText(preview, 'vanilla'), 'Se calcula al jugar según la RAM de tu equipo.');
+  assert.equal(autoRamText(preview, 'standard'), 'Se calcula al jugar según la RAM de tu equipo. Tu equipo tiene poca RAM, así que será menos de lo ideal.');
+  assert.match(autoRamText(preview, 'deluxe'), /Tu equipo tiene muy poca RAM; se usará el mínimo/);
+  // The global settings do not know the kind of game, so they only say how the value is chosen.
+  assert.equal(autoRamText(preview, null), 'Se calcula al jugar según la RAM de tu equipo y el tipo de instancia.');
+  // The reading failed: nothing about the machine is claimed.
+  assert.equal(autoRamText(null, 'vanilla'), 'No pudimos leer la RAM de tu equipo; se usará un valor prudente.');
+  assert.match(autoRamText({ ...preview, vanilla: { mib: 4096, basis: 'unknown' } }, 'vanilla'), /valor prudente\.$/);
+});
+
+test('the automatic value is the one of the instance kind, and unknown without a reading or a kind', () => {
+  const preview = { totalMib: 8192,
+    vanilla: { mib: 4096, basis: 'target' }, lite: { mib: 4096, basis: 'target' },
+    standard: { mib: 3840, basis: 'limited' }, deluxe: { mib: 3072, basis: 'floor' } };
+  assert.equal(autoRamMib(preview, 'standard'), 3840);
+  assert.equal(autoRamMib(preview, 'vanilla'), 4096);
+  assert.equal(autoRamMib(preview, null), null);
+  assert.equal(autoRamMib(null, 'standard'), null);
+});
+
+test('the slider scale has a tick per step and puts the middle label where its value really is', () => {
+  const sixteen = sliderScale(16384);
+  assert.deepEqual([sixteen.steps, sixteen.every], [31, 1]);
+  // 8 GiB is not half way along a slider that starts at 512 MiB, so the label follows the value.
+  assert.ok(Math.abs(sixteen.midAt - (8192 - 512) / (16384 - 512)) < 1e-9);
+  assert.ok(sixteen.midAt < 0.5);
+  // Too close to an end label to show.
+  assert.equal(sliderScale(1024).midAt, null);
+  // Many steps spread their ticks so they stay apart.
+  const huge = sliderScale(262144);
+  assert.deepEqual([huge.steps, huge.every], [511, 8]);
+  assert.equal(sliderScale(32768).every, 1);
+});

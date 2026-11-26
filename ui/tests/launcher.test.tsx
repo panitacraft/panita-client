@@ -37,6 +37,8 @@ const variantOptions = [
   { id: 'deluxe', fileCount: 35, size: 190_000_000, sameAsPrevious: false },
 ];
 let systemResources: { memoryMib: number | null; freeDiskMib: number | null } | null = null;
+let settingsRamAuto: boolean | undefined;
+let ramPreview: Record<string, unknown> | null = null;
 const manualFile ={ path: 'mods/manual.jar', name: 'Mod manual', fileName: 'manual.jar', folder: 'mods', projectId: 1, fileId: 2, size: 10, reason: 'manual' };
 function entry(patch: Partial<PlayEntry>): PlayEntry {
   return { instanceId: 'pack-a', requestId: 'request', phase: 'running', operation: 'play', confirmationId: null, error: null, exitCode: null, exitSuccess: null, backupRequested: false, backupOperation: null, receivedFiles: 0, reusedFiles: 0, retainedFiles: 0, ...patch };
@@ -53,6 +55,7 @@ beforeEach(() => {
   play = { revision: 0, processSessionId: 'test', closeBlocked: false, gracefulStopSupported: true, instances: [] };
   backend.listeners.clear();
   systemResources = null;
+  settingsRamAuto = undefined; ramPreview = null;
   accounts = { revision: 1, selected_account_id: 'account', login_pending: false, login_error: null, accounts: [{ metadata: { account_id: 'account', kind: 'offline', username: 'Jugador', profile_id: 'profile', oauth_client_id: null }, status: 'offline', error: null, persisted: true }] };
   backend.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     switch (command) {
@@ -60,7 +63,9 @@ beforeEach(() => {
       case 'initialize': return;
       case 'catalog_snapshot': return catalog;
       case 'play_snapshot': return play;
-      case 'settings_snapshot': return { instanceId: args?.instanceId ?? null, instance: null, windowWarning: null, global: { schema_version: 2, ram_mib: 4096, extra_jvm_args: [], java_path_override: null, show_console_on_start: false, window_size: { width: 1280, height: 720 }, launcher: { selected_instance_id: 'pack-a', window: null } } };
+      case 'settings_snapshot': return { instanceId: args?.instanceId ?? null, instance: null, windowWarning: null, global: { schema_version: 2, ram_mib: 4096, ram_auto: settingsRamAuto, extra_jvm_args: [], java_path_override: null, show_console_on_start: false, window_size: { width: 1280, height: 720 }, launcher: { selected_instance_id: 'pack-a', window: null } } };
+      case 'save_global_settings': case 'save_instance_settings': return;
+      case 'ram_preview': if (!ramPreview) throw 'storage_unavailable'; return ramPreview;
       case 'account_snapshot': return accounts;
       case 'select_account': accounts = { ...accounts, revision: accounts.revision + 1, selected_account_id: String(args?.accountId) }; return;
       case 'instance_folder_path': return 'C:\\Synthetic\\PanitaClient\\instances\\aventura';
@@ -548,7 +553,9 @@ test('the variant that suits the machine is preselected, marked and explained', 
   await user.click(await screen.findByRole('button', { name: 'Instalar', exact: true }));
   const dialog = await screen.findByRole('dialog', { name: 'Elige cómo instalar' });
   await within(dialog).findByText(/28 archivos/);
-  expect(await within(dialog).findByText('Te recomendamos el Perfil de Rendimiento Ligero porque tu equipo tiene 4 GB de RAM.')).toBeTruthy();
+  await waitFor(() => expect(dialog.querySelector('.variant-reason')?.textContent).toBe('Te recomendamos el perfil de rendimiento Ligero porque tu equipo tiene 4 GB de RAM.'));
+  expect(dialog.querySelector('.variant-reason > svg')).not.toBeNull();
+  expect(dialog.querySelector('.variant-reason-name svg')).toBeNull();
   expect((within(dialog).getByRole('radio', { name: /^Ligero/ }) as HTMLInputElement).checked).toBe(true);
   expect(within(dialog.querySelector('label:has(input[value="lite"])') as HTMLElement).getByText('Recomendada')).toBeTruthy();
   expect(dialog.querySelectorAll('.variant-chip').length).toBe(1);
@@ -583,7 +590,7 @@ test('the Rendimiento tab marks the recommended variant but keeps the installed 
   const user = userEvent.setup(); mount();
   await openVariantTab(user);
   await screen.findByText(/28 archivos/);
-  expect(await screen.findByText('Te recomendamos el Perfil de Rendimiento Ligero porque tu equipo tiene 2 GB de RAM.')).toBeTruthy();
+  await waitFor(() => expect(document.querySelector('.variant-reason')?.textContent).toBe('Te recomendamos el perfil de rendimiento Ligero porque tu equipo tiene 2 GB de RAM.'));
   expect(screen.getByText('Recomendada')).toBeTruthy();
   expect((screen.getByRole('radio', { name: 'Estándar' }) as HTMLInputElement).checked).toBe(true);
   expect((screen.getByRole('button', { name: 'Cambiar rendimiento' }) as HTMLButtonElement).disabled).toBe(true);
@@ -705,4 +712,82 @@ test('the variant cards appear at once and only their sizes wait for the backend
   // The default is already marked, but nothing can be confirmed until the sizes are known.
   expect((within(dialog).getByRole('radio', { name: 'Estándar' }) as HTMLInputElement).checked).toBe(true);
   expect((within(dialog).getByRole('button', { name: 'Instalar', exact: true }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+const resolution = (mib: number, basis = 'target') => ({ mib, basis });
+
+test('automatic memory disables the manual controls, explains the value and keeps the saved number', async () => {
+  ramPreview = { totalMib: 16384, vanilla: resolution(4096), lite: resolution(4096), standard: resolution(6144), deluxe: resolution(8192) };
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
+  await user.click(screen.getByRole('tab', { name: 'Minecraft' }));
+  const ram = await screen.findByLabelText('RAM Asignada (MiB)') as HTMLInputElement;
+  const auto = screen.getByRole('switch', { name: 'Automática' }) as HTMLInputElement;
+  expect([auto.checked, ram.disabled]).toEqual([false, false]);
+  await user.click(auto);
+  expect(auto.checked).toBe(true);
+  expect(ram.disabled).toBe(true);
+  expect((screen.getByLabelText('Control deslizante de RAM para Minecraft') as HTMLInputElement).disabled).toBe(true);
+  expect(ram.value).toBe('4096');
+  // The explanation is a tooltip on the option, announced to screen readers, never a visible line.
+  expect(await screen.findByText('Se calcula al jugar según la RAM de tu equipo y el tipo de instancia.')).toBeTruthy();
+  expect(document.querySelector('.memory-auto-note')).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Guardar ajustes' }));
+  await waitFor(() => expect(backend.invoke).toHaveBeenCalledWith('save_global_settings', { settings: expect.objectContaining({ ram_auto: true, ram_mib: 4096 }) }));
+  await user.click(auto);
+  expect(auto.checked).toBe(false);
+  expect(ram.disabled).toBe(false);
+  expect(screen.getByText('Se calcula al jugar según la RAM de tu equipo y el tipo de instancia.')).toBeTruthy();
+});
+
+test('automatic memory says so plainly when the machine cannot be read', async () => {
+  settingsRamAuto = true;
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
+  await user.click(screen.getByRole('tab', { name: 'Minecraft' }));
+  expect(await screen.findByText(/No pudimos leer la RAM de tu equipo/)).toBeTruthy();
+  expect((screen.getByRole('switch', { name: 'Automática' }) as HTMLInputElement).checked).toBe(true);
+});
+
+test('an instance can choose automatic memory on its own and names its own value', async () => {
+  ramPreview = { totalMib: 16384, vanilla: resolution(4096), lite: resolution(4096), standard: resolution(6144), deluxe: resolution(8192) };
+  const user = userEvent.setup(); mount();
+  const card = await screen.findByRole('article', { name: 'Aventura' });
+  await user.click(within(card).getByRole('button', { name: 'Opciones de instancia' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Ajustes de la instancia' }));
+  const inherit = await screen.findByRole('switch', { name: 'Heredar ajuste global: Memoria' }) as HTMLInputElement;
+  // While the memory is inherited the instance has no choice of its own to make.
+  expect(inherit.checked).toBe(true);
+  expect(screen.queryByRole('switch', { name: 'Automática' })).toBeNull();
+  await user.click(inherit);
+  await user.click(screen.getByRole('switch', { name: 'Automática' }));
+  await user.click(screen.getByRole('button', { name: 'Guardar ajustes' }));
+  await waitFor(() => expect(backend.invoke).toHaveBeenCalledWith('save_instance_settings', expect.objectContaining({ settings: expect.objectContaining({ ram_auto: true, ram_mib: 4096 }) })));
+  expect(await screen.findByText('Se calcula al jugar según la RAM de tu equipo.')).toBeTruthy();
+  // The automatic value for this kind of instance is shown in the field and on the slider.
+  expect((screen.getByLabelText('RAM Asignada (MiB)') as HTMLInputElement).value).toBe('6144');
+  expect((screen.getByLabelText('Control deslizante de RAM para Minecraft') as HTMLInputElement).value).toBe('6144');
+});
+
+test('the memory slider stops at the RAM of this machine', async () => {
+  systemResources = { memoryMib: 8000, freeDiskMib: 500 * 1024 };
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
+  await user.click(screen.getByRole('tab', { name: 'Minecraft' }));
+  const slider = await screen.findByLabelText('Control deslizante de RAM para Minecraft') as HTMLInputElement;
+  await waitFor(() => expect(slider.max).toBe('8192'));
+  await user.clear(screen.getByLabelText('RAM Asignada (MiB)')); await user.type(screen.getByLabelText('RAM Asignada (MiB)'), '12288');
+  expect(await screen.findByText(/Este valor es mayor que la RAM de tu equipo \(8 GiB\)/)).toBeTruthy();
+  expect(slider.max).toBe('8192');
+});
+
+test('without a reading of the machine the memory slider keeps its former range', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await user.click(screen.getByRole('button', { name: 'Ajustes Globales' }));
+  await user.click(screen.getByRole('tab', { name: 'Minecraft' }));
+  expect(((await screen.findByLabelText('Control deslizante de RAM para Minecraft')) as HTMLInputElement).max).toBe('32768');
 });

@@ -1,12 +1,15 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Save, MemoryStick, Monitor, Terminal, SlidersHorizontal, ChevronDown, AppWindow } from 'lucide-react';
+import { Save, MemoryStick, Monitor, Terminal, SlidersHorizontal, ChevronDown, AppWindow, TriangleAlert, Info } from 'lucide-react';
 import { Button } from './components/ui/button';
+import { Hint } from './components/hint';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { settingsApi } from './settings-api';
 import { globalSettingsPayload, instanceSettingsPayload, settingsDraft, trayPreferences, updateSettingsDraft, type SettingsDraft, type SettingsSnapshot } from './settings-state';
 import { messageForError } from './errors';
+import { autoRamMib, autoRamText, exceedsMachine, formatGiB, sliderMaxMib, sliderScale, sliderZones, type RamProfile } from './ram-state';
+import { useRamPreview, useSystemResources } from './system-api';
 
 type Selection = { id: string | null; busy: boolean; error: string | null; warning: string | null; select: (id: string) => Promise<void>; retry: () => void };
 const SelectionContext = createContext<Selection | null>(null);
@@ -47,7 +50,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
 
 export function usePreferences() { return useContext(SelectionContext); }
 
-export function SettingsPanel({ instanceId, local, scope }: { instanceId: string | null; name: string | null; local: boolean; scope?: 'global' | 'instance' }) {
+export function SettingsPanel({ instanceId, local, scope, ramProfile = null }: { instanceId: string | null; name: string | null; local: boolean; scope?: 'global' | 'instance'; ramProfile?: RamProfile | null }) {
   const [chosenMode, setMode] = useState<'global' | 'instance'>('global');
   const mode = scope ?? chosenMode;
   const preferences = usePreferences();
@@ -60,18 +63,17 @@ export function SettingsPanel({ instanceId, local, scope }: { instanceId: string
       <button type="button" aria-pressed={mode === 'instance'} disabled={!instanceId} onClick={() => setMode('instance')}>Ajustes de la instancia seleccionada</button>
     </div>}
     {mode === 'instance' && !local ? <p>Instala o reintenta instalar esta instancia para poder guardar sus ajustes propios. Puedes configurar los valores globales mientras tanto.</p>
-      : <SettingsEditor key={mode === 'global' ? 'global' : instanceId} instanceId={mode === 'global' ? null : instanceId} />}
+      : <SettingsEditor key={mode === 'global' ? 'global' : instanceId} instanceId={mode === 'global' ? null : instanceId} ramProfile={mode === 'global' ? null : ramProfile} />}
   </section>;
 }
 
 const RAM_SLIDER_STEP_MIB = 512;
-const formatGiB = (mib: number) => Number((mib / 1024).toFixed(2));
 
 function InheritToggle({ checked, onChange, name }: { checked: boolean; onChange: (value: boolean) => void; name: string }) {
   return <label className="inherit-toggle"><span>Heredar ajuste global</span><input role="switch" aria-label={`Heredar ajuste global: ${name}`} type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)} /></label>;
 }
 
-function SettingsEditor({ instanceId }: { instanceId: string | null }) {
+function SettingsEditor({ instanceId, ramProfile }: { instanceId: string | null; ramProfile: RamProfile | null }) {
   const [advanced, setAdvanced] = useState(false);
   const [snapshot, setSnapshot] = useState<SettingsSnapshot | null>(null);
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
@@ -83,6 +85,8 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
   const saving = useRef(false);
   const desktop = isTauri();
   const instance = instanceId !== null;
+  const machineMib = useSystemResources()?.memoryMib ?? null;
+  const ramPreview = useRamPreview(draft?.ramAuto === true);
   useEffect(() => {
     mounted.current = true;
     let active = true;
@@ -126,7 +130,17 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
     } finally { saving.current = false; if (mounted.current) setBusy(false); }
   }
   const prefix = instance ? 'instance-settings' : 'global-settings';
-  const sliderMax = Math.ceil(Math.min(262144, Math.max(32768, Number(draft?.ram) || 0)) / RAM_SLIDER_STEP_MIB) * RAM_SLIDER_STEP_MIB;
+  // Automática shows what the core would use for this instance; the saved manual value stays untouched.
+  const autoMib = draft?.ramAuto ? autoRamMib(ramPreview, ramProfile) : null;
+  const ramShown = autoMib !== null ? String(autoMib) : (draft?.ram ?? '');
+  const autoText = autoRamText(ramPreview, ramProfile);
+  const ramValue = Number(ramShown) || 0;
+  const sliderMax = sliderMaxMib(machineMib, ramValue);
+  const zones = sliderZones(machineMib, sliderMax);
+  const scale = sliderScale(sliderMax);
+  const ramInherited = instance && draft?.inheritRam === true;
+  // Automática dims the field, GiB value and slider; an inherited memory is already dimmed as a whole.
+  const autoDim = draft?.ramAuto === true && !ramInherited;
   const customJava = snapshot && (snapshot.instance?.java_path_override ?? snapshot.global.java_path_override);
   return <>
     {!desktop && <p>Los ajustes están disponibles en la aplicación de escritorio.</p>}
@@ -139,10 +153,27 @@ function SettingsEditor({ instanceId }: { instanceId: string | null }) {
         <div className="settings-grid">
           <div className="settings-card memory-card">
             <div className="settings-card-heading"><h3><MemoryStick aria-hidden="true" />Memoria</h3>{instance && <InheritToggle name="Memoria" checked={draft.inheritRam} onChange={value => change({ inheritRam: value })} />}</div>
-            <div className={instance && draft.inheritRam ? 'inherited-content' : undefined}>
-            <div className="memory-value"><label htmlFor={prefix + '-ram'}>RAM Asignada (MiB)</label><input id={prefix + '-ram'} type="number" min="512" max="262144" step="1" required disabled={instance && draft.inheritRam} value={draft.ram} onChange={event => change({ ram: event.target.value })} /><output>{formatGiB(Number(draft.ram) || 0)} GiB</output></div>
-            <input className="memory-slider" aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={sliderMax} step={RAM_SLIDER_STEP_MIB} disabled={instance && draft.inheritRam} value={/^\d+$/.test(draft.ram) ? draft.ram : '512'} onChange={event => change({ ram: event.target.value })} />
-            <div className="memory-ticks" aria-hidden="true"><span>512 MiB</span><span>{formatGiB(sliderMax / 2)} GiB</span><span>{formatGiB(sliderMax)} GiB</span></div>
+            <div className={ramInherited ? 'inherited-content' : undefined}>
+            <label htmlFor={prefix + '-ram'}>RAM Asignada (MiB)</label>
+            <span id={prefix + '-auto-help'} className="sr-only">{autoText}</span>
+            <div className="memory-row">
+              <input id={prefix + '-ram'} className={autoDim ? 'is-auto' : undefined} type="number" min="512" max="262144" step="1" required disabled={ramInherited || draft.ramAuto} value={ramShown} onChange={event => change({ ram: event.target.value })} />
+              <output className={[autoDim && 'is-auto', !draft.ramAuto && exceedsMachine(ramValue, machineMib) && 'is-over'].filter(Boolean).join(' ') || undefined}>{formatGiB(ramValue)} GiB
+                {!draft.ramAuto && exceedsMachine(ramValue, machineMib) && <><Hint text={'Este valor es mayor que la RAM de tu equipo (' + formatGiB(sliderMax) + ' GiB). Minecraft podría no abrir o ir muy lento.'}><span className="memory-alert" tabIndex={0} role="img" aria-label="Aviso de memoria"><TriangleAlert aria-hidden="true" /></span></Hint><span className="sr-only">Este valor es mayor que la RAM de tu equipo ({formatGiB(sliderMax)} GiB). Minecraft podría no abrir o ir muy lento.</span></>}
+              </output>
+              {!ramInherited && <Hint text={autoText}><label className="inherit-toggle memory-auto-toggle"><span>Automática<Info aria-hidden="true" /></span><input role="switch" aria-label="Automática" aria-describedby={prefix + '-auto-help'} type="checkbox" checked={draft.ramAuto} onChange={event => change({ ramAuto: event.target.checked })} /></label></Hint>}
+            </div>
+            <div className={autoDim ? 'memory-track is-auto' : 'memory-track'}>
+              <input className="memory-slider" aria-label="Control deslizante de RAM para Minecraft" type="range" min="512" max={sliderMax} step={RAM_SLIDER_STEP_MIB} disabled={ramInherited || draft.ramAuto} value={/^\d+$/.test(ramShown) ? Math.min(Number(ramShown), sliderMax) : '512'} style={{ '--ram-green': (zones.green * 100) + '%', '--ram-yellow': (zones.yellow * 100) + '%' } as CSSProperties} onChange={event => change({ ram: event.target.value })} />
+              <div className="memory-scale" aria-hidden="true" style={{ '--steps': scale.steps, '--every': scale.every } as CSSProperties}>
+                <div className="memory-ticks-line" />
+                <div className="memory-ticks">
+                  <span style={{ '--at': 0 } as CSSProperties}>512 MiB</span>
+                  {scale.midAt !== null && <span style={{ '--at': scale.midAt } as CSSProperties}>{formatGiB(sliderMax / 2)} GiB</span>}
+                  <span style={{ '--at': 1 } as CSSProperties}>{formatGiB(sliderMax)} GiB</span>
+                </div>
+              </div>
+            </div>
             </div>
           </div>
           <div className="settings-card">

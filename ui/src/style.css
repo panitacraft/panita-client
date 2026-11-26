@@ -267,7 +267,9 @@
   .variant-tagline { color: #54A636; font-size: 12px; font-weight: 600; margin-top: -4px; }
   .variant-text small { color: #BABABA; font-size: 13px; line-height: 1.5; }
   .variant-text .variant-meta { margin-top: auto; padding-top: 8px; color: #8f8f8f; font-size: 12px; }
-  .variant-reason { margin: 10px 0 0; color: #BABABA; font-size: 13px; }
+  .variant-reason { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 0; color: #BABABA; font-size: 13px; line-height: 1.5; }
+  .variant-reason > svg { width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px; color: #A9E58C; }
+  .variant-reason-name { color: #54A636; font-weight: 600; }
   .variant-dialog .account-buttons { margin-top: 24px; }
   .screenshot-note { margin: 12px 0 0; color: #BABABA; font-size: 13px; }
   .screenshot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
@@ -308,7 +310,9 @@
   .screenshot-empty h3 { margin: 0; color: #E4FFDA; }
   .screenshot-empty p { margin: 0; max-width: 460px; }
   .variant-panel > p { color: #BABABA; margin-bottom: 4px; }
-  .variant-panel .account-buttons { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .variant-panel .account-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 12px; }
+  .variant-busy { display: inline-flex; align-items: center; gap: 8px; margin: 0; color: #D2AF4D; font-size: 13px; }
+  .variant-busy svg { width: 16px; height: 16px; flex-shrink: 0; }
   .variant-pending, .variant-ready { display: flex; align-items: center; gap: 8px; min-height: 18px; }
   .variant-pending { color: #8f8f8f; }
   .variant-spinner { width: 12px; height: 12px; border: 2px solid #515151; border-top-color: #54A636; border-radius: 50%; animation: variant-spin .8s linear infinite; }
@@ -406,7 +410,7 @@
   .operation-card { width: min(100%, 520px); margin-top: 4px; border: 1px solid #383838; border-radius: 9px; padding: 12px 16px; background: #1B1B1B; }
   .operation-heading { display: flex; align-items: center; gap: 10px; font-size: 14px; }
   .operation-heading > svg { width: 19px; height: 19px; color: #A9E58C; }
-  .operation-heading > button { margin-left: auto; }
+  .operation-heading > button, .operation-heading > .icon-control { margin-left: auto; }
   .operation-card p { margin: 6px 0 0; color: #BABABA; font-size: 12px; }
   .operation-metrics { display: flex; justify-content: space-between; gap: 12px; margin: 10px 0 6px; color: #BABABA; font-size: 12px; }
   .operation-metrics > strong { color: #E4FFDA; }
@@ -431,14 +435,30 @@
   .settings-card h3 svg, .settings-advanced summary svg { width: 18px; height: 18px; color: #A9E58C; }
   .settings-card label { margin-bottom: 8px; font-size: 13px; }
   .settings-card input:not([type='checkbox']) { max-width: 100%; }
-  .memory-value { display: grid; grid-template-columns: 110px 1fr; gap: 4px 12px; align-items: center; }
-  .memory-value > label { grid-column: 1 / -1; }
-  .memory-value > input { width: 110px; }
-  .memory-value > output { color: #BABABA; font-size: 13px; }
-  .settings-card .memory-slider { appearance: none; -webkit-appearance: none; width: 100%; height: 10px; margin: 18px 0 6px; padding: 0; border: 0; border-radius: 0; background: linear-gradient(90deg, #54A63699 0 60%, #D2AF4D99 60% 85%, #C66B6B99 85% 100%); }
-  .memory-slider::-webkit-slider-thumb { appearance: none; width: 14px; height: 22px; background: #E4FFDA; clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); cursor: ew-resize; }
-  .memory-slider::-moz-range-thumb { width: 14px; height: 22px; border: 0; border-radius: 2px; background: #E4FFDA; cursor: ew-resize; }
-  .memory-ticks { display: flex; justify-content: space-between; padding-top: 9px; background: repeating-linear-gradient(90deg, #515151 0 1px, transparent 1px 6.25%) top / 100% 5px no-repeat; color: #BABABA; font-size: 10px; }
+  .settings-card .memory-auto-toggle { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 0 auto; font-size: 12px; color: #BABABA; }
+  .memory-auto-toggle span { display: inline-flex; align-items: center; gap: 6px; }
+  .memory-auto-toggle svg { width: 14px; height: 14px; }
+  .memory-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+  .memory-row > input { width: 96px; }
+  .memory-row > output { display: inline-flex; align-items: center; gap: 6px; color: #BABABA; font-size: 13px; white-space: nowrap; }
+  .memory-row > output.is-over { color: #D2AF4D; }
+  .memory-alert { display: inline-flex; border-radius: 4px; color: #D2AF4D; }
+  .memory-alert:focus-visible { outline: 2px solid #D2AF4D; outline-offset: 2px; }
+  .memory-alert svg { width: 16px; height: 16px; }
+  /* The end labels are centred on the end ticks and stick out by about 11px, so the slider keeps room at both sides. */
+  .memory-track { min-width: 0; margin-top: 16px; padding-inline: 16px; }
+  .memory-row > output.is-auto, .memory-track.is-auto { opacity: .55; }
+  .settings-card .memory-row > input.is-auto { background: #0c0c0c; border-color: #383838; color: #8f8f8f; opacity: .6; }
+  .settings-card .memory-slider { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 16px; margin: 0 0 2px; padding: 0; border: 0; border-radius: 999px; background: transparent; }
+  .memory-slider::-webkit-slider-runnable-track { height: 8px; border-radius: 999px; background: linear-gradient(90deg, #54A636AA 0 var(--ram-green, 60%), #D2AF4DAA var(--ram-green, 60%) var(--ram-yellow, 85%), #C66B6BAA var(--ram-yellow, 85%) 100%); }
+  .memory-slider::-moz-range-track { height: 8px; border-radius: 999px; background: linear-gradient(90deg, #54A636AA 0 var(--ram-green, 60%), #D2AF4DAA var(--ram-green, 60%) var(--ram-yellow, 85%), #C66B6BAA var(--ram-yellow, 85%) 100%); }
+  .memory-slider::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 16px; height: 16px; margin-top: -4px; border: 2px solid #141414; border-radius: 50%; background: #E4FFDA; box-shadow: 0 0 0 1px #A9E58C, 0 1px 4px #0008; cursor: ew-resize; }
+  .memory-slider::-moz-range-thumb { box-sizing: border-box; width: 16px; height: 16px; border: 2px solid #141414; border-radius: 50%; background: #E4FFDA; box-shadow: 0 0 0 1px #A9E58C, 0 1px 4px #0008; cursor: ew-resize; }
+  .memory-slider:focus-visible { outline: 2px solid #54A636; outline-offset: 4px; }
+  /* The thumb is 16px wide, so its centre runs from 8px to 8px short of the end of the slider; ticks and labels use the same span. */
+  .memory-ticks-line { height: 5px; margin: 3px 7.5px 0; background-image: linear-gradient(90deg, #6a6a6a 1px, transparent 1px); background-repeat: repeat-x; background-size: calc((100% - 1px) * var(--every, 1) / var(--steps, 1)) 100%; }
+  .memory-ticks { position: relative; height: 14px; margin-top: 3px; color: #BABABA; font-size: 10px; }
+  .memory-ticks > span { position: absolute; top: 0; left: calc(8px + (100% - 16px) * var(--at, 0)); transform: translateX(-50%); white-space: nowrap; }
   .window-dimensions { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: end; }
   .window-dimensions input { width: 100%; }
   .window-dimensions > span { padding-bottom: 12px; color: #BABABA; }
