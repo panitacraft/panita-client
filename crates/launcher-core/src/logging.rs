@@ -170,6 +170,31 @@ impl BoundedLog {
         Some(path)
     }
 
+    /// Delete the logs of previous sessions in `directory`, keeping the file this
+    /// process is writing. The outcome is noted in the session file.
+    pub fn clear_previous_logs(&self, directory: &Path) -> session_log::Cleared {
+        let cleared = {
+            let file = self
+                .file
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            session_log::clear_previous(directory, file.as_ref().map(SessionFile::path))
+        };
+        let level = if cleared.failed > 0 {
+            Level::Warn
+        } else {
+            Level::Info
+        };
+        self.note(
+            level,
+            &format!(
+                "previous logs cleared removed={} failed={}",
+                cleared.removed, cleared.failed
+            ),
+        );
+        cleared
+    }
+
     /// Record a free-text note in the session file only. The text is redacted and
     /// bounded; it never enters the in-memory view.
     pub fn note(&self, level: Level, message: &str) {

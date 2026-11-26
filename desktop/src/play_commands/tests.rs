@@ -682,3 +682,36 @@ fn the_start_line_reaches_the_session_file_with_the_instance_and_both_versions()
     );
     assert!(!written.contains("[redacted]"), "{written}");
 }
+
+#[test]
+fn exported_logs_always_end_up_as_text_files() {
+    use std::path::PathBuf;
+    assert_eq!(
+        with_text_extension(PathBuf::from("registro")),
+        PathBuf::from("registro.txt")
+    );
+    assert_eq!(
+        with_text_extension(PathBuf::from("registro.log")),
+        PathBuf::from("registro.log")
+    );
+}
+
+#[test]
+fn clearing_previous_logs_keeps_the_file_this_session_writes() {
+    let directory = std::env::temp_dir().join(format!("panita-clear-logs-{}", Uuid::new_v4()));
+    assert!(std::fs::create_dir_all(&directory).is_ok());
+    let old = directory.join("session-20250101-000000-deadbeef.log");
+    assert!(std::fs::write(&old, "old").is_ok());
+    let logs = BoundedLog::default();
+    let current = logs
+        .attach_file(&directory, ProcessSessionId::new(), &[])
+        .unwrap_or_else(|| panic!("session file"));
+    let cleared = logs.clear_previous_logs(&directory);
+    assert_eq!((cleared.removed, cleared.failed), (1, 0));
+    assert!(!old.exists());
+    assert!(current.exists(), "the running session file survives");
+    let written = std::fs::read_to_string(&current).unwrap_or_default();
+    assert!(written.contains("previous logs cleared removed=1 failed=0"));
+    drop(logs);
+    assert!(std::fs::remove_dir_all(directory).is_ok());
+}

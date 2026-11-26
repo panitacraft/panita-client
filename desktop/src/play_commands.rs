@@ -998,6 +998,96 @@ pub(super) fn game_log_snapshot(
         .game_output_page(instance_id, request_id, offset)
 }
 
+/// Largest complete log the frontend may hand back for export or copy (owner-approved
+/// 2026-11-26). Lines are already redacted and bounded at capture.
+const MAX_LOG_TEXT_BYTES: usize = 256 * 1024 * 1024;
+
+/// Only the execution-log window of a game that is still retained may use its text.
+fn require_game_log(
+    window: &tauri::WebviewWindow,
+    state: &DesktopState,
+    instance_id: Uuid,
+    request_id: Uuid,
+    text: &str,
+) -> Result<(), ErrorCode> {
+    if window.label() != log_label(instance_id, request_id) || text.len() > MAX_LOG_TEXT_BYTES {
+        return Err(ErrorCode::InvalidData);
+    }
+    let plays = state
+        .plays
+        .state
+        .lock()
+        .map_err(|_| ErrorCode::StorageUnavailable)?;
+    plays
+        .entries
+        .get(&instance_id)
+        .filter(|entry| entry.request == request_id && entry.last_game.is_some())
+        .map(|_| ())
+        .ok_or(ErrorCode::OperationCancelled)
+}
+
+/// A name the player typed without an extension still ends up as a text file.
+fn with_text_extension(mut path: std::path::PathBuf) -> std::path::PathBuf {
+    if path.extension().is_none() {
+        path.set_extension("txt");
+    }
+    path
+}
+
+/// Save the complete formatted log the log window assembled. The native dialog chooses the
+/// destination, so no path crosses IPC. Returns false when the player cancels.
+#[tauri::command]
+pub(super) async fn export_game_log(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+    text: String,
+) -> Result<bool, ErrorCode> {
+    use tauri_plugin_dialog::DialogExt;
+    require_game_log(&window, &state, instance_id, request_id, &text)?;
+    let picked = {
+        let (app, window) = (window.app_handle().clone(), window.clone());
+        tauri::async_runtime::spawn_blocking(move || {
+            app.dialog()
+                .file()
+                .set_parent(&window)
+                .set_title("Exportar registro de Minecraft")
+                .set_file_name("registro-minecraft.txt")
+                .add_filter("Texto", &["txt"])
+                .blocking_save_file()
+        })
+        .await
+        .map_err(|_| ErrorCode::StorageUnavailable)?
+    };
+    let Some(picked) = picked else {
+        return Ok(false);
+    };
+    let path = with_text_extension(picked.into_path().map_err(|_| ErrorCode::InvalidData)?);
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::write(path, text).map_err(|_| ErrorCode::StorageUnavailable)
+    })
+    .await
+    .map_err(|_| ErrorCode::StorageUnavailable)??;
+    Ok(true)
+}
+
+/// Put the complete formatted log on the system clipboard.
+#[tauri::command]
+pub(super) async fn copy_game_log(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+    text: String,
+) -> Result<bool, ErrorCode> {
+    require_game_log(&window, &state, instance_id, request_id, &text)?;
+    tauri::async_runtime::spawn_blocking(move || super::screenshot_commands::put_text(text))
+        .await
+        .map_err(|_| ErrorCode::StorageUnavailable)??;
+    Ok(true)
+}
+
 #[tauri::command]
 pub(super) async fn open_game_log(
     app: tauri::AppHandle,

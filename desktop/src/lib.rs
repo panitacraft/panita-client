@@ -165,6 +165,28 @@ async fn open_logs_folder(
     folder_opener::open(app, directory).await.map(|_| true)
 }
 
+/// Delete the logs of previous launcher sessions, keeping the one being written. The
+/// folder is fixed under the data root; the frontend supplies no path.
+#[tauri::command]
+async fn clear_old_logs(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+) -> Result<launcher_core::session_log::Cleared, launcher_core::error::ErrorCode> {
+    if window.label() != "main" {
+        return Err(launcher_core::error::ErrorCode::InvalidData);
+    }
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)?
+        .join("logs");
+    let logs = state.logs.clone();
+    tauri::async_runtime::spawn_blocking(move || logs.clear_previous_logs(&directory))
+        .await
+        .map_err(|_| launcher_core::error::ErrorCode::StorageUnavailable)
+}
+
 #[tauri::command]
 async fn catalog_snapshot(
     app: tauri::AppHandle,
@@ -346,6 +368,7 @@ pub fn run() {
             system_resources,
             ram_preview,
             open_logs_folder,
+            clear_old_logs,
             catalog_snapshot,
             activation_commands::activation_snapshot,
             activation_commands::start_activation,
@@ -380,6 +403,8 @@ pub fn run() {
             play_commands::game_log_snapshot,
             play_commands::find_game_log,
             play_commands::open_game_log,
+            play_commands::export_game_log,
+            play_commands::copy_game_log,
             play_commands::open_crash_reports,
             play_commands::begin_install,
             play_commands::begin_update,

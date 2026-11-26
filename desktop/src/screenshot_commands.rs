@@ -11,11 +11,14 @@ use uuid::Uuid;
 
 use super::pack_commands::{blocking, main_only, paths};
 
-/// One handle for the whole process. On Linux the copied image is served by this handle,
-/// so dropping it would empty the clipboard; keeping it also avoids reconnecting per copy.
+/// One handle for the whole process. On Linux the copied image or text is served by this
+/// handle, so dropping it would empty the clipboard; keeping it also avoids reconnecting
+/// per copy.
 static CLIPBOARD: Mutex<Option<arboard::Clipboard>> = Mutex::new(None);
 
-fn put_image(image: screenshots::Rgba) -> Result<(), ErrorCode> {
+fn with_clipboard(
+    write: impl FnOnce(&mut arboard::Clipboard) -> Result<(), arboard::Error>,
+) -> Result<(), ErrorCode> {
     let mut guard = CLIPBOARD
         .lock()
         .map_err(|_| ErrorCode::StorageUnavailable)?;
@@ -23,16 +26,26 @@ fn put_image(image: screenshots::Rgba) -> Result<(), ErrorCode> {
         *guard = Some(arboard::Clipboard::new().map_err(|_| ErrorCode::StorageUnavailable)?);
     }
     let clipboard = guard.as_mut().ok_or(ErrorCode::StorageUnavailable)?;
-    let data = arboard::ImageData {
-        width: image.width as usize,
-        height: image.height as usize,
-        bytes: image.pixels.into(),
-    };
-    clipboard.set_image(data).map_err(|_| {
+    write(clipboard).map_err(|_| {
         // A broken connection (for example a restarted display server) is retried afresh.
         *guard = None;
         ErrorCode::StorageUnavailable
     })
+}
+
+fn put_image(image: screenshots::Rgba) -> Result<(), ErrorCode> {
+    with_clipboard(|clipboard| {
+        clipboard.set_image(arboard::ImageData {
+            width: image.width as usize,
+            height: image.height as usize,
+            bytes: image.pixels.into(),
+        })
+    })
+}
+
+/// Put plain text on the system clipboard.
+pub(super) fn put_text(text: String) -> Result<(), ErrorCode> {
+    with_clipboard(|clipboard| clipboard.set_text(text))
 }
 
 #[tauri::command]
