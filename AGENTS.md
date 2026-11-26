@@ -192,6 +192,9 @@ PanitaClient/
 ├─ update-state.json      # nonsecret launcher-update channel and pending requirement (§8)
 ├─ insts-cache.json
 ├─ instance-erasures.json # temporary explicit full-instance erasure intents; never auto-retried
+├─ skins.json             # nonsecret skin library index: saved looks, cached capes, last known state per profile (§5.5)
+├─ skins/                 # cached skin PNGs named by pixel hash; disposable apart from saved looks
+├─ capes/                 # cached cape PNGs named by the service's cape identifier
 ├─ libraries/             # shared, verified caches
 ├─ assets/
 ├─ versions/
@@ -498,6 +501,44 @@ the Minecraft log viewer, only as the two explicit player actions below.
   save dialog and the copy always covers the complete log.
 - These behaviors are verified by tests; the save dialog, clipboard and file deletion are
   unvalidated on a real desktop and on Ubuntu x64 (§6).
+
+### 5.5 Skin and cape manager (2026-11-26)
+
+Owner request, GitHub issue 51, for 1.3.0-beta.1. A "Skins y capas" page, opened from the main
+toolbar, manages the skin, arm model and cape of the selected Microsoft account.
+
+- Only an authenticated Microsoft account can use it. The core refuses every operation for an
+  offline account (`microsoft_account_required`), so hiding the toolbar entry is a convenience and
+  not the boundary. The page offers nothing to an offline account except an explanation.
+- A "look" is a skin file, its arm model (classic or slim) and a cape or none. The library keeps
+  at most 100 looks, shared by every Microsoft account on this computer. Looks, the capes the account
+  owns and the last known state of each profile live in `skins.json` (disk schema 1,
+  written through the private store, its interprocess lock and atomic replacement). Images live in
+  `skins/{pixel-hash}.png` and `capes/{cape-id}.png` in private directories. A damaged or future
+  `skins.json` is reported and left untouched; every name read from it is validated before it
+  becomes a file name. Images nothing refers to are removed after the index is durable.
+- A skin is identified by the hash of its decoded pixels, never of its file, because the service
+  re-encodes uploads. This is how the page recognises that the account wears a saved look and offers
+  to save the current look when it matches none (a different skin, model or cape). Every image is
+  decoded under size limits and stored again as a plain RGBA PNG. Uploads must be 64×64 or 64×32.
+- All calls to Minecraft Services (`GET /minecraft/profile`, `POST /minecraft/profile/skins`,
+  `PUT` and `DELETE /minecraft/profile/capes/active`) run in Rust with the session's access
+  token, which never reaches the interface, logs or the index. A rejected token is renewed once and
+  the call repeated once (§4.2). Textures are fetched only from `textures.minecraft.net`, over HTTPS,
+  from addresses validated against that exact host, bounded to 1 MiB, with no credential.
+- Each session acquisition, selection, renewal or login completion starts a background
+  synchronisation that caches the current skin and every owned cape that is not cached yet; the page
+  also synchronises when it opens and on explicit request. Failures are silent in the background and
+  shown as "last saved" on the page. Applying a look or a cape records what the service answers, even
+  after a partial failure. Calls are serialized by one gate per process.
+- The preview is an interactive 3D player (`skinview3d`, loaded lazily so the launcher starts
+  without it) that turns by dragging or with the arrow keys and plays idle, walking, running and wave
+  animations. It follows the player's reduced-motion setting and falls back to a flat picture when
+  WebGL is unavailable. Textures reach the webview as data URLs, so the content security policy and
+  the Tauri capabilities are unchanged. The skin file is chosen with the page's own file input and
+  sent as base64; no path crosses IPC.
+- Verified by tests with an in-memory service, a loopback service and a mocked webview. Not
+  validated against a live Microsoft account, in the installed product, or on Ubuntu x64 (§6).
 
 ## Annex A. Account and Token Storage Decision
 
