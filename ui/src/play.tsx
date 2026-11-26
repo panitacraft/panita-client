@@ -75,7 +75,14 @@ export function PlayNotice({ names = {}, versions = {} }: { names?: Record<strin
   // What a finished operation kept or left behind, told by a toast and read in a modal.
   const [completion, setCompletion] = useState<{ instanceId: string; heading: string; outcome: 'ready' | 'removed'; details: CompletionDetails } | null>(null);
   const [completionError, setCompletionError] = useState<string | null>(null);
+  // The instance whose details toast is on screen. It goes away when that instance starts another operation.
+  const detailsToast = useRef<string | null>(null);
   useEffect(() => {
+    const watched = detailsToast.current;
+    if (watched && play?.snapshot?.instances.some(entry => entry.instanceId === watched && playActive(entry.phase))) {
+      detailsToast.current = null;
+      toast.clear();
+    }
     for (const entry of play?.snapshot?.instances ?? []) {
       const key = entry.requestId + ':' + entry.phase;
       if (seen.current.has(key)) continue;
@@ -86,13 +93,14 @@ export function PlayNotice({ names = {}, versions = {} }: { names?: Record<strin
       seen.current.add(key);
       const prefix = names[entry.instanceId] ? names[entry.instanceId] + ': ' : '';
       const details = completionDetails(entry);
-      if (!details) { toast.show(prefix + message); continue; }
+      if (!details) { detailsToast.current = null; toast.show(prefix + message); continue; }
+      detailsToast.current = entry.instanceId;
       toast.show(`${prefix}${message} ${completionNote(details)}`, 'success', {
         label: 'Ver detalles',
         onClick: () => { setCompletionError(null); setCompletion({ instanceId: entry.instanceId, heading: heading(entry), outcome: entry.phase === 'installed' ? 'ready' : 'removed', details }); },
       });
     }
-  }, [play?.snapshot, toast.show, names]);
+  }, [play?.snapshot, toast.show, toast.clear, names]);
   return <><TransientNotice notice={toast.notice} />
     {completion && <CompletionDialog heading={completion.heading} name={names[completion.instanceId] ?? null} outcome={completion.outcome} version={versions[completion.instanceId] ?? null} details={completion.details} busy={!isTauri()} error={completionError} onClose={() => setCompletion(null)}
       onOpenBackups={() => { setCompletionError(null); void invoke('open_instance_folder', { instanceId: completion.instanceId, folder: 'pack-backups' }).catch(cause => setCompletionError(messageForError(cause))); }} />}
@@ -154,6 +162,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   const [details, setDetails] = useState<'conflicts' | 'manual' | 'natives' | null>(null);
   const [nativeReport, setNativeReport] = useState<NativeCleanupReport | null>(null);
   const announced = useRef(new Set<string>());
+  const noticeToast = useRef(false);
   const entry = play?.snapshot?.instances.find(entry => entry.instanceId === instanceId);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const active = entry && playActive(entry.phase);
@@ -164,8 +173,14 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     if (!notice || !noticeKey || announced.current.has(noticeKey)) return;
     announced.current.add(noticeKey);
     const kind = notice.details;
+    noticeToast.current = true;
     toast.show(notice.message, 'error', kind ? { label: 'Ver detalles', onClick: () => setDetails(kind) } : undefined);
   }, [noticeKey]);
+  // The toast is about the operation that ended. Once the player starts another one (Continuar y guardar mis
+  // archivos, or Update again) it has been acted on, and a toast that stays until dismissed must not sit over the new progress.
+  useEffect(() => {
+    if (active && noticeToast.current) { noticeToast.current = false; toast.clear(); }
+  }, [active]);
   // A modal about one operation closes with it: a new request must not reopen it by accident.
   useEffect(() => { if (details === 'conflicts' || details === 'manual') { if (notice?.details !== details) setDetails(null); } }, [details, notice?.details]);
   // A required launcher update replaces Play; installing and updating instances stay available.

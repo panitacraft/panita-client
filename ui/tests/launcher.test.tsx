@@ -228,6 +228,30 @@ test('update conflicts are a toast, and set-aside consent is asked in a confirma
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({ update: { from_version: 'v1', to_version: 'v2', backup_worlds: true, move_aside: true } }));
 });
 
+test('the conflict toast leaves once the player starts the update it was about', async () => {
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'failed', operation: 'update', error: 'pack_conflict', packConflicts: [{ path: 'mods/player.jar', reason: 'occupied' }] }));
+  await screen.findByText('Hay 1 archivo tuyo que estorba a la actualización.');
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  await user.click(screen.getByRole('button', { name: 'Continuar y guardar mis archivos' }));
+  // Nothing has started yet, so the toast stays; it goes when the new operation does.
+  expect(screen.queryByText('Hay 1 archivo tuyo que estorba a la actualización.')).not.toBeNull();
+  await emit(entry({ requestId: 'again', phase: 'installing', operation: 'update' }));
+  await waitFor(() => expect(screen.queryByText('Hay 1 archivo tuyo que estorba a la actualización.')).toBeNull());
+  expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull();
+});
+
+test('a details toast of a finished operation leaves when that instance starts another one', async () => {
+  mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update', packSkipped: ['options.txt'] }));
+  await screen.findByRole('button', { name: 'Ver detalles' });
+  await emit(entry({ requestId: 'next', phase: 'installing', operation: 'repair' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull());
+});
+
 test('conflicts that moving files aside cannot fix offer no continue button', async () => {
   const user = userEvent.setup(); mount();
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
