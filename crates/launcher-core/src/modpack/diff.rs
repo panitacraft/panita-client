@@ -177,6 +177,15 @@ pub fn diff(
                     // A default seeds a path once. It never replaces a file that is there.
                     if let Some(previous) = previous {
                         out.files.push(previous.clone());
+                        // A default the player kept instead of the pack's file has no
+                        // baseline. The published state ties that to a skip record, so
+                        // keep reporting it or the next state fails its own validation.
+                        if previous.baseline.as_ref() != Some(&previous.desired) {
+                            out.skipped.push(SkippedConfiguration {
+                                path: previous.path.clone(),
+                                desired: previous.desired.clone(),
+                            });
+                        }
                         continue;
                     }
                     if consumed_keys.contains(&k) {
