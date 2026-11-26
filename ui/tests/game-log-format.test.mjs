@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formattedGameLines, logMetadata, displayLogTime, logPrefix } from '../src/game-log-format.ts';
+import { formattedGameLines, logMetadata, displayLogTime, logPrefix, plainGameLogText } from '../src/game-log-format.ts';
 
 const header = '<log4j:Event timestamp="1720000000123" level="warn" thread="Render thread" logger="a&gt;b">';
 test('inline Log4j events expose metadata and preserve inert CDATA', () => {
@@ -39,4 +39,16 @@ test('many inline XML events never expand a single source row into unbounded DOM
   const lines = formattedGameLines([{ stream: 'stdout', text }]);
   assert.equal(lines.length, 1);
   assert.equal(lines[0].text.match(/x/g).length, 50);
+});
+test('the exported text keeps prefixes, marks plain stderr and ends with one newline', () => {
+  const text = plainGameLogText(formattedGameLines([
+    { stream: 'stdout', sequence: 0, text: header + '<log4j:Message><![CDATA[ready]]></log4j:Message></log4j:Event>' },
+    { stream: 'stderr', sequence: 1, text: 'plain error', context: null, cdata: false },
+    { stream: 'stdout', sequence: 2, text: 'plain output', context: null, cdata: false },
+    { stream: 'notice', sequence: 3, text: 'Se omitió una línea.' },
+  ]));
+  const rows = text.split('\n');
+  assert.match(rows[0], /^\[\d\d:\d\d:\d\d\.123\] \[Render thread\/WARN\] \[a>b\] ready$/);
+  assert.deepEqual(rows.slice(1), ['[STDERR] plain error', 'plain output', 'Se omitió una línea.', '']);
+  assert.equal(plainGameLogText([]), '');
 });
