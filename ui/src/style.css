@@ -397,7 +397,9 @@
   .skins-default { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%; padding: 24px; color: #BABABA; text-align: center; }
   .skins-default img { width: 64px; height: 64px; image-rendering: pixelated; }
   .skins-default p { margin: 0; }
-  .skins-play { position: absolute; top: 12px; right: 12px; z-index: 3; background: #252525e6; }
+  .skins-tools { position: absolute; top: 12px; right: 12px; z-index: 3; display: flex; align-items: center; gap: 8px; }
+  .skins-tools > button { background: #252525e6; }
+  .skins-elytra { display: inline-flex; align-items: center; gap: 8px; margin: 0; color: #F9FFF8; padding: 5px 10px; border: 1px solid #515151; border-radius: 8px; background: #252525e6; font-size: 13px; font-weight: 600; }
   .skins-pending { position: absolute; top: 14px; left: 14px; z-index: 3; border: 1px solid #515151; border-radius: 4px; padding: 2px 8px; background: #141414cc; color: #BABABA; font-size: 11px; font-weight: 600; }
   .skins-apply { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 3; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
   .skins-apply > button { flex: 1 1 auto; padding-inline: 10px; font-size: 13px; }
@@ -415,7 +417,7 @@
   .skins-scroll { flex: 1; min-height: 0; margin-right: -8px; padding: 16px 8px 4px 0; overflow-y: auto; }
   .skins-sync { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; color: #8f8f8f; font-size: 12px; }
   .skins-sync svg { width: 14px; height: 14px; }
-  .skins-unsaved { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; padding: 10px 12px; border: 1px dashed #515151; border-radius: 10px; background: #151515; }
+  .skins-unsaved { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; padding: 10px 12px; border: 1px dashed #515151; border-radius: 10px; background: #151515; }
   .skins-unsaved > div { flex: 1; min-width: 0; }
   .skins-unsaved p { margin: 2px 0 0; color: #BABABA; font-size: 13px; line-height: 1.4; }
   .skins-unsaved .skin-card-art { width: 48px; height: 64px; aspect-ratio: auto; }
@@ -430,7 +432,8 @@
   div.skins-empty > svg { width: 36px; height: 36px; color: #FCA5A5; }
 
   .skin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
-  .skin-card { position: relative; min-width: 0; margin: 0; }
+  .skin-card { min-width: 0; margin: 0; }
+  .skin-card-body { position: relative; height: 100%; }
   .skin-card-main { flex-direction: column; justify-content: flex-start; gap: 8px; width: 100%; height: 100%; padding: 6px 6px 10px; border: 1px solid #333; border-radius: 10px; background: #151515; font-weight: 400; }
   .skin-card-main:not(:disabled):hover { border-color: #515151; background: #1b1b1b; }
   .skin-card-main[aria-pressed='true'] { border-color: #54A636; background: #1c2a17; box-shadow: inset 0 0 0 1px #54A636; }

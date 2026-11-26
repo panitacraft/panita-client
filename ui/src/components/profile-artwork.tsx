@@ -1,12 +1,19 @@
 import { useState } from 'react';
 import defaultSkin from '../assets/default-skin.svg';
+import { useWornSkin } from '../worn-skin';
+import { BustPicture } from './skin-picture';
 
-/** Render only valid Minecraft names; Discord identifiers remain valid login inputs. */
-export function ProfileArtwork({ username, bust = false }: { username: string; bust?: boolean }) {
+/**
+ * Render only valid Minecraft names; Discord identifiers remain valid login inputs. A Microsoft
+ * profile whose skin the launcher has cached shows that skin, so a change appears at once.
+ */
+export function ProfileArtwork({ username, bust = false, profileId = null, selected = false }: { username: string; bust?: boolean; profileId?: string | null; selected?: boolean }) {
   const valid = /^[A-Za-z0-9_]{3,16}$/.test(username);
   const source = valid ? `https://render.crafty.gg/${bust ? '3d/bust' : '2d/head'}/${encodeURIComponent(username)}?${bust ? 'width=128&height=128' : 'cors=true'}` : null;
   const [failed, setFailed] = useState<string | null>(null);
-  return <img className={bust ? 'profile-bust' : 'profile-head'} src={source && failed !== source ? source : defaultSkin} alt="" aria-hidden="true" referrerPolicy="no-referrer" decoding="async" onError={() => { if (source) setFailed(source); }} />;
+  const worn = useWornSkin(bust ? profileId : null, selected);
+  const online = <img className={bust ? 'profile-bust' : 'profile-head'} src={source && failed !== source ? source : defaultSkin} alt="" aria-hidden="true" referrerPolicy="no-referrer" decoding="async" onError={() => { if (source) setFailed(source); }} />;
+  return worn ? <BustPicture texture={worn.texture} model={worn.model} className="profile-bust" fallback={online} /> : online;
 }
 
 export function DiscordIcon() {

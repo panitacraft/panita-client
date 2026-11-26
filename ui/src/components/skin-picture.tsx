@@ -1,12 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ImageOff, LoaderCircle } from 'lucide-react';
 import { CAPE_YAW, DEFAULT_YAW } from '../skin-angles';
-import { cachedThumbnail, renderThumbnail } from '../skin-renderer';
+import { BUST_FRAME, cachedThumbnail, renderThumbnail, type ThumbnailRequest } from '../skin-renderer';
 import { textureUrl } from '../skin-api';
 import type { SkinModel } from '../skin-state';
 import { CapeThumbnail, SkinThumbnail } from './skin-thumbnails';
 
-type Spec = { key: string; skin: string; model: SkinModel; cape: string | null; yaw: number };
+type Spec = Omit<ThumbnailRequest, 'skin' | 'cape'> & { skin: string; cape: string | null };
 type State = { key: string | null; src: string | null; failed: boolean };
 
 /** The 3D picture of a spec: from the cache at once, otherwise rendered in turn once it is wanted. */
@@ -59,4 +59,13 @@ export function CapePicture({ id, cached, wearer, model, label }: { id: string; 
   return spec === null
     ? <CapeThumbnail id={id} cached={cached} label={label} />
     : <Picture src={src} failed={failed} label={label} fallback={<CapeThumbnail id={id} cached={cached} label={label} />} />;
+}
+
+/**
+ * The head and shoulders of a skin, as a 3D picture at the angle of the preview. `fallback` stands in
+ * until the picture is ready and whenever it cannot be drawn.
+ */
+export function BustPicture({ texture, model, className, fallback }: { texture: string; model: SkinModel; className: string; fallback: ReactNode }) {
+  const { src } = usePicture({ key: `bust|${texture}|${model}`, skin: texture, model, cape: null, yaw: DEFAULT_YAW, frame: BUST_FRAME });
+  return src ? <img className={className} src={src} alt="" aria-hidden="true" decoding="async" draggable={false} /> : <>{fallback}</>;
 }

@@ -14,10 +14,15 @@ export type ThumbnailRequest = {
   model: SkinModel;
   cape: string | null;
   yaw: number;
+  /** A different framing, for the bust shown beside an account. Everything else draws the whole body. */
+  frame?: { width: number; height: number; zoom: number; lift: number };
 };
 
 export const THUMBNAIL_WIDTH = 240;
 export const THUMBNAIL_HEIGHT = 320;
+const BODY_FRAME = { width: THUMBNAIL_WIDTH, height: THUMBNAIL_HEIGHT, zoom: 0.78, lift: 0 };
+/** Head and shoulders, for a picture beside an account name. */
+export const BUST_FRAME = { width: 192, height: 216, zoom: 2.3, lift: -10 };
 const CACHE_LIMIT = 240;
 
 const cache = new Map<string, string>();
@@ -58,6 +63,10 @@ export function renderThumbnail(request: ThumbnailRequest): Promise<string> {
     const [viewer, skin, cape] = await Promise.all([createPlayer(), decodeImage(request.skin), request.cape ? decodeImage(request.cape) : Promise.resolve(null)]);
     viewer.loadSkin(skin, { model: request.model === 'slim' ? 'slim' : 'default' });
     if (cape) viewer.loadCape(cape, { backEquipment: 'cape' }); else viewer.resetCape();
+    const frame = request.frame ?? BODY_FRAME;
+    viewer.setSize(frame.width, frame.height);
+    viewer.zoom = frame.zoom;
+    viewer.playerWrapper.position.y = frame.lift;
     viewer.playerWrapper.rotation.y = request.yaw;
     viewer.render();
     const picture = viewer.canvas.toDataURL('image/png');

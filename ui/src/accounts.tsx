@@ -173,7 +173,7 @@ export function Accounts({ suggestedName = '', onSnapshot, onEditSkins, onboardi
         const selected = id === view.selected_account_id;
         const microsoft = account.metadata.kind === 'microsoft';
         return <li key={id} className="profile-row">
-          <ProfileArtwork username={microsoft ? account.metadata.username : 'MHF_Steve'} bust />
+          <ProfileArtwork username={microsoft ? account.metadata.username : 'MHF_Steve'} bust profileId={microsoft ? account.metadata.profile_id : null} selected={selected} />
           <div className="profile-info"><div className="profile-name"><strong>{account.metadata.username}</strong>{selected && <span className="active-badge"><Check aria-hidden="true" />Activa</span>}</div>
             <span className="profile-type">{microsoft ? <MicrosoftIcon /> : <UserRound aria-hidden="true" />}{microsoft ? 'Microsoft' : 'No-Premium'}</span>
             {microsoft && account.status !== 'ready' && <p className="profile-status">{statusText[account.status]}</p>}

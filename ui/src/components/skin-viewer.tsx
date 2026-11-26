@@ -19,12 +19,14 @@ const KEY_TURN = Math.PI / 12;
  * Textures arrive as data URLs, which the content security policy already allows. Every change of
  * skin, model or cape is applied to the same renderer, so previews are immediate.
  */
-export function SkinViewer3D({ skin, model, cape, playing, suspended = false, label, fallback }: {
+export function SkinViewer3D({ skin, model, cape, playing, elytra = false, suspended = false, label, fallback }: {
   skin: string | null;
   model: SkinModel;
   cape: string | null;
   /** Whether the walking animation runs; false holds the current pose. */
   playing: boolean;
+  /** Show the cape texture as elytra. Needs a cape: the library has no elytra texture of its own. */
+  elytra?: boolean;
   /** Stop rendering altogether while the view is not visible. */
   suspended?: boolean;
   label: string;
@@ -99,10 +101,10 @@ export function SkinViewer3D({ skin, model, cape, playing, suspended = false, la
     if (!cape) { player.resetCape(); return; }
     let current = true;
     decodeImage(cape).then(image => {
-      if (current && token === latest.current.cape && !player.disposed) player.loadCape(image, { backEquipment: 'cape' });
+      if (current && token === latest.current.cape && !player.disposed) player.loadCape(image, { backEquipment: elytra ? 'elytra' : 'cape' });
     }).catch(() => {});
     return () => { current = false; };
-  }, [status, cape]);
+  }, [status, cape, elytra]);
 
   useEffect(() => {
     if (status === 'ready' && walk.current) walk.current.paused = !playing;

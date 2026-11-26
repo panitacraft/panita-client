@@ -15,13 +15,14 @@ vi.mock('../src/components/skin-viewer', async importOriginal => {
   const original = await importOriginal<typeof import('../src/components/skin-viewer')>();
   return {
     ...original,
-    SkinViewer3D: (props: { skin: string | null; model: string; cape: string | null; playing: boolean }) =>
-      <div data-testid="viewer" data-skin={props.skin ?? ''} data-model={props.model} data-cape={props.cape ?? ''} data-playing={String(props.playing)} />,
+    SkinViewer3D: (props: { skin: string | null; model: string; cape: string | null; playing: boolean; elytra?: boolean }) =>
+      <div data-testid="viewer" data-skin={props.skin ?? ''} data-model={props.model} data-cape={props.cape ?? ''} data-playing={String(props.playing)} data-elytra={String(!!props.elytra)} />,
   };
 });
 // The real renderer needs WebGL. The stand-in answers with a picture named after what it was asked to draw.
 const renderer = vi.hoisted(() => ({ fail: false, requests: [] as { key: string; yaw: number; cape: string | null }[] }));
 vi.mock('../src/skin-renderer', () => ({
+  BUST_FRAME: { width: 192, height: 216, zoom: 2.3, lift: -10 },
   cachedThumbnail: () => undefined,
   renderThumbnail: async (request: { key: string; yaw: number; cape: string | null }) => {
     renderer.requests.push({ key: request.key, yaw: request.yaw, cape: request.cape });
@@ -60,6 +61,7 @@ beforeEach(() => {
   failure = {};
   issued = 0;
   renderer.fail = false; renderer.requests = [];
+  localStorage.clear();
   backend.invoke.mockReset();
   backend.invoke.mockImplementation(async (command: string, args: Record<string, unknown> = {}) => {
     if (command in failure) throw failure[command];
@@ -124,12 +126,12 @@ test('previewing a saved look updates the 3D view at once and applying sends exa
   expect(viewer().dataset.skin).toBe(image(hash('c')));
   expect(viewer().dataset.model).toBe('slim');
   await waitFor(() => expect(viewer().dataset.cape).toBe(image('cape-b')));
-  expect(screen.getByText('Sin aplicar')).toBeTruthy();
+  expect(screen.getByText('Vista previa')).toBeTruthy();
   expect(calls('skins_apply')).toHaveLength(0);
-  await user.click(screen.getByRole('button', { name: 'Aplicar a mi cuenta' }));
+  await user.click(screen.getByRole('button', { name: 'Aplicar' }));
   await waitFor(() => expect(calls('skins_apply')).toEqual([{ request: { lookId: 'c', capeChange: { id: 'cape-b' } } }]));
   expect(await screen.findByText('Cambios aplicados a tu cuenta.')).toBeTruthy();
-  expect(screen.queryByText('Sin aplicar')).toBeNull();
+  expect(screen.queryByText('Vista previa')).toBeNull();
   expect(screen.getByRole('img', { name: 'Skin activa' })).toBeTruthy();
 });
 
@@ -142,14 +144,14 @@ test('toggling a cape in the Capas tab previews it and discarding returns to the
   expect(screen.getByRole('img', { name: 'Capa activa' })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Vanilla' }));
   expect(viewer().dataset.cape).toBe(image('cape-b'));
-  expect(screen.getByText('Sin aplicar')).toBeTruthy();
+  expect(screen.getByText('Vista previa')).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Sin capa' }));
   expect(viewer().dataset.cape).toBe('');
   await user.click(screen.getByRole('button', { name: 'Descartar' }));
   expect(viewer().dataset.cape).toBe(image('cape-a'));
   expect(calls('skins_apply')).toHaveLength(0);
   await user.click(screen.getByRole('button', { name: 'Sin capa' }));
-  await user.click(screen.getByRole('button', { name: 'Aplicar a mi cuenta' }));
+  await user.click(screen.getByRole('button', { name: 'Aplicar' }));
   await waitFor(() => expect(calls('skins_apply')).toEqual([{ request: { lookId: null, capeChange: { id: null } } }]));
 });
 
@@ -224,7 +226,7 @@ test('without WebGL the cards keep their flat pictures and everything still work
 test('a current look that is not saved can be saved, and then stops being offered', async () => {
   const user = userEvent.setup();
   mount();
-  expect(await screen.findByText('Tu aspecto actual no está guardado')).toBeTruthy();
+  expect(await screen.findByText('Aspecto actual sin guardar')).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Guardar' }));
   const dialog = await screen.findByRole('dialog', { name: 'Guardar en mi biblioteca' });
   const name = within(dialog).getByLabelText('Nombre') as HTMLInputElement;
@@ -233,15 +235,15 @@ test('a current look that is not saved can be saved, and then stops being offere
   await user.type(name, 'Mi aspecto');
   await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
   await waitFor(() => expect(calls('skins_save_current')).toEqual([{ name: 'Mi aspecto' }]));
-  await waitFor(() => expect(screen.queryByText('Tu aspecto actual no está guardado')).toBeNull());
+  await waitFor(() => expect(screen.queryByText('Aspecto actual sin guardar')).toBeNull());
   expect(screen.getByRole('button', { name: /^Mi aspecto/ })).toBeTruthy();
 });
 
 test('a look that already matches the account is not offered for saving', async () => {
-  view = { ...baseView(), matchingLook: 'b' };
+  view = { ...baseView(), library: [look('b', { texture: hash('a'), cape: 'cape-a' })] };
   mount();
   await screen.findByRole('button', { name: /^Look b/ });
-  expect(screen.queryByText('Tu aspecto actual no está guardado')).toBeNull();
+  expect(screen.queryByText('Aspecto actual sin guardar')).toBeNull();
 });
 
 test('adding a skin previews the file, model and cape before saving and can apply it in one step', async () => {
@@ -343,7 +345,7 @@ test('a failed apply is reported and the page shows what the backend now holds',
   mount();
   await user.click(await screen.findByRole('button', { name: /^Look c/ }));
   failure = { skins_apply: 'service_unavailable' };
-  await user.click(screen.getByRole('button', { name: 'Aplicar a mi cuenta' }));
+  await user.click(screen.getByRole('button', { name: 'Aplicar' }));
   expect(await screen.findByText(/no está disponible por ahora/)).toBeTruthy();
   expect(calls('skins_snapshot').length).toBeGreaterThanOrEqual(2);
 });
@@ -354,4 +356,86 @@ test('an account without a skin of its own says so instead of showing an empty v
   expect(await screen.findByText(/skin predeterminada de Minecraft/)).toBeTruthy();
   expect(screen.queryByTestId('viewer')).toBeNull();
   expect(screen.getByText('Aún no has guardado ninguna skin. Elige «Nuevo skin» para añadir un archivo PNG.')).toBeTruthy();
+});
+
+test('right-clicking a card opens its own menu instead of the browser one', async () => {
+  const user = userEvent.setup();
+  mount();
+  await user.pointer({ keys: '[MouseRight]', target: await screen.findByRole('button', { name: 'Look b' }) });
+  const menu = await screen.findByRole('menu', { name: 'Acciones de Look b' });
+  expect(within(menu).getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Vista previa', 'Aplicar', 'Editar', 'Eliminar']);
+  await user.click(within(menu).getByRole('menuitem', { name: 'Aplicar' }));
+  await waitFor(() => expect(calls('skins_apply')).toEqual([{ request: { lookId: 'b' } }]));
+  // Another choice from the same kind of menu previews, and one that edits opens its dialog.
+  await user.pointer({ keys: '[MouseRight]', target: screen.getByRole('button', { name: 'Look c' }) });
+  await user.click(within(await screen.findByRole('menu', { name: 'Acciones de Look c' })).getByRole('menuitem', { name: 'Vista previa' }));
+  expect(viewer().dataset.model).toBe('slim');
+  await user.pointer({ keys: '[MouseRight]', target: screen.getByRole('button', { name: 'Look c' }) });
+  await user.click(within(await screen.findByRole('menu', { name: 'Acciones de Look c' })).getByRole('menuitem', { name: 'Editar' }));
+  expect(await screen.findByRole('dialog', { name: 'Editar skin' })).toBeTruthy();
+});
+
+test('the capes, the empty cape and the new skin card have menus too', async () => {
+  const user = userEvent.setup();
+  mount();
+  await user.pointer({ keys: '[MouseRight]', target: await screen.findByRole('button', { name: /^Nuevo skin/ }) });
+  await user.click(within(await screen.findByRole('menu', { name: 'Acciones de Nuevo skin' })).getByRole('menuitem', { name: 'Añadir skin' }));
+  expect(await screen.findByRole('dialog', { name: 'Añadir skin' })).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Cancelar' }));
+
+  await user.click(screen.getByRole('tab', { name: /^Capas/ }));
+  await user.pointer({ keys: '[MouseRight]', target: screen.getByRole('button', { name: 'Vanilla' }) });
+  await user.click(within(await screen.findByRole('menu', { name: 'Acciones de Vanilla' })).getByRole('menuitem', { name: 'Aplicar' }));
+  await waitFor(() => expect(calls('skins_apply')).toEqual([{ request: { lookId: null, capeChange: { id: 'cape-b' } } }]));
+  // The cape that is already worn cannot be applied again.
+  await user.pointer({ keys: '[MouseRight]', target: screen.getByRole('button', { name: 'Vanilla' }) });
+  expect(within(await screen.findByRole('menu', { name: 'Acciones de Vanilla' })).getByRole('menuitem', { name: 'Aplicar' }).getAttribute('aria-disabled')).toBe('true');
+});
+
+test('the reminder to save can be dismissed for that skin, is remembered, and another skin asks again', async () => {
+  const user = userEvent.setup();
+  mount();
+  expect(await screen.findByText('Aspecto actual sin guardar')).toBeTruthy();
+  expect(screen.getByText('Añádelo a tu biblioteca para volver a usarlo cuando quieras.')).toBeTruthy();
+  await user.click(screen.getByRole('button', { name: 'Ocultar este aviso' }));
+  expect(screen.queryByText('Aspecto actual sin guardar')).toBeNull();
+  cleanup();
+  mount();
+  await screen.findByRole('button', { name: /^Look b/ });
+  expect(screen.queryByText('Aspecto actual sin guardar')).toBeNull();
+  cleanup();
+  view = { ...baseView(), current: { ...baseView().current!, texture: hash('f') } };
+  mount();
+  expect(await screen.findByText('Aspecto actual sin guardar')).toBeTruthy();
+});
+
+test('a saved skin worn with a different cape is not offered for saving, and its card is the active one', async () => {
+  view = { ...baseView(), library: [look('x', { texture: hash('a'), cape: null }), look('y', { texture: hash('c'), model: 'slim' })] };
+  mount();
+  await screen.findByRole('button', { name: /^Look x/ });
+  expect(screen.queryByText('Aspecto actual sin guardar')).toBeNull();
+  const card = screen.getByRole('button', { name: 'Look x' }).closest('.skin-card-body')!;
+  expect(within(card as HTMLElement).getByRole('img', { name: 'Skin activa' })).toBeTruthy();
+  expect(screen.getAllByRole('img', { name: 'Skin activa' })).toHaveLength(1);
+});
+
+test('the elytra switch needs a cape and shows the cape as elytra in the preview', async () => {
+  const user = userEvent.setup();
+  mount();
+  await screen.findByRole('button', { name: /^Look b/ });
+  const toggle = () => screen.getByRole('switch', { name: 'Élitros' }) as HTMLInputElement;
+  await waitFor(() => expect(viewer().dataset.cape).toBe(image('cape-a')));
+  expect(toggle().disabled).toBe(false);
+  expect(viewer().dataset.elytra).toBe('false');
+  await user.click(toggle());
+  expect(viewer().dataset.elytra).toBe('true');
+  // Without a cape there is nothing to make the elytra from.
+  await user.click(screen.getByRole('tab', { name: /^Capas/ }));
+  await user.click(screen.getByRole('button', { name: 'Sin capa' }));
+  expect(toggle().disabled).toBe(true);
+  expect(toggle().checked).toBe(false);
+  expect(viewer().dataset.elytra).toBe('false');
+  await user.click(screen.getByRole('button', { name: 'Migrator' }));
+  await waitFor(() => expect(viewer().dataset.cape).toBe(image('cape-a')));
+  expect(toggle().checked).toBe(true);
 });

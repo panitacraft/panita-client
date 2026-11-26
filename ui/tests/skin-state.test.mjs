@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  MAX_LOOK_NAME, MAX_SKIN_FILE_BYTES, applyRequestOf, filterCapes, filterLooks, matchesSearch, canSaveCurrent, isDirty, lookCape, lookNameProblem, noSelection, pickCape, pickLook, previewOf,
+  MAX_LOOK_NAME, MAX_SKIN_FILE_BYTES, applyRequestOf, filterCapes, filterLooks, matchesSearch, unsavedKey, wornLookId, canSaveCurrent, isDirty, lookCape, lookNameProblem, noSelection, pickCape, pickLook, previewOf,
   skinFileProblem, suggestedLookName, syncedText, validSelection,
 } from '../src/skin-state.ts';
 
@@ -84,11 +84,33 @@ test('nothing is pending before the profile was ever synchronised', () => {
   assert.equal(canSaveCurrent(v), false);
 });
 
-test('the current look can be saved only when it is a real, cached skin that is not saved yet', () => {
+test('the current skin is offered for saving only when it is a real, cached skin that no saved look has', () => {
   assert.equal(canSaveCurrent(view()), true);
-  assert.equal(canSaveCurrent(view({ matchingLook: 'b' })), false);
   assert.equal(canSaveCurrent(view({ current: { custom: false, texture: null, model: 'classic', cape: null } })), false);
   assert.equal(canSaveCurrent(view({ current: { custom: true, texture: null, model: 'classic', cape: null } })), false);
+});
+
+test('a different cape does not make a saved skin unsaved, but a different arm model does', () => {
+  const saved = look('a', { texture: hash('a'), model: 'classic', cape: null });
+  // The account wears the saved skin with a cape the look does not have.
+  assert.equal(canSaveCurrent(view({ library: [saved] })), false);
+  assert.equal(wornLookId(view({ library: [saved] })), 'a');
+  assert.equal(canSaveCurrent(view({ library: [look('a', { texture: hash('a'), model: 'slim' })] })), true);
+  assert.equal(wornLookId(view({ library: [look('a', { texture: hash('a'), model: 'slim' })] })), null);
+});
+
+test('among looks that share the worn skin, the one with the worn cape comes first', () => {
+  const library = [look('x', { texture: hash('a'), cape: null }), look('y', { texture: hash('a'), cape: CAPE_A }), look('z', { texture: hash('a'), cape: CAPE_B })];
+  assert.equal(wornLookId(view({ library })), 'y');
+  assert.equal(wornLookId(view({ library, current: { custom: true, texture: hash('a'), model: 'classic', cape: 'other' } })), 'x');
+  assert.equal(wornLookId(view({ current: null })), null);
+});
+
+test('the reminder to save names the skin and model, so another unsaved skin asks again', () => {
+  assert.equal(unsavedKey(view()), `${hash('a')}|classic`);
+  assert.equal(unsavedKey(view({ current: { custom: true, texture: hash('f'), model: 'slim', cape: null } })), `${hash('f')}|slim`);
+  assert.equal(unsavedKey(view({ library: [look('a', { texture: hash('a') })] })), null);
+  assert.equal(unsavedKey(view({ current: null })), null);
 });
 
 test('a selection that names a vanished look or cape is dropped', () => {

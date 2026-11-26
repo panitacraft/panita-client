@@ -69,3 +69,13 @@ export function drawCape(context: CanvasRenderingContext2D, image: CanvasImageSo
   const { x, y, w, h } = capeSource(image);
   context.drawImage(image, x, y, w, h, 0, 0, CAPE_WIDTH, CAPE_HEIGHT);
 }
+
+export const HEAD_SIZE = 8;
+
+/** The face of a skin with its hat layer over it, in an 8 by 8 frame. */
+export function drawHead(context: CanvasRenderingContext2D, image: CanvasImageSource & Source): void {
+  context.clearRect(0, 0, HEAD_SIZE, HEAD_SIZE);
+  context.imageSmoothingEnabled = false;
+  const scale = image.width / 64;
+  for (const x of [8, 40]) context.drawImage(image, x * scale, 8 * scale, 8 * scale, 8 * scale, 0, 0, HEAD_SIZE, HEAD_SIZE);
+}

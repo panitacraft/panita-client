@@ -98,11 +98,26 @@ export function pickCape(view: SkinsView, selection: Selection, id: string | nul
   return { ...selection, cape: id === implied ? null : { id } };
 }
 
-/** The saved look is the one the account wears, and the account wears a skin worth saving. */
+/**
+ * The saved look that has the skin and arm model the account wears, whatever its cape. When several
+ * share them, the one whose cape also matches comes first.
+ */
+export function wornLookId(view: SkinsView): string | null {
+  const current = view.current;
+  if (!current || current.texture === null) return null;
+  const same = view.library.filter(look => look.texture === current.texture && look.model === current.model);
+  return (same.find(look => look.cape === current.cape) ?? same[0])?.id ?? null;
+}
+
+/** The skin the account wears is a real, cached one and no saved look has it. A different cape does not count. */
 export function canSaveCurrent(view: SkinsView): boolean {
   const current = view.current;
-  return !!current && current.custom && current.texture !== null && view.matchingLook === null;
+  return !!current && current.custom && current.texture !== null && wornLookId(view) === null;
 }
+
+/** What a reminder to save the current skin is about, or null when there is nothing to save. */
+export const unsavedKey = (view: SkinsView): string | null =>
+  canSaveCurrent(view) && view.current ? `${view.current.texture}|${view.current.model}` : null;
 
 /** Drop a selection that names a look that no longer exists. */
 export function validSelection(view: SkinsView, selection: Selection): Selection {

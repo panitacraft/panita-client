@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ArrowLeft, Ban, Check, CircleAlert, CirclePlus, Ellipsis, LoaderCircle, Pause, Pencil, Play, RefreshCw, Save, Search, Trash2, Undo2, UserRound } from 'lucide-react';
+import { ArrowLeft, Ban, Check, CircleAlert, CirclePlus, Ellipsis, Eye, LoaderCircle, Pause, Pencil, Play, RefreshCw, Save, Search, Trash2, Undo2, UserRound, X } from 'lucide-react';
 import type { AccountView } from './account-state';
 import { DeleteLookDialog, SaveCurrentDialog, SkinDialog, type LookDraft } from './components/skin-dialogs';
 import { CapePicture, SkinPicture } from './components/skin-picture';
@@ -9,15 +9,18 @@ import { SkinThumbnail } from './components/skin-thumbnails';
 import { SkinViewer3D, prefersReducedMotion } from './components/skin-viewer';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { Button } from './components/ui/button';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from './components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Hint } from './components/hint';
 import { messageForError } from './errors';
+import { dismissUnsaved, loadDismissed } from './skin-dismissed';
 import { addLook, applySkins, deleteLook, editLook, loadSkins, saveCurrentLook, syncSkins } from './skin-api';
 import {
-  applyRequestOf, canSaveCurrent, filterCapes, filterLooks, isDirty, noSelection, pickCape, pickLook, previewOf, syncedText, validSelection,
+  applyRequestOf, filterCapes, filterLooks, isDirty, noSelection, pickCape, pickLook, previewOf, syncedText, unsavedKey, validSelection, wornLookId,
   type CapeView, type LookView, type Selection, type SkinModel, type SkinsView,
 } from './skin-state';
 import { useTextureUrl } from './use-texture';
+import { publishSkinsView } from './worn-skin';
 import defaultSkin from './assets/default-skin.svg';
 
 type Dialog = { kind: 'add' } | { kind: 'edit'; id: string } | { kind: 'save-current' } | { kind: 'delete'; id: string };
@@ -31,35 +34,70 @@ function WornMark({ label }: { label: string }) {
   return <span className="skin-card-check" role="img" aria-label={label}><Check aria-hidden="true" /></span>;
 }
 
+/** A card's right-click menu: the choice that opens a dialog keeps focus away from the card afterwards. */
+function useDialogFocus() {
+  const opensDialog = useRef(false);
+  return {
+    mark: () => { opensDialog.current = true; },
+    onCloseAutoFocus: (event: Event) => { if (opensDialog.current) { event.preventDefault(); opensDialog.current = false; } },
+  };
+}
+
 function LookCard({ look, active, selected, busy, onPick, onApply, onEdit, onDelete }: {
   look: LookView; active: boolean; selected: boolean; busy: boolean;
   onPick: () => void; onApply: () => void; onEdit: () => void; onDelete: () => void;
 }) {
+  const focus = useDialogFocus();
   return <li className="skin-card">
-    <button type="button" className="skin-card-main" aria-pressed={selected} aria-label={look.name} onClick={onPick}>
-      <span className="skin-card-art"><SkinPicture texture={look.texture} model={look.model} label={look.name} /></span>
-      <span className="skin-card-name" title={look.name}>{look.name}</span>
-    </button>
-    {active && <WornMark label="Skin activa" />}
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild><button type="button" className="skin-more" aria-label={`Más acciones para ${look.name}`}><Ellipsis aria-hidden="true" /></button></DropdownMenuTrigger>
-      <DropdownMenuContent align="start">
-        <DropdownMenuItem disabled={busy || active} onSelect={onApply}><Check />Aplicar a mi cuenta</DropdownMenuItem>
-        <DropdownMenuItem onSelect={onEdit}><Pencil />Editar</DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onDelete}><Trash2 />Eliminar</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="skin-card-body">
+          <button type="button" className="skin-card-main" aria-pressed={selected} aria-label={look.name} onClick={onPick}>
+            <span className="skin-card-art"><SkinPicture texture={look.texture} model={look.model} label={look.name} /></span>
+            <span className="skin-card-name" title={look.name}>{look.name}</span>
+          </button>
+          {active && <WornMark label="Skin activa" />}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><button type="button" className="skin-more" aria-label={`Más acciones para ${look.name}`}><Ellipsis aria-hidden="true" /></button></DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem disabled={busy || active} onSelect={onApply}><Check />Aplicar</DropdownMenuItem>
+              <DropdownMenuItem onSelect={onEdit}><Pencil />Editar</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onDelete}><Trash2 />Eliminar</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent aria-label={`Acciones de ${look.name}`} onCloseAutoFocus={focus.onCloseAutoFocus}>
+        <ContextMenuItem onSelect={onPick}><Eye />Vista previa</ContextMenuItem>
+        <ContextMenuItem disabled={busy || active} onSelect={onApply}><Check />Aplicar</ContextMenuItem>
+        <ContextMenuItem onSelect={() => { focus.mark(); onEdit(); }}><Pencil />Editar</ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem className="text-destructive focus:text-destructive" onSelect={() => { focus.mark(); onDelete(); }}><Trash2 />Eliminar</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   </li>;
 }
 
-function CapeCard({ cape, worn, selected, wearer, model, onPick }: { cape: CapeView; worn: boolean; selected: boolean; wearer: string | null; model: SkinModel; onPick: () => void }) {
+function CapeCard({ cape, worn, selected, busy, wearer, model, onPick, onApply }: {
+  cape: CapeView; worn: boolean; selected: boolean; busy: boolean; wearer: string | null; model: SkinModel; onPick: () => void; onApply: () => void;
+}) {
   return <li className="skin-card">
-    <button type="button" className="skin-card-main" aria-pressed={selected} aria-label={cape.alias} onClick={onPick}>
-      <span className="skin-card-art"><CapePicture id={cape.id} cached={cape.cached} wearer={wearer} model={model} label={cape.alias} /></span>
-      <span className="skin-card-name" title={cape.alias}>{cape.alias}</span>
-    </button>
-    {worn && <WornMark label="Capa activa" />}
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div className="skin-card-body">
+          <button type="button" className="skin-card-main" aria-pressed={selected} aria-label={cape.alias} onClick={onPick}>
+            <span className="skin-card-art"><CapePicture id={cape.id} cached={cape.cached} wearer={wearer} model={model} label={cape.alias} /></span>
+            <span className="skin-card-name" title={cape.alias}>{cape.alias}</span>
+          </button>
+          {worn && <WornMark label="Capa activa" />}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent aria-label={`Acciones de ${cape.alias}`}>
+        <ContextMenuItem onSelect={onPick}><Eye />Vista previa</ContextMenuItem>
+        <ContextMenuItem disabled={busy || worn} onSelect={onApply}><Check />Aplicar</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   </li>;
 }
 
@@ -83,12 +121,15 @@ export function SkinsPage({ account, onBack }: { account: AccountView | undefine
   const [tab, setTab] = useState<Tab>('skins');
   const [query, setQuery] = useState('');
   const [playing, setPlaying] = useState(!prefersReducedMotion());
+  const [elytra, setElytra] = useState(false);
+  const [dismissed, setDismissed] = useState(loadDismissed);
   const { notice, show } = useTransientNotice();
   const current = useRef<string | null>(null);
   current.current = profileId;
 
   const accept = useCallback((next: SkinsView) => {
     if (next.profileId !== current.current && !(current.current === null)) return;
+    publishSkinsView(next);
     setView(next);
     setSelection(previous => validSelection(next, previous));
   }, []);
@@ -115,7 +156,7 @@ export function SkinsPage({ account, onBack }: { account: AccountView | undefine
     void (async () => {
       try {
         const local = await loadSkins();
-        if (live) setView(local);
+        if (live) { publishSkinsView(local); setView(local); }
       } catch (cause) {
         if (live) setError(messageForError(cause));
         return;
@@ -229,6 +270,9 @@ export function SkinsPage({ account, onBack }: { account: AccountView | undefine
   const looks = view ? filterLooks(view.library, query) : [];
   const capes = view ? filterCapes(view.capes, query) : [];
   const searching = query.trim() !== '';
+  const reminder = view ? unsavedKey(view) : null;
+  const showReminder = reminder !== null && !dismissed.has(reminder);
+  const wornLook = view ? wornLookId(view) : null;
 
   const heading = <div className="page-heading">
     <Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={onBack}><ArrowLeft aria-hidden="true" />Instancias</Button>
@@ -251,18 +295,25 @@ export function SkinsPage({ account, onBack }: { account: AccountView | undefine
       <section className="skins-stage" aria-label="Vista previa">
         <div className="skins-viewer">
           {preview.custom
-            ? <SkinViewer3D skin={skinImage.url} model={preview.model} cape={capeImage.url} playing={playing} label={`Vista 3D de ${view.library.find(look => look.id === selection.lookId)?.name ?? 'tu skin'}`}
+            ? <SkinViewer3D skin={skinImage.url} model={preview.model} cape={capeImage.url} playing={playing} elytra={elytra && !!capeImage.url} label={`Vista 3D de ${view.library.find(look => look.id === selection.lookId)?.name ?? 'tu skin'}`}
                 fallback={<SkinThumbnail texture={preview.texture} model={preview.model} label="Tu skin" />} />
             : <div className="skins-default"><img src={defaultSkin} alt="" aria-hidden="true" /><p>Tu cuenta usa la skin predeterminada de Minecraft. Elige una de tu biblioteca o añade una nueva.</p></div>}
-          {dirty && <span className="skins-pending">Sin aplicar</span>}
-          {preview.custom && <Hint text={playing ? 'Pausar la animación' : 'Reanudar la animación'}>
-            <Button variant="secondary" size="icon" className="skins-play" aria-pressed={!playing} aria-label={playing ? 'Pausar animación' : 'Reanudar animación'} onClick={() => setPlaying(value => !value)}>
-              {playing ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
-            </Button>
-          </Hint>}
+          {dirty && <span className="skins-pending">Vista previa</span>}
+          {preview.custom && <div className="skins-tools">
+            <Hint text={preview.cape ? 'Ver la capa como élitros' : 'Elige una capa para ver los élitros'}>
+              <label className="inherit-toggle skins-elytra"><span>Élitros</span>
+                <input role="switch" type="checkbox" checked={elytra && !!preview.cape} disabled={!preview.cape} onChange={event => setElytra(event.target.checked)} />
+              </label>
+            </Hint>
+            <Hint text={playing ? 'Pausar la animación' : 'Reanudar la animación'}>
+              <Button variant="secondary" size="icon" aria-pressed={!playing} aria-label={playing ? 'Pausar animación' : 'Reanudar animación'} onClick={() => setPlaying(value => !value)}>
+                {playing ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}
+              </Button>
+            </Hint>
+          </div>}
           {dirty && <div className="skins-apply" role="group" aria-label="Cambios sin aplicar">
             <Button variant="outline" disabled={busy} onClick={() => setSelection(noSelection)}><Undo2 aria-hidden="true" />Descartar</Button>
-            <Button disabled={busy} onClick={() => void apply()}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <Check aria-hidden="true" />}Aplicar a mi cuenta</Button>
+            <Button disabled={busy} onClick={() => void apply()}>{busy ? <LoaderCircle className="spin" aria-hidden="true" /> : <Check aria-hidden="true" />}Aplicar</Button>
           </div>}
         </div>
       </section>
@@ -280,22 +331,31 @@ export function SkinsPage({ account, onBack }: { account: AccountView | undefine
         </div>
 
         <div className="skins-scroll" role="tabpanel" id="aspect-panel" aria-labelledby={`aspect-tab-${tab}`}>
-          {tab === 'skins' && canSaveCurrent(view) && !searching && <div className="skins-unsaved" role="status">
+          {tab === 'skins' && showReminder && !searching && <div className="skins-unsaved" role="status">
             <span className="skin-card-art"><SkinPicture texture={view.current?.texture ?? null} model={view.current?.model ?? 'classic'} label="Tu aspecto actual" /></span>
-            <div><strong>Tu aspecto actual no está guardado</strong><p>Guárdalo para volver a él cuando quieras, con su capa.</p></div>
+            <div><strong>Aspecto actual sin guardar</strong><p>Añádelo a tu biblioteca para volver a usarlo cuando quieras.</p></div>
             <Button variant="secondary" disabled={busy} onClick={() => open({ kind: 'save-current' })}><Save aria-hidden="true" />Guardar</Button>
+            <Hint text="No volver a avisar de este aspecto"><Button variant="ghost" size="icon" aria-label="Ocultar este aviso" onClick={() => reminder && setDismissed(previous => dismissUnsaved(previous, reminder))}><X aria-hidden="true" /></Button></Hint>
           </div>}
           {tab === 'skins' && <ul className="skin-grid">
-            {!searching && <li className="skin-card"><button type="button" className="skin-card-main skin-card-new" disabled={busy} onClick={() => open({ kind: 'add' })}><CirclePlus aria-hidden="true" /><span className="skin-card-name">Nuevo skin</span></button></li>}
-            {looks.map(look => <LookCard key={look.id} look={look} busy={busy} active={view.matchingLook === look.id} selected={selection.lookId === look.id}
+            {!searching && <li className="skin-card"><ContextMenu><ContextMenuTrigger asChild><div className="skin-card-body">
+              <button type="button" className="skin-card-main skin-card-new" disabled={busy} onClick={() => open({ kind: 'add' })}><CirclePlus aria-hidden="true" /><span className="skin-card-name">Nuevo skin</span></button>
+            </div></ContextMenuTrigger><ContextMenuContent aria-label="Acciones de Nuevo skin"><ContextMenuItem disabled={busy} onSelect={() => open({ kind: 'add' })}><CirclePlus />Añadir skin</ContextMenuItem></ContextMenuContent></ContextMenu></li>}
+            {looks.map(look => <LookCard key={look.id} look={look} busy={busy} active={wornLook === look.id} selected={selection.lookId === look.id}
               onPick={() => setSelection(pickLook(selection, look.id))}
               onApply={() => void apply({ lookId: look.id }, `«${look.name}» se aplicó a tu cuenta.`)}
               onEdit={() => open({ kind: 'edit', id: look.id })} onDelete={() => open({ kind: 'delete', id: look.id })} />)}
           </ul>}
           {tab === 'capes' && <ul className="skin-grid">
-            {!searching && <li className="skin-card"><button type="button" className="skin-card-main skin-card-new" aria-pressed={preview.cape === null} aria-label="Sin capa" onClick={() => setSelection(pickCape(view, selection, null))}><Ban aria-hidden="true" /><span className="skin-card-name">Sin capa</span></button>
-              {view.current?.cape == null && view.current && <WornMark label="Sin capa activa" />}</li>}
-            {capes.map(cape => <CapeCard key={cape.id} cape={cape} worn={view.current?.cape === cape.id} selected={preview.cape === cape.id}
+            {!searching && <li className="skin-card"><ContextMenu><ContextMenuTrigger asChild><div className="skin-card-body">
+              <button type="button" className="skin-card-main skin-card-new" aria-pressed={preview.cape === null} aria-label="Sin capa" onClick={() => setSelection(pickCape(view, selection, null))}><Ban aria-hidden="true" /><span className="skin-card-name">Sin capa</span></button>
+              {view.current?.cape == null && view.current && <WornMark label="Sin capa activa" />}
+            </div></ContextMenuTrigger><ContextMenuContent aria-label="Acciones de Sin capa">
+              <ContextMenuItem onSelect={() => setSelection(pickCape(view, selection, null))}><Eye />Vista previa</ContextMenuItem>
+              <ContextMenuItem disabled={busy || view.current?.cape == null} onSelect={() => void apply({ lookId: null, capeChange: { id: null } }, 'Te quitaste la capa.')}><Check />Aplicar</ContextMenuItem>
+            </ContextMenuContent></ContextMenu></li>}
+            {capes.map(cape => <CapeCard key={cape.id} cape={cape} worn={view.current?.cape === cape.id} selected={preview.cape === cape.id} busy={busy}
+              onApply={() => void apply({ lookId: null, capeChange: { id: cape.id } }, `La capa «${cape.alias}» se aplicó a tu cuenta.`)}
               wearer={view.current?.custom ? view.current.texture : null} model={view.current?.model ?? 'classic'} onPick={() => setSelection(pickCape(view, selection, cape.id))} />)}
           </ul>}
           {tab === 'skins' && view.library.length === 0 && !searching && <p className="skins-library-empty">Aún no has guardado ninguna skin. Elige «Nuevo skin» para añadir un archivo PNG.</p>}
