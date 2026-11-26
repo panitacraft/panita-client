@@ -145,34 +145,34 @@
   .detail-files .account-buttons { margin-top: 6px; }
   .changelog { max-height: 180px; margin: 8px 0 0; padding: 12px 14px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #383838; border-radius: 8px; background: #141414; font: inherit; font-size: 13px; line-height: 1.5; color: #BABABA; scrollbar-width: thin; scrollbar-color: #515151 transparent; }
   /* Update prompt: header with version chips, notes card, checklist, warning, backup switch and a footer that spans the dialog. */
-  .update-modal { width: min(640px, calc(100vw - 40px)); padding-bottom: 0; text-align: left; }
+  .update-modal { width: min(600px, calc(100vw - 40px)); padding-bottom: 0; text-align: left; }
   .update-head { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
-  .update-head .dialog-title { margin: 0; font-size: 22px; }
+  .update-head .dialog-title { margin: 0; font-size: 18px; }
   .update-versions { display: inline-flex; align-items: center; gap: 8px; color: #8f8f8f; }
   .update-versions svg { width: 16px; height: 16px; }
-  .version-chip { padding: 3px 10px; border: 1px solid #444; border-radius: 8px; background: #222; color: #E4E4E4; font-size: 13px; font-weight: 650; }
+  .version-chip { padding: 2px 8px; border: 1px solid #444; border-radius: 8px; background: #222; color: #E4E4E4; font-size: 12px; font-weight: 650; }
   .version-chip.is-new { border-color: #3c7928; background: #1c331a; color: #7fd65a; }
   .update-close { display: grid; place-items: center; width: 32px; height: 32px; margin-left: auto; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #BABABA; cursor: pointer; }
   .update-close:hover { background: #ffffff14; color: #F9FFF8; }
-  .update-close svg { width: 20px; height: 20px; }
-  .update-card { margin: 0 0 18px; padding: 16px 18px; border: 1px solid #383838; border-radius: 12px; background: #141414; }
-  .update-card h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 16px; }
-  .update-card h3 svg { width: 18px; height: 18px; color: #54A636; }
-  .update-card .changelog { max-height: 200px; margin: 0; padding: 0 0 0 28px; border: 0; background: transparent; }
-  .update-card-empty { margin: 0 0 0 28px; font-size: 15px; color: #8f8f8f; }
-  .update-checks { display: grid; gap: 12px; margin: 0 0 18px; padding: 0 2px; list-style: none; }
-  .update-checks li { display: flex; align-items: flex-start; gap: 14px; margin: 0; font-size: 15px; line-height: 1.5; color: #E4E4E4; }
-  .update-checks svg { width: 20px; height: 20px; margin-top: 2px; flex-shrink: 0; color: #54A636; }
-  .update-callout { display: flex; align-items: flex-start; gap: 12px; margin: 0 0 14px; padding: 14px 16px; border: 1px solid #6b5a2a; border-radius: 12px; background: #2a2218; font-size: 15px; line-height: 1.5; color: #E9D591; }
-  .update-callout svg { width: 20px; height: 20px; margin-top: 2px; flex-shrink: 0; }
+  .update-close svg { width: 18px; height: 18px; }
+  .update-card { margin: 0 0 18px; padding: 14px 16px; border: 1px solid #383838; border-radius: 12px; background: #141414; }
+  .update-card h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 14px; }
+  .update-card h3 svg { width: 16px; height: 16px; color: #54A636; }
+  .update-card .changelog { max-height: 200px; margin: 0; padding: 0 0 0 26px; font-size: 13px; border: 0; background: transparent; }
+  .update-card-empty { margin: 0 0 0 26px; font-size: 13px; color: #8f8f8f; }
+  .update-checks { display: grid; gap: 10px; margin: 0 0 18px; padding: 0 2px; list-style: none; }
+  .update-checks li { display: flex; align-items: flex-start; gap: 12px; margin: 0; font-size: 13px; line-height: 1.5; color: #E4E4E4; }
+  .update-checks svg { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; color: #54A636; }
+  .update-callout { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 14px; padding: 12px 14px; border: 1px solid #6b5a2a; border-radius: 12px; background: #2a2218; font-size: 13px; line-height: 1.5; color: #E9D591; }
+  .update-callout svg { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; }
   .update-callout strong { color: #F6E3A6; }
-  .update-backup { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0; padding: 14px 18px; border: 1px solid #383838; border-radius: 12px; }
-  .update-backup label { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 650; cursor: pointer; }
-  .update-chip { padding: 2px 8px; border-radius: 6px; background: #1c331a; color: #7fd65a; font-size: 14px; font-weight: 500; }
-  .update-switch { appearance: none; flex-shrink: 0; width: 44px; height: 26px; margin: 0; padding: 3px; border: 1px solid #555; border-radius: 13px; background: #333; cursor: pointer; transition: background-color .15s, border-color .15s; }
-  .update-switch::before { content: ''; display: block; width: 18px; height: 18px; border-radius: 50%; background: #ddd; transition: transform .15s; }
+  .update-backup { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0; padding: 12px 16px; border: 1px solid #383838; border-radius: 12px; }
+  .update-backup label { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 650; cursor: pointer; }
+  .update-chip { padding: 2px 8px; border-radius: 6px; background: #1c331a; color: #7fd65a; font-size: 12px; font-weight: 500; }
+  .update-switch { appearance: none; flex-shrink: 0; width: 36px; height: 22px; margin: 0; padding: 2px; border: 1px solid #555; border-radius: 11px; background: #333; cursor: pointer; transition: background-color .15s, border-color .15s; }
+  .update-switch::before { content: ''; display: block; width: 16px; height: 16px; border-radius: 50%; background: #ddd; transition: transform .15s; }
   .update-switch:checked { border-color: #4caf50; background: #4caf50; }
-  .update-switch:checked::before { transform: translateX(18px); background: #fff; }
+  .update-switch:checked::before { transform: translateX(14px); background: #fff; }
   .update-switch:focus-visible { outline: 2px solid #a9e58c; outline-offset: 3px; }
   .update-foot { display: flex; justify-content: flex-end; gap: 12px; margin: 24px -28px 0; padding: 18px 28px; border-top: 1px solid #333; }
   .wordmark { display: inline-flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 650; }
