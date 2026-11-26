@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
-import { startGameLogFeed, applyLogNotice, mergeLogPage } from '../src/game-log-feed.ts';
+import { startGameLogFeed, applyLogNotice, mergeLogPage, readWholeGameLog } from '../src/game-log-feed.ts';
 
 const page = (offset, total, running = true) => ({ offset, nextOffset: Math.min(offset + 500, total), total, pageSize: 500, running, exitCode: running ? null : 1,
   lines: Array.from({ length: Math.min(500, total - offset) }, (_, index) => ({ sequence: offset + index, stream: 'stdout', text: String(offset + index) })) });
@@ -91,4 +91,23 @@ test('closing a window ignores an in-flight read and failures do not start a ret
   await until(() => failures === 1);
   await delay(10); assert.equal(reads, 1);
   end();
+});
+
+test('the whole log is read from the start in bounded pages, including entries added while reading', async () => {
+  let total = 1200;
+  const offsets = [];
+  const lines = await readWholeGameLog(async offset => {
+    offsets.push(offset);
+    if (offset === 500) total = 1300;
+    return { ...page(offset, total), total };
+  });
+  assert.deepEqual(offsets, [0, 500, 1000]);
+  assert.equal(lines.length, 1300);
+  assert.deepEqual(lines.map(line => line.sequence), Array.from({ length: 1300 }, (_, index) => index));
+  assert.deepEqual(await readWholeGameLog(async offset => page(offset, 0)), []);
+});
+
+test('reading the whole log rejects a cursor that jumps or never advances', async () => {
+  await assert.rejects(readWholeGameLog(async offset => ({ ...page(offset, 1200), offset: offset + 1 })), /Invalid console page/);
+  await assert.rejects(readWholeGameLog(async offset => ({ ...page(offset, 1200), nextOffset: offset })), /did not advance/);
 });

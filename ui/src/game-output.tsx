@@ -3,15 +3,16 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { usePlaySnapshot } from './play';
 import { messageForError } from './errors';
-import { LoaderCircle, ChevronsDown, ChevronUp, ChevronDown, FileText, FolderOpen, RotateCcw, Search, Trash2, TriangleAlert, X } from 'lucide-react';
+import { LoaderCircle, ChevronsDown, ChevronUp, ChevronDown, Copy, Download, FileText, FolderOpen, RotateCcw, Search, Trash2, TriangleAlert, X } from 'lucide-react';
 import { Button } from './components/ui/button';
+import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { TooltipProvider } from './components/ui/tooltip';
 import { WindowControls } from './components/window-controls';
 import { WindowDragRegion } from './components/window-drag-region';
 import logoBackground from './assets/logo_background.svg';
 import { unacknowledgedCrashes, type GameLogSnapshot } from './game-output-state';
-import { formattedGameLines, displayLogTime, readableGameLines } from './game-log-format';
-import { startGameLogFeed, type GameLogNotice } from './game-log-feed';
+import { formattedGameLines, displayLogTime, plainGameLogText, readableGameLines } from './game-log-format';
+import { readWholeGameLog, startGameLogFeed, type GameLogNotice } from './game-log-feed';
 
 export function CrashNotifications({ names }: { names: Record<string, string> }) {
   const snapshot = usePlaySnapshot();
@@ -73,6 +74,8 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
   const [searchNotice, setSearchNotice] = useState<string | null>(null);
   const [match, setMatch] = useState<number | null>(null);
   const [retry, setRetry] = useState(0);
+  const [transferring, setTransferring] = useState<'export' | 'copy' | null>(null);
+  const toast = useTransientNotice();
   const [atBottom, setAtBottom] = useState(true);
   const searchGeneration = useRef(0);
   const list = useRef<HTMLDivElement>(null);
@@ -119,6 +122,19 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
     searchGeneration.current++; setSearching(false); setMatch(null); setSearchNotice(null);
     const start = snapshot?.total ?? 0;
     setViewStart(start); setSnapshot(null); setOffset(start); setFollow(true); setRetry(value => value + 1);
+  }
+  /** The complete retained history of this execution, ignoring filters and a cleared view. */
+  async function transfer(action: 'export' | 'copy') {
+    if (transferring) return;
+    setTransferring(action); toast.clear();
+    try {
+      const raw = await readWholeGameLog(cursor => invoke<GameLogSnapshot>('game_log_snapshot', { instanceId, requestId, offset: cursor }));
+      const text = plainGameLogText(formattedGameLines(raw));
+      if (!text) { toast.show('Todavía no hay mensajes en el registro.', 'error'); return; }
+      const done = await invoke<boolean>(action === 'export' ? 'export_game_log' : 'copy_game_log', { instanceId, requestId, text });
+      if (done) toast.show(action === 'export' ? 'Registro exportado.' : 'Registro copiado al portapapeles.');
+    } catch (cause) { toast.show(messageForError(cause), 'error'); }
+    finally { setTransferring(null); }
   }
   function scrollWindow(backwards: boolean) {
     if (!snapshot || !list.current || scrollingRead.current) return;
@@ -171,7 +187,7 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
     <header className="log-toolbar">
       <div className="log-filter" role="search" aria-label="Buscar en el historial de Minecraft"><label htmlFor="log-query"><Search aria-hidden="true" />Filtrar mensajes</label><div className="log-search-input"><input id="log-query" placeholder="Buscar en el registro…" value={query} maxLength={256} onChange={event => { searchGeneration.current++; setSearching(false); setQuery(event.target.value); setMatch(null); setSearchNotice(null); }} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void find(event.shiftKey); } }} /><Button variant="ghost" size="icon" aria-label="Coincidencia anterior" disabled={!query.trim() || searching} onClick={() => void find(true)}><ChevronUp aria-hidden="true" /></Button><Button variant="ghost" size="icon" aria-label="Coincidencia siguiente" disabled={!query.trim() || searching} onClick={() => void find(false)}><ChevronDown aria-hidden="true" /></Button></div></div>
       <fieldset className="log-levels"><legend>Niveles</legend>{['debug', 'info', 'warn', 'error', 'fatal'].map(level => <label key={level}><input type="checkbox" checked={levels.has(level)} onChange={event => setLevels(previous => { const next = new Set(previous); if (event.target.checked) next.add(level); else next.delete(level); return next; })} />{level.toUpperCase()}</label>)}</fieldset>
-      <div className="log-actions"><Button variant="ghost" disabled={!snapshot} onClick={clearView}><Trash2 aria-hidden="true" />Limpiar vista</Button>{viewStart > 0 && <Button variant="ghost" aria-label="Restaurar historial" onClick={() => { setViewStart(0); navigate(null); }}><RotateCcw aria-hidden="true" /></Button>}</div>
+      <div className="log-actions"><Button variant="ghost" disabled={!snapshot || transferring !== null} onClick={() => void transfer('export')}><Download aria-hidden="true" />{transferring === 'export' ? 'Exportando…' : 'Exportar'}</Button><Button variant="ghost" disabled={!snapshot || transferring !== null} onClick={() => void transfer('copy')}><Copy aria-hidden="true" />{transferring === 'copy' ? 'Copiando…' : 'Copiar'}</Button><Button variant="ghost" disabled={!snapshot} onClick={clearView}><Trash2 aria-hidden="true" />Limpiar vista</Button>{viewStart > 0 && <Button variant="ghost" aria-label="Restaurar historial" onClick={() => { setViewStart(0); navigate(null); }}><RotateCcw aria-hidden="true" /></Button>}</div>
     </header>
     <div className="log-options"><label><input type="checkbox" checked={follow} onChange={event => { setFollow(event.target.checked); setOffset(event.target.checked ? null : snapshot?.offset ?? viewStart); }} />Seguir entradas nuevas</label><label><input type="checkbox" checked={wrap} onChange={event => setWrap(event.target.checked)} />Ajustar líneas</label><label><input type="checkbox" checked={colors} onChange={event => setColors(event.target.checked)} />Colores</label><span>{snapshot?.running ? 'Minecraft en ejecución' : 'Registro de Minecraft'}</span></div>
     {searching && <div className="log-feedback" role="status">Buscando en el historial… <button onClick={() => { searchGeneration.current++; setSearching(false); }}>Cancelar búsqueda</button></div>}
@@ -190,5 +206,6 @@ export function GameLogWindow({ instanceId, requestId }: { instanceId: string; r
     </div>
     {!(atBottom && snapshot && (follow || snapshot.nextOffset >= snapshot.total)) && <Button variant="ghost" size="icon" className="log-jump" aria-label="Ir al final" title="Ir al final" onClick={() => navigate(null)}><ChevronsDown aria-hidden="true" /></Button>}
     </div>
+    <TransientNotice notice={toast.notice} />
   </main></TooltipProvider>;
 }

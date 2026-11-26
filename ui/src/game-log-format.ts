@@ -83,6 +83,19 @@ export function formattedGameLines(lines: GameLogSnapshot['lines']): FormattedLo
   });
 }
 
+/**
+ * The whole formatted log as plain text, one entry per line, the way the viewer shows it:
+ * Log4j entries carry their `[time] [thread/LEVEL] [logger]` prefix, plain stderr output
+ * is marked, and everything else is the message itself.
+ */
+export function plainGameLogText(lines: FormattedLogLine[]): string {
+  if (!lines.length) return '';
+  return lines.map(line => {
+    const prefix = logPrefix(line.metadata) || (line.stream === 'stderr' ? '[STDERR]' : '');
+    return prefix ? prefix + ' ' + line.text : line.text;
+  }).join('\n') + '\n';
+}
+
 export function readableGameLines(lines: GameLogSnapshot['lines']): GameLogSnapshot['lines'] {
   return formattedGameLines(lines).map(line => {
     const prefix = [line.metadata?.level, line.metadata?.thread].filter(Boolean).join('/');

@@ -311,7 +311,7 @@ panita-client/
 
 - Keep business logic in the UI-independent Rust core. Keep desktop integration thin and UI state separate from account secrets.
 - Closing the launcher window while games run hides it and keeps the owning process supervising those games. Opening the launcher again restores that process and its active-instance controls. Exit automatically after the last game and cancelled pending launch finish if the window remains hidden; keep an open or minimized window alive. Cancel other pending launches when hiding, and preserve the preparation-only close guard. This owner-approved behavior supersedes requiring the launcher window to remain open during gameplay (2026-10-18).
-- The owner requested crash notifications and a separate Minecraft log window on 2026-10-23. Unexpected nonzero game exit restores a hidden launcher and shows a Spanish dialog with its exit code, a bounded redacted crash excerpt, a continuously scrolling execution-log viewer and an option to open that instance's existing `minecraft/crash-reports/` directory. Requested stops do not produce crash notifications. Missing reports are reported honestly. On 2026-10-24 the owner explicitly approved unlimited Minecraft log entry retention in memory only, superseding the 256-event console ring. Keep all accepted redacted entries for the current/most recent execution of each instance until replaced or the launcher exits; memory use can grow with output. Bound each IPC read and rendered window, and retain per-line size and redaction protections. The log viewer never accepts arbitrary paths or commands, reads account files, persists/exports console output, or exposes credentials. Structured launcher diagnostics remain separate and retain their 256-event limit.
+- The owner requested crash notifications and a separate Minecraft log window on 2026-10-23. Unexpected nonzero game exit restores a hidden launcher and shows a Spanish dialog with its exit code, a bounded redacted crash excerpt, a continuously scrolling execution-log viewer and an option to open that instance's existing `minecraft/crash-reports/` directory. Requested stops do not produce crash notifications. Missing reports are reported honestly. On 2026-10-24 the owner explicitly approved unlimited Minecraft log entry retention in memory only, superseding the 256-event console ring. Keep all accepted redacted entries for the current/most recent execution of each instance until replaced or the launcher exits; memory use can grow with output. Bound each IPC read and rendered window, and retain per-line size and redaction protections. The log viewer never accepts arbitrary paths or commands, reads account files, persists console output on its own, or exposes credentials. The only export is the explicit player action of §5.4. Structured launcher diagnostics remain separate and retain their 256-event limit.
 - Owner decision, 2026-10-31: on Windows the launcher shows a notification-area (tray)
   icon with "Abrir Panita Client" and "Salir"; a left click reopens the window. Three
   global, off-by-default settings live under `launcher` in `settings.json` (additive keys
@@ -332,7 +332,7 @@ panita-client/
   GNOME needs its AppIndicator extension to display the icon. Linux behavior is
   implemented but unvalidated until tested on Ubuntu x64 (§6). macOS is not covered.
 - Keep storage, networking, and platform integrations testable behind clear boundaries. Avoid abstractions or dependencies without a concrete need.
-- The owner approved Prism as a behavioral reference for live Minecraft logs, formatting and local viewer controls on 2026-10-25. Use scoped change notifications with short burst coalescing, sequential cursor catch-up, Log4j time/level/thread/logger formatting, full retained-history search with bounded scans, wrap/colors, and local clear/restore. Keep the approved unlimited memory-only history, redaction, per-line protections and bounded IPC/rendering. Clear must not delete retained history. Do not add persistence, copying, uploading or export. Implement independently; do not copy Prism source.
+- The owner approved Prism as a behavioral reference for live Minecraft logs, formatting and local viewer controls on 2026-10-25. Use scoped change notifications with short burst coalescing, sequential cursor catch-up, Log4j time/level/thread/logger formatting, full retained-history search with bounded scans, wrap/colors, and local clear/restore. Keep the approved unlimited memory-only history, redaction, per-line protections and bounded IPC/rendering. Clear must not delete retained history. Do not add automatic persistence or uploading; copying and export exist only as the explicit actions of §5.4. Implement independently; do not copy Prism source.
 - Keep phased implementation work in the implementation plan and decision documents. Annex A preserves the accepted account-storage decision within this file so these policies remain available without separate documents.
 
 ## 6. Verification and Documentation
@@ -478,6 +478,26 @@ Owner requests for 1.2.1-beta.2.
   autor no ha publicado notas para esta versión."). Vanilla has no notes card. The API's
   published manifest did not carry `changelog` when this was written (it exists on the admin
   version endpoints only), so custom packs show no notes until the API adds it to the manifest.
+
+### 5.4 Log export, copy and cleanup (2026-11-26)
+
+Owner request for 1.2.1-beta.3. It supersedes the earlier "no copying or export" limit of §5 for
+the Minecraft log viewer, only as the two explicit player actions below.
+
+- The log window has "Exportar" and "Copiar". Both act on the complete retained history of
+  that execution, ignoring the search, level filters and a cleared view. The window reads it through
+  the same bounded 500-event pages as the viewer, formats it as the viewer does (Log4j time,
+  thread/level and logger prefixes, plain stderr marked) and hands the text to the core once.
+- Export opens the native save dialog in Rust, so no path crosses IPC, and writes a `.txt` file
+  there; cancelling writes nothing. Copy uses the process-lifetime clipboard handle of §5.2. Both
+  accept text only from the matching log window of a retained execution, bounded to 256 MiB. The
+  text is the already redacted output; nothing is persisted, uploaded or exported automatically.
+- Each outcome of these actions, and of "Borrar registros anteriores" on the launcher diagnostics tab
+  (see Annex B, session log files), is a transient toast, never a message left in the page (owner
+  decision, 2026-11-26). Button labels carry no redundant words: the export is a text file by its
+  save dialog and the copy always covers the complete log.
+- These behaviors are verified by tests; the save dialog, clipboard and file deletion are
+  unvalidated on a real desktop and on Ubuntu x64 (§6).
 
 ## Annex A. Account and Token Storage Decision
 
@@ -710,8 +730,12 @@ and individual measurements are evidence, not product guarantees.
   game output. Create the folder 0700 and files 0600 on Unix. Delete only
   application-named session files older than 48 hours, at startup, never following
   links. File failures never affect the launcher. The diagnostics tab may open the
-  fixed logs folder; there is still no upload or arbitrary-path access. This
-  supersedes "no export" only for these local files.
+  fixed logs folder and, after an inline confirmation, delete the logs of previous
+  sessions (owner request, 2026-11-26): only application-named `session-*.log`
+  regular files, never `latest.log`, the file the running session writes, links,
+  directories or unrelated files; the result and any file that could not be deleted
+  are reported and noted in the session log. There is still no upload or
+  arbitrary-path access. This supersedes "no export" only for these local files.
 - Optional support identifiers are random process/session and operation UUIDs.
   They correlate one process or action; they are neither content hashes nor online
   report lookup codes. Clear structured events on process exit.
