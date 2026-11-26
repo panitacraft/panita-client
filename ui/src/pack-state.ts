@@ -14,7 +14,10 @@ export type CacheDetail = { directory: string; reason: string };
 export type CacheReport = { removedEntries: number; removedBytes: number; retainedEntries: number; details: CacheDetail[] };
 
 export type PackConflict = { path: string; reason: 'edited' | 'occupied' | 'blocked' };
-export type VersionNames = { installed: string | null; available: string | null };
+/** Readable names of the two versions of an update and the release notes of the new one, when it has any. */
+export type VersionNames = { installed: string | null; available: string | null; changelog?: string | null };
+/** What the update prompt shows when the lookup failed or was never made. */
+export const unknownVersionNames: VersionNames = { installed: null, available: null, changelog: null };
 
 const number = new Intl.NumberFormat('es', { maximumFractionDigits: 1 });
 
@@ -80,7 +83,13 @@ export function conflictsResolvable(conflicts: PackConflict[]): boolean {
 }
 
 export function updateConflictHeading(count: number): string {
-  return count === 1 ? 'Hay 1 archivo tuyo que estorba a la actualización' : `Hay ${count} archivos tuyos que estorban a la actualización`;
+  return conflictHeading(count, 'update');
+}
+
+/** Names what the player's files are in the way of: an update, or an installation or repair. */
+export function conflictHeading(count: number, operation: string): string {
+  const target = operation === 'update' ? 'la actualización' : 'la instalación';
+  return count === 1 ? `Hay 1 archivo tuyo que estorba a ${target}` : `Hay ${count} archivos tuyos que estorban a ${target}`;
 }
 
 export function versionTitle(names: VersionNames | null, from: string, to: string): string {

@@ -129,6 +129,22 @@
   .transient-notice { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border: 1px solid #54A636; border-radius: 8px; background: #21351c; color: #E4FFDA; box-shadow: 0 8px 30px #0008; font-size: 13px; }
   .transient-notice > svg { width: 18px; height: 18px; flex-shrink: 0; }
   .transient-notice.notice-error { border-color: #FCA5A5; background: #3c2323; color: #FCA5A5; }
+  .transient-notice > span:not(.notice-actions) { flex: 1; min-width: 0; }
+  .notice-actions { display: flex; flex-shrink: 0; align-items: center; gap: 4px; margin-left: 6px; pointer-events: auto; }
+  .notice-action { padding: 5px 10px; border: 1px solid currentColor; border-radius: 6px; background: transparent; color: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .notice-action:hover { background: #ffffff14; }
+  .notice-dismiss { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+  .notice-dismiss:hover { background: #ffffff14; }
+  .notice-dismiss svg { width: 14px; height: 14px; }
+  .notice-action:focus-visible, .notice-dismiss:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+  .detail-heading { margin: 16px 0 6px; font-size: 13px; font-weight: 650; color: #E4FFDA; }
+  .detail-intro { margin: 8px 0; font-size: 13px; line-height: 1.5; color: #BABABA; }
+  .detail-files { display: grid; gap: 8px; max-height: 220px; margin: 8px 0 0; padding: 12px 14px; overflow-y: auto; list-style: none; border: 1px solid #383838; border-radius: 8px; background: #141414; font-size: 13px; line-height: 1.5; color: #BABABA; scrollbar-width: thin; scrollbar-color: #515151 transparent; }
+  .detail-files li { margin: 0; overflow-wrap: anywhere; }
+  .detail-files code { color: #E4FFDA; }
+  .detail-files .account-buttons { margin-top: 6px; }
+  .changelog { max-height: 180px; margin: 8px 0 0; padding: 12px 14px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid #383838; border-radius: 8px; background: #141414; font: inherit; font-size: 13px; line-height: 1.5; color: #BABABA; scrollbar-width: thin; scrollbar-color: #515151 transparent; }
+  .changelog-empty { color: #8f8f8f; font-style: italic; }
   .wordmark { display: inline-flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 650; }
   .wordmark img { width: 36px; height: 36px; }
   main:not(.launcher-shell) > header { display: flex; align-items: center; padding: 24px 32px; border-bottom: 1px solid #333; }

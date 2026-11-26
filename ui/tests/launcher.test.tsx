@@ -36,6 +36,7 @@ const variantOptions = [
   { id: 'standard', fileCount: 28, size: 128_307_508, sameAsPrevious: false },
   { id: 'deluxe', fileCount: 35, size: 190_000_000, sameAsPrevious: false },
 ];
+let changelog: string | null = null;
 let systemResources: { memoryMib: number | null; freeDiskMib: number | null } | null = null;
 let settingsRamAuto: boolean | undefined;
 let ramPreview: Record<string, unknown> | null = null;
@@ -54,7 +55,7 @@ beforeEach(() => {
   catalog = { instances: [{ ...first }, { ...first, id: 'pack-b', name: 'Otra aventura' }], stale: false, cacheWarning: null, registryWarning: null };
   play = { revision: 0, processSessionId: 'test', closeBlocked: false, gracefulStopSupported: true, instances: [] };
   backend.listeners.clear();
-  systemResources = null;
+  systemResources = null; changelog = null;
   settingsRamAuto = undefined; ramPreview = null;
   accounts = { revision: 1, selected_account_id: 'account', login_pending: false, login_error: null, accounts: [{ metadata: { account_id: 'account', kind: 'offline', username: 'Jugador', profile_id: 'profile', oauth_client_id: null }, status: 'offline', error: null, persisted: true }] };
   backend.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
@@ -71,13 +72,13 @@ beforeEach(() => {
       case 'instance_folder_path': return 'C:\\Synthetic\\PanitaClient\\instances\\aventura';
       case 'begin_uninstall': return;
       case 'content_cache_size': return 0;
-      case 'pack_version_names': return { installed: 'Uno', available: 'Dos' };
+      case 'pack_version_names': return { installed: 'Uno', available: 'Dos', changelog };
       case 'pack_files': return { files: [manualFile], complete: false };
       case 'import_pack_file': throw 'artifact_mismatch';
       case 'instance_variants': return variantOptions;
       case 'list_screenshots': return { screenshots: [], truncated: false };
       case 'system_resources': if (!systemResources) throw 'storage_unavailable'; return systemResources;
-      case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': case 'open_instance_folder': return;
+      case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': case 'open_instance_folder': case 'open_curseforge_project': return;
       default: throw new Error(`Unexpected test command: ${command}`);
     }
   });
@@ -200,15 +201,125 @@ test('running controls survive navigation and force stop never happens without c
   expect(screen.queryByRole('button', { name: 'Confirmar cierre forzoso' })).toBeNull();
 });
 
-test('update conflicts require explicit set-aside consent before retrying', async () => {
+test('update conflicts are a toast, and set-aside consent is asked in a confirmation modal', async () => {
   catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
   const user = userEvent.setup(); mount();
   await screen.findByRole('heading', { name: 'Aventura', exact: true });
   await emit(entry({ phase: 'failed', operation: 'update', error: 'pack_conflict', packConflicts: [{ path: 'mods/player.jar', reason: 'occupied' }] }));
-  expect(screen.getByText('mods/player.jar')).toBeTruthy();
+  const toast = await screen.findByText('Hay 1 archivo tuyo que estorba a la actualización.');
+  expect(toast.closest('.transient-notice')).not.toBeNull();
+  // The list and the raw error text no longer sit in the page.
+  expect(screen.queryByText('mods/player.jar')).toBeNull();
+  expect(screen.queryByText(/Ya existen archivos tuyos/)).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  const dialog = screen.getByRole('dialog', { name: 'Hay 1 archivo tuyo que estorba a la actualización' });
+  expect(within(dialog).getByText('mods/player.jar')).toBeTruthy();
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
+  // Cancelling changes nothing and leaves the toast to come back to.
+  await user.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
   await user.click(screen.getByRole('button', { name: 'Continuar y guardar mis archivos' }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({ update: { from_version: 'v1', to_version: 'v2', backup_worlds: true, move_aside: true } }));
+});
+
+test('conflicts that moving files aside cannot fix offer no continue button', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'failed', operation: 'install', error: 'pack_conflict', packConflicts: [{ path: 'mods', reason: 'blocked' }] }));
+  await user.click(await screen.findByRole('button', { name: 'Ver detalles' }));
+  const dialog = screen.getByRole('dialog', { name: 'Hay 1 archivo tuyo que estorba a la instalación' });
+  expect(within(dialog).queryByRole('button', { name: 'Continuar y guardar mis archivos' })).toBeNull();
+  expect(within(dialog).getByText(/Mueve esa carpeta o enlace/)).toBeTruthy();
+  await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
+  await user.click(screen.getByRole('button', { name: 'Cerrar aviso' }));
+  expect(screen.queryByText('Hay 1 archivo tuyo que estorba a la instalación.')).toBeNull();
+});
+
+test('a required update is a toast without details instead of a block in the page', async () => {
+  mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'failed', operation: 'play', error: 'update_required' }));
+  const toast = await screen.findByText('Actualiza esta instancia antes de jugar.');
+  expect(toast.closest('.transient-notice')).not.toBeNull();
+  expect(document.querySelector('.account-error')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull();
+});
+
+test('missing manual files are a toast whose details open the download buttons', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'failed', operation: 'update', error: 'manual_files_required', packAwaiting: [manualFile as never] }));
+  await screen.findByText('Falta 1 archivo que debes descargar tú mismo.');
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  const dialog = screen.getByRole('dialog', { name: 'Falta 1 archivo que debes descargar tú mismo' });
+  expect(within(dialog).getByText('Mod manual')).toBeTruthy();
+  await user.click(within(dialog).getByRole('button', { name: 'Abrir CurseForge' }));
+  expect(backend.invoke).toHaveBeenCalledWith('open_curseforge_project', { projectId: 1 });
+  await user.click(within(dialog).getByRole('button', { name: 'Abrir carpeta' }));
+  expect(backend.invoke).toHaveBeenCalledWith('open_instance_folder', { instanceId: 'pack-a', folder: 'mods' });
+});
+
+test('kept files after an update are announced once, with their list one click away', async () => {
+  const user = userEvent.setup(); mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update', packSkipped: ['options.txt', 'config/paperdoll.json'], packBackedUp: ['mods/a.jar'] }));
+  await screen.findByText('Aventura: Actualización completada. Algunos de tus archivos se conservaron.');
+  // The lists are not repeated in the page while the modal is closed.
+  expect(screen.queryByText('options.txt')).toBeNull();
+  await user.click(screen.getByRole('button', { name: 'Ver detalles' }));
+  const dialog = screen.getByRole('dialog', { name: 'Aventura: Actualización completada' });
+  expect(within(dialog).getByText('options.txt')).toBeTruthy();
+  expect(within(dialog).getByText('config/paperdoll.json')).toBeTruthy();
+  expect(within(dialog).getByText('mods/a.jar')).toBeTruthy();
+  await user.click(within(dialog).getByRole('button', { name: 'Abrir copias de archivos' }));
+  expect(backend.invoke).toHaveBeenCalledWith('open_instance_folder', { instanceId: 'pack-a', folder: 'pack-backups' });
+});
+
+test('a completed operation with nothing to explain keeps the plain toast', async () => {
+  mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  await emit(entry({ phase: 'installed', operation: 'update' }));
+  await screen.findByText('Aventura: Actualización completada.');
+  expect(screen.queryByRole('button', { name: 'Ver detalles' })).toBeNull();
+});
+
+test('a cancelled installation leaves no status chip beside the instance badges', async () => {
+  catalog.instances[0] = { ...first, localState: 'cancelled', installedSource: null, hasInstallationManifest: false };
+  mount();
+  await screen.findByRole('heading', { name: 'Aventura', exact: true });
+  const hero = screen.getByRole('article', { name: 'Aventura' });
+  expect(within(hero).queryByText('Operación cancelada')).toBeNull();
+  expect(hero.querySelector('.instance-status')).toBeNull();
+  expect(within(hero).getByRole('button', { name: 'Instalar', exact: true })).toBeTruthy();
+});
+
+test('the update prompt shows the new version\'s release notes as plain text', async () => {
+  changelog = '- Nuevas misiones\n- <b>Menos</b> lag';
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  const notes = await screen.findByLabelText('Notas de la versión');
+  expect(notes.textContent).toBe(changelog);
+  expect(notes.querySelector('b')).toBeNull();
+  expect(screen.getByRole('heading', { name: 'Novedades de esta versión' })).toBeTruthy();
+});
+
+test('the update prompt says so when the new version has no release notes', async () => {
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  await screen.findByText('Esta versión no incluye notas de cambios.');
+  expect(screen.queryByLabelText('Notas de la versión')).toBeNull();
+});
+
+test('a vanilla update does not claim to have release notes', async () => {
+  catalog.instances[0] = { ...first, source: { type: 'vanilla' }, installedSource: null, installedVersion: '1.21.1', minecraftVersion: '1.21.2', localState: 'installed' };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…', exact: true }));
+  await screen.findByRole('dialog', { name: 'Actualizar Minecraft (1.21.1 → 1.21.2)' });
+  expect(screen.queryByRole('heading', { name: 'Novedades de esta versión' })).toBeNull();
 });
 
 test('missing and failed artwork use a local fallback without removing controls', async () => {
@@ -632,6 +743,7 @@ test('a conflict while changing the variant can be retried from the instance pag
   await user.click(await screen.findByRole('radio', { name: 'Ligero' }));
   await user.click(screen.getByRole('button', { name: 'Cambiar rendimiento' }));
   await emit(entry({ operation: 'update', phase: 'failed', error: 'pack_conflict', packConflicts: [{ path: 'mods/a.jar', reason: 'occupied' }] }));
+  await user.click(await screen.findByRole('button', { name: 'Ver detalles' }));
   await user.click(await screen.findByRole('button', { name: 'Continuar y guardar mis archivos' }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({
     update: { from_version: 'v2', to_version: 'v2', backup_worlds: false, from_variant: 'standard', to_variant: 'lite', move_aside: true },

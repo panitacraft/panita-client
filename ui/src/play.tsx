@@ -15,11 +15,10 @@ import { blocksPlay } from './update-state';
 import type { UpdateTarget } from './library-state';
 import { invokePlay, type PlayArguments, type PlayCommand, type UpdateArguments } from './play-api';
 import { previewOptions, withdrawnVariantText, type Variant, type VariantChange, type VariantOption } from './variant-state';
-import { nativeCleanupSummary, nativeRetentionReason, type NativeCleanupReport } from './native-cleanup-state';
-import {
-  backedUpSummary, conflictReasonText, conflictsResolvable, folderHint, manualHeading, reasonText, releasedSummary,
-  skippedSummary, updateConflictHeading, versionTitle, type VersionNames,
-} from './pack-state';
+import { nativeCleanupSummary, type NativeCleanupReport } from './native-cleanup-state';
+import { ConflictsDialog, CompletionDialog, DetailsDialog, ManualFilesDialog, NativeCleanupSection } from './components/notice-details';
+import { completionDetails, completionNote, entryNotice, type CompletionDetails } from './notice-state';
+import { conflictsResolvable, unknownVersionNames, versionTitle, type VersionNames } from './pack-state';
 
 type PlayContextValue = {
   snapshot: PlaySnapshot | null;
@@ -66,6 +65,9 @@ export function PlayNotice({ names = {} }: { names?: Record<string, string> }) {
   const play = useContext(PlayContext);
   const toast = useTransientNotice();
   const seen = useRef(new Set<string>());
+  // What a finished operation kept or left behind, told by a toast and read in a modal.
+  const [completion, setCompletion] = useState<{ instanceId: string; title: string; details: CompletionDetails } | null>(null);
+  const [completionError, setCompletionError] = useState<string | null>(null);
   useEffect(() => {
     for (const entry of play?.snapshot?.instances ?? []) {
       const key = entry.requestId + ':' + entry.phase;
@@ -73,10 +75,20 @@ export function PlayNotice({ names = {} }: { names?: Record<string, string> }) {
       const message = entry.phase === 'installed' ? (entry.operation === 'update' ? 'Actualización completada.' : entry.operation === 'repair' ? 'Reparación completada.' : 'Instalación completada.')
         : entry.phase === 'uninstalled' ? (entry.eraseRequested ? 'Instancia eliminada.' : 'Instancia desinstalada. Tus datos personales se conservan.')
         : entry.phase === 'cancelled' ? 'Operación cancelada.' : null;
-      if (message) { seen.current.add(key); toast.show((names[entry.instanceId] ? names[entry.instanceId] + ': ' : '') + message); }
+      if (!message) continue;
+      seen.current.add(key);
+      const prefix = names[entry.instanceId] ? names[entry.instanceId] + ': ' : '';
+      const details = completionDetails(entry);
+      if (!details) { toast.show(prefix + message); continue; }
+      toast.show(`${prefix}${message} ${completionNote(details)}`, 'success', {
+        label: 'Ver detalles',
+        onClick: () => { setCompletionError(null); setCompletion({ instanceId: entry.instanceId, title: prefix + message.replace(/\.$/, ''), details }); },
+      });
     }
   }, [play?.snapshot, toast.show, names]);
   return <><TransientNotice notice={toast.notice} />
+    {completion && <CompletionDialog title={completion.title} details={completion.details} busy={!isTauri()} error={completionError} onClose={() => setCompletion(null)}
+      onOpenBackups={() => { setCompletionError(null); void invoke('open_instance_folder', { instanceId: completion.instanceId, folder: 'pack-backups' }).catch(cause => setCompletionError(messageForError(cause))); }} />}
     {play?.error && <p role="alert">{play.error}</p>}
     {play?.snapshot?.closeBlocked && <p className="catalog-notice" role="alert">No pudimos cerrar esta ventana. Cancela la instalación o el inicio pendiente y vuelve a intentarlo. Puedes minimizar esta ventana.</p>}
   </>;
@@ -128,13 +140,27 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   const [names, setNames] = useState<VersionNames | null>(null);
   const [lastBackup, setLastBackup] = useState(true);
   const [logError, setLogError] = useState<string | null>(null);
-  const [cleanupText, setCleanupText] = useState<string | null>(null);
   const toast = useTransientNotice();
   const [cleanupError, setCleanupError] = useState<string | null>(null);
-  const [cleanupDetails, setCleanupDetails] = useState<NativeCleanupReport['details']>([]);
+  // The list behind a toast, read in a modal: the player's files in the way, files to
+  // download by hand, or native folders a manual cleanup could not remove.
+  const [details, setDetails] = useState<'conflicts' | 'manual' | 'natives' | null>(null);
+  const [nativeReport, setNativeReport] = useState<NativeCleanupReport | null>(null);
+  const announced = useRef(new Set<string>());
   const entry = play?.snapshot?.instances.find(entry => entry.instanceId === instanceId);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const active = entry && playActive(entry.phase);
+  // A finished operation that stopped before changing anything is told with a toast, not a block in the page.
+  const notice = entry ? entryNotice(entry) : null;
+  const noticeKey = entry && notice ? `${entry.requestId}:${entry.phase}:${entry.error}` : null;
+  useEffect(() => {
+    if (!notice || !noticeKey || announced.current.has(noticeKey)) return;
+    announced.current.add(noticeKey);
+    const kind = notice.details;
+    toast.show(notice.message, 'error', kind ? { label: 'Ver detalles', onClick: () => setDetails(kind) } : undefined);
+  }, [noticeKey]);
+  // A modal about one operation closes with it: a new request must not reopen it by accident.
+  useEffect(() => { if (details === 'conflicts' || details === 'manual') { if (notice?.details !== details) setDetails(null); } }, [details, notice?.details]);
   // A required launcher update replaces Play; installing and updating instances stay available.
   const launcherUpdate = useLauncherUpdate();
   const launcherRequired = !active && blocksPlay(launcherUpdate?.view ?? null);
@@ -201,16 +227,14 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     busyRef.current = true;
     setBusy(true);
     setCleanupError(null);
-    setCleanupDetails([]);
-    setCleanupText(null);
     toast.show('Eliminando las carpetas nativas antiguas…', 'progress');
     try {
       const report = await invoke<NativeCleanupReport>('clean_native_cache', { instanceId });
-      if (report.retainedGenerations > 0) { toast.clear(); setCleanupText(nativeCleanupSummary(report)); }
-      else { setCleanupText(null); toast.show('Caché nativa limpia.'); }
-      setCleanupDetails(report.details);
+      if (report.retainedGenerations > 0) {
+        setNativeReport(report);
+        toast.show(nativeCleanupSummary(report), 'error', { label: 'Ver detalles', onClick: () => setDetails('natives') });
+      } else toast.show('Caché nativa limpia.');
     } catch (cause) {
-      setCleanupText(null);
       toast.clear(); setCleanupError(messageForError(cause));
     } finally {
       busyRef.current = false;
@@ -230,9 +254,11 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   function askUpdate() {
     if (!updateTarget) return;
     setUpdateQuestion({ ...updateTarget, backupWorlds: true });
-    if (updateTarget.pack && isTauri()) {
+    if (updateTarget.pack) {
+      // Until the lookup answers the prompt says it is loading; a failure or the browser preview means no names and no notes.
       setNames(null);
-      void invoke<VersionNames>('pack_version_names', { instanceId }).then(setNames).catch(() => setNames(null));
+      if (isTauri()) void invoke<VersionNames>('pack_version_names', { instanceId }).then(setNames).catch(() => setNames(unknownVersionNames));
+      else setNames(unknownVersionNames);
     }
   }
 
@@ -241,48 +267,8 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     {logError && <p role="alert">{logError}</p>}
     {entry?.consoleError && <p role="alert">Minecraft se inició, pero no pudimos abrir su consola automáticamente. Puedes volver a intentarlo con «Ver registro». {messageForError(entry.consoleError)}</p>}
     {entry && (entry.operation === 'repair' || entry.operation === 'uninstall') && !active && entry.retainedFiles > 0 && <p role="status">Conservamos {entry.retainedFiles} archivos nativos modificados o que no pudimos comprobar.</p>}
-    {entry?.nativeCleanup && !active && entry.nativeCleanup.retainedGenerations > 0 && <div role="status">
-      <p>{nativeCleanupSummary(entry.nativeCleanup)}</p>
-      {entry.nativeCleanup.retainedGenerations > 0 && <p>Cierra los programas que usen esas carpetas y vuelve a intentar «Limpiar nativos antiguos».</p>}
-      {entry.nativeCleanup.details.length > 0 && <details><summary>Detalle de la limpieza automática</summary>
-        <ul>{entry.nativeCleanup.details.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
-      </details>}
-    </div>}
     {switchNotice && <p role="status">{withdrawnVariantText(switchNotice)}</p>}
-    {entry?.error && entry.error !== 'operation_cancelled' && <p className="account-error" role="alert">{messageForError(entry.error)}</p>}
-    {!active && entry?.operation === 'update' && entry.error === 'pack_conflict' && (entry.packConflicts?.length ?? 0) > 0 && retry && <fieldset className="catalog-notice">
-      <legend>{updateConflictHeading(entry.packConflicts?.length ?? 0)}</legend>
-      <p>No cambiamos nada: tu instalación sigue como estaba.</p>
-      <ul>{(entry.packConflicts ?? []).map(conflict => <li key={conflict.path}><code>{conflict.path}</code>: {conflictReasonText(conflict.reason)}</li>)}</ul>
-      {conflictsResolvable(entry.packConflicts ?? [])
-        ? <>
-          <p>Si continúas, movemos tus archivos a la carpeta <code>pack-backups</code> de esta instancia (no los borramos) e instalamos los del modpack.</p>
-          <div className="account-buttons">
-            <button type="button" disabled={busy || !isTauri()} onClick={() => void act('begin_update', { requestId: crypto.randomUUID(), update: { ...retry, move_aside: true } })}>Continuar y guardar mis archivos</button>
-          </div>
-        </>
-        : <p>Mueve esa carpeta o enlace fuera de la instancia y vuelve a actualizar.</p>}
-    </fieldset>}
-    {!active && entry?.operation === 'update' && entry.error === 'manual_files_required' && (entry.packAwaiting?.length ?? 0) > 0 && retry && <fieldset className="catalog-notice">
-      <legend>{manualHeading(entry.packAwaiting?.length ?? 0)}</legend>
-      <p>No cambiamos nada. Descarga estos archivos, guárdalos en la carpeta indicada y vuelve a intentarlo.</p>
-      <ul>{(entry.packAwaiting ?? []).map(file => <li key={file.path}>
-        <strong>{file.name}</strong> (<code>{file.fileName}</code>)
-        <p>{reasonText(file.reason)} {folderHint(file)}</p>
-        <div className="account-buttons">
-          <button type="button" disabled={busy || !isTauri()} onClick={() => void invoke('open_curseforge_project', { projectId: file.projectId }).catch(cause => setLogError(messageForError(cause)))}>Abrir CurseForge</button>
-          <button type="button" disabled={busy || !isTauri()} onClick={() => void invoke('open_instance_folder', { instanceId, folder: file.folder }).catch(cause => setLogError(messageForError(cause)))}>Abrir carpeta</button>
-        </div>
-      </li>)}</ul>
-    </fieldset>}
-    {!active && (entry?.operation === 'update' || entry?.operation === 'repair') && entry.phase === 'installed' && ((entry.packSkipped?.length ?? 0) > 0 || (entry.packReleased?.length ?? 0) > 0 || (entry.packBackedUp?.length ?? 0) > 0) && <div role="status">
-      {(entry.packSkipped?.length ?? 0) > 0 && <p>{skippedSummary(entry.packSkipped ?? [])}</p>}
-      {(entry.packReleased?.length ?? 0) > 0 && <p>{releasedSummary(entry.packReleased ?? [])}</p>}
-      {(entry.packBackedUp?.length ?? 0) > 0 && <>
-        <p>{backedUpSummary(entry.packBackedUp ?? [])}</p>
-        <button type="button" disabled={busy || !isTauri()} onClick={() => void invoke('open_instance_folder', { instanceId, folder: 'pack-backups' }).catch(cause => setLogError(messageForError(cause)))}>Abrir copias de archivos</button>
-      </>}
-    </div>}
+    {entry?.error && entry.error !== 'operation_cancelled' && !notice && <p className="account-error" role="alert">{messageForError(entry.error)}</p>}
     {entry?.phase === 'warning' && <div className="catalog-notice" role="alert">
       <p>No pudimos comprobar si esta instancia sigue habilitada. Usaremos la instalación local verificada. Si usas una cuenta Microsoft, necesitas conexión para verificarla.</p>
       {pack && <p>Tampoco podemos comprobar si hay una versión más nueva del modpack, así que esta instalación puede estar desactualizada.</p>}
@@ -323,11 +309,15 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     </>}
     </div>
     </div>
-    {cleanupText && <p role="status">{cleanupText}</p>}
-    {cleanupDetails.length > 0 && <details><summary>Por qué se conservaron estas carpetas</summary>
-      <ul>{cleanupDetails.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
-    </details>}
     {cleanupError && <p role="alert">{cleanupError}</p>}
+    {details === 'conflicts' && entry?.packConflicts && notice?.details === 'conflicts' && <ConflictsDialog conflicts={entry.packConflicts} operation={entry.operation}
+      resolvable={conflictsResolvable(entry.packConflicts)} canContinue={entry.operation === 'update' && !!retry && conflictsResolvable(entry.packConflicts)}
+      busy={busy || !isTauri()} onClose={() => setDetails(null)}
+      onContinue={() => { if (!retry) return; setDetails(null); void act('begin_update', { requestId: crypto.randomUUID(), update: { ...retry, move_aside: true } }); }} />}
+    {details === 'manual' && entry?.packAwaiting && notice?.details === 'manual' && <ManualFilesDialog files={entry.packAwaiting} busy={busy || !isTauri()} onClose={() => setDetails(null)}
+      onOpenSource={file => void invoke('open_curseforge_project', { projectId: file.projectId }).catch(cause => setLogError(messageForError(cause)))}
+      onOpenFolder={file => void invoke('open_instance_folder', { instanceId, folder: file.folder }).catch(cause => setLogError(messageForError(cause)))} />}
+    {details === 'natives' && nativeReport && <DetailsDialog title="Carpetas nativas antiguas" onClose={() => setDetails(null)}><NativeCleanupSection report={nativeReport} /></DetailsDialog>}
     {variantDialog && <VariantDialog variants={variants} options={variantDialog.options} error={variantDialog.error} busy={busy} onConfirm={confirmVariant} onCancel={() => setVariantDialog(null)} />}
     <dialog ref={uninstallDialog} className="update-dialog" aria-labelledby={instanceId + '-uninstall-title'} onCancel={() => setUninstallQuestion(false)} onClose={() => { if (!uninstallDialog.current?.open) setUninstallQuestion(false); }}>
     {uninstallQuestion && <>
@@ -360,6 +350,12 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
         {updateQuestion.pack && withdrawnVariant && <li><TriangleAlert aria-hidden="true" />{withdrawnVariantText(withdrawnVariant)}</li>}
         <li id={instanceId + '-update-warning'} className="is-warning"><TriangleAlert aria-hidden="true" />Abrir mundos con otra versión puede cambiarlos. Volver de versión no deshace esos cambios.</li>
       </ul>
+      {updateQuestion.pack && <div role="group" aria-labelledby={instanceId + '-changelog-title'}>
+        <h3 id={instanceId + '-changelog-title'} className="detail-heading">Novedades de esta versión</h3>
+        {names === null ? <p className="detail-intro changelog-empty" role="status">Buscando las novedades…</p>
+          : names.changelog ? <pre className="changelog" tabIndex={0} aria-label="Notas de la versión">{names.changelog}</pre>
+          : <p className="detail-intro changelog-empty">Esta versión no incluye notas de cambios.</p>}
+      </div>}
       <label className="backup-choice"><input type="checkbox" checked={updateQuestion.backupWorlds} onChange={event => setUpdateQuestion({ ...updateQuestion, backupWorlds: event.target.checked })} /><span>Crear copia de mis mundos (recomendado)</span></label>
       <div className="account-buttons">
         <Button disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {

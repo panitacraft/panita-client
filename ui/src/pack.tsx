@@ -9,8 +9,8 @@ import { Button } from './components/ui/button';
 import { Database, Download, FolderOpen, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import {
-  cacheRetainedReason, clearSummary, conflictReasonText, conflictSummary, folderHint, importErrorText, manualHeading,
-  reasonText, skippedSummary, formatBytes, type CacheReport, type PackFile, type PackList,
+  cacheRetainedReason, clearSummary, folderHint, importErrorText, manualHeading,
+  reasonText, formatBytes, type CacheReport, type PackFile, type PackList,
 } from './pack-state';
 
 const packImportError = (cause: unknown) => importErrorText(cause) ?? messageForError(cause);
@@ -51,21 +51,10 @@ export function PackPanel({ instanceId, awaiting, onChanged }: { instanceId: str
     }
   }
 
-  const skipped = entry?.packSkipped ?? [];
-  // An update that stopped on conflicts explains them in the update controls.
-  const conflicts = entry?.operation === 'update' ? [] : entry?.packConflicts ?? [];
-  if (!installing && !awaiting && skipped.length === 0 && conflicts.length === 0) return null;
+  // Conflicts and kept files are told with a toast and read in its modal (see PlayControls and PlayNotice).
+  if (!installing && !awaiting) return null;
 
   return <div className="pack-panel">
-    {!installing && conflicts.length > 0 && <div className="catalog-notice" role="alert">
-      <p>{conflictSummary(conflicts.map(conflict => conflict.path))}</p>
-      <details><summary>Archivos en conflicto</summary><ul>{conflicts.map(conflict => <li key={conflict.path}><code>{conflict.path}</code>: {conflictReasonText(conflict.reason)}</li>)}</ul></details>
-      <p>Muévelos o elimínalos y vuelve a intentar la instalación. Nunca los reemplazamos por nuestra cuenta.</p>
-    </div>}
-    {!installing && skipped.length > 0 && <div role="status">
-      <p>{skippedSummary(skipped)}</p>
-      <details><summary>Archivos conservados</summary><ul>{skipped.map(path => <li key={path}><code>{path}</code></li>)}</ul></details>
-    </div>}
     {awaiting && !installing && <fieldset className="catalog-notice">
       <legend>{manualHeading(files.length)}</legend>
       <p>Sin ellos no puedes jugar. Los demás archivos ya están instalados.</p>
