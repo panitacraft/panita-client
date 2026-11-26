@@ -200,7 +200,7 @@ export function Launcher() {
 
         <div hidden={page !== 'accounts'} className="utility-page">
           <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>Tus cuentas</h1></div>
-          <ActivationPanel /><Accounts onSnapshot={acceptAccounts} />
+          <ActivationPanel /><Accounts onSnapshot={acceptAccounts} onEditSkins={() => setPage('skins')} />
           <UtilityFooter />
         </div>
         {/* Mounted only while shown: it starts a 3D renderer and a profile request, which the other pages never need. */}
