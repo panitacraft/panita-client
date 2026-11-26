@@ -352,24 +352,33 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       onOpenFolder={file => void invoke('open_instance_folder', { instanceId, folder: file.folder }).catch(cause => setLogError(messageForError(cause)))} />}
     {details === 'natives' && nativeReport && <DetailsDialog title="Carpetas nativas antiguas" onClose={() => setDetails(null)}><NativeCleanupSection report={nativeReport} /></DetailsDialog>}
     {variantDialog && <VariantDialog variants={variants} options={variantDialog.options} error={variantDialog.error} busy={busy} onConfirm={confirmVariant} onCancel={() => setVariantDialog(null)} />}
-    <dialog ref={uninstallDialog} className="update-dialog" aria-labelledby={instanceId + '-uninstall-title'} onCancel={() => setUninstallQuestion(false)} onClose={() => { if (!uninstallDialog.current?.open) setUninstallQuestion(false); }}>
+    <dialog ref={uninstallDialog} className="update-dialog update-modal" aria-labelledby={instanceId + '-uninstall-title'} onCancel={() => setUninstallQuestion(false)} onClose={() => { if (!uninstallDialog.current?.open) setUninstallQuestion(false); }}>
     {uninstallQuestion && <>
-      <h2 id={instanceId + '-uninstall-title'}>Desinstalar instancia</h2>
-      {!deleteInstance && <>
-      <p>La instancia dejará de estar lista para jugar. Conservaremos tus mundos, ajustes, capturas, mods añadidos y copias de seguridad.</p>
-      <p>{pack ? "Se quitarán los archivos del modpack sin cambios y sus carpetas nativas." : "Se limpiarán sus carpetas nativas."} Puedes reinstalarla después.</p>
-      </>}
-      <label className="backup-choice"><input type="checkbox" checked={deleteInstance} onChange={event => { setDeleteInstance(event.target.checked); setEraseConfirmed(false); }} /><span>Eliminar también la carpeta de la instancia</span></label>
-      {removalPending && <p role="alert">Hay una eliminación pendiente. Marca la opción de eliminar la carpeta para reintentarla.</p>}
-      {deleteInstance && <div className="erase-warning">
+      <div className="update-head">
+        <h2 id={instanceId + '-uninstall-title'} className="dialog-title"><Trash2 aria-hidden="true" />Desinstalar instancia</h2>
+        <button type="button" className="update-close" aria-label="Cerrar" disabled={busy} onClick={() => setUninstallQuestion(false)}><X aria-hidden="true" /></button>
+      </div>
+      {!deleteInstance && <ul className="update-checks">
+        <li><Check aria-hidden="true" />Conservaremos tus mundos, ajustes, capturas, mods añadidos y copias de seguridad.</li>
+        <li><Check aria-hidden="true" />{pack ? 'Se quitarán los archivos del modpack sin cambios y sus carpetas nativas.' : 'Se limpiarán sus carpetas nativas.'} Puedes reinstalarla después.</li>
+      </ul>}
+      {removalPending && <p className="update-callout" role="alert"><TriangleAlert aria-hidden="true" /><span>Hay una eliminación pendiente. Marca la opción de eliminar la carpeta para reintentarla.</span></p>}
+      <div className="update-backup">
+        <label htmlFor={instanceId + '-uninstall-erase'}>Eliminar también la carpeta de la instancia</label>
+        <input id={instanceId + '-uninstall-erase'} className="update-switch" role="switch" type="checkbox" checked={deleteInstance} onChange={event => { setDeleteInstance(event.target.checked); setEraseConfirmed(false); }} />
+      </div>
+      {deleteInstance && <div className="update-danger">
         {logError && <p role="alert">No pudimos verificar la carpeta. Cierra este diálogo y vuelve a intentarlo. {logError}</p>}
-        <p>Se eliminará permanentemente esta carpeta y todo su contenido:</p>
+        <p className="update-danger-head"><TriangleAlert aria-hidden="true" />Se eliminará permanentemente esta carpeta y todo su contenido:</p>
         <p><code>{instanceFolder ?? (isTauri() ? 'Consultando carpeta…' : 'Carpeta de esta instancia · vista previa')}</code></p>
         <p>Se borrarán mundos, capturas, ajustes, mods y copias de seguridad. No se puede deshacer. Tus cuentas, otras instancias y cachés se conservan.</p>
-        <label className="backup-choice"><input type="checkbox" checked={eraseConfirmed} onChange={event => setEraseConfirmed(event.target.checked)} /><span>Entiendo que perderé todos los datos de esta instancia</span></label>
+        <div className="update-ack">
+          <label htmlFor={instanceId + '-uninstall-ack'}>Entiendo que perderé todos los datos de esta instancia</label>
+          <input id={instanceId + '-uninstall-ack'} className="update-switch" role="switch" type="checkbox" checked={eraseConfirmed} onChange={event => setEraseConfirmed(event.target.checked)} />
+        </div>
       </div>}
-      <div className="account-buttons">
-        <Button variant="secondary" disabled={busy} onClick={() => setUninstallQuestion(false)}><X aria-hidden="true" />Cancelar</Button>
+      <div className="update-foot">
+        <Button variant="outline" disabled={busy} onClick={() => setUninstallQuestion(false)}>Cancelar</Button>
         <Button variant="destructive" disabled={busy || !isTauri() || !play?.snapshot || (removalPending && !deleteInstance) || (deleteInstance && (!eraseConfirmed || !instanceFolder))} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID(), deleteInstance }); }}><Trash2 aria-hidden="true" />{deleteInstance ? 'Eliminar instancia' : 'Desinstalar'}</Button>
       </div>
     </>}

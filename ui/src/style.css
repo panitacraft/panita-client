@@ -190,6 +190,16 @@
   .detail-card-rows svg { width: 16px; height: 16px; margin-top: 1px; flex-shrink: 0; }
   .detail-card-rows code { font-size: 13px; color: #E4E4E4; }
   .detail-card-foot { padding: 10px 16px; border-top: 1px solid #383838; }
+  /* Permanent erasure: a red callout in the family of the amber one, with the acknowledgement inside it. */
+  .update-danger { margin: 14px 0 0; padding: 14px 16px; border: 1px solid #7a3535; border-radius: 12px; background: #2a1a1a; font-size: 13px; line-height: 1.5; color: #F3B4B4; }
+  .update-danger p { margin: 0 0 8px; }
+  .update-danger-head { display: flex; align-items: flex-start; gap: 10px; font-weight: 650; color: #FCA5A5; }
+  .update-danger-head svg { width: 16px; height: 16px; margin-top: 2px; flex-shrink: 0; }
+  .update-danger code { display: block; padding: 8px 10px; border-radius: 8px; background: #1b1111; font-size: 12px; color: #FCE1E1; overflow-wrap: anywhere; }
+  .update-ack { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #7a353588; }
+  .update-ack label { font-weight: 600; cursor: pointer; }
+  .update-danger .update-switch:checked { border-color: #D05A5A; background: #B94545; }
+  .update-close:disabled { opacity: .5; cursor: default; }
   .update-foot { display: flex; justify-content: flex-end; gap: 12px; margin: 24px -28px 0; padding: 18px 28px; border-top: 1px solid #333; }
   .wordmark { display: inline-flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 650; }
   .wordmark img { width: 36px; height: 36px; }

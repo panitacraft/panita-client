@@ -449,6 +449,12 @@ Owner requests for 1.2.1-beta.2.
 - Every modal puts its action buttons in a footer on the right, with the cancel or close action first
   and the confirming action last (owner decision, 2026-11-26). Buttons that belong to one row of a
   list, such as "Abrir carpeta" beside a file, stay with that row.
+- The uninstall modal uses the same layout as the update prompt (owner request, 2026-11-26): a
+  header with a close button, a checklist of what is kept, a "Eliminar también la carpeta de la
+  instancia" switch (off by default), and a footer with Cancelar and "Desinstalar". Turning the switch
+  on shows a red callout with the exact folder, what is lost and a separate "Entiendo que perderé
+  todos los datos de esta instancia" switch inside it, and the button becomes "Eliminar instancia",
+  enabled only after that acknowledgement; the confirmation rules of §4.3 are unchanged.
 - A cancelled operation shows no status chip beside the instance badges: it leaves the
   installation as it was, and the Instalar or Jugar button already says what to do.
 - The update prompt follows the owner's template (2026-11-26): a header with "Actualizar modpack"
