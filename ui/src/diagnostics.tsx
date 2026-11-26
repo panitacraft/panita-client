@@ -1,12 +1,20 @@
 import { useEffect, useState } from 'react';
-import { CircleAlert, CircleCheck, RefreshCw, Activity, FolderOpen } from 'lucide-react';
+import { CircleAlert, CircleCheck, RefreshCw, Activity, FolderOpen, Trash2 } from 'lucide-react';
 import { isTauri } from '@tauri-apps/api/core';
-import { loadDiagnostics, openLogsFolder } from './diagnostic-api';
+import { clearOldLogs, loadDiagnostics, openLogsFolder, type ClearedLogs } from './diagnostic-api';
 import { diagnosticText, visibleDiagnosticRecords, type DiagnosticSnapshot } from './diagnostic-state';
 import { messageForError } from './errors';
 
 function formatTime(at: number): string {
   return new Date(at).toLocaleString('es', { dateStyle: 'short', timeStyle: 'medium', hour12: false });
+}
+
+export function clearedLogsMessage({ removed, failed }: ClearedLogs): string {
+  if (removed === 0 && failed === 0) return 'No hay registros anteriores que borrar.';
+  const done = removed === 1 ? 'Se borró 1 registro anterior.' : `Se borraron ${removed} registros anteriores.`;
+  if (failed === 0) return done;
+  const left = failed === 1 ? 'No pudimos borrar 1 archivo; puede estar en uso.' : `No pudimos borrar ${failed} archivos; pueden estar en uso.`;
+  return removed === 0 ? left : `${done} ${left}`;
 }
 
 function DiagnosticViewer() {
@@ -16,6 +24,17 @@ function DiagnosticViewer() {
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState(false);
   const [folderError, setFolderError] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearResult, setClearResult] = useState<{ text: string; failed: boolean } | null>(null);
+  async function clearPrevious() {
+    setClearing(true); setClearResult(null);
+    try {
+      const result = await clearOldLogs();
+      setClearResult({ text: clearedLogsMessage(result), failed: result.failed > 0 });
+    } catch { setClearResult({ text: 'No pudimos borrar los registros anteriores.', failed: true }); }
+    finally { setClearing(false); setConfirmClear(false); }
+  }
   useEffect(() => {
     let active = true;
     setBusy(true);
@@ -34,7 +53,14 @@ function DiagnosticViewer() {
     {folderError && <p role="alert">No pudimos abrir la carpeta de registros.</p>}
     <div className="diagnostic-toolbar"><span><Activity aria-hidden="true" />{snapshot?.records.length ?? 0} {snapshot?.records.length === 1 ? 'evento' : 'eventos'}</span><label><input type="checkbox" checked={errorsOnly} onChange={event => setErrorsOnly(event.target.checked)} />Solo problemas</label>
     <div className="diagnostic-actions"><button type="button" disabled={!isTauri()} onClick={() => { setFolderError(false); openLogsFolder().catch(() => setFolderError(true)); }}><FolderOpen aria-hidden="true" />Abrir carpeta de registros</button>
+    <button type="button" disabled={clearing || !isTauri()} onClick={() => { setClearResult(null); setConfirmClear(true); }}><Trash2 aria-hidden="true" />Borrar registros anteriores</button>
     <button type="button" disabled={busy || !isTauri()} onClick={() => setAttempt(value => value + 1)}><RefreshCw aria-hidden="true" />Actualizar registro</button></div></div>
+    {confirmClear && <div role="group" aria-label="Confirmar borrado de registros anteriores" className="diagnostic-confirm">
+      <p>Se borrarán los archivos de registro de sesiones anteriores. El registro de esta sesión (latest.log) se conserva. Esta acción no se puede deshacer.</p>
+      <div className="diagnostic-actions"><button type="button" disabled={clearing} onClick={() => setConfirmClear(false)}>Cancelar</button>
+      <button type="button" disabled={clearing} onClick={() => void clearPrevious()}><Trash2 aria-hidden="true" />Borrar</button></div>
+    </div>}
+    {clearResult && <p role={clearResult.failed ? 'alert' : 'status'}>{clearResult.text}</p>}
     {busy && <p role="status">Cargando registro…</p>}
     {error && <p role="alert">No pudimos actualizar el registro. Puedes reintentar; conservamos la última lectura.</p>}
     {snapshot && !snapshot.records.length && <p role="status">{isTauri() ? 'Todavía no hay eventos disponibles.' : 'El registro está disponible en la aplicación de escritorio.'}</p>}
