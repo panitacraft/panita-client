@@ -92,10 +92,11 @@ export function conflictHeading(count: number, operation: string): string {
   return count === 1 ? `Hay 1 archivo tuyo que estorba a ${target}` : `Hay ${count} archivos tuyos que estorban a ${target}`;
 }
 
-export function versionTitle(names: VersionNames | null, from: string, to: string): string {
+/** What the update prompt calls the two versions: readable names, or shortened identifiers until they are known. */
+export function versionLabels(names: VersionNames | null, from: string, to: string): { installed: string; available: string } {
   const shown = (name: string | null | undefined, id: string) => name ?? (id.length > 12 ? `${id.slice(0, 8)}…` : id);
   const tagged = (name: string) => (/^\d[\w.+-]*$/.test(name) ? `v${name}` : name);
-  return `Actualizar Modpack (${tagged(shown(names?.installed, from))} → ${tagged(shown(names?.available, to))})`;
+  return { installed: tagged(shown(names?.installed, from)), available: tagged(shown(names?.available, to)) };
 }
 
 export function backedUpSummary(paths: string[]): string {

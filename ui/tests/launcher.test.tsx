@@ -95,8 +95,8 @@ test('refreshing a selected vanilla instance replaces Play with a mandatory upda
   expect(screen.queryByRole('button', { name: 'Jugar', exact: true })).toBeNull();
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(update);
-  expect(screen.getByRole('dialog', { name: 'Actualizar Minecraft (1.21.1 → 1.21.2)' })).toBeTruthy();
-  expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
+  expect(screen.getByRole('dialog', { name: 'Actualizar Minecraft' })).toBeTruthy();
+  expect((screen.getByLabelText(/^Copia de seguridad de mis mundos/) as HTMLInputElement).checked).toBe(true);
 });
 
 test('the running primary action stays available and crashes use the branded dialog', async () => {
@@ -143,11 +143,15 @@ test('mandatory pack updates open a modal and require explicit world-backup cons
   const update = await screen.findByRole('button', { name: 'Actualizar…' });
   expect(screen.queryByRole('button', { name: 'Jugar', exact: true })).toBeNull();
   await user.click(update);
-  await screen.findByText('Actualizar Modpack (Uno → Dos)');
-  expect(screen.getByRole('dialog', { name: 'Actualizar Modpack (Uno → Dos)' })).toBeTruthy();
-  expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
+  const dialog = await screen.findByRole('dialog', { name: 'Actualizar modpack' });
+  // The header names both versions as chips, and the confirm button names the one being installed.
+  await within(dialog).findByText('Uno');
+  expect(within(dialog).getByText('Dos')).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: 'Actualizar a Dos' })).toBeTruthy();
+  expect(within(dialog).getByText(/Volver a Uno no revierte esos cambios/)).toBeTruthy();
+  expect((screen.getByLabelText(/^Copia de seguridad de mis mundos/) as HTMLInputElement).checked).toBe(true);
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
-  await user.click(screen.getByRole('button', { name: 'Actualizar', exact: true }));
+  await user.click(screen.getByRole('button', { name: /^Actualizar a / }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({ instanceId: 'pack-a', update: { from_version: 'v1', to_version: 'v2', backup_worlds: true } }));
 });
 
@@ -303,14 +307,14 @@ test('the update prompt shows the new version\'s release notes as plain text', a
   const notes = await screen.findByLabelText('Notas de la versión');
   expect(notes.textContent).toBe(changelog);
   expect(notes.querySelector('b')).toBeNull();
-  expect(screen.getByRole('heading', { name: 'Novedades de esta versión' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Notas de la versión' })).toBeTruthy();
 });
 
 test('the update prompt says so when the new version has no release notes', async () => {
   catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
   const user = userEvent.setup(); mount();
   await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
-  await screen.findByText('Esta versión no incluye notas de cambios.');
+  await screen.findByText('El autor no ha publicado notas para esta versión.');
   expect(screen.queryByLabelText('Notas de la versión')).toBeNull();
 });
 
@@ -318,8 +322,23 @@ test('a vanilla update does not claim to have release notes', async () => {
   catalog.instances[0] = { ...first, source: { type: 'vanilla' }, installedSource: null, installedVersion: '1.21.1', minecraftVersion: '1.21.2', localState: 'installed' };
   const user = userEvent.setup(); mount();
   await user.click(await screen.findByRole('button', { name: 'Actualizar…', exact: true }));
-  await screen.findByRole('dialog', { name: 'Actualizar Minecraft (1.21.1 → 1.21.2)' });
-  expect(screen.queryByRole('heading', { name: 'Novedades de esta versión' })).toBeNull();
+  const dialog = await screen.findByRole('dialog', { name: 'Actualizar Minecraft' });
+  expect(screen.queryByRole('heading', { name: 'Notas de la versión' })).toBeNull();
+  // Vanilla versions are named as they are, without the pack's "v" prefix.
+  expect(within(dialog).getByText('1.21.1')).toBeTruthy();
+  expect(within(dialog).getByRole('button', { name: 'Actualizar a 1.21.2' })).toBeTruthy();
+  expect(within(dialog).getByText(/Volver a 1.21.1 no revierte esos cambios/)).toBeTruthy();
+});
+
+test('the update prompt can be closed from its header without starting anything', async () => {
+  catalog.instances[0] = { ...first, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
+  const user = userEvent.setup(); mount();
+  await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
+  const dialog = await screen.findByRole('dialog', { name: 'Actualizar modpack' });
+  await user.click(within(dialog).getByRole('switch', { name: /^Copia de seguridad de mis mundos/ }));
+  await user.click(within(dialog).getByRole('button', { name: 'Cerrar' }));
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
 });
 
 test('missing and failed artwork use a local fallback without removing controls', async () => {
@@ -499,8 +518,8 @@ test('browser update preview permits inspection while desktop actions stay disab
   const user = userEvent.setup(); mount();
   await user.click(await screen.findByRole('button', { name: 'Modpack con actualización: Actualización disponible' }));
   await user.click(screen.getByRole('button', { name: 'Actualizar…', exact: true }));
-  expect((screen.getByRole('button', { name: 'Actualizar', exact: true }) as HTMLButtonElement).disabled).toBe(true);
-  expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByRole('button', { name: /^Actualizar a / }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText(/^Copia de seguridad de mis mundos/) as HTMLInputElement).checked).toBe(true);
   await user.click(screen.getByRole('button', { name: 'Cancelar', exact: true }));
   expect(screen.queryByRole('dialog')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Opciones de instancia' }));
@@ -515,13 +534,13 @@ test('cancelling the update modal never starts an update and restores the defaul
   const user = userEvent.setup(); mount();
   const trigger = await screen.findByRole('button', { name: 'Actualizar…', exact: true });
   await user.click(trigger);
-  await user.click(screen.getByLabelText('Crear copia de mis mundos (recomendado)'));
+  await user.click(screen.getByLabelText(/^Copia de seguridad de mis mundos/));
   const dialog = screen.getByRole('dialog');
   fireEvent(dialog, new Event('cancel', { bubbles: false, cancelable: true }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(backend.invoke.mock.calls.some(([command]) => command === 'begin_update')).toBe(false);
   await user.click(trigger);
-  expect((screen.getByLabelText('Crear copia de mis mundos (recomendado)') as HTMLInputElement).checked).toBe(true);
+  expect((screen.getByLabelText(/^Copia de seguridad de mis mundos/) as HTMLInputElement).checked).toBe(true);
 });
 
 
@@ -793,7 +812,7 @@ test('a version update of a pack installed before variants names no variant, so 
   catalog.instances[0] = { ...first, ...withVariants, localState: 'update_available', installedSource: { ...first.installedSource, current_version_id: 'v1' } };
   const user = userEvent.setup(); mount();
   await user.click(await screen.findByRole('button', { name: 'Actualizar…' }));
-  await user.click(screen.getByRole('button', { name: 'Actualizar', exact: true }));
+  await user.click(screen.getByRole('button', { name: /^Actualizar a / }));
   expect(backend.invoke).toHaveBeenCalledWith('begin_update', expect.objectContaining({ update: { from_version: 'v1', to_version: 'v2', backup_worlds: true } }));
 });
 

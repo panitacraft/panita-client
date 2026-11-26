@@ -439,10 +439,15 @@ Owner requests for 1.2.1-beta.2.
   as a pack waiting for manual files (`awaiting_files`), keep their inline controls.
 - A cancelled operation shows no status chip beside the instance badges: it leaves the
   installation as it was, and the Instalar or Jugar button already says what to do.
-- The pack update modal has a "Novedades de esta versión" section. Modrinth packs show the
+- The update prompt follows the owner's template (2026-11-26): a header with "Actualizar modpack"
+  (or "Actualizar Minecraft"), the installed and new versions as chips and a close button; for packs a
+  "Notas de la versión" card; a checklist of what is kept; an amber warning that opening a world
+  with the new version can change it and that going back to the installed version does not
+  revert that; a "Copia de seguridad de mis mundos" switch marked "Recomendado" and on by default;
+  and a footer with Cancelar and "Actualizar a {version}". Modrinth packs show the
   version changelog fetched from Modrinth for the pinned version, as plain bounded text (4000
   characters, control characters removed, never rendered as markup). Custom packs and vanilla
-  show no notes ("Esta versión no incluye notas de cambios." for packs): the Panita catalog
+  show no notes ("El autor no ha publicado notas para esta versión." for packs): the Panita catalog
   carries only a version label and publish date. Showing custom notes needs a changelog field in
   the API and in the catalog source, which also touches cached catalog and installation records;
   do not add it without a new owner decision on those disk formats.

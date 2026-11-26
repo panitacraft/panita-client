@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronDown, CircleArrowUp, Download, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { ArrowRight, ArrowUp, Check, ChevronDown, CircleArrowUp, Download, List, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, TriangleAlert } from 'lucide-react';
 import { InstanceProgress } from './components/instance-progress';
 import { AccountDialog } from './components/account-dialog';
 import { VariantDialog } from './components/variant-dialog';
@@ -18,7 +18,7 @@ import { previewOptions, withdrawnVariantText, type Variant, type VariantChange,
 import { nativeCleanupSummary, type NativeCleanupReport } from './native-cleanup-state';
 import { ConflictsDialog, CompletionDialog, DetailsDialog, ManualFilesDialog, NativeCleanupSection } from './components/notice-details';
 import { completionDetails, completionNote, entryNotice, type CompletionDetails } from './notice-state';
-import { conflictsResolvable, unknownVersionNames, versionTitle, type VersionNames } from './pack-state';
+import { conflictsResolvable, unknownVersionNames, versionLabels, type VersionNames } from './pack-state';
 
 type PlayContextValue = {
   snapshot: PlaySnapshot | null;
@@ -262,6 +262,11 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     }
   }
 
+  // Both prompts name the version being left and the one being installed; a pack uses readable names once they are known.
+  const updateLabels = updateQuestion
+    ? updateQuestion.pack ? versionLabels(names, updateQuestion.fromVersion, updateQuestion.toVersion) : { installed: updateQuestion.fromVersion, available: updateQuestion.toVersion }
+    : null;
+
   return <div className="play-controls">
     <TransientNotice notice={toast.notice} />
     {logError && <p role="alert">{logError}</p>}
@@ -341,30 +346,37 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
       </div>
     </>}
     </dialog>
-    <dialog ref={updateDialog} className="update-dialog" aria-labelledby={instanceId + '-update-title'} aria-describedby={instanceId + '-update-warning'} onCancel={() => setUpdateQuestion(null)} onClose={() => { if (!updateDialog.current?.open) setUpdateQuestion(null); }}>
-    {updateQuestion && <>
-      <h2 id={instanceId + '-update-title'} className="dialog-title"><CircleArrowUp aria-hidden="true" />{updateQuestion.pack ? versionTitle(names, updateQuestion.fromVersion, updateQuestion.toVersion) : `Actualizar Minecraft (${updateQuestion.fromVersion} → ${updateQuestion.toVersion})`}</h2>
-      <ul className="update-notes">
-        {updateQuestion.pack && <li><ShieldCheck aria-hidden="true" />Actualizaremos solo los archivos del modpack que no hayas cambiado.</li>}
-        {updateQuestion.pack && <li><ShieldCheck aria-hidden="true" />Tus mundos, mods añadidos y ajustes editados se conservan.</li>}
-        {updateQuestion.pack && withdrawnVariant && <li><TriangleAlert aria-hidden="true" />{withdrawnVariantText(withdrawnVariant)}</li>}
-        <li id={instanceId + '-update-warning'} className="is-warning"><TriangleAlert aria-hidden="true" />Abrir mundos con otra versión puede cambiarlos. Volver de versión no deshace esos cambios.</li>
-      </ul>
-      {updateQuestion.pack && <div role="group" aria-labelledby={instanceId + '-changelog-title'}>
-        <h3 id={instanceId + '-changelog-title'} className="detail-heading">Novedades de esta versión</h3>
-        {names === null ? <p className="detail-intro changelog-empty" role="status">Buscando las novedades…</p>
-          : names.changelog ? <pre className="changelog" tabIndex={0} aria-label="Notas de la versión">{names.changelog}</pre>
-          : <p className="detail-intro changelog-empty">Esta versión no incluye notas de cambios.</p>}
+    <dialog ref={updateDialog} className="update-dialog update-modal" aria-labelledby={instanceId + '-update-title'} aria-describedby={instanceId + '-update-warning'} onCancel={() => setUpdateQuestion(null)} onClose={() => { if (!updateDialog.current?.open) setUpdateQuestion(null); }}>
+    {updateQuestion && updateLabels && <>
+      <div className="update-head">
+        <h2 id={instanceId + '-update-title'} className="dialog-title"><CircleArrowUp aria-hidden="true" />{updateQuestion.pack ? 'Actualizar modpack' : 'Actualizar Minecraft'}</h2>
+        <span className="update-versions"><span className="version-chip">{updateLabels.installed}</span><ArrowRight aria-hidden="true" /><span className="sr-only">a</span><span className="version-chip is-new">{updateLabels.available}</span></span>
+        <button type="button" className="update-close" aria-label="Cerrar" onClick={() => setUpdateQuestion(null)}><X aria-hidden="true" /></button>
+      </div>
+      {updateQuestion.pack && <div className="update-card">
+        <h3 id={instanceId + '-notes-title'}><List aria-hidden="true" />Notas de la versión</h3>
+        {names === null ? <p className="update-card-empty" role="status">Buscando las novedades…</p>
+          : names.changelog ? <pre className="changelog" tabIndex={0} aria-labelledby={instanceId + '-notes-title'}>{names.changelog}</pre>
+          : <p className="update-card-empty">El autor no ha publicado notas para esta versión.</p>}
       </div>}
-      <label className="backup-choice"><input type="checkbox" checked={updateQuestion.backupWorlds} onChange={event => setUpdateQuestion({ ...updateQuestion, backupWorlds: event.target.checked })} /><span>Crear copia de mis mundos (recomendado)</span></label>
-      <div className="account-buttons">
+      <ul className="update-checks">
+        <li><Check aria-hidden="true" />{updateQuestion.pack ? 'Solo se reemplazan los archivos del modpack que no hayas modificado.' : `Se instalan los archivos de Minecraft ${updateLabels.available}.`}</li>
+        <li><Check aria-hidden="true" />{updateQuestion.pack ? 'Tus mundos, mods añadidos y ajustes personalizados se conservan.' : 'Tus mundos y ajustes se conservan.'}</li>
+      </ul>
+      {updateQuestion.pack && withdrawnVariant && <p className="update-callout"><TriangleAlert aria-hidden="true" /><span>{withdrawnVariantText(withdrawnVariant)}</span></p>}
+      <p id={instanceId + '-update-warning'} className="update-callout"><TriangleAlert aria-hidden="true" /><span>Abrir un mundo con la nueva versión puede modificarlo. <strong>Volver a {updateLabels.installed} no revierte esos cambios.</strong></span></p>
+      <div className="update-backup">
+        <label htmlFor={instanceId + '-update-backup'}><span>Copia de seguridad de mis mundos</span><span className="update-chip">Recomendado</span></label>
+        <input id={instanceId + '-update-backup'} className="update-switch" role="switch" type="checkbox" checked={updateQuestion.backupWorlds} onChange={event => setUpdateQuestion({ ...updateQuestion, backupWorlds: event.target.checked })} />
+      </div>
+      <div className="update-foot">
+        <Button variant="outline" disabled={busy} onClick={() => setUpdateQuestion(null)}>Cancelar</Button>
         <Button disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {
           const choice = updateQuestion;
           setUpdateQuestion(null);
           setLastBackup(choice.backupWorlds);
           void act('begin_update', { requestId: crypto.randomUUID(), update: { from_version: choice.fromVersion, to_version: choice.toVersion, backup_worlds: choice.backupWorlds } });
-        }}><RefreshCw aria-hidden="true" />Actualizar</Button>
-        <Button variant="secondary" disabled={busy} onClick={() => setUpdateQuestion(null)}><X aria-hidden="true" />Cancelar</Button>
+        }}><ArrowUp aria-hidden="true" />Actualizar a {updateLabels.available}</Button>
       </div>
     </>}
     </dialog>
