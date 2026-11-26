@@ -420,6 +420,33 @@ valid empties the list and reports the error. It stops when the tab closes.
   real desktop, and all of it is unvalidated on Ubuntu x64 (§6). Copying under a pure Wayland session without
   XWayland is unverified.
 
+### 5.3 Notices with details and update changelog (2026-11-26)
+
+Owner requests for 1.2.1-beta.2.
+
+- Outcomes of one sentence are toasts, not blocks in the page: a required instance update
+  (`update_required`, "Actualiza esta instancia antes de jugar.") is a plain toast.
+- An outcome that has a list behind it is a toast with a "Ver detalles" button that opens a modal
+  shaped like the update and uninstall prompts: the player's files in the way of an update,
+  install or repair (`pack_conflict`), files to download by hand (`manual_files_required`) and
+  what a completed operation kept or left behind (kept configuration, files moved to
+  `pack-backups`, native folders that could not be removed, including a manual native cleanup).
+  A toast with an action stays until dismissed or replaced, because it can be the only way back
+  to the decision. Pages and the instance controls no longer repeat these lists inline. Moving
+  the player's files aside is confirmed in that modal ("Continuar y guardar mis archivos") and
+  offered only for an update whose conflicts are all movable; the confirmation keeps
+  `move_aside` semantics and moves nothing before the player confirms. Persistent states, such
+  as a pack waiting for manual files (`awaiting_files`), keep their inline controls.
+- A cancelled operation shows no status chip beside the instance badges: it leaves the
+  installation as it was, and the Instalar or Jugar button already says what to do.
+- The pack update modal has a "Novedades de esta versión" section. Modrinth packs show the
+  version changelog fetched from Modrinth for the pinned version, as plain bounded text (4000
+  characters, control characters removed, never rendered as markup). Custom packs and vanilla
+  show no notes ("Esta versión no incluye notas de cambios." for packs): the Panita catalog
+  carries only a version label and publish date. Showing custom notes needs a changelog field in
+  the API and in the catalog source, which also touches cached catalog and installation records;
+  do not add it without a new owner decision on those disk formats.
+
 ## Annex A. Account and Token Storage Decision
 
 This annex is an integral part of AGENTS.md. It preserves the accepted decision, rationale, recovery cases, and validation requirements from the local source document `docs/account-storage-decision.md` as of 2026-10-08. The complete policy is included below; reading a separate file is not required. Update this annex alongside any owner-approved policy changes.
