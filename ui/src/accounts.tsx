@@ -191,7 +191,7 @@ export function Accounts({ suggestedName = '', onSnapshot, onboarding = false }:
       <form noValidate onSubmit={event => { event.preventDefault(); void act('add_offline_account', { username }); }}>
         <label htmlFor="offline-name">Nombre de usuario</label>
         <input id="offline-name" placeholder="Ej. Steve" value={username} onChange={event => setUsername(event.target.value)} minLength={3} maxLength={16} pattern="[A-Za-z0-9_]{3,16}" required autoComplete="off" autoFocus />
-        {feedback}<div className="account-buttons"><Button type="submit" disabled={busy === 'add_offline_account' || !username.trim()}><Check aria-hidden="true" />Confirmar</Button><Button type="button" variant="outline" disabled={busy === 'add_offline_account'} onClick={() => setDialog(null)}><X aria-hidden="true" />Cancelar</Button></div>
+        {feedback}<div className="account-buttons"><Button type="button" variant="outline" disabled={busy === 'add_offline_account'} onClick={() => setDialog(null)}><X aria-hidden="true" />Cancelar</Button><Button type="submit" disabled={busy === 'add_offline_account' || !username.trim()}><Check aria-hidden="true" />Confirmar</Button></div>
       </form>
     </AccountDialog>}
     {dialog === 'microsoft' && <AccountDialog title="Añadir cuenta Microsoft" onCancel={() => void cancelDialog()}>
@@ -203,7 +203,7 @@ export function Accounts({ suggestedName = '', onSnapshot, onboarding = false }:
     {confirming && <AccountDialog title="Quitar cuenta" onCancel={() => setConfirming(null)}>
       <TransientNotice notice={toast.notice} />
       <p>¿Quitar esta cuenta de este equipo? Se eliminará su sesión guardada.</p>
-      <div className="account-buttons"><Button variant="destructive" onClick={() => { const id = confirming; setConfirming(null); void act('remove_account', { accountId: id }); }}><LogOut aria-hidden="true" />Quitar cuenta</Button><Button variant="outline" onClick={() => setConfirming(null)}><X aria-hidden="true" />Cancelar</Button></div>
+      <div className="account-buttons"><Button variant="outline" onClick={() => setConfirming(null)}><X aria-hidden="true" />Cancelar</Button><Button variant="destructive" onClick={() => { const id = confirming; setConfirming(null); void act('remove_account', { accountId: id }); }}><LogOut aria-hidden="true" />Quitar cuenta</Button></div>
     </AccountDialog>}
   </section>;
 }

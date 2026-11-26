@@ -573,6 +573,7 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
             "phase",
             "confirmationId",
             "error",
+            "errorDetail",
             "exitCode",
             "exitExpected",
             "consoleError",
@@ -600,4 +601,117 @@ fn snapshots_exclude_backend_ownership_and_bound_terminal_history() {
         assert!(entry.get("args").is_none());
         assert!(entry.get("token").is_none());
     }
+}
+
+#[test]
+fn a_failed_operation_exposes_its_structured_detail_only_while_it_has_that_error() {
+    use launcher_core::error::{CoreError, ErrorCause};
+    let controller = PlayController::new(ProcessSessionId::new());
+    let instance = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    assert!(
+        controller
+            .reserve_operation(instance, request, OperationKind::Update)
+            .is_ok()
+    );
+    let error = CoreError::new(ErrorCode::InvalidData)
+        .with_cause(ErrorCause::PublishedStateInvalid)
+        .with_path("config/seed.toml");
+    controller.fail_with(instance, request, error.code(), Some(error.detail()));
+    let view = controller.snapshot().unwrap_or_default();
+    let entry = &view["instances"][0];
+    assert_eq!(entry["error"], "invalid_data");
+    assert_eq!(entry["errorDetail"]["cause"], "published_state_invalid");
+    assert_eq!(entry["errorDetail"]["path"], "config/seed.toml");
+    assert!(entry["errorDetail"]["osError"].is_null());
+    // A plain failure carries no stale detail from an earlier one.
+    controller.fail(instance, request, ErrorCode::NetworkUnavailable);
+    let view = controller.snapshot().unwrap_or_default();
+    assert!(view["instances"][0]["errorDetail"].is_null());
+}
+
+#[test]
+fn the_start_note_names_both_versions_and_ignores_unsafe_text() {
+    use launcher_core::minecraft::update::UpdateRequest;
+    let request = UpdateRequest {
+        from_version: "1.21.1\nforged line".into(),
+        to_version: "b1d2f3a4-0000-4000-8000-000000000000".into(),
+        backup_worlds: true,
+        move_aside: false,
+        from_variant: None,
+        to_variant: Some(launcher_core::catalog::Variant::Lite),
+    };
+    let text = describe_start(OperationKind::Update, Uuid::nil(), Some(&request));
+    assert!(text.starts_with("update started instance="));
+    assert!(text.contains("from_version=1.21.1forgedline "));
+    assert!(text.contains("to_version=b1d2f3a4-0000-4000-8000-000000000000"));
+    assert!(text.contains("from_variant=unchanged to_variant=lite backup_worlds=true"));
+    assert!(!text.contains('\n'));
+}
+
+#[test]
+fn the_start_line_reaches_the_session_file_with_the_instance_and_both_versions() {
+    use launcher_core::minecraft::update::UpdateRequest;
+    use launcher_core::session_log::Level;
+    let directory = std::env::temp_dir().join(format!("panita-start-line-{}", Uuid::new_v4()));
+    assert!(std::fs::create_dir_all(&directory).is_ok());
+    let logs = BoundedLog::default();
+    let file = logs
+        .attach_file(&directory, ProcessSessionId::new(), &[])
+        .unwrap_or_else(|| panic!("session file"));
+    let (instance, from, to) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let request = UpdateRequest {
+        from_version: from.to_string(),
+        to_version: to.to_string(),
+        backup_worlds: false,
+        move_aside: false,
+        from_variant: None,
+        to_variant: None,
+    };
+    logs.note(
+        Level::Info,
+        &describe_start(OperationKind::Update, instance, Some(&request)),
+    );
+    let written = std::fs::read_to_string(&file).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&directory);
+    assert!(
+        written.contains(&format!(
+            "update started instance={instance} from_version={from} to_version={to} "
+        )),
+        "{written}"
+    );
+    assert!(!written.contains("[redacted]"), "{written}");
+}
+
+#[test]
+fn exported_logs_always_end_up_as_text_files() {
+    use std::path::PathBuf;
+    assert_eq!(
+        with_text_extension(PathBuf::from("registro")),
+        PathBuf::from("registro.txt")
+    );
+    assert_eq!(
+        with_text_extension(PathBuf::from("registro.log")),
+        PathBuf::from("registro.log")
+    );
+}
+
+#[test]
+fn clearing_previous_logs_keeps_the_file_this_session_writes() {
+    let directory = std::env::temp_dir().join(format!("panita-clear-logs-{}", Uuid::new_v4()));
+    assert!(std::fs::create_dir_all(&directory).is_ok());
+    let old = directory.join("session-20250101-000000-deadbeef.log");
+    assert!(std::fs::write(&old, "old").is_ok());
+    let logs = BoundedLog::default();
+    let current = logs
+        .attach_file(&directory, ProcessSessionId::new(), &[])
+        .unwrap_or_else(|| panic!("session file"));
+    let cleared = logs.clear_previous_logs(&directory);
+    assert_eq!((cleared.removed, cleared.failed), (1, 0));
+    assert!(!old.exists());
+    assert!(current.exists(), "the running session file survives");
+    let written = std::fs::read_to_string(&current).unwrap_or_default();
+    assert!(written.contains("previous logs cleared removed=1 failed=0"));
+    drop(logs);
+    assert!(std::fs::remove_dir_all(directory).is_ok());
 }

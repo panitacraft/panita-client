@@ -14,7 +14,8 @@ export type CacheDetail = { directory: string; reason: string };
 export type CacheReport = { removedEntries: number; removedBytes: number; retainedEntries: number; details: CacheDetail[] };
 
 export type PackConflict = { path: string; reason: 'edited' | 'occupied' | 'blocked' };
-export type VersionNames = { installed: string | null; available: string | null };
+/** Readable names of the two versions of an update and the release notes of the new one. `changelog` is undefined while the notes are still being fetched, null when there are none. */
+export type VersionNames = { installed: string | null; available: string | null; changelog?: string | null };
 
 const number = new Intl.NumberFormat('es', { maximumFractionDigits: 1 });
 
@@ -80,13 +81,24 @@ export function conflictsResolvable(conflicts: PackConflict[]): boolean {
 }
 
 export function updateConflictHeading(count: number): string {
-  return count === 1 ? 'Hay 1 archivo tuyo que estorba a la actualización' : `Hay ${count} archivos tuyos que estorban a la actualización`;
+  return conflictHeading(count, 'update');
 }
 
-export function versionTitle(names: VersionNames | null, from: string, to: string): string {
+/** Names what the player's files are in the way of: an update, or an installation or repair. */
+export function conflictHeading(count: number, operation: string): string {
+  const target = operation === 'update' ? 'la actualización' : 'la instalación';
+  return count === 1 ? `Hay 1 archivo tuyo que estorba a ${target}` : `Hay ${count} archivos tuyos que estorban a ${target}`;
+}
+
+/** A version name as the player reads it: a plain number such as 1.2.0 gets a "v" in front, any other name stays as written. */
+export function tagVersion(name: string): string {
+  return /^\d[\w.+-]*$/.test(name) ? `v${name}` : name;
+}
+
+/** What the update prompt calls the two versions: readable names, or shortened identifiers until they are known. */
+export function versionLabels(names: VersionNames | null, from: string, to: string): { installed: string; available: string } {
   const shown = (name: string | null | undefined, id: string) => name ?? (id.length > 12 ? `${id.slice(0, 8)}…` : id);
-  const tagged = (name: string) => (/^\d[\w.+-]*$/.test(name) ? `v${name}` : name);
-  return `Actualizar Modpack (${tagged(shown(names?.installed, from))} → ${tagged(shown(names?.available, to))})`;
+  return { installed: tagVersion(shown(names?.installed, from)), available: tagVersion(shown(names?.available, to)) };
 }
 
 export function backedUpSummary(paths: string[]): string {

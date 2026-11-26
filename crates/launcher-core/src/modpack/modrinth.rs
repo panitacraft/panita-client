@@ -9,6 +9,12 @@ use std::io::Read;
 use std::time::Duration;
 
 const API: &str = "https://api.modrinth.com";
+/// What Modrinth publishes about one pack version for the update prompt.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VersionInfo {
+    pub number: String,
+    pub changelog: Option<String>,
+}
 
 /// Public Modrinth version metadata. It sends no credentials and follows no
 /// redirects, and it only ever asks for the exact version the catalog pins.
@@ -63,19 +69,25 @@ impl ModrinthClient {
         resolve_version(&bytes, project, version)
     }
 
-    /// The readable version number of one version, for naming it to the player.
-    pub async fn version_number(&self, version: &str) -> Result<String, CoreError> {
+    /// The readable version number of one version and its release notes, for naming
+    /// it to the player and telling them what changed.
+    pub async fn version_info(&self, version: &str) -> Result<VersionInfo, CoreError> {
         #[derive(Deserialize)]
         struct Named {
             id: String,
             version_number: String,
+            #[serde(default)]
+            changelog: Option<String>,
         }
         let bytes = self.version_document(version).await?;
         let named: Named = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
         if named.id != version || !text(&named.version_number, 64) {
             return Err(invalid());
         }
-        Ok(named.version_number)
+        Ok(VersionInfo {
+            number: named.version_number,
+            changelog: named.changelog.as_deref().and_then(clean_changelog),
+        })
     }
 
     async fn version_document(&self, version: &str) -> Result<Vec<u8>, CoreError> {
@@ -352,6 +364,58 @@ mod tests {
         assert_eq!(
             verified_index(&corrupt, &artifact).err().map(|e| e.code()),
             Some(ErrorCode::ArtifactMismatch)
+        );
+    }
+
+    #[test]
+    fn changelogs_are_plain_bounded_and_optional() {
+        assert_eq!(clean_changelog("  \r\n "), None);
+        assert_eq!(
+            clean_changelog("- Fixed a crash\r\n- Added \u{7}maps\u{0}\t.").as_deref(),
+            Some("- Fixed a crash\n- Added maps\t.")
+        );
+        let long = "ñ".repeat(MAX_CHANGELOG_CHARS + 50);
+        let cut = clean_changelog(&long).unwrap_or_default();
+        assert_eq!(cut.chars().count(), MAX_CHANGELOG_CHARS + 1);
+        assert!(cut.ends_with('…'));
+    }
+
+    #[tokio::test]
+    async fn version_info_names_the_version_and_carries_its_notes() {
+        let server = Server::start(|request| match request.path.as_str() {
+            "/v2/version/noted" => Reply::ok(
+                json!({"id": "noted", "version_number": "1.4.0", "changelog": "- New quests"})
+                    .to_string(),
+            ),
+            "/v2/version/plain" => {
+                Reply::ok(json!({"id": "plain", "version_number": "1.3.0"}).to_string())
+            }
+            "/v2/version/blank" => Reply::ok(
+                json!({"id": "blank", "version_number": "1.2.0", "changelog": " \n"}).to_string(),
+            ),
+            "/v2/version/other" => Reply::ok(
+                json!({"id": "plain", "version_number": "1.3.0", "changelog": "x"}).to_string(),
+            ),
+            _ => Reply::status(500),
+        });
+        let client = ModrinthClient::for_tests(server.base());
+        let noted = client
+            .version_info("noted")
+            .await
+            .unwrap_or_else(|_| panic!("noted"));
+        assert_eq!(noted.number, "1.4.0");
+        assert_eq!(noted.changelog.as_deref(), Some("- New quests"));
+        for pin in ["plain", "blank"] {
+            let info = client
+                .version_info(pin)
+                .await
+                .unwrap_or_else(|_| panic!("{pin}"));
+            assert_eq!(info.changelog, None, "{pin}");
+        }
+        // The document must name the version that was requested.
+        assert_eq!(
+            code(client.version_info("other").await),
+            Some(ErrorCode::InvalidData)
         );
     }
 

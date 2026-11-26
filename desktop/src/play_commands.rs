@@ -143,6 +143,8 @@ struct Entry {
     exit_expected: bool,
     console_error: Option<ErrorCode>,
     error: Option<ErrorCode>,
+    /// What the failing operation knows beyond its code: the cause and the file.
+    error_detail: Option<launcher_core::error::ErrorDetail>,
     exit: Option<launcher_core::minecraft::process::GameExit>,
     kind: OperationKind,
     backup_requested: bool,
@@ -381,6 +383,7 @@ impl PlayController {
                 exit_expected: false,
                 console_error: None,
                 error: None,
+                error_detail: None,
                 exit: None,
                 kind,
                 backup_requested: false,
@@ -413,7 +416,20 @@ impl PlayController {
     }
 
     fn fail(&self, instance: Uuid, request: Uuid, error: ErrorCode) {
+        self.fail_with(instance, request, error, None);
+    }
+
+    /// End an operation with its code and, when the core knows more, the structured
+    /// detail the interface can show instead of a generic message.
+    fn fail_with(
+        &self,
+        instance: Uuid,
+        request: Uuid,
+        error: ErrorCode,
+        detail: Option<launcher_core::error::ErrorDetail>,
+    ) {
         self.update(instance, request, |entry| {
+            entry.error_detail = detail;
             if entry.game.is_some() {
                 entry.error = Some(error);
                 return;
@@ -512,7 +528,9 @@ impl PlayController {
                 json!({
                     "instanceId": id, "requestId": entry.request, "phase": entry.phase.text(),
                     "confirmationId": entry.pending.as_ref().map(PendingPlay::operation_id),
-                    "error": entry.error, "exitCode": entry.exit.and_then(|exit| exit.code),
+                    "error": entry.error,
+                    "errorDetail": entry.error.and(entry.error_detail.as_ref()),
+                    "exitCode": entry.exit.and_then(|exit| exit.code),
                     "exitSuccess": entry.exit.map(|exit| exit.success),
                     "exitExpected": entry.exit_expected,
                     "consoleError": entry.console_error,
@@ -980,6 +998,96 @@ pub(super) fn game_log_snapshot(
         .game_output_page(instance_id, request_id, offset)
 }
 
+/// Largest complete log the frontend may hand back for export or copy (owner-approved
+/// 2026-11-26). Lines are already redacted and bounded at capture.
+const MAX_LOG_TEXT_BYTES: usize = 256 * 1024 * 1024;
+
+/// Only the execution-log window of a game that is still retained may use its text.
+fn require_game_log(
+    window: &tauri::WebviewWindow,
+    state: &DesktopState,
+    instance_id: Uuid,
+    request_id: Uuid,
+    text: &str,
+) -> Result<(), ErrorCode> {
+    if window.label() != log_label(instance_id, request_id) || text.len() > MAX_LOG_TEXT_BYTES {
+        return Err(ErrorCode::InvalidData);
+    }
+    let plays = state
+        .plays
+        .state
+        .lock()
+        .map_err(|_| ErrorCode::StorageUnavailable)?;
+    plays
+        .entries
+        .get(&instance_id)
+        .filter(|entry| entry.request == request_id && entry.last_game.is_some())
+        .map(|_| ())
+        .ok_or(ErrorCode::OperationCancelled)
+}
+
+/// A name the player typed without an extension still ends up as a text file.
+fn with_text_extension(mut path: std::path::PathBuf) -> std::path::PathBuf {
+    if path.extension().is_none() {
+        path.set_extension("txt");
+    }
+    path
+}
+
+/// Save the complete formatted log the log window assembled. The native dialog chooses the
+/// destination, so no path crosses IPC. Returns false when the player cancels.
+#[tauri::command]
+pub(super) async fn export_game_log(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+    text: String,
+) -> Result<bool, ErrorCode> {
+    use tauri_plugin_dialog::DialogExt;
+    require_game_log(&window, &state, instance_id, request_id, &text)?;
+    let picked = {
+        let (app, window) = (window.app_handle().clone(), window.clone());
+        tauri::async_runtime::spawn_blocking(move || {
+            app.dialog()
+                .file()
+                .set_parent(&window)
+                .set_title("Exportar registro de Minecraft")
+                .set_file_name("registro-minecraft.txt")
+                .add_filter("Texto", &["txt"])
+                .blocking_save_file()
+        })
+        .await
+        .map_err(|_| ErrorCode::StorageUnavailable)?
+    };
+    let Some(picked) = picked else {
+        return Ok(false);
+    };
+    let path = with_text_extension(picked.into_path().map_err(|_| ErrorCode::InvalidData)?);
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::write(path, text).map_err(|_| ErrorCode::StorageUnavailable)
+    })
+    .await
+    .map_err(|_| ErrorCode::StorageUnavailable)??;
+    Ok(true)
+}
+
+/// Put the complete formatted log on the system clipboard.
+#[tauri::command]
+pub(super) async fn copy_game_log(
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
+    instance_id: Uuid,
+    request_id: Uuid,
+    text: String,
+) -> Result<bool, ErrorCode> {
+    require_game_log(&window, &state, instance_id, request_id, &text)?;
+    tauri::async_runtime::spawn_blocking(move || super::screenshot_commands::put_text(text))
+        .await
+        .map_err(|_| ErrorCode::StorageUnavailable)??;
+    Ok(true)
+}
+
 #[tauri::command]
 pub(super) async fn open_game_log(
     app: tauri::AppHandle,
@@ -1213,8 +1321,13 @@ fn begin_maintenance(
         entry.backup_requested = update.as_ref().is_some_and(|request| request.backup_worlds)
     });
     controller.publish(&app);
+    let logs = state.logs.clone();
+    logs.note(
+        launcher_core::session_log::Level::Info,
+        &describe_start(kind, instance_id, update.as_ref()),
+    );
     tauri::async_runtime::spawn(async move {
-        let result = async {
+        let result: Result<_, launcher_core::error::CoreError> = async {
             use launcher_core::registry::{InstallationState, InstanceRegistry};
             let record = InstanceRegistry::new(paths.clone())
                 .get(instance_id)
@@ -1230,9 +1343,9 @@ fn begin_maintenance(
                     )
                 })
             {
-                return Err(ErrorCode::OperationBusy);
+                return Err(ErrorCode::OperationBusy.into());
             }
-            cancel.check().map_err(|error| error.code())?;
+            cancel.check()?;
             if kind == OperationKind::Uninstall {
                 let outcome = tauri::async_runtime::spawn_blocking(move || {
                     if delete_instance {
@@ -1251,8 +1364,7 @@ fn begin_maintenance(
                     }
                 })
                 .await
-                .map_err(|_| ErrorCode::StorageCommitUncertain)?
-                .map_err(|error| error.code())?;
+                .map_err(|_| ErrorCode::StorageCommitUncertain)??;
                 return Ok((None, outcome.retained_files, outcome.native_cleanup));
             }
             let platform = platform.as_ref().ok_or(ErrorCode::RuntimeUnsupported)?;
@@ -1286,8 +1398,7 @@ fn begin_maintenance(
                         pack_progress,
                         credentials.clone(),
                     )
-                    .await
-                    .map_err(|error| error.code())?;
+                    .await?;
                     controller.update(instance_id, request_id, |entry| {
                         entry.pack = Some(PackResult {
                             backed_up: report.backed_up,
@@ -1314,8 +1425,7 @@ fn begin_maintenance(
                     pack_progress,
                     credentials.clone(),
                 )
-                .await
-                .map_err(|error| error.code())?;
+                .await?;
                 return match outcome {
                     // Nothing was changed: the player decides, then asks again.
                     UpdateOutcome::Blocked(blocked) => {
@@ -1331,7 +1441,7 @@ fn begin_maintenance(
                                 ..PackResult::default()
                             });
                         });
-                        Err(error)
+                        Err(error.into())
                     }
                     UpdateOutcome::Updated(report) => {
                         controller.update(instance_id, request_id, |entry| {
@@ -1359,8 +1469,7 @@ fn begin_maintenance(
                     progress,
                     credentials.clone(),
                 )
-                .await
-                .map_err(|error| error.code())?;
+                .await?;
                 Ok((None, outcome.retained_files, outcome.native_cleanup))
             } else if let Some(update) = update {
                 // Only a custom pack has variants; a vanilla update names none.
@@ -1369,7 +1478,7 @@ fn begin_maintenance(
                     .into_iter()
                     .any(|named| named.is_some() && named != standard)
                 {
-                    return Err(ErrorCode::InvalidData);
+                    return Err(ErrorCode::InvalidData.into());
                 }
                 let outcome = launcher_core::minecraft::update::update(
                     &paths,
@@ -1380,8 +1489,7 @@ fn begin_maintenance(
                     progress,
                     credentials.clone(),
                 )
-                .await
-                .map_err(|error| error.code())?;
+                .await?;
                 Ok((
                     outcome.backup.map(|backup| backup.operation),
                     0,
@@ -1406,8 +1514,7 @@ fn begin_maintenance(
                     variant,
                     credentials.clone(),
                 )
-                .await
-                .map_err(|error| error.code())?;
+                .await?;
                 match installed {
                     Installed::Vanilla => {}
                     Installed::Pack(Outcome::Conflicts(conflicts)) => {
@@ -1417,7 +1524,7 @@ fn begin_maintenance(
                                 ..PackResult::default()
                             });
                         });
-                        return Err(ErrorCode::PackConflict);
+                        return Err(ErrorCode::PackConflict.into());
                     }
                     Installed::Pack(Outcome::Installed(report)) => {
                         controller.update(instance_id, request_id, |entry| {
@@ -1455,21 +1562,71 @@ fn begin_maintenance(
                 })
             }
             Err(error) => {
+                let code = error.code();
+                let detail = error.detail();
+                // The log line carries the same fixed fields the interface receives.
+                logs.note(
+                    launcher_core::session_log::Level::Error,
+                    &format!(
+                        "{} failed instance={instance_id} error={} {}",
+                        kind.text(),
+                        serde_json::to_value(code)
+                            .ok()
+                            .and_then(|value| value.as_str().map(str::to_owned))
+                            .unwrap_or_default(),
+                        detail.describe()
+                    ),
+                );
                 if let Some(credentials) = &credentials {
-                    activation_commands::observe(
-                        &app,
-                        &controller,
-                        &activation,
-                        credentials,
-                        error,
-                    );
+                    activation_commands::observe(&app, &controller, &activation, credentials, code);
                 }
-                controller.fail(instance_id, request_id, error)
+                controller.fail_with(
+                    instance_id,
+                    request_id,
+                    code,
+                    (!detail.is_empty()).then_some(detail),
+                )
             }
         }
         controller.publish(&app);
     });
     Ok(())
+}
+
+/// A version pin reduced to the characters real pins use, so a value from the
+/// interface can never inject text into the session log.
+fn loggable(text: &str) -> String {
+    text.chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || "._-+".contains(*ch))
+        .take(64)
+        .collect()
+}
+
+/// What an operation was asked to do, written when it starts so a failure can be
+/// read against the versions it was moving between.
+fn describe_start(
+    kind: OperationKind,
+    instance_id: Uuid,
+    update: Option<&launcher_core::minecraft::update::UpdateRequest>,
+) -> String {
+    let mut text = format!("{} started instance={instance_id}", kind.text());
+    if let Some(request) = update {
+        let variant = |variant: Option<launcher_core::catalog::Variant>| {
+            variant
+                .and_then(|variant| serde_json::to_value(variant).ok())
+                .and_then(|value| value.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "unchanged".to_owned())
+        };
+        text.push_str(&format!(
+            " from_version={} to_version={} from_variant={} to_variant={} backup_worlds={}",
+            loggable(&request.from_version),
+            loggable(&request.to_version),
+            variant(request.from_variant),
+            variant(request.to_variant),
+            request.backup_worlds
+        ));
+    }
+    text
 }
 
 #[tauri::command]

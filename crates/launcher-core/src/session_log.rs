@@ -211,6 +211,46 @@ pub fn prune(directory: &Path, now: SystemTime) -> usize {
     removed
 }
 
+/// What a manual cleanup of previous sessions' logs did.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize)]
+pub struct Cleared {
+    /// Archived session files that were deleted.
+    pub removed: usize,
+    /// Archived session files that could not be deleted (for example an open handle).
+    pub failed: usize,
+}
+
+/// Delete every archived `session-*.log` regardless of age, as an explicit player
+/// action. `latest.log`, the file this session is writing (`active`), unrelated files,
+/// directories and links are never touched.
+pub fn clear_previous(directory: &Path, active: Option<&Path>) -> Cleared {
+    let mut cleared = Cleared::default();
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return cleared;
+    };
+    let active = active.and_then(Path::file_name);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let text = name.to_string_lossy();
+        if !(text.starts_with(FILE_PREFIX) && text.ends_with(FILE_SUFFIX)) {
+            continue;
+        }
+        if active == Some(name.as_os_str()) {
+            continue;
+        }
+        // `DirEntry::metadata` does not follow links, so a link is never treated as a file.
+        if !entry.metadata().is_ok_and(|metadata| metadata.is_file()) {
+            continue;
+        }
+        if std::fs::remove_file(entry.path()).is_ok() {
+            cleared.removed += 1;
+        } else {
+            cleared.failed += 1;
+        }
+    }
+    cleared
+}
+
 /// Make free text safe for a support log: one line, bounded, without home paths,
 /// URL queries, bearer tokens, JWTs, Panita serials or long opaque secrets.
 pub fn redact(text: &str) -> String {
@@ -251,7 +291,16 @@ fn redact_with_homes(text: &str, homes: &[String]) -> String {
     for word in cleaned.split_whitespace() {
         let lower = word.to_ascii_lowercase();
         // Instance and operation UUIDs identify support cases and are not secrets.
-        let identifier = uuid::Uuid::parse_str(word).is_ok();
+        // Also when it follows a short field name, as in `instance=<uuid>`: the word is
+        // otherwise long enough to be taken for an opaque secret.
+        let identifier = uuid::Uuid::parse_str(word).is_ok()
+            || word.split_once('=').is_some_and(|(name, value)| {
+                name.len() <= 32
+                    && name
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+                    && uuid::Uuid::parse_str(value).is_ok()
+            });
         let opaque = looks_like_serial(word)
             || word.matches('.').count() == 2 && word.len() > 40 && lower.starts_with("ey")
             || (word.len() >= 32
@@ -371,6 +420,30 @@ mod tests {
     }
 
     #[test]
+    fn support_identifiers_next_to_a_field_name_survive_but_opaque_values_do_not() {
+        let id = "b1d2f3a4-0000-4000-8000-000000000000";
+        let out = redact(&format!(
+            "update started instance={id} from_version={id} to_version={id} backup_worlds=true"
+        ));
+        assert_eq!(
+            out,
+            format!(
+                "update started instance={id} from_version={id} to_version={id} backup_worlds=true"
+            )
+        );
+        let secret = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+        assert_eq!(redact(&format!("token={secret}")), "[redacted]");
+        assert_eq!(
+            redact(&format!("a-key-with-dashes-in-it={id}")),
+            "[redacted]"
+        );
+        assert_eq!(
+            redact(&format!("bearer instance={id}")),
+            "bearer [redacted]"
+        );
+    }
+
+    #[test]
     fn redaction_bounds_message_length() {
         let out = redact(&"word ".repeat(2000));
         assert!(out.chars().count() <= MAX_MESSAGE_CHARS + 16);
@@ -391,6 +464,38 @@ mod tests {
         assert_eq!(removed, 2, "both session logs expire at the later clock");
         assert!(other.exists(), "unrelated files are never deleted");
         assert!(prune(&dir, SystemTime::now()) == 0);
+        assert!(std::fs::remove_dir_all(dir).is_ok());
+    }
+
+    #[test]
+    fn clearing_removes_only_archived_sessions_and_keeps_the_active_one() {
+        let dir = scratch();
+        let archived = dir.join("session-20261031-120000-1a2b3c4d.log");
+        let active = dir.join("session-20261031-130000-5e6f7a8b.log");
+        let latest = dir.join(LATEST);
+        let other = dir.join("notes.txt");
+        let folder = dir.join("session-folder.log");
+        for path in [&archived, &active, &latest, &other] {
+            assert!(std::fs::write(path, "x").is_ok());
+        }
+        assert!(std::fs::create_dir(&folder).is_ok());
+        let cleared = clear_previous(&dir, Some(&active));
+        assert_eq!(
+            cleared,
+            Cleared {
+                removed: 1,
+                failed: 0
+            }
+        );
+        assert!(!archived.exists());
+        for kept in [&active, &latest, &other, &folder] {
+            assert!(kept.exists(), "{kept:?}");
+        }
+        assert_eq!(clear_previous(&dir, Some(&active)), Cleared::default());
+        assert_eq!(
+            clear_previous(&dir.join("missing"), None),
+            Cleared::default()
+        );
         assert!(std::fs::remove_dir_all(dir).is_ok());
     }
 

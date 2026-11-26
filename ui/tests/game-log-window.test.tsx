@@ -47,3 +47,41 @@ test('clear and restore only change the local view of retained history', async (
   expect(await screen.findByText('Message 2500')).toBeTruthy();
   expect(backend.invoke.mock.calls.every(([command]) => command === 'game_log_snapshot')).toBe(true);
 });
+
+test('export and copy send the complete history, ignoring filters and a cleared view', async () => {
+  const user = userEvent.setup();
+  const sent: { command: string; text: string }[] = [];
+  const base = backend.invoke.getMockImplementation()!;
+  backend.invoke.mockImplementation(async (command: string, args: { offset?: number | null; text?: string }) => {
+    if (command === 'export_game_log' || command === 'copy_game_log') { sent.push({ command, text: args.text! }); return true; }
+    return base(command, args);
+  });
+  render(<GameLogWindow instanceId="fixture" requestId="run" />);
+  await screen.findByText('Message 2500');
+  await user.click(screen.getByRole('button', { name: 'Limpiar vista' }));
+  await user.click(screen.getByRole('button', { name: 'Exportar' }));
+  expect((await screen.findByText('Registro exportado.')).textContent).toBe('Registro exportado.');
+  await user.click(screen.getByRole('button', { name: 'Copiar' }));
+  expect(await screen.findByText('Registro copiado al portapapeles.')).toBeTruthy();
+  expect(sent.map(item => item.command)).toEqual(['export_game_log', 'copy_game_log']);
+  for (const { text } of sent) {
+    const rows = text.trimEnd().split('\n');
+    expect(rows).toHaveLength(3000);
+    expect(rows[0]).toBe('Message 0');
+    expect(rows[2999]).toBe('Message 2999');
+  }
+});
+
+test('a failed export is reported without losing the log', async () => {
+  const user = userEvent.setup();
+  const base = backend.invoke.getMockImplementation()!;
+  backend.invoke.mockImplementation(async (command: string, args: { offset?: number | null }) => {
+    if (command === 'export_game_log') throw 'storage_unavailable';
+    return base(command, args);
+  });
+  const { container } = render(<GameLogWindow instanceId="fixture" requestId="run" />);
+  await screen.findByText('Message 2500');
+  await user.click(screen.getByRole('button', { name: 'Exportar' }));
+  await waitFor(() => expect(container.querySelector('.transient-notice.notice-error')).toBeTruthy());
+  expect(screen.getByText('Message 2500')).toBeTruthy();
+});

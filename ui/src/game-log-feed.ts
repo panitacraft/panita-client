@@ -20,6 +20,20 @@ export function mergeLogPage(previous: GameLogSnapshot | null, next: GameLogSnap
     lines: [...previous.lines, ...next.lines].filter(line => (line.sequence ?? 0) >= offset) };
 }
 
+/** Every retained line, read page by page from the start so each read stays bounded. */
+export async function readWholeGameLog(load: (offset: number) => Promise<GameLogSnapshot>): Promise<GameLogSnapshot['lines']> {
+  const lines: GameLogSnapshot['lines'] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await load(offset);
+    if (page.offset !== offset || page.nextOffset < page.offset || page.nextOffset > page.total) throw new Error('Invalid console page');
+    for (const line of page.lines) lines.push(line);
+    if (page.nextOffset >= page.total) return lines;
+    if (page.nextOffset === offset) throw new Error('Console cursor did not advance');
+    offset = page.nextOffset;
+  }
+}
+
 type FeedOptions = {
   offset: number | null; follow: boolean;
   load: (offset: number | null) => Promise<GameLogSnapshot>;

@@ -311,7 +311,7 @@ panita-client/
 
 - Keep business logic in the UI-independent Rust core. Keep desktop integration thin and UI state separate from account secrets.
 - Closing the launcher window while games run hides it and keeps the owning process supervising those games. Opening the launcher again restores that process and its active-instance controls. Exit automatically after the last game and cancelled pending launch finish if the window remains hidden; keep an open or minimized window alive. Cancel other pending launches when hiding, and preserve the preparation-only close guard. This owner-approved behavior supersedes requiring the launcher window to remain open during gameplay (2026-10-18).
-- The owner requested crash notifications and a separate Minecraft log window on 2026-10-23. Unexpected nonzero game exit restores a hidden launcher and shows a Spanish dialog with its exit code, a bounded redacted crash excerpt, a continuously scrolling execution-log viewer and an option to open that instance's existing `minecraft/crash-reports/` directory. Requested stops do not produce crash notifications. Missing reports are reported honestly. On 2026-10-24 the owner explicitly approved unlimited Minecraft log entry retention in memory only, superseding the 256-event console ring. Keep all accepted redacted entries for the current/most recent execution of each instance until replaced or the launcher exits; memory use can grow with output. Bound each IPC read and rendered window, and retain per-line size and redaction protections. The log viewer never accepts arbitrary paths or commands, reads account files, persists/exports console output, or exposes credentials. Structured launcher diagnostics remain separate and retain their 256-event limit.
+- The owner requested crash notifications and a separate Minecraft log window on 2026-10-23. Unexpected nonzero game exit restores a hidden launcher and shows a Spanish dialog with its exit code, a bounded redacted crash excerpt, a continuously scrolling execution-log viewer and an option to open that instance's existing `minecraft/crash-reports/` directory. Requested stops do not produce crash notifications. Missing reports are reported honestly. On 2026-10-24 the owner explicitly approved unlimited Minecraft log entry retention in memory only, superseding the 256-event console ring. Keep all accepted redacted entries for the current/most recent execution of each instance until replaced or the launcher exits; memory use can grow with output. Bound each IPC read and rendered window, and retain per-line size and redaction protections. The log viewer never accepts arbitrary paths or commands, reads account files, persists console output on its own, or exposes credentials. The only export is the explicit player action of §5.4. Structured launcher diagnostics remain separate and retain their 256-event limit.
 - Owner decision, 2026-10-31: on Windows the launcher shows a notification-area (tray)
   icon with "Abrir Panita Client" and "Salir"; a left click reopens the window. Three
   global, off-by-default settings live under `launcher` in `settings.json` (additive keys
@@ -332,7 +332,7 @@ panita-client/
   GNOME needs its AppIndicator extension to display the icon. Linux behavior is
   implemented but unvalidated until tested on Ubuntu x64 (§6). macOS is not covered.
 - Keep storage, networking, and platform integrations testable behind clear boundaries. Avoid abstractions or dependencies without a concrete need.
-- The owner approved Prism as a behavioral reference for live Minecraft logs, formatting and local viewer controls on 2026-10-25. Use scoped change notifications with short burst coalescing, sequential cursor catch-up, Log4j time/level/thread/logger formatting, full retained-history search with bounded scans, wrap/colors, and local clear/restore. Keep the approved unlimited memory-only history, redaction, per-line protections and bounded IPC/rendering. Clear must not delete retained history. Do not add persistence, copying, uploading or export. Implement independently; do not copy Prism source.
+- The owner approved Prism as a behavioral reference for live Minecraft logs, formatting and local viewer controls on 2026-10-25. Use scoped change notifications with short burst coalescing, sequential cursor catch-up, Log4j time/level/thread/logger formatting, full retained-history search with bounded scans, wrap/colors, and local clear/restore. Keep the approved unlimited memory-only history, redaction, per-line protections and bounded IPC/rendering. Clear must not delete retained history. Do not add automatic persistence or uploading; copying and export exist only as the explicit actions of §5.4. Implement independently; do not copy Prism source.
 - Keep phased implementation work in the implementation plan and decision documents. Annex A preserves the accepted account-storage decision within this file so these policies remain available without separate documents.
 
 ## 6. Verification and Documentation
@@ -419,6 +419,85 @@ valid empties the list and reports the error. It stops when the tab closes.
   of the folder. Opening, revealing, copying and moving to the trash are unvalidated on a
   real desktop, and all of it is unvalidated on Ubuntu x64 (§6). Copying under a pure Wayland session without
   XWayland is unverified.
+
+### 5.3 Notices with details and update changelog (2026-11-26)
+
+Owner requests for 1.2.1-beta.2.
+
+- Outcomes of one sentence are toasts, not blocks in the page: a required instance update
+  (`update_required`, "Actualiza esta instancia antes de jugar.") is a plain toast.
+- An outcome that has a list behind it is a toast with a "Ver detalles" button that opens a modal
+  shaped like the update and uninstall prompts: the player's files in the way of an update,
+  install or repair (`pack_conflict`), files to download by hand (`manual_files_required`) and
+  what a completed operation kept or left behind (kept configuration, files moved to
+  `pack-backups`, native folders that could not be removed, including a manual native cleanup).
+  A toast with an action stays until dismissed or replaced, because it can be the only way back
+  to the decision. Pages and the instance controls no longer repeat these lists inline. Moving
+  the player's files aside is confirmed in that modal ("Continuar y guardar mis archivos") and
+  offered only for an update whose conflicts are all movable; the confirmation keeps
+  `move_aside` semantics and moves nothing before the player confirms. Persistent states, such
+  as a pack waiting for manual files (`awaiting_files`), keep their inline controls.
+- The details modal of a completed operation follows the owner's template (2026-11-26): a green
+  check, the operation's title ("Actualización completada", "Reparación completada",
+  "Instalación completada", or "Instancia desinstalada" and "Instancia eliminada"), the version
+  the instance now has as a chip (a custom pack's label or the vanilla Minecraft version, not
+  shown after an uninstall), the line "{instancia} ya está listo para jugar." (or that it was
+  uninstalled and personal data is kept), one bordered card per kind with its icon, title, count,
+  a short note and its rows (kept files, files that became the player's, files saved in
+  `pack-backups` with a button to open that folder, native folders left behind and why), and an
+  "Aceptar" footer.
+- Every modal puts its action buttons in a footer on the right, with the cancel or close action first
+  and the confirming action last (owner decision, 2026-11-26). Buttons that belong to one row of a
+  list, such as "Abrir carpeta" beside a file, stay with that row.
+- The uninstall modal uses the same layout as the update prompt (owner request, 2026-11-26): a
+  header with a red circled-minus icon, the title, the instance name in a monospace chip and a close
+  button, a checklist of what is kept, a "Eliminar también la carpeta de la
+  instancia" switch (off by default), and a footer with Cancelar and "Desinstalar". Turning the switch
+  on shows a red callout with the exact folder, what is lost and a separate "Entiendo que perderé
+  todos los datos de esta instancia" switch inside it, and the button becomes "Eliminar instancia",
+  enabled only after that acknowledgement; the confirmation rules of §4.3 are unchanged.
+- A cancelled operation shows no status chip beside the instance badges: it leaves the
+  installation as it was, and the Instalar or Jugar button already says what to do.
+- The update prompt follows the owner's template (2026-11-26): a header with "Actualizar modpack"
+  (or "Actualizar Minecraft"), the installed and new versions as chips and a close button; for packs a
+  "Notas de la versión" card; a checklist of what is kept; a "Copia de seguridad de mis mundos"
+  switch marked "Recomendado" and on by default; and a footer with Cancelar and "Actualizar a
+  {version}" with the reload icon. The prompt shows no warning box about opening worlds in another
+  version (owner decision, 2026-11-26, superseding Annex B's explanation requirement for this
+  prompt); the world backup stays the default and the only safeguard it offers. Both versions are
+  named at once from the labels the catalog already carries for a custom pack; the notes and any
+  name only the backend knows (a Modrinth version number) arrive when its answer does, so the
+  notes card says it is loading until then. The notes are plain bounded text (5000
+  characters, the API's limit; control characters removed; never rendered as markup). Modrinth
+  packs show the changelog fetched from Modrinth for the pinned version. Custom packs show the
+  `changelog` of the published version's manifest (owner decision, 2026-11-26): the launcher reads
+  that field from the raw `GET /v1/instances/{id}/versions/{versionId}/manifest` answer, with the
+  session when there is one, only when the prompt opens. It is never added to the parsed
+  `Manifest`, the cached manifest or any installation record, so no disk format changes and cached
+  manifests stay valid. A missing field, a failed request or an empty text means no notes ("El
+  autor no ha publicado notas para esta versión."). Vanilla has no notes card. The API's
+  published manifest did not carry `changelog` when this was written (it exists on the admin
+  version endpoints only), so custom packs show no notes until the API adds it to the manifest.
+
+### 5.4 Log export, copy and cleanup (2026-11-26)
+
+Owner request for 1.2.1-beta.3. It supersedes the earlier "no copying or export" limit of §5 for
+the Minecraft log viewer, only as the two explicit player actions below.
+
+- The log window has "Exportar" and "Copiar". Both act on the complete retained history of
+  that execution, ignoring the search, level filters and a cleared view. The window reads it through
+  the same bounded 500-event pages as the viewer, formats it as the viewer does (Log4j time,
+  thread/level and logger prefixes, plain stderr marked) and hands the text to the core once.
+- Export opens the native save dialog in Rust, so no path crosses IPC, and writes a `.txt` file
+  there; cancelling writes nothing. Copy uses the process-lifetime clipboard handle of §5.2. Both
+  accept text only from the matching log window of a retained execution, bounded to 256 MiB. The
+  text is the already redacted output; nothing is persisted, uploaded or exported automatically.
+- Each outcome of these actions, and of "Borrar registros anteriores" on the launcher diagnostics tab
+  (see Annex B, session log files), is a transient toast, never a message left in the page (owner
+  decision, 2026-11-26). Button labels carry no redundant words: the export is a text file by its
+  save dialog and the copy always covers the complete log.
+- These behaviors are verified by tests; the save dialog, clipboard and file deletion are
+  unvalidated on a real desktop and on Ubuntu x64 (§6).
 
 ## Annex A. Account and Token Storage Decision
 
@@ -566,9 +645,10 @@ and individual measurements are evidence, not product guarantees.
   only after ZIP read-back verification, identifying the instance and installed
   version at backup time. Reject linked/redirected entries, unsafe names, and
   detected source changes. Preserve incomplete directories without a completed receipt.
-- Backups exclude account data. Updating never restores or deletes worlds. Explain
-  that opening a world in another Minecraft version can change it and reverting
-  game files cannot undo those changes. Reinstalling against a changed catalog pin
+- Backups exclude account data. Updating never restores or deletes worlds. Opening a
+  world in another Minecraft version can change it and reverting game files cannot
+  undo those changes; the update prompt no longer says so (§5.3, owner decision,
+  2026-11-26). Reinstalling against a changed catalog pin
   uses the same explicit version-transition/backup workflow. Full player-data
   removal and shared-cache cleanup remain outside these maintenance controls.
 - Repair/Uninstall controls require an active recorded installation plan; damaged
@@ -650,8 +730,12 @@ and individual measurements are evidence, not product guarantees.
   game output. Create the folder 0700 and files 0600 on Unix. Delete only
   application-named session files older than 48 hours, at startup, never following
   links. File failures never affect the launcher. The diagnostics tab may open the
-  fixed logs folder; there is still no upload or arbitrary-path access. This
-  supersedes "no export" only for these local files.
+  fixed logs folder and, after an inline confirmation, delete the logs of previous
+  sessions (owner request, 2026-11-26): only application-named `session-*.log`
+  regular files, never `latest.log`, the file the running session writes, links,
+  directories or unrelated files; the result and any file that could not be deleted
+  are reported and noted in the session log. There is still no upload or
+  arbitrary-path access. This supersedes "no export" only for these local files.
 - Optional support identifiers are random process/session and operation UUIDs.
   They correlate one process or action; they are neither content hashes nor online
   report lookup codes. Clear structured events on process exit.

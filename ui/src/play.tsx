@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ChevronDown, CircleArrowUp, Download, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, CircleArrowUp, CircleMinus, Download, List, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, TriangleAlert } from 'lucide-react';
 import { InstanceProgress } from './components/instance-progress';
 import { AccountDialog } from './components/account-dialog';
 import { VariantDialog } from './components/variant-dialog';
@@ -9,17 +9,16 @@ import { TransientNotice, useTransientNotice } from './components/transient-noti
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { messageForError } from './errors';
-import { acceptPlaySnapshot, playActive, type PlaySnapshot } from './play-state';
+import { acceptPlaySnapshot, playActive, type PlayEntry, type PlaySnapshot } from './play-state';
 import { useLauncherUpdate } from './update';
 import { blocksPlay } from './update-state';
 import type { UpdateTarget } from './library-state';
 import { invokePlay, type PlayArguments, type PlayCommand, type UpdateArguments } from './play-api';
 import { previewOptions, withdrawnVariantText, type Variant, type VariantChange, type VariantOption } from './variant-state';
-import { nativeCleanupSummary, nativeRetentionReason, type NativeCleanupReport } from './native-cleanup-state';
-import {
-  backedUpSummary, conflictReasonText, conflictsResolvable, folderHint, manualHeading, reasonText, releasedSummary,
-  skippedSummary, updateConflictHeading, versionTitle, type VersionNames,
-} from './pack-state';
+import { nativeCleanupSummary, type NativeCleanupReport } from './native-cleanup-state';
+import { ConflictsDialog, CompletionDialog, DetailsDialog, ManualFilesDialog, NativeCleanupSection } from './components/notice-details';
+import { completionDetails, completionNote, entryNotice, type CompletionDetails } from './notice-state';
+import { conflictsResolvable, versionLabels, type VersionNames } from './pack-state';
 
 type PlayContextValue = {
   snapshot: PlaySnapshot | null;
@@ -62,21 +61,49 @@ export function PlayProvider({ children }: { children: ReactNode }) {
   return <PlayContext.Provider value={{ snapshot, error, act, lastUpdate: id => updates.current.get(id) ?? null }}>{children}</PlayContext.Provider>;
 }
 
-export function PlayNotice({ names = {} }: { names?: Record<string, string> }) {
+/** What a finished operation is called in its details modal. */
+function heading(entry: PlayEntry): string {
+  if (entry.phase === 'uninstalled') return entry.eraseRequested ? 'Instancia eliminada' : 'Instancia desinstalada';
+  return entry.operation === 'update' ? 'Actualización completada' : entry.operation === 'repair' ? 'Reparación completada' : 'Instalación completada';
+}
+
+/** `versions` holds what each instance has installed, read live so the modal shows the version the operation left. */
+export function PlayNotice({ names = {}, versions = {} }: { names?: Record<string, string>; versions?: Record<string, string> }) {
   const play = useContext(PlayContext);
   const toast = useTransientNotice();
   const seen = useRef(new Set<string>());
+  // What a finished operation kept or left behind, told by a toast and read in a modal.
+  const [completion, setCompletion] = useState<{ instanceId: string; heading: string; outcome: 'ready' | 'removed'; details: CompletionDetails } | null>(null);
+  const [completionError, setCompletionError] = useState<string | null>(null);
+  // The instance whose details toast is on screen. It goes away when that instance starts another operation.
+  const detailsToast = useRef<string | null>(null);
   useEffect(() => {
+    const watched = detailsToast.current;
+    if (watched && play?.snapshot?.instances.some(entry => entry.instanceId === watched && playActive(entry.phase))) {
+      detailsToast.current = null;
+      toast.clear();
+    }
     for (const entry of play?.snapshot?.instances ?? []) {
       const key = entry.requestId + ':' + entry.phase;
       if (seen.current.has(key)) continue;
       const message = entry.phase === 'installed' ? (entry.operation === 'update' ? 'Actualización completada.' : entry.operation === 'repair' ? 'Reparación completada.' : 'Instalación completada.')
         : entry.phase === 'uninstalled' ? (entry.eraseRequested ? 'Instancia eliminada.' : 'Instancia desinstalada. Tus datos personales se conservan.')
         : entry.phase === 'cancelled' ? 'Operación cancelada.' : null;
-      if (message) { seen.current.add(key); toast.show((names[entry.instanceId] ? names[entry.instanceId] + ': ' : '') + message); }
+      if (!message) continue;
+      seen.current.add(key);
+      const prefix = names[entry.instanceId] ? names[entry.instanceId] + ': ' : '';
+      const details = completionDetails(entry);
+      if (!details) { detailsToast.current = null; toast.show(prefix + message); continue; }
+      detailsToast.current = entry.instanceId;
+      toast.show(`${prefix}${message} ${completionNote(details)}`, 'success', {
+        label: 'Ver detalles',
+        onClick: () => { setCompletionError(null); setCompletion({ instanceId: entry.instanceId, heading: heading(entry), outcome: entry.phase === 'installed' ? 'ready' : 'removed', details }); },
+      });
     }
-  }, [play?.snapshot, toast.show, names]);
+  }, [play?.snapshot, toast.show, toast.clear, names]);
   return <><TransientNotice notice={toast.notice} />
+    {completion && <CompletionDialog heading={completion.heading} name={names[completion.instanceId] ?? null} outcome={completion.outcome} version={versions[completion.instanceId] ?? null} details={completion.details} busy={!isTauri()} error={completionError} onClose={() => { setCompletion(null); detailsToast.current = null; toast.clear(); }}
+      onOpenBackups={() => { setCompletionError(null); void invoke('open_instance_folder', { instanceId: completion.instanceId, folder: 'pack-backups' }).catch(cause => setCompletionError(messageForError(cause))); }} />}
     {play?.error && <p role="alert">{play.error}</p>}
     {play?.snapshot?.closeBlocked && <p className="catalog-notice" role="alert">No pudimos cerrar esta ventana. Cancela la instalación o el inicio pendiente y vuelve a intentarlo. Puedes minimizar esta ventana.</p>}
   </>;
@@ -102,7 +129,7 @@ export function usePlayControl() {
   return useContext(PlayContext);
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, removalPending = false, optionsAllowed = false, variants = ['standard'], withdrawnVariant = null, automaticSwitch = null }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; removalPending?: boolean; optionsAllowed?: boolean; variants?: Variant[]; withdrawnVariant?: Variant | null; automaticSwitch?: (VariantChange & { to: Variant }) | null }) {
+export function PlayControls({ instanceId, instanceName, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, removalPending = false, optionsAllowed = false, variants = ['standard'], withdrawnVariant = null, automaticSwitch = null }: { instanceId: string; instanceName?: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; removalPending?: boolean; optionsAllowed?: boolean; variants?: Variant[]; withdrawnVariant?: Variant | null; automaticSwitch?: (VariantChange & { to: Variant }) | null }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -128,13 +155,34 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   const [names, setNames] = useState<VersionNames | null>(null);
   const [lastBackup, setLastBackup] = useState(true);
   const [logError, setLogError] = useState<string | null>(null);
-  const [cleanupText, setCleanupText] = useState<string | null>(null);
   const toast = useTransientNotice();
   const [cleanupError, setCleanupError] = useState<string | null>(null);
-  const [cleanupDetails, setCleanupDetails] = useState<NativeCleanupReport['details']>([]);
+  // The list behind a toast, read in a modal: the player's files in the way, files to
+  // download by hand, or native folders a manual cleanup could not remove.
+  const [details, setDetails] = useState<'conflicts' | 'manual' | 'natives' | null>(null);
+  const [nativeReport, setNativeReport] = useState<NativeCleanupReport | null>(null);
+  const announced = useRef(new Set<string>());
+  const noticeToast = useRef(false);
   const entry = play?.snapshot?.instances.find(entry => entry.instanceId === instanceId);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const active = entry && playActive(entry.phase);
+  // A finished operation that stopped before changing anything is told with a toast, not a block in the page.
+  const notice = entry ? entryNotice(entry) : null;
+  const noticeKey = entry && notice ? `${entry.requestId}:${entry.phase}:${entry.error}` : null;
+  useEffect(() => {
+    if (!notice || !noticeKey || announced.current.has(noticeKey)) return;
+    announced.current.add(noticeKey);
+    const kind = notice.details;
+    noticeToast.current = true;
+    toast.show(notice.message, 'error', kind ? { label: 'Ver detalles', onClick: () => setDetails(kind) } : undefined);
+  }, [noticeKey]);
+  // The toast is about the operation that ended. Once the player starts another one (Continuar y guardar mis
+  // archivos, or Update again) it has been acted on, and a toast that stays until dismissed must not sit over the new progress.
+  useEffect(() => {
+    if (active && noticeToast.current) { noticeToast.current = false; toast.clear(); }
+  }, [active]);
+  // A modal about one operation closes with it: a new request must not reopen it by accident.
+  useEffect(() => { if (details === 'conflicts' || details === 'manual') { if (notice?.details !== details) setDetails(null); } }, [details, notice?.details]);
   // A required launcher update replaces Play; installing and updating instances stay available.
   const launcherUpdate = useLauncherUpdate();
   const launcherRequired = !active && blocksPlay(launcherUpdate?.view ?? null);
@@ -201,16 +249,14 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     busyRef.current = true;
     setBusy(true);
     setCleanupError(null);
-    setCleanupDetails([]);
-    setCleanupText(null);
     toast.show('Eliminando las carpetas nativas antiguas…', 'progress');
     try {
       const report = await invoke<NativeCleanupReport>('clean_native_cache', { instanceId });
-      if (report.retainedGenerations > 0) { toast.clear(); setCleanupText(nativeCleanupSummary(report)); }
-      else { setCleanupText(null); toast.show('Caché nativa limpia.'); }
-      setCleanupDetails(report.details);
+      if (report.retainedGenerations > 0) {
+        setNativeReport(report);
+        toast.show(nativeCleanupSummary(report), 'error', { label: 'Ver detalles', onClick: () => setDetails('natives') });
+      } else toast.show('Caché nativa limpia.');
     } catch (cause) {
-      setCleanupText(null);
       toast.clear(); setCleanupError(messageForError(cause));
     } finally {
       busyRef.current = false;
@@ -230,59 +276,32 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
   function askUpdate() {
     if (!updateTarget) return;
     setUpdateQuestion({ ...updateTarget, backupWorlds: true });
-    if (updateTarget.pack && isTauri()) {
-      setNames(null);
-      void invoke<VersionNames>('pack_version_names', { instanceId }).then(setNames).catch(() => setNames(null));
+    if (updateTarget.pack) {
+      // The catalog already names the versions of a custom pack, so the prompt shows them at once; the notes
+      // (`changelog` undefined) and any name only the backend knows (a Modrinth version number) arrive with its
+      // answer, which waits on the network. A failure or the browser preview leaves the names and no notes.
+      const seeded: VersionNames = { installed: updateTarget.labels?.installed ?? null, available: updateTarget.labels?.available ?? null, changelog: undefined };
+      setNames(seeded);
+      if (isTauri()) {
+        void invoke<VersionNames>('pack_version_names', { instanceId })
+          .then(answer => setNames({ installed: answer.installed ?? seeded.installed, available: answer.available ?? seeded.available, changelog: answer.changelog ?? null }))
+          .catch(() => setNames({ ...seeded, changelog: null }));
+      } else setNames({ ...seeded, changelog: null });
     }
   }
+
+  // Both prompts name the version being left and the one being installed; a pack uses readable names once they are known.
+  const updateLabels = updateQuestion
+    ? updateQuestion.pack ? versionLabels(names, updateQuestion.fromVersion, updateQuestion.toVersion) : { installed: updateQuestion.fromVersion, available: updateQuestion.toVersion }
+    : null;
 
   return <div className="play-controls">
     <TransientNotice notice={toast.notice} />
     {logError && <p role="alert">{logError}</p>}
     {entry?.consoleError && <p role="alert">Minecraft se inició, pero no pudimos abrir su consola automáticamente. Puedes volver a intentarlo con «Ver registro». {messageForError(entry.consoleError)}</p>}
     {entry && (entry.operation === 'repair' || entry.operation === 'uninstall') && !active && entry.retainedFiles > 0 && <p role="status">Conservamos {entry.retainedFiles} archivos nativos modificados o que no pudimos comprobar.</p>}
-    {entry?.nativeCleanup && !active && entry.nativeCleanup.retainedGenerations > 0 && <div role="status">
-      <p>{nativeCleanupSummary(entry.nativeCleanup)}</p>
-      {entry.nativeCleanup.retainedGenerations > 0 && <p>Cierra los programas que usen esas carpetas y vuelve a intentar «Limpiar nativos antiguos».</p>}
-      {entry.nativeCleanup.details.length > 0 && <details><summary>Detalle de la limpieza automática</summary>
-        <ul>{entry.nativeCleanup.details.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
-      </details>}
-    </div>}
     {switchNotice && <p role="status">{withdrawnVariantText(switchNotice)}</p>}
-    {entry?.error && entry.error !== 'operation_cancelled' && <p className="account-error" role="alert">{messageForError(entry.error)}</p>}
-    {!active && entry?.operation === 'update' && entry.error === 'pack_conflict' && (entry.packConflicts?.length ?? 0) > 0 && retry && <fieldset className="catalog-notice">
-      <legend>{updateConflictHeading(entry.packConflicts?.length ?? 0)}</legend>
-      <p>No cambiamos nada: tu instalación sigue como estaba.</p>
-      <ul>{(entry.packConflicts ?? []).map(conflict => <li key={conflict.path}><code>{conflict.path}</code>: {conflictReasonText(conflict.reason)}</li>)}</ul>
-      {conflictsResolvable(entry.packConflicts ?? [])
-        ? <>
-          <p>Si continúas, movemos tus archivos a la carpeta <code>pack-backups</code> de esta instancia (no los borramos) e instalamos los del modpack.</p>
-          <div className="account-buttons">
-            <button type="button" disabled={busy || !isTauri()} onClick={() => void act('begin_update', { requestId: crypto.randomUUID(), update: { ...retry, move_aside: true } })}>Continuar y guardar mis archivos</button>
-          </div>
-        </>
-        : <p>Mueve esa carpeta o enlace fuera de la instancia y vuelve a actualizar.</p>}
-    </fieldset>}
-    {!active && entry?.operation === 'update' && entry.error === 'manual_files_required' && (entry.packAwaiting?.length ?? 0) > 0 && retry && <fieldset className="catalog-notice">
-      <legend>{manualHeading(entry.packAwaiting?.length ?? 0)}</legend>
-      <p>No cambiamos nada. Descarga estos archivos, guárdalos en la carpeta indicada y vuelve a intentarlo.</p>
-      <ul>{(entry.packAwaiting ?? []).map(file => <li key={file.path}>
-        <strong>{file.name}</strong> (<code>{file.fileName}</code>)
-        <p>{reasonText(file.reason)} {folderHint(file)}</p>
-        <div className="account-buttons">
-          <button type="button" disabled={busy || !isTauri()} onClick={() => void invoke('open_curseforge_project', { projectId: file.projectId }).catch(cause => setLogError(messageForError(cause)))}>Abrir CurseForge</button>
-          <button type="button" disabled={busy || !isTauri()} onClick={() => void invoke('open_instance_folder', { instanceId, folder: file.folder }).catch(cause => setLogError(messageForError(cause)))}>Abrir carpeta</button>
-        </div>
-      </li>)}</ul>
-    </fieldset>}
-    {!active && (entry?.operation === 'update' || entry?.operation === 'repair') && entry.phase === 'installed' && ((entry.packSkipped?.length ?? 0) > 0 || (entry.packReleased?.length ?? 0) > 0 || (entry.packBackedUp?.length ?? 0) > 0) && <div role="status">
-      {(entry.packSkipped?.length ?? 0) > 0 && <p>{skippedSummary(entry.packSkipped ?? [])}</p>}
-      {(entry.packReleased?.length ?? 0) > 0 && <p>{releasedSummary(entry.packReleased ?? [])}</p>}
-      {(entry.packBackedUp?.length ?? 0) > 0 && <>
-        <p>{backedUpSummary(entry.packBackedUp ?? [])}</p>
-        <button type="button" disabled={busy || !isTauri()} onClick={() => void invoke('open_instance_folder', { instanceId, folder: 'pack-backups' }).catch(cause => setLogError(messageForError(cause)))}>Abrir copias de archivos</button>
-      </>}
-    </div>}
+    {entry?.error && entry.error !== 'operation_cancelled' && !notice && <p className="account-error" role="alert">{messageForError(entry.error)}</p>}
     {entry?.phase === 'warning' && <div className="catalog-notice" role="alert">
       <p>No pudimos comprobar si esta instancia sigue habilitada. Usaremos la instalación local verificada. Si usas una cuenta Microsoft, necesitas conexión para verificarla.</p>
       {pack && <p>Tampoco podemos comprobar si hay una versión más nueva del modpack, así que esta instalación puede estar desactualizada.</p>}
@@ -293,7 +312,7 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     </div>}
     {forceQuestion && entry?.requestId === forceQuestion && <AccountDialog title="Cerrar Minecraft" onCancel={() => setForceQuestion(null)}>
       <p>Se cerrará el juego inmediatamente. Puedes perder cambios sin guardar.</p>
-      <div className="account-buttons"><Button variant="destructive" disabled={busy} onClick={() => { setForceQuestion(null); void act('stop_game', { requestId: entry.requestId, force: true }); }}><Square aria-hidden="true" />Confirmar cierre forzoso</Button><Button variant="outline" onClick={() => setForceQuestion(null)}><X aria-hidden="true" />Cancelar</Button></div>
+      <div className="account-buttons"><Button variant="outline" onClick={() => setForceQuestion(null)}><X aria-hidden="true" />Cancelar</Button><Button variant="destructive" disabled={busy} onClick={() => { setForceQuestion(null); void act('stop_game', { requestId: entry.requestId, force: true }); }}><Square aria-hidden="true" />Confirmar cierre forzoso</Button></div>
     </AccountDialog>}
     <div className="instance-actions">
     <div className="split-button" role="group" aria-label="Controles de la instancia">
@@ -323,52 +342,78 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     </>}
     </div>
     </div>
-    {cleanupText && <p role="status">{cleanupText}</p>}
-    {cleanupDetails.length > 0 && <details><summary>Por qué se conservaron estas carpetas</summary>
-      <ul>{cleanupDetails.map(detail => <li key={detail.directory}><code>{detail.directory}</code>: {nativeRetentionReason(detail.reason)}</li>)}</ul>
-    </details>}
     {cleanupError && <p role="alert">{cleanupError}</p>}
+    {details === 'conflicts' && entry?.packConflicts && notice?.details === 'conflicts' && <ConflictsDialog conflicts={entry.packConflicts} operation={entry.operation}
+      resolvable={conflictsResolvable(entry.packConflicts)} canContinue={entry.operation === 'update' && !!retry && conflictsResolvable(entry.packConflicts)}
+      busy={busy || !isTauri()} onClose={() => setDetails(null)}
+      onContinue={() => { if (!retry) return; setDetails(null); void act('begin_update', { requestId: crypto.randomUUID(), update: { ...retry, move_aside: true } }); }} />}
+    {details === 'manual' && entry?.packAwaiting && notice?.details === 'manual' && <ManualFilesDialog files={entry.packAwaiting} busy={busy || !isTauri()} onClose={() => setDetails(null)}
+      onOpenSource={file => void invoke('open_curseforge_project', { projectId: file.projectId }).catch(cause => setLogError(messageForError(cause)))}
+      onOpenFolder={file => void invoke('open_instance_folder', { instanceId, folder: file.folder }).catch(cause => setLogError(messageForError(cause)))} />}
+    {details === 'natives' && nativeReport && <DetailsDialog title="Carpetas nativas antiguas" onClose={() => setDetails(null)}><NativeCleanupSection report={nativeReport} /></DetailsDialog>}
     {variantDialog && <VariantDialog variants={variants} options={variantDialog.options} error={variantDialog.error} busy={busy} onConfirm={confirmVariant} onCancel={() => setVariantDialog(null)} />}
-    <dialog ref={uninstallDialog} className="update-dialog" aria-labelledby={instanceId + '-uninstall-title'} onCancel={() => setUninstallQuestion(false)} onClose={() => { if (!uninstallDialog.current?.open) setUninstallQuestion(false); }}>
+    <dialog ref={uninstallDialog} className="update-dialog update-modal" aria-labelledby={instanceId + '-uninstall-title'} onCancel={() => setUninstallQuestion(false)} onClose={() => { if (!uninstallDialog.current?.open) setUninstallQuestion(false); }}>
     {uninstallQuestion && <>
-      <h2 id={instanceId + '-uninstall-title'}>Desinstalar instancia</h2>
-      {!deleteInstance && <>
-      <p>La instancia dejará de estar lista para jugar. Conservaremos tus mundos, ajustes, capturas, mods añadidos y copias de seguridad.</p>
-      <p>{pack ? "Se quitarán los archivos del modpack sin cambios y sus carpetas nativas." : "Se limpiarán sus carpetas nativas."} Puedes reinstalarla después.</p>
-      </>}
-      <label className="backup-choice"><input type="checkbox" checked={deleteInstance} onChange={event => { setDeleteInstance(event.target.checked); setEraseConfirmed(false); }} /><span>Eliminar también la carpeta de la instancia</span></label>
-      {removalPending && <p role="alert">Hay una eliminación pendiente. Marca la opción de eliminar la carpeta para reintentarla.</p>}
-      {deleteInstance && <div className="erase-warning">
+      <div className="update-head">
+        <h2 id={instanceId + '-uninstall-title'} className="dialog-title is-danger"><CircleMinus aria-hidden="true" />Desinstalar instancia</h2>
+        {instanceName && <span className="name-chip">{instanceName}</span>}
+        <button type="button" className="update-close" aria-label="Cerrar" disabled={busy} onClick={() => setUninstallQuestion(false)}><X aria-hidden="true" /></button>
+      </div>
+      {!deleteInstance && <ul className="update-checks">
+        <li><Check aria-hidden="true" />Conservaremos tus mundos, ajustes, capturas, mods añadidos y copias de seguridad.</li>
+        <li><Check aria-hidden="true" />{pack ? 'Se quitarán los archivos del modpack sin cambios y sus carpetas nativas.' : 'Se limpiarán sus carpetas nativas.'} Puedes reinstalarla después.</li>
+      </ul>}
+      {removalPending && <p className="update-callout" role="alert"><TriangleAlert aria-hidden="true" /><span>Hay una eliminación pendiente. Marca la opción de eliminar la carpeta para reintentarla.</span></p>}
+      <div className="update-backup">
+        <label htmlFor={instanceId + '-uninstall-erase'}>Eliminar también la carpeta de la instancia</label>
+        <input id={instanceId + '-uninstall-erase'} className="update-switch" role="switch" type="checkbox" checked={deleteInstance} onChange={event => { setDeleteInstance(event.target.checked); setEraseConfirmed(false); }} />
+      </div>
+      {deleteInstance && <div className="update-danger">
         {logError && <p role="alert">No pudimos verificar la carpeta. Cierra este diálogo y vuelve a intentarlo. {logError}</p>}
-        <p>Se eliminará permanentemente esta carpeta y todo su contenido:</p>
+        <p className="update-danger-head"><TriangleAlert aria-hidden="true" />Se eliminará permanentemente esta carpeta y todo su contenido:</p>
         <p><code>{instanceFolder ?? (isTauri() ? 'Consultando carpeta…' : 'Carpeta de esta instancia · vista previa')}</code></p>
         <p>Se borrarán mundos, capturas, ajustes, mods y copias de seguridad. No se puede deshacer. Tus cuentas, otras instancias y cachés se conservan.</p>
-        <label className="backup-choice"><input type="checkbox" checked={eraseConfirmed} onChange={event => setEraseConfirmed(event.target.checked)} /><span>Entiendo que perderé todos los datos de esta instancia</span></label>
+        <div className="update-ack">
+          <label htmlFor={instanceId + '-uninstall-ack'}>Entiendo que perderé todos los datos de esta instancia</label>
+          <input id={instanceId + '-uninstall-ack'} className="update-switch" role="switch" type="checkbox" checked={eraseConfirmed} onChange={event => setEraseConfirmed(event.target.checked)} />
+        </div>
       </div>}
-      <div className="account-buttons">
+      <div className="update-foot">
+        <Button variant="outline" disabled={busy} onClick={() => setUninstallQuestion(false)}>Cancelar</Button>
         <Button variant="destructive" disabled={busy || !isTauri() || !play?.snapshot || (removalPending && !deleteInstance) || (deleteInstance && (!eraseConfirmed || !instanceFolder))} onClick={() => { setUninstallQuestion(false); void act('begin_uninstall', { requestId: crypto.randomUUID(), deleteInstance }); }}><Trash2 aria-hidden="true" />{deleteInstance ? 'Eliminar instancia' : 'Desinstalar'}</Button>
-        <Button variant="secondary" disabled={busy} onClick={() => setUninstallQuestion(false)}><X aria-hidden="true" />Cancelar</Button>
       </div>
     </>}
     </dialog>
-    <dialog ref={updateDialog} className="update-dialog" aria-labelledby={instanceId + '-update-title'} aria-describedby={instanceId + '-update-warning'} onCancel={() => setUpdateQuestion(null)} onClose={() => { if (!updateDialog.current?.open) setUpdateQuestion(null); }}>
-    {updateQuestion && <>
-      <h2 id={instanceId + '-update-title'} className="dialog-title"><CircleArrowUp aria-hidden="true" />{updateQuestion.pack ? versionTitle(names, updateQuestion.fromVersion, updateQuestion.toVersion) : `Actualizar Minecraft (${updateQuestion.fromVersion} → ${updateQuestion.toVersion})`}</h2>
-      <ul className="update-notes">
-        {updateQuestion.pack && <li><ShieldCheck aria-hidden="true" />Actualizaremos solo los archivos del modpack que no hayas cambiado.</li>}
-        {updateQuestion.pack && <li><ShieldCheck aria-hidden="true" />Tus mundos, mods añadidos y ajustes editados se conservan.</li>}
-        {updateQuestion.pack && withdrawnVariant && <li><TriangleAlert aria-hidden="true" />{withdrawnVariantText(withdrawnVariant)}</li>}
-        <li id={instanceId + '-update-warning'} className="is-warning"><TriangleAlert aria-hidden="true" />Abrir mundos con otra versión puede cambiarlos. Volver de versión no deshace esos cambios.</li>
+    <dialog ref={updateDialog} className="update-dialog update-modal" aria-labelledby={instanceId + '-update-title'} onCancel={() => setUpdateQuestion(null)} onClose={() => { if (!updateDialog.current?.open) setUpdateQuestion(null); }}>
+    {updateQuestion && updateLabels && <>
+      <div className="update-head">
+        <h2 id={instanceId + '-update-title'} className="dialog-title"><CircleArrowUp aria-hidden="true" />{updateQuestion.pack ? 'Actualizar modpack' : 'Actualizar Minecraft'}</h2>
+        <span className="update-versions"><span className="version-chip">{updateLabels.installed}</span><ArrowRight aria-hidden="true" /><span className="sr-only">a</span><span className="version-chip is-new">{updateLabels.available}</span></span>
+        <button type="button" className="update-close" aria-label="Cerrar" onClick={() => setUpdateQuestion(null)}><X aria-hidden="true" /></button>
+      </div>
+      {updateQuestion.pack && <div className="update-card">
+        <h3 id={instanceId + '-notes-title'}><List aria-hidden="true" />Notas de la versión</h3>
+        {names?.changelog === undefined ? <p className="update-card-empty" role="status">Buscando las novedades…</p>
+          : names?.changelog ? <pre className="changelog" tabIndex={0} aria-labelledby={instanceId + '-notes-title'}>{names?.changelog}</pre>
+          : <p className="update-card-empty">El autor no ha publicado notas para esta versión.</p>}
+      </div>}
+      <ul className="update-checks">
+        <li><Check aria-hidden="true" />{updateQuestion.pack ? 'Solo se reemplazan los archivos del modpack que no hayas modificado.' : `Se instalan los archivos de Minecraft ${updateLabels.available}.`}</li>
+        <li><Check aria-hidden="true" />{updateQuestion.pack ? 'Tus mundos, mods añadidos y ajustes personalizados se conservan.' : 'Tus mundos y ajustes se conservan.'}</li>
       </ul>
-      <label className="backup-choice"><input type="checkbox" checked={updateQuestion.backupWorlds} onChange={event => setUpdateQuestion({ ...updateQuestion, backupWorlds: event.target.checked })} /><span>Crear copia de mis mundos (recomendado)</span></label>
-      <div className="account-buttons">
+      {updateQuestion.pack && withdrawnVariant && <p className="update-callout"><TriangleAlert aria-hidden="true" /><span>{withdrawnVariantText(withdrawnVariant)}</span></p>}
+      <div className="update-backup">
+        <label htmlFor={instanceId + '-update-backup'}><span>Copia de seguridad de mis mundos</span><span className="update-chip">Recomendado</span></label>
+        <input id={instanceId + '-update-backup'} className="update-switch" role="switch" type="checkbox" checked={updateQuestion.backupWorlds} onChange={event => setUpdateQuestion({ ...updateQuestion, backupWorlds: event.target.checked })} />
+      </div>
+      <div className="update-foot">
+        <Button variant="outline" disabled={busy} onClick={() => setUpdateQuestion(null)}>Cancelar</Button>
         <Button disabled={busy || !isTauri() || !play?.snapshot} onClick={() => {
           const choice = updateQuestion;
           setUpdateQuestion(null);
           setLastBackup(choice.backupWorlds);
           void act('begin_update', { requestId: crypto.randomUUID(), update: { from_version: choice.fromVersion, to_version: choice.toVersion, backup_worlds: choice.backupWorlds } });
-        }}><RefreshCw aria-hidden="true" />Actualizar</Button>
-        <Button variant="secondary" disabled={busy} onClick={() => setUpdateQuestion(null)}><X aria-hidden="true" />Cancelar</Button>
+        }}><RefreshCw aria-hidden="true" />Actualizar a {updateLabels.available}</Button>
       </div>
     </>}
     </dialog>

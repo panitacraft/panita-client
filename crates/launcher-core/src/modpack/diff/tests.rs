@@ -389,3 +389,110 @@ fn hash_comparison_needs_one_shared_algorithm_and_no_disagreement() {
     };
     assert!(!same(&both, &mixed));
 }
+
+/// The state an update would publish from `result`, as `run_update` builds it.
+fn published(previous: &PackState, result: &Diff) -> PackState {
+    PackState {
+        files: result.files.clone(),
+        consumed_defaults: result.consumed.clone(),
+        skipped_configuration: result.skipped.clone(),
+        ..previous.clone()
+    }
+}
+
+#[test]
+fn a_skipped_default_keeps_the_published_state_valid_through_later_updates() {
+    // The player already had a file where the pack seeds a default: the first update
+    // keeps it whole and records it as skipped, with no baseline.
+    let old = state(Vec::new(), &[]);
+    let id = old.id;
+    let incoming = || vec![want("config/seed.toml", Defaults, 5)];
+    let disk = [("config/seed.toml", file(9))];
+    let first = run(&old, incoming(), &disk);
+    let first_state = published(&old, &first);
+    assert!(first_state.validate(id).is_ok());
+    assert_eq!(first_state.skipped_configuration.len(), 1);
+    // The same file is offered again by the next update. The state it publishes must
+    // still satisfy the invariants the validator enforces on every pack state.
+    let second = run(&first_state, incoming(), &disk);
+    let second_state = published(&first_state, &second);
+    assert!(
+        second_state.validate(id).is_ok(),
+        "a skipped default made the next published state invalid"
+    );
+    assert_eq!(second_state.skipped_configuration.len(), 1);
+}
+
+/// Every combination of what a path was, what it holds and what the pack now wants
+/// must publish a state that passes the validator; otherwise an update would fail
+/// with a generic invalid-data error after it had already downloaded everything.
+#[test]
+fn every_diff_outcome_publishes_a_valid_state() {
+    let path = "config/thing.toml";
+    for ownership in [Content, Defaults, Enforced, Override] {
+        // The recorded entry: none, clean, or kept whole (non-content only).
+        let recorded: [Option<(u64, Option<u64>)>; 3] = [None, Some((1, Some(1))), Some((1, None))];
+        for previous in recorded {
+            if previous.is_some_and(|(_, baseline)| baseline.is_none()) && ownership == Content {
+                continue;
+            }
+            for consumed in [false, true] {
+                for desired in [1, 2] {
+                    for disk in [Local::Absent, file(1), file(2), file(9), Local::Unsafe] {
+                        let mut old = state(Vec::new(), &[]);
+                        let id = old.id;
+                        if let Some((was, baseline)) = previous {
+                            old.files
+                                .push(managed(path, ownership.clone(), was, baseline));
+                            if baseline.is_none() {
+                                old.skipped_configuration.push(SkippedConfiguration {
+                                    path: path.into(),
+                                    desired: hashes(was),
+                                });
+                            }
+                        }
+                        if consumed || ownership == Defaults && previous.is_some() {
+                            old.consumed_defaults.insert(path.into());
+                        }
+                        assert!(
+                            old.validate(id).is_ok(),
+                            "fixture {ownership:?} {previous:?} {consumed}"
+                        );
+                        let result = run(
+                            &old,
+                            vec![want(path, ownership.clone(), desired)],
+                            &[(path, disk.clone())],
+                        );
+                        let next = published(&old, &result);
+                        assert!(
+                            next.validate(id).is_ok(),
+                            "{ownership:?} previous={previous:?} consumed={consumed} \
+                             desired={desired} disk={disk:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_rejected_state_names_the_file_that_broke_it() {
+    let old = state(Vec::new(), &[]);
+    let id = old.id;
+    // A kept-whole configuration file with no skip record is the broken invariant.
+    let broken = PackState {
+        files: vec![managed("config/seed.toml", Defaults, 5, None)],
+        consumed_defaults: ["config/seed.toml".to_owned()].into(),
+        ..old
+    };
+    let error = broken.validate(id).err();
+    assert_eq!(
+        error.as_ref().map(|error| error.code()),
+        Some(crate::error::ErrorCode::InvalidData)
+    );
+    assert_eq!(
+        error.as_ref().and_then(|error| error.path()),
+        Some("config/seed.toml")
+    );
+}

@@ -1,6 +1,7 @@
 //! Versioned pack state to embed in a future installed-plan schema. No disk writer
 //! is enabled here; vanilla schema 4 and its recovery readers remain authoritative.
 use super::*;
+use crate::error::ResultDetail;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -125,19 +126,21 @@ impl PackState {
         let mut paths = BTreeMap::new();
         let mut total = 0u64;
         for file in &self.files {
-            game_path(&file.path)?;
-            file.desired.validate()?;
+            game_path(&file.path).at_path(&file.path)?;
+            file.desired.validate().at_path(&file.path)?;
             if let Some(baseline) = &file.baseline {
-                baseline.validate()?;
+                baseline.validate().at_path(&file.path)?;
             }
             if file.size > MAX_FILE_BYTES
                 || paths.insert(path_key(&file.path), file).is_some()
                 || (file.ownership == Ownership::Content
                     && file.baseline.as_ref() != Some(&file.desired))
             {
-                return Err(invalid());
+                return Err(invalid().with_path(&file.path));
             }
-            total = total.checked_add(file.size).ok_or_else(invalid)?;
+            total = total
+                .checked_add(file.size)
+                .ok_or_else(|| invalid().with_path(&file.path))?;
         }
         if total > MAX_PACK_BYTES {
             return Err(invalid());
@@ -168,24 +171,26 @@ impl PackState {
         for skip in &self.skipped_configuration {
             skip.desired.validate()?;
             let key = path_key(&skip.path);
-            let file = paths.get(&key).ok_or_else(invalid)?;
+            let file = paths
+                .get(&key)
+                .ok_or_else(|| invalid().with_path(&skip.path))?;
             if skip.path != file.path
                 || file.ownership == Ownership::Content
                 || skip.desired != file.desired
                 || !skipped.insert(key)
             {
-                return Err(invalid());
+                return Err(invalid().with_path(&skip.path));
             }
         }
         for file in &self.files {
             if file.ownership == Ownership::Defaults && !consumed.contains(&path_key(&file.path)) {
-                return Err(invalid());
+                return Err(invalid().with_path(&file.path));
             }
             if file.ownership != Ownership::Content
                 && file.baseline.as_ref() != Some(&file.desired)
                 && !skipped.contains(&path_key(&file.path))
             {
-                return Err(invalid());
+                return Err(invalid().with_path(&file.path));
             }
         }
         Ok(())

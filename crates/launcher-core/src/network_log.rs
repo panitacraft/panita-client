@@ -23,6 +23,12 @@ pub fn install(sink: impl Fn(Level, &str) + Send + Sync + 'static) {
     let _ = SINK.set(Box::new(sink));
 }
 
+/// Record one free-text diagnostic from the core. The caller guarantees the text is
+/// fixed vocabulary plus identifiers; the sink redacts and bounds it again.
+pub fn note(level: Level, text: &str) {
+    emit(level, text);
+}
+
 fn emit(level: Level, text: &str) {
     if let Some(sink) = SINK.get() {
         sink(level, text);

@@ -223,16 +223,21 @@ pub(super) async fn open_instance_folder(
         .map(|_| true)
 }
 
-/// Readable names for the installed and the available version of a pack, for the
-/// update prompt. A failed lookup falls back to the plain identifiers.
+/// Readable names for the installed and the available version of a pack and the
+/// release notes of the available one (Modrinth's changelog or the Panita manifest's),
+/// for the update prompt. A failed lookup falls back to the plain identifiers and no
+/// notes.
 #[tauri::command]
 pub(super) async fn pack_version_names(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
     instance_id: Uuid,
 ) -> Result<Value, ErrorCode> {
     use launcher_core::{
-        catalog::CatalogSource, modpack::modrinth::ModrinthClient, registry::InstanceRegistry,
+        catalog::CatalogSource,
+        modpack::{cache::ManifestClient, modrinth::ModrinthClient},
+        registry::InstanceRegistry,
     };
     main_only(&window)?;
     let paths = paths(&app)?;
@@ -267,15 +272,43 @@ pub(super) async fn pack_version_names(
     {
         let lookup = async {
             let client = ModrinthClient::new().ok()?;
-            let from = client.version_number(from).await.ok()?;
-            let to = client.version_number(to).await.ok()?;
+            let from = client.version_info(from).await.ok()?;
+            let to = client.version_info(to).await.ok()?;
             Some((from, to))
         };
         if let Some((from, to)) = lookup.await {
-            return Ok(json!({"installed": from, "available": to}));
+            return Ok(json!({
+                "installed": from.number,
+                "available": to.number,
+                "changelog": to.changelog,
+            }));
         }
     }
-    Ok(json!({"installed": installed, "available": available}))
+    // A custom pack names its versions through the catalog and publishes its notes in
+    // the manifest of the new version. The notes are read for this prompt only. The
+    // session is sent when there is one, because a restricted pack's manifest is served
+    // to nothing else; without it the request is public and a failure means no notes.
+    let changelog = match &record.last_catalog.source {
+        CatalogSource::Custom {
+            current_version_id: Some(version),
+            ..
+        } => {
+            let credentials = super::activation_commands::controller(&state)
+                .ok()
+                .and_then(|controller| controller.online_credentials().ok());
+            match ManifestClient::new() {
+                Ok(client) => client
+                    .with_auth(credentials)
+                    .changelog(instance_id, *version)
+                    .await
+                    .ok()
+                    .flatten(),
+                Err(_) => None,
+            }
+        }
+        _ => None,
+    };
+    Ok(json!({"installed": installed, "available": available, "changelog": changelog}))
 }
 
 #[tauri::command]

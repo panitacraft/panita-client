@@ -35,8 +35,8 @@ export function VariantDialog({ variants, options, error = null, busy, onConfirm
     {recommendation?.reason && <VariantReason recommendation={recommendation} />}
     <VariantPicker cards={cards} loading={loading} selected={selected} recommended={recommendation?.variant ?? null} onPick={setPicked} />
     <div className="account-buttons">
-      <Button disabled={busy || loading || cards.length === 0} onClick={() => onConfirm(selected)}><Download aria-hidden="true" />Instalar</Button>
       <Button variant="secondary" disabled={busy} onClick={onCancel}><X aria-hidden="true" />Cancelar</Button>
+      <Button disabled={busy || loading || cards.length === 0} onClick={() => onConfirm(selected)}><Download aria-hidden="true" />Instalar</Button>
     </div>
   </AccountDialog>;
 }
