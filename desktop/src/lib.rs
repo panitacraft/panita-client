@@ -17,6 +17,7 @@ mod play_commands;
 mod protocol;
 mod screenshot_commands;
 mod settings_commands;
+mod skin_commands;
 mod tray;
 mod update_commands;
 mod window_commands;
@@ -32,6 +33,9 @@ struct DesktopState {
     activation: Mutex<Option<Arc<ActivationController>>>,
     orphaned_callback: bool,
     catalog_fetch: tokio::sync::Mutex<()>,
+    /// Serializes the skin manager's calls to Minecraft Services, so a background
+    /// synchronisation never interleaves with an apply.
+    skins: tokio::sync::Mutex<()>,
     plays: Arc<play_commands::PlayController>,
     launcher_update: Arc<update_commands::UpdateController>,
     window: Mutex<settings_commands::WindowPreferences>,
@@ -278,6 +282,7 @@ pub fn run() {
             accounts: Mutex::new(None),
             activation: Mutex::new(None),
             catalog_fetch: tokio::sync::Mutex::new(()),
+            skins: tokio::sync::Mutex::new(()),
             launcher_update: Arc::new(update_commands::UpdateController::new(
                 plays.clone(),
                 logs,
@@ -426,6 +431,14 @@ pub fn run() {
             screenshot_commands::reveal_screenshot,
             screenshot_commands::copy_screenshot,
             screenshot_commands::delete_screenshot,
+            skin_commands::skins_snapshot,
+            skin_commands::skins_sync,
+            skin_commands::skins_apply,
+            skin_commands::skins_add_look,
+            skin_commands::skins_save_current,
+            skin_commands::skins_edit_look,
+            skin_commands::skins_delete_look,
+            skin_commands::skin_texture,
             pack_commands::import_pack_file,
             pack_commands::content_cache_size,
             pack_commands::clear_content_cache,
