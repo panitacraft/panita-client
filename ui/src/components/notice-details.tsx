@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Archive, CircleCheck, ExternalLink, FileText, FolderOpen, Shield, ShieldCheck, TriangleAlert, Wrench, X } from 'lucide-react';
+import { Archive, Check, CircleCheck, ExternalLink, FileText, FolderOpen, Shield, ShieldCheck, TriangleAlert, Wrench, X } from 'lucide-react';
 import { AccountDialog } from './account-dialog';
 import { Button } from './ui/button';
 import { nativeCleanupSummary, nativeRetentionReason, type NativeCleanupReport } from '../native-cleanup-state';
@@ -112,6 +112,6 @@ export function CompletionDialog({ heading, name, outcome, version, details, bus
       {details.natives.details.map(detail => <li key={detail.directory}><FolderOpen aria-hidden="true" /><span><code>{detail.directory}</code><br />{nativeRetentionReason(detail.reason)}</span></li>)}
     </DetailCard>}
     {error && <p className="account-error" role="alert">{error}</p>}
-    <div className="update-foot"><Button onClick={onClose}>Aceptar</Button></div>
+    <div className="update-foot is-start"><Button onClick={onClose}><Check aria-hidden="true" />Aceptar</Button></div>
   </AccountDialog>;
 }
