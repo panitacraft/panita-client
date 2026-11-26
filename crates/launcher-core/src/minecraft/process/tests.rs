@@ -226,6 +226,7 @@ fn systemd_service_builder_preserves_io_contract_without_exposing_environment_va
         directory: "/tmp/game directory".into(),
         args: vec!["-Dfixture=$HOME".into(), "main.Class".into()],
         redactions: vec![],
+        ram_note: None,
     };
     let operation = OperationId::new();
     let tools = SystemdTools {
@@ -284,6 +285,7 @@ fn fallback_runner_uses_literal_arguments_and_an_owned_process_group() {
         directory: "/tmp/game directory".into(),
         args: vec!["literal;argument".into(), "$HOME".into()],
         redactions: vec![],
+        ram_note: None,
     };
     let (builder, control) = fallback_builder(&launch, &[]).unwrap_or_else(|_| panic!("fallback"));
     let args: Vec<_> = builder.as_std().get_args().collect();
@@ -306,6 +308,7 @@ fn fallback_fixture_command(test: &str) -> LaunchCommand {
             "--nocapture".into(),
         ],
         redactions: vec![],
+        ram_note: None,
     }
 }
 
