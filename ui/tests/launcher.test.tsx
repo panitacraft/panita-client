@@ -672,6 +672,8 @@ test('uninstall defaults to preserving player files and sends an explicit false 
   await user.click(within(article).getByRole('button', { name: 'Opciones de instancia' }));
   await user.click(screen.getByRole('menuitem', { name: 'Desinstalar…' }));
   const dialog = screen.getByRole('dialog', { name: 'Desinstalar instancia' });
+  // The instance is named in a chip beside the title, outside the dialog's name.
+  expect(dialog.querySelector('.name-chip')?.textContent).toBe('Aventura');
   expect((within(dialog).getByLabelText('Eliminar también la carpeta de la instancia') as HTMLInputElement).checked).toBe(false);
   expect(within(dialog).queryByRole('button', { name: 'Eliminar instancia', exact: true })).toBeNull();
   await user.click(within(dialog).getByRole('button', { name: 'Desinstalar', exact: true }));

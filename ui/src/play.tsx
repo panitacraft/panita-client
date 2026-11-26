@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ArrowRight, Check, ChevronDown, CircleArrowUp, Download, List, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, TriangleAlert } from 'lucide-react';
+import { ArrowRight, Check, ChevronDown, CircleArrowUp, CircleMinus, Download, List, Play, FolderOpen, FileText, Database, RefreshCw, Settings2, Trash2, Wrench, X, LoaderCircle, Square, TriangleAlert } from 'lucide-react';
 import { InstanceProgress } from './components/instance-progress';
 import { AccountDialog } from './components/account-dialog';
 import { VariantDialog } from './components/variant-dialog';
@@ -129,7 +129,7 @@ export function usePlayControl() {
   return useContext(PlayContext);
 }
 
-export function PlayControls({ instanceId, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, removalPending = false, optionsAllowed = false, variants = ['standard'], withdrawnVariant = null, automaticSwitch = null }: { instanceId: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; removalPending?: boolean; optionsAllowed?: boolean; variants?: Variant[]; withdrawnVariant?: Variant | null; automaticSwitch?: (VariantChange & { to: Variant }) | null }) {
+export function PlayControls({ instanceId, instanceName, allowed, installAllowed = false, updateTarget = null, repairAllowed = false, uninstallAllowed = false, cleanupAllowed = false, pack = false, onSettings, onPackCache, removalPending = false, optionsAllowed = false, variants = ['standard'], withdrawnVariant = null, automaticSwitch = null }: { instanceId: string; instanceName?: string; allowed: boolean; installAllowed?: boolean; updateTarget?: UpdateTarget | null; repairAllowed?: boolean; uninstallAllowed?: boolean; cleanupAllowed?: boolean; pack?: boolean; onSettings?: () => void; onPackCache?: () => void; removalPending?: boolean; optionsAllowed?: boolean; variants?: Variant[]; withdrawnVariant?: Variant | null; automaticSwitch?: (VariantChange & { to: Variant }) | null }) {
   const play = useContext(PlayContext);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
@@ -355,7 +355,8 @@ export function PlayControls({ instanceId, allowed, installAllowed = false, upda
     <dialog ref={uninstallDialog} className="update-dialog update-modal" aria-labelledby={instanceId + '-uninstall-title'} onCancel={() => setUninstallQuestion(false)} onClose={() => { if (!uninstallDialog.current?.open) setUninstallQuestion(false); }}>
     {uninstallQuestion && <>
       <div className="update-head">
-        <h2 id={instanceId + '-uninstall-title'} className="dialog-title"><Trash2 aria-hidden="true" />Desinstalar instancia</h2>
+        <h2 id={instanceId + '-uninstall-title'} className="dialog-title is-danger"><CircleMinus aria-hidden="true" />Desinstalar instancia</h2>
+        {instanceName && <span className="name-chip">{instanceName}</span>}
         <button type="button" className="update-close" aria-label="Cerrar" disabled={busy} onClick={() => setUninstallQuestion(false)}><X aria-hidden="true" /></button>
       </div>
       {!deleteInstance && <ul className="update-checks">

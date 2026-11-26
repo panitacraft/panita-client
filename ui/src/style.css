@@ -154,6 +154,8 @@
   .update-versions svg { width: 16px; height: 16px; }
   .version-chip { padding: 2px 8px; border: 1px solid #444; border-radius: 8px; background: #222; color: #E4E4E4; font-size: 12px; font-weight: 650; }
   .version-chip.is-new { border-color: #3c7928; background: #1c331a; color: #7fd65a; }
+  .dialog-title.is-danger > svg { color: #FCA5A5; }
+  .name-chip { padding: 3px 10px; border: 1px solid #444; border-radius: 8px; background: #222; color: #E4E4E4; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
   .update-close { display: grid; place-items: center; width: 32px; height: 32px; margin-left: auto; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #BABABA; cursor: pointer; }
   .update-close:hover { background: #ffffff14; color: #F9FFF8; }
   .update-close svg { width: 18px; height: 18px; }

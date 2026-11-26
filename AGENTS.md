@@ -450,7 +450,8 @@ Owner requests for 1.2.1-beta.2.
   and the confirming action last (owner decision, 2026-11-26). Buttons that belong to one row of a
   list, such as "Abrir carpeta" beside a file, stay with that row.
 - The uninstall modal uses the same layout as the update prompt (owner request, 2026-11-26): a
-  header with a close button, a checklist of what is kept, a "Eliminar también la carpeta de la
+  header with a red circled-minus icon, the title, the instance name in a monospace chip and a close
+  button, a checklist of what is kept, a "Eliminar también la carpeta de la
   instancia" switch (off by default), and a footer with Cancelar and "Desinstalar". Turning the switch
   on shows a red callout with the exact folder, what is lost and a separate "Entiendo que perderé
   todos los datos de esta instancia" switch inside it, and the button becomes "Eliminar instancia",
