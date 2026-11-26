@@ -492,23 +492,22 @@ test('the rail shows only the selected account and opens management to change it
   expect(screen.getByText('v0.2.0-alpha')).toBeTruthy();
 });
 
-test('the skins entry is offered only to a selected Microsoft account and opens the manager', async () => {
+test('the Aspectos button opens the manager from a Microsoft account row, and the toolbar has no entry', async () => {
   accounts.accounts.push({ ...accounts.accounts[0], metadata: { ...accounts.accounts[0].metadata, account_id: 'second', kind: 'microsoft', username: 'Otro', oauth_client_id: null }, status: 'ready' });
   const user = userEvent.setup(); mount();
   await screen.findByRole('button', { name: 'Ajustes Globales' });
-  // The selected account is offline: no entry, and the backend is never asked about skins.
   expect(screen.queryByRole('button', { name: 'Skins y capas' })).toBeNull();
   expect(backend.invoke.mock.calls.some(([command]) => String(command).startsWith('skins_'))).toBe(false);
 
   await user.click(await screen.findByRole('button', { name: 'Gestionar cuenta: Jugador' }));
-  const row = screen.getByText('Otro').closest('li')!;
-  await user.click(within(row).getByRole('button', { name: 'Opciones de Otro' }));
-  await user.click(screen.getByRole('menuitem', { name: 'Seleccionar', exact: true }));
-  const entry = await screen.findByRole('button', { name: 'Skins y capas' });
-  await user.click(entry);
+  // The offline row has no button, and the backend is still never asked about skins.
+  expect(screen.queryByRole('button', { name: 'Aspectos de Jugador' })).toBeNull();
+  // Another Microsoft account is selected first, then the editor opens on it.
+  await user.click(await screen.findByRole('button', { name: 'Aspectos de Otro' }));
   expect(await screen.findByRole('heading', { name: 'Skins y capas' })).toBeTruthy();
+  expect(backend.invoke).toHaveBeenCalledWith('select_account', { accountId: 'second' });
   await waitFor(() => expect(backend.invoke.mock.calls.some(([command]) => command === 'skins_snapshot')).toBe(true));
-  expect(entry.getAttribute('aria-current')).toBe('page');
+  expect(screen.queryByRole('button', { name: 'Skins y capas' })).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Instancias', exact: true }));
   expect(screen.queryByRole('heading', { name: 'Skins y capas' })).toBeNull();
 });

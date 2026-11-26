@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { MessageText } from './components/message-text';
-import { Check, ChevronDown, Copy, Ellipsis, LoaderCircle, LogIn, LogOut, Plus, RefreshCw, Save, ShieldCheck, Shirt, UserRound, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, Ellipsis, LoaderCircle, LogIn, LogOut, Palette, Plus, RefreshCw, Save, ShieldCheck, UserRound, X } from 'lucide-react';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
@@ -180,8 +180,8 @@ export function Accounts({ suggestedName = '', onSnapshot, onEditSkins, onboardi
             {account.error && <p role="alert"><MessageText text={messageForError(account.error)} /></p>}
             {!account.persisted && <p role="alert">Esta cuenta no se ha guardado. Reintenta guardarla antes de cerrar el cliente.</p>}
           </div>
-          {microsoft && onEditSkins && <Button variant="secondary" disabled={busy === 'select_account'} aria-label={`Editar skin de ${account.metadata.username}`}
-            onClick={() => void editSkins(id, selected)}><Shirt aria-hidden="true" />Editar skin</Button>}
+          {microsoft && onEditSkins && <Button variant="secondary" disabled={busy === 'select_account'} aria-label={`Aspectos de ${account.metadata.username}`}
+            onClick={() => void editSkins(id, selected)}><Palette aria-hidden="true" />Aspectos</Button>}
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`Opciones de ${account.metadata.username}`}><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled={selected} onSelect={() => void act('select_account', { accountId: id })}><Check />Seleccionar</DropdownMenuItem>

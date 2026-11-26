@@ -105,30 +105,30 @@ test('account management reuses offline creation and only removes after confirma
   await user.click(screen.getByRole('button', { name: 'Cancelar' }));
 });
 
-test('the skin editor button sits beside the menu of Microsoft accounts only and edits the selected account', async () => {
+test('the Aspectos button sits beside the menu of Microsoft accounts only and edits the selected account', async () => {
   const row = (id: string, kind: 'microsoft' | 'offline', name: string) => ({ metadata: { account_id: id, kind, username: name, profile_id: id, oauth_client_id: null }, persisted: true, status: kind === 'offline' ? 'offline' as const : 'ready' as const, error: null });
   view.accounts = [row('micro', 'microsoft', 'Premium'), row('other', 'microsoft', 'Segunda'), row('off', 'offline', 'Local')];
   view.selected_account_id = 'micro';
   const open = vi.fn();
   const user = userEvent.setup(); render(<Accounts onEditSkins={open} />);
   await screen.findByText('Premium');
-  expect(screen.queryByRole('button', { name: 'Editar skin de Local' })).toBeNull();
-  expect(screen.getAllByRole('button', { name: /^Editar skin de/ })).toHaveLength(2);
-  await user.click(screen.getByRole('button', { name: 'Editar skin de Premium' }));
+  expect(screen.queryByRole('button', { name: 'Aspectos de Local' })).toBeNull();
+  expect(screen.getAllByRole('button', { name: /^Aspectos de/ })).toHaveLength(2);
+  await user.click(screen.getByRole('button', { name: 'Aspectos de Premium' }));
   expect(open).toHaveBeenCalledTimes(1);
   expect(backend.invoke.mock.calls.some(([command]) => command === 'select_account')).toBe(false);
   // Another Microsoft account is selected first, so the editor never opens on the wrong profile.
-  await user.click(screen.getByRole('button', { name: 'Editar skin de Segunda' }));
+  await user.click(screen.getByRole('button', { name: 'Aspectos de Segunda' }));
   await waitFor(() => expect(open).toHaveBeenCalledTimes(2));
   expect(backend.invoke).toHaveBeenCalledWith('select_account', { accountId: 'other' });
 });
 
-test('without an editor to open, no account row offers the skin button', async () => {
+test('without an editor to open, no account row offers the Aspectos button', async () => {
   view.accounts = [{ metadata: { account_id: 'micro', kind: 'microsoft', username: 'Premium', profile_id: 'micro', oauth_client_id: null }, persisted: true, status: 'ready', error: null }];
   view.selected_account_id = 'micro';
   render(<Accounts />);
   await screen.findByText('Premium');
-  expect(screen.queryByRole('button', { name: /^Editar skin/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Aspectos/ })).toBeNull();
 });
 
 test('skin requests fall back locally and a different name can load again', () => {

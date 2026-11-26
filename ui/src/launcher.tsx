@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
 import { getVersion } from '@tauri-apps/api/app';
-import { LoaderCircle, ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, Shirt, WifiOff } from 'lucide-react';
+import { LoaderCircle, ArrowLeft, Blocks, ChevronUp, ChevronDown, Gamepad2, LockKeyhole, RefreshCw, Settings2, WifiOff } from 'lucide-react';
 import { loadCatalog } from './catalog-api';
 import type { CatalogOverview } from './preview-catalog';
 import { messageForError } from './errors';
 import logoBackground from './assets/logo_background.svg';
 import { useInstanceRail } from './use-instance-rail';
 import { Accounts } from './accounts';
-import { SkinsPage, canManageSkins } from './skins';
+import { SkinsPage } from './skins';
 import type { AccountsView } from './account-state';
 import { ActivationPanel, useActivation } from './activation';
 import { OperationDock, PlayControls, PlayNotice, usePlaySnapshot } from './play';
@@ -149,7 +149,6 @@ export function Launcher() {
         <WindowDragRegion><span className="toolbar-brand">PANITA <span>CLIENT</span></span></WindowDragRegion>
         <div className="flex shrink-0 items-center gap-2">
           <Hint text="Actualizar catálogo"><span className="icon-control"><Button variant="ghost" size="icon" disabled={refreshing} aria-label="Actualizar catálogo" onClick={() => setCatalogAttempt(previous => previous + 1)}><RefreshCw aria-hidden="true" /></Button></span></Hint>
-          {canManageSkins(selectedAccount) && <Hint text="Skins y capas"><Button variant="ghost" size="icon" aria-label="Skins y capas" onClick={() => setPage('skins')} aria-current={page === 'skins' ? 'page' : undefined}><Shirt aria-hidden="true" /></Button></Hint>}
           <Hint text="Ajustes Globales"><Button variant="ghost" size="icon" aria-label="Ajustes Globales" onClick={() => openSettings('global')} aria-current={page === 'settings' && settingsScope === 'global' ? 'page' : undefined}><Settings2 aria-hidden="true" /></Button></Hint>
           <WindowControls />
         </div>
