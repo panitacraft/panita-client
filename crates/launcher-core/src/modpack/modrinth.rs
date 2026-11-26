@@ -9,33 +9,11 @@ use std::io::Read;
 use std::time::Duration;
 
 const API: &str = "https://api.modrinth.com";
-/// Release notes are shown as plain text in a prompt, so they stay short.
-const MAX_CHANGELOG_CHARS: usize = 4000;
-
 /// What Modrinth publishes about one pack version for the update prompt.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VersionInfo {
     pub number: String,
     pub changelog: Option<String>,
-}
-
-/// Plain, bounded release notes: control characters other than line breaks and tabs
-/// are dropped, and an empty result means the version has no notes.
-fn clean_changelog(raw: &str) -> Option<String> {
-    let cleaned: String = raw
-        .replace("\r\n", "\n")
-        .chars()
-        .filter(|ch| !ch.is_control() || matches!(ch, '\n' | '\t'))
-        .collect();
-    let trimmed = cleaned.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed.chars().count() <= MAX_CHANGELOG_CHARS {
-        return Some(trimmed.to_owned());
-    }
-    let cut: String = trimmed.chars().take(MAX_CHANGELOG_CHARS).collect();
-    Some(format!("{}…", cut.trim_end()))
 }
 
 /// Public Modrinth version metadata. It sends no credentials and follows no

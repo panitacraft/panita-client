@@ -444,13 +444,17 @@ Owner requests for 1.2.1-beta.2.
   "Notas de la versión" card; a checklist of what is kept; an amber warning that opening a world
   with the new version can change it and that going back to the installed version does not
   revert that; a "Copia de seguridad de mis mundos" switch marked "Recomendado" and on by default;
-  and a footer with Cancelar and "Actualizar a {version}". Modrinth packs show the
-  version changelog fetched from Modrinth for the pinned version, as plain bounded text (4000
-  characters, control characters removed, never rendered as markup). Custom packs and vanilla
-  show no notes ("El autor no ha publicado notas para esta versión." for packs): the Panita catalog
-  carries only a version label and publish date. Showing custom notes needs a changelog field in
-  the API and in the catalog source, which also touches cached catalog and installation records;
-  do not add it without a new owner decision on those disk formats.
+  and a footer with Cancelar and "Actualizar a {version}". The notes are plain bounded text (5000
+  characters, the API's limit; control characters removed; never rendered as markup). Modrinth
+  packs show the changelog fetched from Modrinth for the pinned version. Custom packs show the
+  `changelog` of the published version's manifest (owner decision, 2026-11-26): the launcher reads
+  that field from the raw `GET /v1/instances/{id}/versions/{versionId}/manifest` answer, with the
+  session when there is one, only when the prompt opens. It is never added to the parsed
+  `Manifest`, the cached manifest or any installation record, so no disk format changes and cached
+  manifests stay valid. A missing field, a failed request or an empty text means no notes ("El
+  autor no ha publicado notas para esta versión."). Vanilla has no notes card. The API's
+  published manifest did not carry `changelog` when this was written (it exists on the admin
+  version endpoints only), so custom packs show no notes until the API adds it to the manifest.
 
 ## Annex A. Account and Token Storage Decision
 

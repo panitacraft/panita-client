@@ -224,16 +224,20 @@ pub(super) async fn open_instance_folder(
 }
 
 /// Readable names for the installed and the available version of a pack and the
-/// release notes of the available one, for the update prompt. A failed lookup falls
-/// back to the plain identifiers and no notes.
+/// release notes of the available one (Modrinth's changelog or the Panita manifest's),
+/// for the update prompt. A failed lookup falls back to the plain identifiers and no
+/// notes.
 #[tauri::command]
 pub(super) async fn pack_version_names(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
+    state: tauri::State<'_, DesktopState>,
     instance_id: Uuid,
 ) -> Result<Value, ErrorCode> {
     use launcher_core::{
-        catalog::CatalogSource, modpack::modrinth::ModrinthClient, registry::InstanceRegistry,
+        catalog::CatalogSource,
+        modpack::{cache::ManifestClient, modrinth::ModrinthClient},
+        registry::InstanceRegistry,
     };
     main_only(&window)?;
     let paths = paths(&app)?;
@@ -280,9 +284,31 @@ pub(super) async fn pack_version_names(
             }));
         }
     }
-    // Custom packs name their versions through the catalog, which carries no release
-    // notes yet, so the prompt shows no changelog for them.
-    Ok(json!({"installed": installed, "available": available, "changelog": null}))
+    // A custom pack names its versions through the catalog and publishes its notes in
+    // the manifest of the new version. The notes are read for this prompt only. The
+    // session is sent when there is one, because a restricted pack's manifest is served
+    // to nothing else; without it the request is public and a failure means no notes.
+    let changelog = match &record.last_catalog.source {
+        CatalogSource::Custom {
+            current_version_id: Some(version),
+            ..
+        } => {
+            let credentials = super::activation_commands::controller(&state)
+                .ok()
+                .and_then(|controller| controller.online_credentials().ok());
+            match ManifestClient::new() {
+                Ok(client) => client
+                    .with_auth(credentials)
+                    .changelog(instance_id, *version)
+                    .await
+                    .ok()
+                    .flatten(),
+                Err(_) => None,
+            }
+        }
+        _ => None,
+    };
+    Ok(json!({"installed": installed, "available": available, "changelog": changelog}))
 }
 
 #[tauri::command]
