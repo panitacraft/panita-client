@@ -21,6 +21,7 @@ fn at_endpoint(client: Client, base: &str) -> AuthClient {
             xsts: format!("{base}/xsts"),
             minecraft: format!("{base}/minecraft"),
             profile: format!("{base}/profile"),
+            textures: format!("{base}/textures"),
         },
     }
 }

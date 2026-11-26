@@ -21,6 +21,8 @@ struct Endpoints {
     xsts: String,
     minecraft: String,
     profile: String,
+    /// Public texture host of skins and capes; the path `/texture/{hash}` is appended.
+    textures: String,
 }
 
 impl Default for Endpoints {
@@ -32,6 +34,7 @@ impl Default for Endpoints {
             minecraft: "https://api.minecraftservices.com/authentication/login_with_xbox"
                 .to_owned(),
             profile: "https://api.minecraftservices.com/minecraft/profile".to_owned(),
+            textures: "https://textures.minecraft.net".to_owned(),
         }
     }
 }
@@ -77,7 +80,12 @@ enum Stage {
     Xsts,
     Minecraft,
     Profile,
+    SkinUpload,
+    CapeSet,
+    CapeHide,
 }
+
+pub(crate) mod profile_services;
 
 impl AuthClient {
     pub fn new() -> Result<Self, CoreError> {
@@ -117,6 +125,7 @@ impl AuthClient {
                 xsts: format!("{base}/xsts"),
                 minecraft: format!("{base}/minecraft"),
                 profile: format!("{base}/profile"),
+                textures: format!("{base}/textures"),
             },
         })
     }
@@ -248,6 +257,9 @@ impl AuthClient {
             Stage::Xsts => ("xsts", "POST", "/xsts/authorize"),
             Stage::Minecraft => ("minecraft", "POST", "/authentication/login_with_xbox"),
             Stage::Profile => ("minecraft", "GET", "/minecraft/profile"),
+            Stage::SkinUpload => ("minecraft", "POST", "/minecraft/profile/skins"),
+            Stage::CapeSet => ("minecraft", "PUT", "/minecraft/profile/capes/active"),
+            Stage::CapeHide => ("minecraft", "DELETE", "/minecraft/profile/capes/active"),
         };
         let started = std::time::Instant::now();
         let sent = request.send().await;
@@ -328,6 +340,8 @@ fn classify_failure(status: StatusCode, stage: Stage, bytes: &[u8]) -> ErrorCode
         StatusCode::UNAUTHORIZED => ErrorCode::AuthenticationRequired,
         StatusCode::FORBIDDEN => ErrorCode::AccountRestricted,
         StatusCode::NOT_FOUND if matches!(stage, Stage::Profile) => ErrorCode::MinecraftNotOwned,
+        // The service refused the image itself, for example for its size or format.
+        StatusCode::BAD_REQUEST if matches!(stage, Stage::SkinUpload) => ErrorCode::InvalidSkin,
         _ => ErrorCode::InvalidData,
     }
 }
@@ -580,6 +594,7 @@ pub(crate) mod tests {
                     xsts: endpoint("xsts"),
                     minecraft: endpoint("minecraft"),
                     profile: endpoint("profile"),
+                    textures: endpoint("textures"),
                 },
             },
             task,

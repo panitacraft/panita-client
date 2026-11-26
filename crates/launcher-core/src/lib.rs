@@ -27,6 +27,7 @@ pub mod registry;
 pub mod session_log;
 pub mod sessions;
 pub mod settings;
+pub mod skins;
 pub mod storage;
 mod storage_json;
 #[cfg(test)]

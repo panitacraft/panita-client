@@ -80,6 +80,12 @@ pub enum ErrorCode {
     LauncherUpdateUnsupported,
     /// A launcher update was found but could not be downloaded, verified or applied.
     LauncherUpdateFailed,
+    /// The operation needs the selected account to be an authenticated Microsoft account.
+    MicrosoftAccountRequired,
+    /// The skin or cape image is not a PNG of a size Minecraft accepts.
+    InvalidSkin,
+    /// The saved skin library holds as many entries as it may.
+    SkinLibraryFull,
 }
 
 /// A fixed, token-free reason that refines an [`ErrorCode`], so one generic code such
