@@ -613,10 +613,7 @@ fn retryable(error: &CoreError) -> bool {
 /// Wait before retrying a held file. Instant under test so suites stay fast.
 async fn pause(attempt: usize) {
     #[cfg(test)]
-    {
-        run_hook(&ON_PAUSE, attempt);
-        return;
-    }
+    run_hook(&ON_PAUSE, attempt);
     #[cfg(not(test))]
     tokio::time::sleep(std::time::Duration::from_millis(250 * attempt as u64)).await;
 }

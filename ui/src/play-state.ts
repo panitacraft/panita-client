@@ -1,10 +1,24 @@
 export type PlayPhase = 'preparing' | 'installing' | 'installed' | 'awaiting_files' | 'uninstalled' | 'warning' | 'starting' | 'running' | 'stopping' | 'cancelling' | 'exited' | 'failed' | 'cancelled';
+/**
+ * What the core knows about a failure beyond its code. Every field is a fixed token or
+ * a game-relative path, never a message from the operating system or a service.
+ */
+export type PlayErrorDetail = {
+  /** For example `published_state_invalid`, `archive_invalid`, `checksum_mismatch`, `file_in_use`. */
+  cause: string | null;
+  /** Game-directory relative file the failure concerns, `/`-separated. */
+  path: string | null;
+  /** Raw operating-system error number, such as 32 for a Windows sharing violation. */
+  osError: number | null;
+};
 export type PlayEntry = {
   instanceId: string;
   requestId: string;
   phase: PlayPhase;
   confirmationId: string | null;
   error: string | null;
+  /** Present only while `error` is set and the core could say more about it. */
+  errorDetail?: PlayErrorDetail | null;
   exitCode: number | null;
   exitSuccess: boolean | null;
   exitExpected?: boolean;
