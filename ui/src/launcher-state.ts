@@ -21,6 +21,20 @@ export const localStateText: Record<CatalogInstance['localState'], string> = {
   needs_repair: 'Necesita reparación', running: 'En ejecución', failed: 'La operación falló', cancelled: 'Operación cancelada',
 };
 
+/**
+ * Statuses that need no chip beside an instance's badges: the primary action already says
+ * it (install, play, update) or nothing is wrong. A cancelled operation leaves the
+ * installation exactly as it was, so only the Instalar or Jugar button matters afterwards.
+ */
+const quietStatuses: readonly string[] = ['Sin instalar', 'Lista para jugar', 'Actualización disponible', localStateText.cancelled];
+/** Statuses the hero already shows through progress or the play button. */
+const progressStatuses: readonly string[] = ['Instalando', 'Reparando', 'Actualizando', 'Preparando inicio', 'Cerrando Minecraft'];
+
+/** Whether a status deserves a chip; the hero also hides in-progress ones because it shows progress itself. */
+export function showsStatusChip(status: string, hero = false): boolean {
+  return !quietStatuses.includes(status) && !(hero && progressStatuses.includes(status));
+}
+
 /** Live operations take precedence over the last catalog snapshot in navigation. */
 export function instanceStatus(instance: CatalogInstance, entry?: PlayEntry): string {
   if (instance.availability === 'disabled') return 'Deshabilitada';

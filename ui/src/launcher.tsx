@@ -22,7 +22,7 @@ import { CachePanel, PackPanel } from './pack';
 import { VariantPanel } from './components/variant-panel';
 import { ScreenshotPanel } from './components/screenshot-panel';
 import { CrashNotifications } from './game-output';
-import { instanceStatus, visibleSelection, type LauncherPage } from './launcher-state';
+import { instanceStatus, showsStatusChip, visibleSelection, type LauncherPage } from './launcher-state';
 import { CatalogArtwork } from './components/catalog-artwork';
 import { Button } from './components/ui/button';
 import { AccountAvatar } from './components/account-avatar';
@@ -114,7 +114,7 @@ export function Launcher() {
           <strong>{instance.name}</strong>
           <p>{instance.description}</p>
           <div className="instance-tags"><InstanceBadges instance={instance} updateAvailable={instance.localState === 'update_available'} />
-            {!['Sin instalar', 'Lista para jugar', 'Actualización disponible'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className={`instance-status ${instance.availability === 'disabled' ? 'status-warning' : ''}`}>{instance.availability === 'disabled' && <LockKeyhole aria-hidden="true" />}{['Instalando', 'Reparando', 'Actualizando'].includes(instanceStatus(instance, liveEntry(instance.id))) && <LoaderCircle className="spin" aria-hidden="true" />}{instanceStatus(instance, liveEntry(instance.id))}</span>}
+            {showsStatusChip(instanceStatus(instance, liveEntry(instance.id))) && <span className={`instance-status ${instance.availability === 'disabled' ? 'status-warning' : ''}`}>{instance.availability === 'disabled' && <LockKeyhole aria-hidden="true" />}{['Instalando', 'Reparando', 'Actualizando'].includes(instanceStatus(instance, liveEntry(instance.id))) && <LoaderCircle className="spin" aria-hidden="true" />}{instanceStatus(instance, liveEntry(instance.id))}</span>}
           </div>
         </div>}><Button variant="ghost"
           className={`rail-instance size-13 p-0 ${instance.id === selectedId && page === 'library' ? 'is-selected' : ''} ${instance.availability === 'disabled' ? 'is-disabled' : ''}`}
@@ -179,7 +179,7 @@ export function Launcher() {
                 <p>{instance.description}</p>
                 <div className="instance-tags">
                   <InstanceBadges instance={instance} showLoaderHint showVariant />
-                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : !['Sin instalar', 'Lista para jugar', 'Actualización disponible', 'Instalando', 'Reparando', 'Actualizando', 'Preparando inicio', 'Cerrando Minecraft'].includes(instanceStatus(instance, liveEntry(instance.id))) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
+                  {instance.availability === 'disabled' ? <Hint text="Esta instancia está deshabilitada. Tus mundos y archivos se conservan."><span className="instance-status status-warning" tabIndex={0}><LockKeyhole aria-hidden="true" />Deshabilitada</span></Hint> : showsStatusChip(instanceStatus(instance, liveEntry(instance.id)), true) && <span className="instance-status">{instanceStatus(instance, liveEntry(instance.id))}</span>}
                 </div>
               </div>
             </div>
