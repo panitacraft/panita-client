@@ -293,8 +293,17 @@ fn read_file(root: &PrivateDir, name: &Path) -> Result<Option<Vec<u8>>, CoreErro
     Ok(Some(bytes))
 }
 
+/// Windows reports a file another process holds open as ERROR_SHARING_VIOLATION (32)
+/// or ERROR_LOCK_VIOLATION (33), which Rust files under the uncategorized kind.
+fn held_by_another_process(error: &std::io::Error) -> bool {
+    cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33))
+}
+
 pub(crate) fn map_io_error(error: std::io::Error) -> CoreError {
+    let number = error.raw_os_error();
+    let busy = held_by_another_process(&error);
     let code = match error.kind() {
+        _ if busy => ErrorCode::StorageBusy,
         std::io::ErrorKind::PermissionDenied => ErrorCode::PermissionDenied,
         std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded => {
             ErrorCode::InsufficientSpace
@@ -305,7 +314,7 @@ pub(crate) fn map_io_error(error: std::io::Error) -> CoreError {
         }
         _ => ErrorCode::StorageUnavailable,
     };
-    CoreError::new(code)
+    CoreError::new(code).with_os_error(number)
 }
 
 pub(crate) fn map_private_error(error: PrivateFsError) -> CoreError {

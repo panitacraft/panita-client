@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::*;
+use crate::error::{ErrorCause, ResultDetail};
 use crate::modpack::path_key;
 use crate::{
     catalog::{CatalogSource, Variant},
@@ -43,6 +44,33 @@ pub(crate) struct Interrupt {
 thread_local! {
     pub(crate) static INTERRUPT: std::cell::Cell<Option<Interrupt>> =
         const { std::cell::Cell::new(None) };
+}
+
+/// Test-only hooks for the recovery paths of `apply`.
+#[cfg(test)]
+pub(crate) type Hook = Box<dyn FnMut(usize)>;
+
+#[cfg(test)]
+thread_local! {
+    /// Runs once just before the files are written, so a test can damage the shared
+    /// cache or hold a file open at the moment the update needs it.
+    pub(crate) static BEFORE_APPLY: std::cell::RefCell<Option<Hook>> =
+        const { std::cell::RefCell::new(None) };
+    /// Runs in place of each wait before a retry, with the attempt that just failed.
+    pub(crate) static ON_PAUSE: std::cell::RefCell<Option<Hook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn run_hook(
+    slot: &'static std::thread::LocalKey<std::cell::RefCell<Option<Hook>>>,
+    attempt: usize,
+) {
+    slot.with(|hook| {
+        if let Some(hook) = hook.borrow_mut().as_mut() {
+            hook(attempt);
+        }
+    });
 }
 
 #[cfg(test)]
@@ -449,7 +477,7 @@ async fn gather(
             .push(Source::Item(Expected::file(&item.hashes, item.size)));
     }
     for file in &plan.pending {
-        match manual::check(game, file, cancel)? {
+        match manual::check(game, file, cancel).at_path(&file.path)? {
             Placement::Satisfied => {
                 out.incoming.push(Incoming {
                     path: file.path.clone(),
@@ -498,8 +526,29 @@ async fn gather(
                 let opened = mrpack::layer(paths, expected, index, index_sha256, cancel)?;
                 out.layers.push((Kind::Override, opened));
             }
-            Layer::Archive { kind, expected, .. } => {
-                let file = content::open_verified(paths, expected, cancel)?;
+            Layer::Archive {
+                kind,
+                url,
+                expected,
+            } => {
+                let file = match content::open_verified(paths, expected, cancel) {
+                    // The cached archive stopped verifying after it was ensured: fetch
+                    // that one archive again instead of ending the update.
+                    Err(error) if error.code() == ErrorCode::ArtifactMismatch => {
+                        let request = Request {
+                            url: url.clone(),
+                            origin: Origin::Upload,
+                            expected: expected.clone(),
+                            fallbacks: Vec::new(),
+                        };
+                        if !heal_cache_entry(paths, downloader, &request, cancel).await {
+                            return Err(error);
+                        }
+                        note_heal("configuration archive");
+                        content::open_verified(paths, expected, cancel)?
+                    }
+                    other => other?,
+                };
                 out.layers
                     .push((*kind, archive::preflight(file, Limits::PACK)?));
             }
@@ -513,7 +562,9 @@ async fn gather(
         let mut budget = opened.budget();
         for entry in opened.entries.clone() {
             cancel.check()?;
-            let digest = opened.stream(&entry, &mut budget, cancel, None)?;
+            let digest = opened
+                .stream(&entry, &mut budget, cancel, None)
+                .at_path(&entry.path)?;
             let ownership = match kind {
                 Kind::Defaults => Ownership::Defaults,
                 Kind::Enforced => Ownership::Enforced,
@@ -537,6 +588,55 @@ async fn gather(
     Ok(out)
 }
 
+fn request_of(item: &Item) -> Request {
+    Request {
+        url: item.url.clone(),
+        origin: item.origin.clone(),
+        expected: Expected::file(&item.hashes, item.size),
+        fallbacks: item.fallbacks.clone(),
+    }
+}
+
+/// Tries one step or cache read gets before its failure ends the operation. Every
+/// retry is of that one file; the rest of the operation is never repeated.
+const HEAL_ATTEMPTS: usize = 3;
+
+/// A failure that waiting briefly can clear: another process (an antivirus scan, a
+/// search indexer) holds the file for a moment.
+fn retryable(error: &CoreError) -> bool {
+    matches!(
+        error.code(),
+        ErrorCode::StorageBusy | ErrorCode::PermissionDenied
+    )
+}
+
+/// Wait before retrying a held file. Instant under test so suites stay fast.
+async fn pause(attempt: usize) {
+    #[cfg(test)]
+    {
+        run_hook(&ON_PAUSE, attempt);
+        return;
+    }
+    #[cfg(not(test))]
+    tokio::time::sleep(std::time::Duration::from_millis(250 * attempt as u64)).await;
+}
+
+/// Replace a shared-cache entry that no longer verifies. `ensure` hashes what is
+/// stored, so a missing, truncated or altered entry is downloaded again and
+/// published over it; a verified entry is simply kept. Returns false when the
+/// file cannot be fetched again, which leaves the original failure standing.
+async fn heal_cache_entry(
+    paths: &AppPaths,
+    downloader: &PackDownloader,
+    request: &Request,
+    cancel: &Cancellation,
+) -> bool {
+    matches!(
+        content::ensure(paths, downloader, request, cancel, &|_| {}).await,
+        Ok(Ensured::Ready { .. })
+    )
+}
+
 /// Download only the content the steps will write. Withdrawn files cannot be
 /// fetched; they become manual files the player must supply, before any change.
 async fn fetch_needed(
@@ -558,15 +658,7 @@ async fn fetch_needed(
         .iter()
         .filter(|item| wanted.contains(&path_key(&item.path)))
         .collect();
-    let requests: Vec<Request> = items
-        .iter()
-        .map(|item| Request {
-            url: item.url.clone(),
-            origin: item.origin.clone(),
-            expected: Expected::file(&item.hashes, item.size),
-            fallbacks: item.fallbacks.clone(),
-        })
-        .collect();
+    let requests: Vec<Request> = items.iter().map(|item| request_of(item)).collect();
     let ensured = content::ensure_all(paths, downloader, &requests, cancel, progress).await?;
     let mut needs = Vec::new();
     for (item, result) in items.iter().zip(&ensured) {
@@ -601,8 +693,10 @@ fn ledger_of(diff: &Diff) -> Vec<Entry> {
 /// Apply the diff's steps. Set-aside happens before each write, so an interruption
 /// at any point can be undone from the ledger and the stashes.
 #[allow(clippy::too_many_arguments)]
-fn apply(
+async fn apply(
     paths: &AppPaths,
+    downloader: &PackDownloader,
+    plan: &Plan,
     root: &Path,
     game: &GameDir,
     diff: &Diff,
@@ -613,6 +707,8 @@ fn apply(
 ) -> Result<(), CoreError> {
     let transient = Stash::open(root, TRANSIENT, operation)?;
     let backups = Stash::open(root, BACKUPS, operation)?;
+    #[cfg(test)]
+    run_hook(&BEFORE_APPLY, 0);
     for (number, step) in diff.steps.iter().enumerate() {
         cancel.check()?;
         #[cfg(test)]
@@ -621,39 +717,103 @@ fn apply(
         }
         #[cfg(not(test))]
         let _ = number;
-        if step.op != Op::Write {
-            let stash = if step.backup { &backups } else { &transient };
-            game.stash(&step.path, stash)?;
-        }
-        let Some(incoming) = &step.incoming else {
-            continue;
-        };
-        match sources.get(incoming.source).ok_or_else(invalid)? {
-            Source::Item(expected) => {
-                game.write_new(&step.path, |output| {
-                    content::stream_verified(paths, expected, cancel, |chunk| {
-                        output.write_all(chunk).map_err(io)
-                    })
-                })?;
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let error = match apply_step(
+                paths, game, step, sources, layers, &transient, &backups, cancel,
+            ) {
+                Ok(()) => break,
+                Err(error) => error.with_path(&step.path),
+            };
+            if attempt >= HEAL_ATTEMPTS || cancel.check().is_err() {
+                return Err(error);
             }
-            Source::Entry { layer, entry } => {
-                let (_, opened) = layers.get_mut(*layer).ok_or_else(invalid)?;
-                let mut budget = opened.budget();
-                let mut digest = None;
-                game.write_new(&step.path, |output| {
-                    digest = Some(opened.stream(entry, &mut budget, cancel, Some(output))?);
-                    Ok(())
-                })?;
-                // The bytes written must be the bytes the plan was diffed against.
-                let written = digest.ok_or_else(invalid)?;
-                if !diff::same(&written.hashes, &incoming.desired) {
-                    return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+            // Only this one file is retried, and only for failures a retry can fix.
+            if retryable(&error) {
+                note_heal(&format!("retry after {}", error.detail().describe()));
+                pause(attempt).await;
+            } else if error.code() == ErrorCode::ArtifactMismatch
+                && let Some(item) = incoming_item(plan, sources, step)
+            {
+                // The shared cache entry no longer verifies: fetch just that file again.
+                if !heal_cache_entry(paths, downloader, &request_of(item), cancel).await {
+                    return Err(error);
                 }
+                note_heal(&format!("refetched cache entry path={}", step.path));
+            } else {
+                return Err(error);
             }
-            Source::Manual => return Err(invalid()),
         }
     }
     Ok(())
+}
+
+/// The plan item whose cached bytes a step writes, when its source is a cache entry.
+fn incoming_item<'a>(plan: &'a Plan, sources: &[Source], step: &diff::Step) -> Option<&'a Item> {
+    let incoming = step.incoming.as_ref()?;
+    if !matches!(sources.get(incoming.source)?, Source::Item(_)) {
+        return None;
+    }
+    let key = path_key(&step.path);
+    plan.items.iter().find(|item| path_key(&item.path) == key)
+}
+
+/// One step of the diff: set the old file aside, then write the new bytes. Running it
+/// again after a failure is safe: a file already set aside is not set aside twice,
+/// and a half-written temporary was already removed.
+#[allow(clippy::too_many_arguments)]
+fn apply_step(
+    paths: &AppPaths,
+    game: &GameDir,
+    step: &diff::Step,
+    sources: &[Source],
+    layers: &mut [(Kind, Opened<File>)],
+    transient: &Stash,
+    backups: &Stash,
+    cancel: &Cancellation,
+) -> Result<(), CoreError> {
+    if step.op != Op::Write {
+        let stash = if step.backup { backups } else { transient };
+        game.stash(&step.path, stash)?;
+    }
+    let Some(incoming) = &step.incoming else {
+        return Ok(());
+    };
+    match sources.get(incoming.source).ok_or_else(invalid)? {
+        Source::Item(expected) => {
+            game.write_new(&step.path, |output| {
+                content::stream_verified(paths, expected, cancel, |chunk| {
+                    output.write_all(chunk).map_err(io)
+                })
+            })?;
+        }
+        Source::Entry { layer, entry } => {
+            let (_, opened) = layers.get_mut(*layer).ok_or_else(invalid)?;
+            let mut budget = opened.budget();
+            let mut digest = None;
+            game.write_new(&step.path, |output| {
+                digest = Some(opened.stream(entry, &mut budget, cancel, Some(output))?);
+                Ok(())
+            })?;
+            // The bytes written must be the bytes the plan was diffed against.
+            let written = digest.ok_or_else(invalid)?;
+            if !diff::same(&written.hashes, &incoming.desired) {
+                return Err(CoreError::new(ErrorCode::ArtifactMismatch));
+            }
+        }
+        Source::Manual => return Err(invalid()),
+    }
+    Ok(())
+}
+
+/// Record a recovery action in the session log; the text is fixed vocabulary plus a
+/// game-relative path, never a URL or a message from the operating system.
+fn note_heal(what: &str) {
+    crate::network_log::note(
+        crate::session_log::Level::Warn,
+        &format!("self-heal {what}"),
+    );
 }
 
 /// What a completed update changed, for the player.
@@ -840,10 +1000,12 @@ pub async fn update_with_catalog(
     let downloader = PackDownloader::new()?;
     // Everything below the lock needs the plan, so resolve it first, as install does.
     let plan = match &catalog.source {
-        CatalogSource::Custom { .. } => {
-            custom_plan(&catalog, id, target_variant, cancel, auth).await?
-        }
-        _ => mrpack_plan(paths, &downloader, &catalog, cancel, pack_progress.clone()).await?,
+        CatalogSource::Custom { .. } => custom_plan(&catalog, id, target_variant, cancel, auth)
+            .await
+            .or_cause(ErrorCause::ManifestInvalid)?,
+        _ => mrpack_plan(paths, &downloader, &catalog, cancel, pack_progress.clone())
+            .await
+            .or_cause(ErrorCause::ManifestInvalid)?,
     };
     run_update(
         paths,
@@ -896,8 +1058,12 @@ pub(crate) async fn run_update(
 ) -> Result<UpdateOutcome, CoreError> {
     let registry = InstanceRegistry::new(paths.clone());
     let (root, _guard) = lock_and_recover(paths, id)?;
-    let previous = installed_pack(&root, id)?;
-    let old = previous.pack.clone().ok_or_else(invalid)?;
+    let previous = installed_pack(&root, id).or_cause(ErrorCause::InstalledRecordInvalid)?;
+    let old = previous
+        .pack
+        .clone()
+        .ok_or_else(invalid)
+        .or_cause(ErrorCause::InstalledRecordInvalid)?;
     let record = registry.get(id)?.ok_or_else(invalid)?;
     let installed_variant = variant_of(&old);
     if !maintainable(&record)
@@ -923,14 +1089,18 @@ pub(crate) async fn run_update(
         cancel,
         pack_progress.clone(),
     )
-    .await?;
+    .await
+    .or_cause(ErrorCause::ArchiveInvalid)?;
     let Gathered {
         incoming,
         sources,
         mut layers,
         mut needs,
     } = gathered;
-    let result = diff::diff(&old, incoming, &mut |path| game.fingerprint(path, cancel))?;
+    let result = diff::diff(&old, incoming, &mut |path| {
+        game.fingerprint(path, cancel).at_path(path)
+    })
+    .or_cause(ErrorCause::PublishedStateInvalid)?;
     if !result.conflicts.is_empty() && (!request.move_aside || result.unresolvable()) {
         return Ok(UpdateOutcome::Blocked(Blocked {
             conflicts: result.conflicts,
@@ -995,18 +1165,24 @@ pub(crate) async fn run_update(
             skipped_configuration: result.skipped.clone(),
             pending: Vec::new(),
         };
-        state.validate(id)?;
+        state
+            .validate(id)
+            .or_cause(ErrorCause::PublishedStateInvalid)?;
         let installed = InstalledLock {
             pack: Some(state),
             ..base
         };
-        validate_manifest(&installed, id)?;
+        validate_manifest(&installed, id).or_cause(ErrorCause::PublishedStateInvalid)?;
         journal.ledger = ledger_of(&result);
         journal.prepared = Some(installed.clone());
-        journal.validate(id)?;
+        journal
+            .validate(id)
+            .or_cause(ErrorCause::PublishedStateInvalid)?;
         write_json(&root, "transaction.json", &journal)?;
         apply(
             paths,
+            downloader,
+            &plan,
             &root,
             &game,
             &result,
@@ -1014,7 +1190,8 @@ pub(crate) async fn run_update(
             &mut layers,
             operation,
             cancel,
-        )?;
+        )
+        .await?;
         #[cfg(test)]
         interrupt(Stage::AfterApply)?;
         cancel.commit(|| write_json(&root, "installed.json", &installed))?;
@@ -1065,7 +1242,9 @@ pub(crate) async fn run_update(
             }
             drop(game);
             if recover_base(paths, id, &root).is_err() {
-                return Err(CoreError::new(ErrorCode::StorageCommitUncertain));
+                return Err(
+                    CoreError::new(ErrorCode::StorageCommitUncertain).with_detail_of(&error)
+                );
             }
             let current = read_json::<InstalledLock>(&root, "installed.json")?;
             if current.is_some_and(|current| {
@@ -1211,8 +1390,12 @@ pub(crate) async fn run_repair(
 ) -> Result<RepairReport, CoreError> {
     let registry = InstanceRegistry::new(paths.clone());
     let (root, _guard) = lock_and_recover(paths, id)?;
-    let previous = installed_pack(&root, id)?;
-    let old = previous.pack.clone().ok_or_else(invalid)?;
+    let previous = installed_pack(&root, id).or_cause(ErrorCause::InstalledRecordInvalid)?;
+    let old = previous
+        .pack
+        .clone()
+        .ok_or_else(invalid)
+        .or_cause(ErrorCause::InstalledRecordInvalid)?;
     let record = registry.get(id)?.ok_or_else(invalid)?;
     if !maintainable(&record) {
         return Err(invalid());
@@ -1293,7 +1476,10 @@ pub(crate) async fn run_repair(
             _ => return Err(CoreError::new(ErrorCode::ManualFilesRequired)),
         }
     }
-    let result = diff::repair_diff(&old, incoming, &mut |path| game.fingerprint(path, cancel))?;
+    let result = diff::repair_diff(&old, incoming, &mut |path| {
+        game.fingerprint(path, cancel).at_path(path)
+    })
+    .or_cause(ErrorCause::InstalledRecordInvalid)?;
     if result.unresolvable() {
         return Err(CoreError::new(ErrorCode::PackConflict));
     }
@@ -1342,6 +1528,8 @@ pub(crate) async fn run_repair(
         write_json(&root, "transaction.json", &journal)?;
         apply(
             paths,
+            downloader,
+            &plan,
             &root,
             &game,
             &result,
@@ -1349,7 +1537,8 @@ pub(crate) async fn run_repair(
             &mut layers,
             operation,
             cancel,
-        )?;
+        )
+        .await?;
         #[cfg(test)]
         interrupt(Stage::AfterApply)?;
         cancel.commit(|| write_json(&root, "installed.json", &installed))?;
@@ -1379,7 +1568,9 @@ pub(crate) async fn run_repair(
             }
             drop(game);
             if recover_base(paths, id, &root).is_err() {
-                return Err(CoreError::new(ErrorCode::StorageCommitUncertain));
+                return Err(
+                    CoreError::new(ErrorCode::StorageCommitUncertain).with_detail_of(&error)
+                );
             }
             let current = read_json::<InstalledLock>(&root, "installed.json")?;
             if current.is_some_and(|current| current.operation == operation) {

@@ -1247,3 +1247,201 @@ async fn an_update_that_only_changes_the_loader_version_completes_and_publishes_
     assert_eq!(state(&world), Some(InstallationState::Installed));
     no_transaction(&world);
 }
+
+// ---- recovery and failure detail ----
+
+/// Where the shared cache keeps the bytes of one downloaded pack file.
+fn cache_file(world: &World, body: &[u8]) -> std::path::PathBuf {
+    use sha1::{Digest as _, Sha1};
+    use sha2::Sha512;
+    let hashes = Hashes {
+        sha1: Some(format!("{:x}", Sha1::digest(body))),
+        sha512: Some(format!("{:x}", Sha512::digest(body))),
+    };
+    let key = crate::modpack::content::ContentKey::for_expected(&Expected::file(
+        &hashes,
+        body.len() as u64,
+    ))
+    .unwrap_or_else(|_| panic!("key"));
+    world.paths.root().join(key.relative())
+}
+
+fn clear_hooks() {
+    BEFORE_APPLY.with(|hook| *hook.borrow_mut() = None);
+    ON_PAUSE.with(|hook| *hook.borrow_mut() = None);
+}
+
+fn downloads_of(server: &Server, name: &str) -> usize {
+    server
+        .requests()
+        .iter()
+        .filter(|request| request.path.ends_with(name))
+        .count()
+}
+
+#[tokio::test]
+async fn a_damaged_cache_entry_is_fetched_again_instead_of_ending_the_update() {
+    let world = world();
+    let pair = installed_pair(&world).await;
+    // The entry verified when it was stored; something damages it before the file is
+    // written, as an antivirus quarantine or a partial disk failure would.
+    let entry = cache_file(&world, A2);
+    BEFORE_APPLY.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move |_| {
+            assert!(std::fs::write(&entry, b"damaged").is_ok());
+        }));
+    });
+    let outcome = update_to(&world, &pair.second, &pair.server, false).await;
+    clear_hooks();
+    let report = updated(outcome);
+    assert_eq!(report.replaced, 1);
+    assert_eq!(read(&world, "mods/a.jar"), A2);
+    assert_eq!(pin_of(&pack(&world)), pair.second.version_id.to_string());
+    // Exactly that one file was downloaded a second time.
+    assert_eq!(downloads_of(&pair.server, "a.jar"), 2);
+    assert_eq!(downloads_of(&pair.server, "d.jar"), 1);
+    no_transaction(&world);
+    cleanup(&world);
+}
+
+#[tokio::test]
+async fn a_cache_entry_that_cannot_be_fetched_again_fails_with_its_file_and_changes_nothing() {
+    let world = world();
+    let pair = installed_pair(&world).await;
+    // The first download works; the host then withdraws the file.
+    let serving = routes(&[("a.jar", A2), ("d.jar", D)]);
+    let server = Server::start(move |request| match serving.get(&request.path) {
+        Some(body) if !request.path.ends_with("a.jar") || request.hit == 0 => {
+            crate::test_http::Reply::ok(body.clone())
+        }
+        _ => crate::test_http::Reply::status(404),
+    });
+    let entry = cache_file(&world, A2);
+    BEFORE_APPLY.with(|hook| {
+        *hook.borrow_mut() = Some(Box::new(move |_| {
+            assert!(std::fs::remove_file(&entry).is_ok());
+        }));
+    });
+    let outcome = update_to(&world, &pair.second, &server, false).await;
+    clear_hooks();
+    let Err(error) = outcome else {
+        panic!("the update cannot finish without the file");
+    };
+    assert_eq!(error.code(), ErrorCode::ArtifactMismatch);
+    let detail = error.detail();
+    assert_eq!(detail.cause, Some(ErrorCause::ChecksumMismatch));
+    assert_eq!(detail.path.as_deref(), Some("mods/a.jar"));
+    // Everything is as it was before the update began.
+    assert_eq!(read(&world, "mods/a.jar"), A1);
+    assert_eq!(pin_of(&pack(&world)), pair.first.version_id.to_string());
+    assert!(!exists(&world, "mods/d.jar"));
+    no_transaction(&world);
+    cleanup(&world);
+}
+
+/// Hold `path` open without sharing, so the operating system refuses to move it.
+#[cfg(windows)]
+fn hold(path: &std::path::Path) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(path)
+        .unwrap_or_else(|_| panic!("hold the file"))
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn a_file_held_for_a_moment_is_retried_and_the_update_completes() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let world = world();
+    let pair = installed_pair(&world).await;
+    let held = Rc::new(RefCell::new(None));
+    let target = game(&world, "mods/a.jar");
+    BEFORE_APPLY.with(|hook| {
+        let held = held.clone();
+        *hook.borrow_mut() = Some(Box::new(move |_| *held.borrow_mut() = Some(hold(&target))));
+    });
+    let released = held.clone();
+    ON_PAUSE.with(|hook| {
+        // The other process lets go after the first refusal.
+        *hook.borrow_mut() = Some(Box::new(move |_| *released.borrow_mut() = None));
+    });
+    let outcome = update_to(&world, &pair.second, &pair.server, false).await;
+    clear_hooks();
+    drop(held);
+    let report = updated(outcome);
+    assert_eq!(report.replaced, 1);
+    assert_eq!(read(&world, "mods/a.jar"), A2);
+    no_transaction(&world);
+    cleanup(&world);
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn a_file_that_stays_held_ends_the_update_after_bounded_tries_and_names_the_file() {
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    let world = world();
+    let pair = installed_pair(&world).await;
+    let held = Rc::new(RefCell::new(None));
+    let target = game(&world, "mods/a.jar");
+    BEFORE_APPLY.with(|hook| {
+        let held = held.clone();
+        *hook.borrow_mut() = Some(Box::new(move |_| *held.borrow_mut() = Some(hold(&target))));
+    });
+    let waits = Rc::new(Cell::new(0));
+    let counted = waits.clone();
+    ON_PAUSE
+        .with(|hook| *hook.borrow_mut() = Some(Box::new(move |_| counted.set(counted.get() + 1))));
+    let outcome = update_to(&world, &pair.second, &pair.server, false).await;
+    clear_hooks();
+    // Three tries means two waits: the retry loop is bounded, never unattended.
+    assert_eq!(waits.get(), HEAL_ATTEMPTS - 1);
+    let Err(error) = outcome else {
+        panic!("a held file cannot be replaced");
+    };
+    // The rollback is blocked by the same held file, so the commit state is uncertain,
+    // but the error still says which file and why.
+    assert_eq!(error.code(), ErrorCode::StorageCommitUncertain);
+    let detail = error.detail();
+    assert_eq!(detail.path.as_deref(), Some("mods/a.jar"));
+    assert!(matches!(
+        detail.cause,
+        Some(ErrorCause::FileInUse | ErrorCause::AccessDenied)
+    ));
+    // Once the other process lets go, the next operation finishes the rollback and the
+    // installation is exactly the one that was there before.
+    drop(held);
+    assert!(lock_and_recover(&world.paths, world.id).is_ok());
+    assert_eq!(read(&world, "mods/a.jar"), A1);
+    assert_eq!(pin_of(&pack(&world)), pair.first.version_id.to_string());
+    no_transaction(&world);
+    cleanup(&world);
+}
+
+#[tokio::test]
+async fn a_pack_archive_that_is_not_a_valid_archive_is_named_as_such() {
+    let world = world();
+    let pair = installed_pair(&world).await;
+    // The download verifies against its hash, but its content is not an archive.
+    let garbage: &[u8] = b"this is not a zip archive";
+    let broken = manifest(
+        world.id,
+        vec![mod_json("mods/a.jar", A2), mod_json("mods/b.jar", B)],
+        Some(archive_json(garbage)),
+    );
+    let server = server(routes(&[("a.jar", A2), (ARCHIVE, garbage)]));
+    let outcome = update_to(&world, &broken, &server, false).await;
+    let Err(error) = outcome else {
+        panic!("an invalid archive must not install");
+    };
+    assert_eq!(error.code(), ErrorCode::InvalidData);
+    assert_eq!(error.detail().cause, Some(ErrorCause::ArchiveInvalid));
+    // The installation was never touched.
+    assert_eq!(pin_of(&pack(&world)), pair.first.version_id.to_string());
+    assert_eq!(read(&world, "mods/a.jar"), A1);
+    no_transaction(&world);
+    cleanup(&world);
+}

@@ -475,3 +475,24 @@ fn every_diff_outcome_publishes_a_valid_state() {
         }
     }
 }
+
+#[test]
+fn a_rejected_state_names_the_file_that_broke_it() {
+    let old = state(Vec::new(), &[]);
+    let id = old.id;
+    // A kept-whole configuration file with no skip record is the broken invariant.
+    let broken = PackState {
+        files: vec![managed("config/seed.toml", Defaults, 5, None)],
+        consumed_defaults: ["config/seed.toml".to_owned()].into(),
+        ..old
+    };
+    let error = broken.validate(id).err();
+    assert_eq!(
+        error.as_ref().map(|error| error.code()),
+        Some(crate::error::ErrorCode::InvalidData)
+    );
+    assert_eq!(
+        error.as_ref().and_then(|error| error.path()),
+        Some("config/seed.toml")
+    );
+}
