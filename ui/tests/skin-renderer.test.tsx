@@ -1,7 +1,7 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 
 type Render = { skin: string; model: string; cape: string | null; yaw: number };
-const fake = vi.hoisted(() => ({ created: 0, renders: [] as Render[], frames: [] as { width: number; height: number; zoom: number; lift: number; fov: number; pitch: number; spread: number }[], active: 0, overlap: false }));
+const fake = vi.hoisted(() => ({ created: 0, renders: [] as Render[], frames: [] as { width: number; height: number; zoom: number; lift: number; fov: number; pitch: number; spread: number; headYaw: number; headPitch: number }[], active: 0, overlap: false }));
 
 // A stand-in for the 3D library: it records what was drawn and notices two renders at once.
 vi.mock('skinview3d', () => ({
@@ -11,7 +11,7 @@ vi.mock('skinview3d', () => ({
     width = 0; height = 0; zoom = 0; fov = 0;
     cameraY = 0; cameraZ = 1;
     camera = { position: { set: (_x: number, y: number, z: number) => { this.cameraY = y; this.cameraZ = z; } }, lookAt: () => {} };
-    playerObject = { skin: { leftArm: { rotation: { z: 0 } }, rightArm: { rotation: { z: 0 } } } };
+    playerObject = { skin: { leftArm: { rotation: { z: 0 } }, rightArm: { rotation: { z: 0 } }, head: { rotation: { x: 0, y: 0 } } } };
     setSize(width: number, height: number) { this.width = width; this.height = height; }
     animation: unknown = 'unset';
     skin = ''; model = ''; cape: string | null = null;
@@ -22,7 +22,7 @@ vi.mock('skinview3d', () => ({
     render() {
       fake.active += 1;
       if (fake.active > 1) fake.overlap = true;
-      fake.frames.push({ width: this.width, height: this.height, zoom: this.zoom, lift: this.playerWrapper.position.y, fov: this.fov, pitch: Math.atan2(this.cameraY, this.cameraZ), spread: this.playerObject.skin.leftArm.rotation.z });
+      fake.frames.push({ width: this.width, height: this.height, zoom: this.zoom, lift: this.playerWrapper.position.y, fov: this.fov, pitch: Math.atan2(this.cameraY, this.cameraZ), spread: this.playerObject.skin.leftArm.rotation.z, headYaw: this.playerObject.skin.head.rotation.y, headPitch: this.playerObject.skin.head.rotation.x });
       fake.renders.push({ skin: this.skin, model: this.model, cape: this.cape, yaw: this.playerWrapper.rotation.y });
       fake.active -= 1;
     }
@@ -37,7 +37,7 @@ vi.mock('../src/use-texture', () => ({
 }));
 
 const load = () => import('../src/skin-renderer');
-const request = (key: string, extra: Partial<{ skin: string; model: 'classic' | 'slim'; cape: string | null; yaw: number; frame: { width: number; height: number; zoom: number; lift: number; pitch?: number; spread?: number; fov?: number } }> = {}) =>
+const request = (key: string, extra: Partial<{ skin: string; model: 'classic' | 'slim'; cape: string | null; yaw: number; frame: { width: number; height: number; zoom: number; lift: number; pitch?: number; spread?: number; fov?: number; headYaw?: number; headPitch?: number } }> = {}) =>
   ({ key, skin: `skin-${key}`, model: 'classic' as const, cape: null, yaw: -0.5, ...extra });
 
 beforeEach(() => {
@@ -98,7 +98,7 @@ test('a bust is framed on the head, and the next full-body picture goes back to 
   await renderThumbnail(request('whole-1'));
   await renderThumbnail(request('bust-1', { frame: BUST_FRAME }));
   await renderThumbnail(request('whole-2'));
-  const { pitch, spread, fov, ...framing } = fake.frames[1];
+  const { pitch, spread, fov, headYaw, headPitch, ...framing } = fake.frames[1];
   expect(framing).toEqual({ width: BUST_FRAME.width, height: BUST_FRAME.height, zoom: BUST_FRAME.zoom, lift: BUST_FRAME.lift });
   expect(fake.frames[0]).not.toEqual(fake.frames[1]);
   expect(fake.frames[2]).toEqual(fake.frames[0]);
@@ -106,6 +106,12 @@ test('a bust is framed on the head, and the next full-body picture goes back to 
   expect(pitch).toBeCloseTo(BUST_FRAME.pitch ?? 0);
   expect(spread).toBeCloseTo(BUST_FRAME.spread ?? 0);
   expect(fov).toBe(BUST_FRAME.fov);
+  // The head turns on the body for the bust only.
+  expect(headYaw).toBeCloseTo(BUST_FRAME.headYaw ?? 0);
+  expect(headPitch).toBeCloseTo(BUST_FRAME.headPitch ?? 0);
+  expect(fake.frames[0].headYaw).toBe(0);
+  expect(fake.frames[0].headPitch).toBe(0);
+  expect(fake.frames[2].headYaw).toBe(0);
   expect(fake.frames[0].pitch).toBeCloseTo(0);
   expect(fake.frames[0].spread).toBe(0);
   expect(fake.frames[0].fov).toBe(40);

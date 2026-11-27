@@ -6,5 +6,8 @@
 export const DEFAULT_YAW = 0.5;
 /** A cape is judged from behind, turned a little so its folds show, the same way round as the skins. */
 export const CAPE_YAW = Math.PI - 0.45;
-/** The bust beside an account, turned a little less than the full-body views, as the online busts it replaces are. */
-export const BUST_YAW = 0.33;
+/**
+ * The body of the bust beside an account. Its head turns a little further (see `BUST_FRAME`). Both were fitted
+ * numerically so the bust reproduces the reference online bust of the default skin.
+ */
+export const BUST_YAW = 0.225;

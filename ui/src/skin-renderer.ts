@@ -9,9 +9,10 @@ import { decodeImage } from './use-texture';
  */
 /**
  * How a picture is framed. `pitch` raises the camera so it looks down on the player, `spread` angles the arms
- * outward (both in radians) and `fov` is the camera's field of view in degrees; a narrower one flattens perspective.
+ * outward and `headYaw` and `headPitch` turn the head on the body (all in radians), and `fov` is the camera's field
+ * of view in degrees; a narrower one flattens perspective.
  */
-export type Frame = { width: number; height: number; zoom: number; lift: number; pitch?: number; spread?: number; fov?: number };
+export type Frame = { width: number; height: number; zoom: number; lift: number; pitch?: number; spread?: number; fov?: number; headYaw?: number; headPitch?: number };
 
 export type ThumbnailRequest = {
   /** Identifies what is drawn; equal keys give the same picture. */
@@ -28,7 +29,7 @@ export const THUMBNAIL_WIDTH = 240;
 export const THUMBNAIL_HEIGHT = 320;
 const BODY_FRAME: Frame = { width: THUMBNAIL_WIDTH, height: THUMBNAIL_HEIGHT, zoom: 0.78, lift: 0 };
 /** Head and torso seen from a little above, square like the online busts it replaces so it sits in the same place. */
-export const BUST_FRAME: Frame = { width: 256, height: 256, zoom: 1.69, lift: -5.9, pitch: 0.42, spread: 0.1, fov: 36 };
+export const BUST_FRAME: Frame = { width: 256, height: 256, zoom: 1.765, lift: -7.025, pitch: 0.207, spread: 0.145, fov: 37.5, headYaw: 0.187, headPitch: -0.04 };
 const CACHE_LIMIT = 240;
 
 const cache = new Map<string, string>();
@@ -81,6 +82,8 @@ export function renderThumbnail(request: ThumbnailRequest): Promise<string> {
     viewer.playerWrapper.rotation.y = request.yaw;
     viewer.playerObject.skin.leftArm.rotation.z = frame.spread ?? 0;
     viewer.playerObject.skin.rightArm.rotation.z = -(frame.spread ?? 0);
+    viewer.playerObject.skin.head.rotation.y = frame.headYaw ?? 0;
+    viewer.playerObject.skin.head.rotation.x = frame.headPitch ?? 0;
     viewer.render();
     const picture = viewer.canvas.toDataURL('image/png');
     remember(request.key, picture);
