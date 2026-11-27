@@ -259,6 +259,77 @@ async fn a_sync_keeps_the_skin_and_every_cape_and_reuses_them_afterwards() {
 }
 
 #[tokio::test]
+async fn every_synchronised_profile_reports_what_it_last_wore_without_any_account() {
+    let world = World::new();
+    assert!(world.manager.worn_skins().unwrap_or_default().is_empty());
+    let first = Fake::new().wearing(5, SkinModel::Slim, &[]);
+    world
+        .manager
+        .sync_with(&first)
+        .await
+        .unwrap_or_else(|_| panic!("first"));
+    let second_id =
+        Uuid::parse_str("11111111111141118111111111111111").unwrap_or_else(|_| panic!("id"));
+    let second = Fake::new();
+    second.with(|service| {
+        if let Some(remote) = service.profile.as_mut() {
+            remote.id = second_id;
+        }
+    });
+    world
+        .manager
+        .sync_with(&second)
+        .await
+        .unwrap_or_else(|_| panic!("second"));
+
+    let worn = world
+        .manager
+        .worn_skins()
+        .unwrap_or_else(|_| panic!("worn"));
+    assert_eq!(worn.len(), 2);
+    let own = worn
+        .iter()
+        .find(|entry| entry.profile_id == profile().id)
+        .unwrap_or_else(|| panic!("own"));
+    assert_eq!(own.model, SkinModel::Slim);
+    let texture = own
+        .texture
+        .clone()
+        .unwrap_or_else(|| panic!("cached texture"));
+    assert_eq!(texture.len(), 64);
+    // A profile without a skin of its own is known, and has no image.
+    let plain = worn
+        .iter()
+        .find(|entry| entry.profile_id == second_id)
+        .unwrap_or_else(|| panic!("plain"));
+    assert_eq!(
+        (plain.texture.clone(), plain.model),
+        (None, SkinModel::Classic)
+    );
+    // The image really is readable, and an uncached one is reported as having none.
+    assert!(world.manager.texture(TextureKind::Skin, &texture).is_ok());
+    std::fs::remove_file(
+        world
+            .paths
+            .root()
+            .join("skins")
+            .join(format!("{texture}.png")),
+    )
+    .unwrap_or_else(|_| panic!("remove"));
+    let after = world
+        .manager
+        .worn_skins()
+        .unwrap_or_else(|_| panic!("after"));
+    assert_eq!(
+        after
+            .iter()
+            .find(|entry| entry.profile_id == profile().id)
+            .map(|entry| entry.texture.clone()),
+        Some(None)
+    );
+}
+
+#[tokio::test]
 async fn the_current_look_can_be_saved_once_and_is_then_recognised() {
     let world = World::new();
     let fake = Fake::new().wearing(5, SkinModel::Classic, &[(CAPE_A, 1, true)]);

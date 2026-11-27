@@ -107,6 +107,16 @@ pub struct SkinsView {
     pub incomplete: bool,
 }
 
+/// The skin a profile last wore, as the library knows it, for drawing accounts without asking a service.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WornSkin {
+    pub profile_id: Uuid,
+    /// Pixel hash of the cached skin; absent when the profile wears the default skin or its image is not kept yet.
+    pub texture: Option<String>,
+    pub model: SkinModel,
+}
+
 /// A look that was just added, with the library as it is now.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -315,6 +325,30 @@ impl SkinManager {
             TextureKind::Cape => library.files().read_cape(key)?,
         };
         bytes.ok_or_else(invalid)
+    }
+
+    /// What every synchronised profile last wore. It reads the library only and never touches the network or
+    /// an account, so the accounts list can draw every saved profile at once.
+    pub fn worn_skins(&self) -> Result<Vec<WornSkin>, CoreError> {
+        let library = Library::open(&self.paths)?;
+        let index = library.index()?;
+        let files = library.files();
+        let mut worn: Vec<WornSkin> = index
+            .profiles
+            .iter()
+            .filter_map(|(key, profile)| {
+                let skin = profile.skin.as_ref();
+                Some(WornSkin {
+                    profile_id: Uuid::parse_str(key).ok()?,
+                    texture: skin
+                        .and_then(|skin| skin.texture.clone())
+                        .filter(|texture| files.has_skin(texture)),
+                    model: skin.map_or(SkinModel::Classic, |skin| skin.model),
+                })
+            })
+            .collect();
+        worn.sort_by_key(|entry| entry.profile_id);
+        Ok(worn)
     }
 
     /// Add a skin file to the library as a new look.
