@@ -192,9 +192,10 @@ PanitaClient/
 ├─ update-state.json      # nonsecret launcher-update channel and pending requirement (§8)
 ├─ insts-cache.json
 ├─ instance-erasures.json # temporary explicit full-instance erasure intents; never auto-retried
-├─ skins.json             # nonsecret skin library index: saved looks, cached capes, last known state per profile (§5.5)
-├─ skins/                 # cached skin PNGs named by pixel hash; disposable apart from saved looks
-├─ capes/                 # cached cape PNGs named by the service's cape identifier
+├─ skins/                 # skin library (§5.5): disposable apart from saved skins
+│  ├─ skins.json          # nonsecret index: saved skins, cached capes, last known state per profile
+│  ├─ {pixel-hash}.png    # cached skin images
+│  └─ capes/              # cached cape PNGs named by the service's cape identifier
 ├─ libraries/             # shared, verified caches
 ├─ assets/
 ├─ versions/
@@ -515,10 +516,16 @@ first, because the page always works on the selected one.
   and not the boundary. The page offers nothing to an offline account except an explanation.
 - A "look" is a skin file, its arm model (classic or slim) and a cape or none. The library keeps
   at most 100 looks, shared by every Microsoft account on this computer. Looks, the capes the account
-  owns and the last known state of each profile live in `skins.json` (disk schema 1,
-  written through the private store, its interprocess lock and atomic replacement). Images live in
-  `skins/{pixel-hash}.png` and `capes/{cape-id}.png` in private directories. A damaged or future
-  `skins.json` is reported and left untouched; every name read from it is validated before it
+  owns and the last known state of each profile live in `skins/skins.json` (disk schema 1,
+  written under the store's interprocess lock with atomic replacement). Its list of saved skins is the
+  `skins` key; the `looks` spelling of earlier builds is still read, never written, and a document with
+  both is refused. Images live in `skins/{pixel-hash}.png` and `skins/capes/{cape-id}.png` in private
+  directories (owner decision, 2026-11-26: the index and the capes folder moved under `skins/`). When
+  the launcher finds the earlier root `skins.json` or `capes/`, it moves them in under the writer
+  lock: the capes folder whole, the index only after its bytes are published at the new path. A
+  conflicting copy is left in the root and the new location wins; entries that are not cape images stay
+  where they are. A damaged or future
+  `skins/skins.json` is reported and left untouched; every name read from it is validated before it
   becomes a file name. Images nothing refers to are removed after the index is durable.
 - A skin is identified by the hash of its decoded pixels, never of its file, because the service
   re-encodes uploads. This is how the page recognises that the account wears a saved look and offers

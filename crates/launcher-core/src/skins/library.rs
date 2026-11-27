@@ -1,10 +1,12 @@
-//! The local skin library: a small index document and two folders of PNG files.
+//! The local skin library: a small index document and two folders of PNG files, all under
+//! the private `skins/` folder.
 //!
-//! `skins.json` lives in the private application root and is written through the same
-//! interprocess lock and atomic replacement as the other documents. `skins/` holds one PNG
-//! per distinct skin, named by its pixel hash; `capes/` holds one per cape, named by the
-//! service's cape identifier. A name read from the index is validated before it becomes a
-//! file name, so a damaged or edited index cannot reach outside those folders.
+//! `skins/skins.json` is written under the same interprocess lock and with the same atomic
+//! replacement as the other documents. `skins/` also holds one PNG per distinct skin, named
+//! by its pixel hash, and `skins/capes/` one per cape, named by the service's cape
+//! identifier. A name read from the index is validated before it becomes a file name, so a
+//! damaged or edited index cannot reach outside those folders. Earlier builds kept the
+//! index and the capes folder in the application root; `Library::open` moves them in.
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::Path;
@@ -18,7 +20,7 @@ use crate::authentication::profile_services::{valid_cape_id, valid_hash};
 use crate::error::{CoreError, ErrorCode};
 use crate::minecraft::world_backup::capability;
 use crate::paths::AppPaths;
-use crate::storage::{PrivateStore, map_io_error, map_private_error};
+use crate::storage::{PrivateStore, StoreTransaction, map_io_error, map_private_error};
 use crate::storage_json::pretty;
 
 const INDEX: &str = "skins.json";
@@ -33,7 +35,9 @@ const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Index {
     pub schema: u32,
-    #[serde(default)]
+    /// Saved skins. Earlier builds wrote this key as `looks`; it is still read, never written,
+    /// and a document carrying both spellings is refused.
+    #[serde(default, rename = "skins", alias = "looks")]
     pub looks: Vec<DiskLook>,
     /// Capes whose image is cached, by service identifier.
     #[serde(default)]
@@ -348,12 +352,80 @@ pub(crate) struct Library {
     files: Files,
 }
 
+/// Where earlier builds kept the capes folder, inside the application root.
+const LEGACY_CAPES: &str = "capes";
+/// Same limit as the other documents written through the private store.
+const MAX_INDEX_BYTES: usize = 1024 * 1024;
+
+/// Move what earlier builds left in the application root into `skins/`, under the writer
+/// lock. Nothing is deleted that is not first present at the destination: an index is
+/// removed only once its bytes are published, a cape image only by moving it. A conflicting
+/// copy is left where it is and the new location wins.
+fn migrate_legacy(
+    transaction: &StoreTransaction<'_>,
+    root: &PrivateDir,
+    skins: &PrivateDir,
+) -> Result<(), CoreError> {
+    if let Some(old) = Files::read(root, INDEX)? {
+        match Files::read(skins, INDEX)? {
+            None => {
+                Files::write(skins, INDEX, &old)?;
+                transaction.remove_verified_file(INDEX)?;
+            }
+            Some(current) if current == old => transaction.remove_verified_file(INDEX)?,
+            Some(_) => {}
+        }
+    }
+    let legacy = match root.open_dir(LEGACY_CAPES) {
+        Ok(directory) => directory,
+        Err(error) if not_found(&error) => return Ok(()),
+        Err(error) => return Err(map_private_error(error)),
+    };
+    let source = capability(&legacy)?;
+    let parent = capability(root)?;
+    match skins.open_dir(LEGACY_CAPES) {
+        Err(error) if not_found(&error) => {
+            // The whole folder moves, with whatever it holds.
+            drop(source);
+            drop(legacy);
+            parent
+                .rename(LEGACY_CAPES, &capability(skins)?, LEGACY_CAPES)
+                .map_err(map_io_error)
+        }
+        Err(error) => Err(map_private_error(error)),
+        Ok(destination) => {
+            // Both exist: move the images that are not already there, then drop the old
+            // folder if that left it empty.
+            let target = capability(&destination)?;
+            let mut moving = Vec::new();
+            for entry in source.entries().map_err(map_io_error)? {
+                let Ok(name) = entry.map_err(map_io_error)?.file_name().into_string() else {
+                    continue;
+                };
+                let valid = name.strip_suffix(".png").is_some_and(valid_cape_id);
+                if valid && target.symlink_metadata(&name).is_err() {
+                    moving.push(name);
+                }
+            }
+            for name in moving {
+                source.rename(&name, &target, &name).map_err(map_io_error)?;
+            }
+            let _ = parent.remove_dir(LEGACY_CAPES);
+            Ok(())
+        }
+    }
+}
+
 impl Library {
     pub(crate) fn open(paths: &AppPaths) -> Result<Self, CoreError> {
         let store = PrivateStore::open(paths)?;
         let root = PrivateDir::ensure(paths.root()).map_err(map_private_error)?;
         let skins = root.ensure_dir("skins").map_err(map_private_error)?;
-        let capes = root.ensure_dir("capes").map_err(map_private_error)?;
+        // Take the writer lock only when something from an earlier build is still there.
+        if root.open_file(Path::new(INDEX)).is_ok() || root.open_dir(LEGACY_CAPES).is_ok() {
+            store.with_lock(|transaction| migrate_legacy(transaction, &root, &skins))?;
+        }
+        let capes = skins.ensure_dir("capes").map_err(map_private_error)?;
         Ok(Self {
             store,
             files: Files { skins, capes },
@@ -366,7 +438,7 @@ impl Library {
 
     /// The current index, without taking the writer lock: replacements are atomic.
     pub(crate) fn index(&self) -> Result<Index, CoreError> {
-        Index::parse(self.store.read(INDEX)?)
+        Index::parse(Files::read(&self.files.skins, INDEX)?)
     }
 
     /// Change the index under the interprocess lock. Nothing is written when `change`
@@ -375,13 +447,16 @@ impl Library {
         &self,
         change: impl FnOnce(&mut Index, &Files) -> Result<T, CoreError>,
     ) -> Result<T, CoreError> {
-        self.store.with_lock(|transaction| {
-            let mut index = Index::parse(transaction.read(INDEX)?)?;
+        self.store.with_lock(|_| {
+            let mut index = Index::parse(Files::read(&self.files.skins, INDEX)?)?;
             let result = change(&mut index, &self.files)?;
             index.tidy();
             index.validate()?;
             let bytes = pretty(&index).map_err(|_| invalid())?;
-            transaction.write(INDEX, &bytes)?;
+            if bytes.len() > MAX_INDEX_BYTES {
+                return Err(invalid());
+            }
+            Files::write(&self.files.skins, INDEX, &bytes)?;
             // Clean up is best effort: a failure here only leaves an unreferenced file
             // that the next change removes.
             let _ = Files::prune(

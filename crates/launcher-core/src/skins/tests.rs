@@ -40,11 +40,19 @@ impl World {
     }
 
     fn index_text(&self) -> String {
-        std::fs::read_to_string(self.paths.root().join("skins.json")).unwrap_or_default()
+        std::fs::read_to_string(self.paths.root().join("skins").join("skins.json"))
+            .unwrap_or_default()
     }
 
+    /// The skin images, not the index or the capes folder that share the directory.
     fn skin_files(&self) -> Vec<String> {
-        names(&self.paths.root().join("skins"))
+        let mut found = names(&self.paths.root().join("skins"));
+        found.retain(|name| name.ends_with(".png"));
+        found
+    }
+
+    fn cape_files(&self) -> Vec<String> {
+        names(&self.paths.root().join("skins").join("capes"))
     }
 }
 
@@ -830,11 +838,11 @@ fn a_damaged_or_future_index_is_reported_and_left_untouched() {
         .manager
         .add_look(&profile(), "Una", SkinModel::Classic, None, &upload_file(1))
         .unwrap_or_else(|_| panic!("add"));
-    let path = world.paths.root().join("skins.json");
+    let path = world.paths.root().join("skins").join("skins.json");
     for broken in [
         "{ not json".to_owned(),
-        r#"{"schema":2,"looks":[]}"#.to_owned(),
-        r#"{"schema":1,"looks":[{"id":"6f1c6f0e-0f0c-4a43-a4a6-0d4b7d1a1c11","name":"x","model":"classic","texture":"../../accounts","cape":null,"created_ms":1}]}"#.to_owned(),
+        r#"{"schema":2,"skins":[]}"#.to_owned(),
+        r#"{"schema":1,"skins":[{"id":"6f1c6f0e-0f0c-4a43-a4a6-0d4b7d1a1c11","name":"x","model":"classic","texture":"../../accounts","cape":null,"created_ms":1}]}"#.to_owned(),
         r#"{"schema":1,"capes":{"../escape":{"texture_key":"abc"}}}"#.to_owned(),
     ] {
         std::fs::write(&path, &broken).unwrap_or_else(|_| panic!("write"));
@@ -877,4 +885,174 @@ fn only_validated_names_reach_the_image_folders() {
             .is_err(),
         "missing"
     );
+}
+
+/// Write a document the way the launcher does, so it has the permissions the library requires.
+fn put(directory: &std::path::Path, name: &str, bytes: &[u8]) {
+    private_fs::PrivateDir::ensure(directory)
+        .and_then(|dir| dir.write_atomic_durable(name, bytes))
+        .unwrap_or_else(|_| panic!("put {name}"));
+}
+
+/// What an earlier build left in the application root: the index with its `looks` key and the capes folder.
+fn move_to_the_old_layout(world: &World) {
+    let root = world.paths.root();
+    let text = std::fs::read_to_string(root.join("skins").join("skins.json"))
+        .unwrap_or_else(|_| panic!("index"));
+    put(
+        root,
+        "skins.json",
+        text.replace("\"skins\": [", "\"looks\": [").as_bytes(),
+    );
+    std::fs::remove_file(root.join("skins").join("skins.json"))
+        .unwrap_or_else(|_| panic!("remove index"));
+    std::fs::rename(root.join("skins").join("capes"), root.join("capes"))
+        .unwrap_or_else(|_| panic!("old capes"));
+}
+
+#[test]
+fn the_index_is_written_under_skins_with_the_skins_key() {
+    let world = World::new();
+    world
+        .manager
+        .add_look(&profile(), "Una", SkinModel::Classic, None, &upload_file(1))
+        .unwrap_or_else(|_| panic!("add"));
+    let text = world.index_text();
+    assert!(text.contains("\"skins\": ["), "{text}");
+    assert!(!text.contains("\"looks\""), "{text}");
+    assert!(!world.paths.root().join("skins.json").exists());
+    assert!(!world.paths.root().join("capes").exists());
+    assert!(world.paths.root().join("skins").join("capes").is_dir());
+}
+
+#[tokio::test]
+async fn an_index_and_capes_folder_from_an_earlier_build_move_into_skins_whole() {
+    let world = World::new();
+    let fake = Fake::new().wearing(5, SkinModel::Slim, &[(CAPE_A, 1, true), (CAPE_B, 2, false)]);
+    world
+        .manager
+        .sync_with(&fake)
+        .await
+        .unwrap_or_else(|_| panic!("sync"));
+    world
+        .manager
+        .add_look(
+            &profile(),
+            "Una",
+            SkinModel::Classic,
+            Some(CAPE_B.to_owned()),
+            &upload_file(2),
+        )
+        .unwrap_or_else(|_| panic!("add"));
+    let capes = world.cape_files();
+    let skins = world.skin_files();
+    assert_eq!(capes.len(), 2);
+    move_to_the_old_layout(&world);
+
+    // A new manager finds the old files, moves them in, and the library is intact.
+    let reopened = SkinManager::new(world.paths.clone());
+    let view = reopened
+        .view(&profile())
+        .unwrap_or_else(|error| panic!("view: {:?}", error.code()));
+    assert_eq!(view.library.len(), 1);
+    assert_eq!(view.library[0].name, "Una");
+    assert_eq!(world.cape_files(), capes);
+    assert_eq!(world.skin_files(), skins);
+    assert!(!world.paths.root().join("skins.json").exists());
+    assert!(!world.paths.root().join("capes").exists());
+    assert!(reopened.texture(TextureKind::Cape, CAPE_A).is_ok());
+    // The next change writes the new spelling.
+    reopened
+        .add_look(&profile(), "Dos", SkinModel::Classic, None, &upload_file(3))
+        .unwrap_or_else(|_| panic!("add"));
+    assert!(!world.index_text().contains("\"looks\""));
+}
+
+#[test]
+fn an_old_index_never_replaces_a_different_new_one_and_stays_where_it_is() {
+    let world = World::new();
+    world
+        .manager
+        .add_look(
+            &profile(),
+            "Nueva",
+            SkinModel::Classic,
+            None,
+            &upload_file(1),
+        )
+        .unwrap_or_else(|_| panic!("add"));
+    let current = world.index_text();
+    put(
+        world.paths.root(),
+        "skins.json",
+        br#"{"schema":1,"looks":[]}"#,
+    );
+    let reopened = SkinManager::new(world.paths.clone());
+    let view = reopened
+        .view(&profile())
+        .unwrap_or_else(|error| panic!("view: {:?}", error.code()));
+    assert_eq!(view.library.len(), 1);
+    assert_eq!(world.index_text(), current);
+    assert!(world.paths.root().join("skins.json").exists());
+}
+
+#[test]
+fn an_identical_old_index_is_retired_and_old_capes_are_merged_without_overwriting() {
+    let world = World::new();
+    world
+        .manager
+        .add_look(&profile(), "Una", SkinModel::Classic, None, &upload_file(1))
+        .unwrap_or_else(|_| panic!("add"));
+    let root = world.paths.root();
+    put(
+        root,
+        "skins.json",
+        &std::fs::read(root.join("skins").join("skins.json")).unwrap_or_default(),
+    );
+    let capes = root.join("capes");
+    private_fs::PrivateDir::ensure(&capes).unwrap_or_else(|_| panic!("old capes"));
+    let moved = format!("{CAPE_A}.png");
+    let kept = format!("{CAPE_B}.png");
+    put(&capes, &moved, b"old");
+    put(&capes, &kept, b"old");
+    put(&capes, "notes.txt", b"mine");
+    put(&root.join("skins").join("capes"), &kept, b"new");
+
+    SkinManager::new(world.paths.clone())
+        .view(&profile())
+        .unwrap_or_else(|error| panic!("view: {:?}", error.code()));
+    assert!(!root.join("skins.json").exists());
+    assert_eq!(
+        std::fs::read(root.join("skins").join("capes").join(&moved)).unwrap_or_default(),
+        b"old"
+    );
+    assert_eq!(
+        std::fs::read(root.join("skins").join("capes").join(&kept)).unwrap_or_default(),
+        b"new"
+    );
+    // What is not ours, and the copy that lost, stay in the old folder.
+    assert!(capes.join("notes.txt").exists());
+    assert!(capes.join(&kept).exists());
+    assert!(!capes.join(&moved).exists());
+}
+
+#[test]
+fn an_index_with_both_spellings_is_refused_untouched() {
+    let world = World::new();
+    world
+        .manager
+        .view(&profile())
+        .unwrap_or_else(|error| panic!("view: {:?}", error.code()));
+    let path = world.paths.root().join("skins").join("skins.json");
+    let both = r#"{"schema":1,"skins":[],"looks":[]}"#;
+    put(
+        &world.paths.root().join("skins"),
+        "skins.json",
+        both.as_bytes(),
+    );
+    assert_eq!(
+        world.manager.view(&profile()).err().map(|e| e.code()),
+        Some(ErrorCode::InvalidData)
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap_or_default(), both);
 }
