@@ -438,6 +438,7 @@ pub fn run() {
             skin_commands::skins_save_current,
             skin_commands::skins_edit_look,
             skin_commands::skins_delete_look,
+            skin_commands::skins_worn,
             skin_commands::skin_texture,
             pack_commands::import_pack_file,
             pack_commands::content_cache_size,

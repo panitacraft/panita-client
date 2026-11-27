@@ -186,19 +186,28 @@ pub(super) async fn skins_delete_look(
     result
 }
 
-/// The PNG of a cached skin or cape, as a raw binary response.
+/// The skin each synchronised profile last wore. It reads the library only, so the accounts list can draw
+/// every saved profile at once, whichever account is selected.
+#[tauri::command]
+pub(super) async fn skins_worn(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Vec<skins::WornSkin>, ErrorCode> {
+    main_only(&window)?;
+    let manager = manager(&app)?;
+    blocking(move || manager.worn_skins()).await
+}
+
+/// The PNG of a cached skin or cape, as a raw binary response. It is a local read of a public image under
+/// a validated key, so it does not depend on which account is selected: the accounts list draws every profile.
 #[tauri::command]
 pub(super) async fn skin_texture(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
-    state: tauri::State<'_, DesktopState>,
     kind: TextureKind,
     key: String,
 ) -> Result<tauri::ipc::Response, ErrorCode> {
     main_only(&window)?;
-    controller(&state)?
-        .selected_microsoft_profile()
-        .map_err(|error| error.code())?;
     let manager = manager(&app)?;
     let bytes = blocking(move || manager.texture(kind, &key)).await?;
     Ok(tauri::ipc::Response::new(bytes))
