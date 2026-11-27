@@ -7,6 +7,12 @@ import { decodeImage } from './use-texture';
  * browser allows, so one hidden player renders every picture in turn, standing still, and the result
  * is kept as an image. The pictures are cached by what they show, so each skin is rendered once.
  */
+/**
+ * How a picture is framed. `pitch` raises the camera so it looks down on the player, `spread` angles the arms
+ * outward (both in radians) and `fov` is the camera's field of view in degrees; a narrower one flattens perspective.
+ */
+export type Frame = { width: number; height: number; zoom: number; lift: number; pitch?: number; spread?: number; fov?: number };
+
 export type ThumbnailRequest = {
   /** Identifies what is drawn; equal keys give the same picture. */
   key: string;
@@ -15,14 +21,14 @@ export type ThumbnailRequest = {
   cape: string | null;
   yaw: number;
   /** A different framing, for the bust shown beside an account. Everything else draws the whole body. */
-  frame?: { width: number; height: number; zoom: number; lift: number };
+  frame?: Frame;
 };
 
 export const THUMBNAIL_WIDTH = 240;
 export const THUMBNAIL_HEIGHT = 320;
-const BODY_FRAME = { width: THUMBNAIL_WIDTH, height: THUMBNAIL_HEIGHT, zoom: 0.78, lift: 0 };
-/** Head and shoulders, for a picture beside an account name: the head fills about half the height, with a small margin above it. */
-export const BUST_FRAME = { width: 192, height: 216, zoom: 1.68, lift: -7.2 };
+const BODY_FRAME: Frame = { width: THUMBNAIL_WIDTH, height: THUMBNAIL_HEIGHT, zoom: 0.78, lift: 0 };
+/** Head and torso seen from a little above, square like the online busts it replaces so it sits in the same place. */
+export const BUST_FRAME: Frame = { width: 256, height: 256, zoom: 1.6, lift: -5.9, pitch: 0.3, spread: 0.18, fov: 24 };
 const CACHE_LIMIT = 240;
 
 const cache = new Map<string, string>();
@@ -65,9 +71,16 @@ export function renderThumbnail(request: ThumbnailRequest): Promise<string> {
     if (cape) viewer.loadCape(cape, { backEquipment: 'cape' }); else viewer.resetCape();
     const frame = request.frame ?? BODY_FRAME;
     viewer.setSize(frame.width, frame.height);
+    // Aim the camera from above before the library rescales its distance, then look at the player's centre.
+    const pitch = frame.pitch ?? 0;
+    viewer.camera.position.set(0, Math.sin(pitch), Math.cos(pitch));
+    viewer.fov = frame.fov ?? 40;
     viewer.zoom = frame.zoom;
+    viewer.camera.lookAt(0, 0, 0);
     viewer.playerWrapper.position.y = frame.lift;
     viewer.playerWrapper.rotation.y = request.yaw;
+    viewer.playerObject.skin.leftArm.rotation.z = frame.spread ?? 0;
+    viewer.playerObject.skin.rightArm.rotation.z = -(frame.spread ?? 0);
     viewer.render();
     const picture = viewer.canvas.toDataURL('image/png');
     remember(request.key, picture);

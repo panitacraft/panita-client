@@ -1,14 +1,17 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 
 type Render = { skin: string; model: string; cape: string | null; yaw: number };
-const fake = vi.hoisted(() => ({ created: 0, renders: [] as Render[], frames: [] as { width: number; height: number; zoom: number; lift: number }[], active: 0, overlap: false }));
+const fake = vi.hoisted(() => ({ created: 0, renders: [] as Render[], frames: [] as { width: number; height: number; zoom: number; lift: number; fov: number; pitch: number; spread: number }[], active: 0, overlap: false }));
 
 // A stand-in for the 3D library: it records what was drawn and notices two renders at once.
 vi.mock('skinview3d', () => ({
   SkinViewer: class {
     canvas = { toDataURL: () => `picture-${fake.renders.length}` };
     playerWrapper = { rotation: { y: 0 }, position: { y: 0 } };
-    width = 0; height = 0; zoom = 0;
+    width = 0; height = 0; zoom = 0; fov = 0;
+    cameraY = 0; cameraZ = 1;
+    camera = { position: { set: (_x: number, y: number, z: number) => { this.cameraY = y; this.cameraZ = z; } }, lookAt: () => {} };
+    playerObject = { skin: { leftArm: { rotation: { z: 0 } }, rightArm: { rotation: { z: 0 } } } };
     setSize(width: number, height: number) { this.width = width; this.height = height; }
     animation: unknown = 'unset';
     skin = ''; model = ''; cape: string | null = null;
@@ -19,7 +22,7 @@ vi.mock('skinview3d', () => ({
     render() {
       fake.active += 1;
       if (fake.active > 1) fake.overlap = true;
-      fake.frames.push({ width: this.width, height: this.height, zoom: this.zoom, lift: this.playerWrapper.position.y });
+      fake.frames.push({ width: this.width, height: this.height, zoom: this.zoom, lift: this.playerWrapper.position.y, fov: this.fov, pitch: Math.atan2(this.cameraY, this.cameraZ), spread: this.playerObject.skin.leftArm.rotation.z });
       fake.renders.push({ skin: this.skin, model: this.model, cape: this.cape, yaw: this.playerWrapper.rotation.y });
       fake.active -= 1;
     }
@@ -34,7 +37,7 @@ vi.mock('../src/use-texture', () => ({
 }));
 
 const load = () => import('../src/skin-renderer');
-const request = (key: string, extra: Partial<{ skin: string; model: 'classic' | 'slim'; cape: string | null; yaw: number; frame: { width: number; height: number; zoom: number; lift: number } }> = {}) =>
+const request = (key: string, extra: Partial<{ skin: string; model: 'classic' | 'slim'; cape: string | null; yaw: number; frame: { width: number; height: number; zoom: number; lift: number; pitch?: number; spread?: number; fov?: number } }> = {}) =>
   ({ key, skin: `skin-${key}`, model: 'classic' as const, cape: null, yaw: -0.5, ...extra });
 
 beforeEach(() => {
@@ -95,9 +98,17 @@ test('a bust is framed on the head, and the next full-body picture goes back to 
   await renderThumbnail(request('whole-1'));
   await renderThumbnail(request('bust-1', { frame: BUST_FRAME }));
   await renderThumbnail(request('whole-2'));
-  expect(fake.frames[1]).toEqual(BUST_FRAME);
-  expect(fake.frames[0]).not.toEqual(BUST_FRAME);
+  const { pitch, spread, fov, ...framing } = fake.frames[1];
+  expect(framing).toEqual({ width: BUST_FRAME.width, height: BUST_FRAME.height, zoom: BUST_FRAME.zoom, lift: BUST_FRAME.lift });
+  expect(fake.frames[0]).not.toEqual(fake.frames[1]);
   expect(fake.frames[2]).toEqual(fake.frames[0]);
+  // Seen from above with the arms angled out, and a narrower lens; the body pictures are level with straight arms.
+  expect(pitch).toBeCloseTo(BUST_FRAME.pitch ?? 0);
+  expect(spread).toBeCloseTo(BUST_FRAME.spread ?? 0);
+  expect(fov).toBe(BUST_FRAME.fov);
+  expect(fake.frames[0].pitch).toBeCloseTo(0);
+  expect(fake.frames[0].spread).toBe(0);
+  expect(fake.frames[0].fov).toBe(40);
   // Head and shoulders are a closer, lower-centred view than the whole body.
   expect(BUST_FRAME.zoom).toBeGreaterThan(fake.frames[0].zoom);
   expect(BUST_FRAME.lift).toBeLessThan(fake.frames[0].lift);

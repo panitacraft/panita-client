@@ -99,8 +99,11 @@ test('the library opens from disk first and then synchronises with the account',
   expect(await screen.findByRole('button', { name: /^Look b/ })).toBeTruthy();
   await waitFor(() => expect(calls('skins_sync')).toHaveLength(1));
   expect(calls('skins_snapshot')).toHaveLength(1);
-  expect(viewer().dataset.skin).toBe(image(hash('a')));
-  expect(viewer().dataset.cape).toBe(image('cape-a'));
+  // The textures arrive a moment after the cards do.
+  await waitFor(() => {
+    expect(viewer().dataset.skin).toBe(image(hash('a')));
+    expect(viewer().dataset.cape).toBe(image('cape-a'));
+  });
   expect(viewer().dataset.model).toBe('classic');
   expect(screen.getByRole('heading', { name: 'Aspectos · PlayerOne' })).toBeTruthy();
 });
@@ -123,7 +126,7 @@ test('previewing a saved look updates the 3D view at once and applying sends exa
   const user = userEvent.setup();
   mount();
   await user.click(await screen.findByRole('button', { name: /^Look c/ }));
-  expect(viewer().dataset.skin).toBe(image(hash('c')));
+  await waitFor(() => expect(viewer().dataset.skin).toBe(image(hash('c'))));
   expect(viewer().dataset.model).toBe('slim');
   await waitFor(() => expect(viewer().dataset.cape).toBe(image('cape-b')));
   expect(screen.getByText('Vista previa')).toBeTruthy();
@@ -143,12 +146,12 @@ test('toggling a cape in the Capas tab previews it and discarding returns to the
   expect(screen.getByRole('button', { name: 'Migrator' }).getAttribute('aria-pressed')).toBe('true');
   expect(screen.getByRole('img', { name: 'Capa activa' })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Vanilla' }));
-  expect(viewer().dataset.cape).toBe(image('cape-b'));
+  await waitFor(() => expect(viewer().dataset.cape).toBe(image('cape-b')));
   expect(screen.getByText('Vista previa')).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Sin capa' }));
   expect(viewer().dataset.cape).toBe('');
   await user.click(screen.getByRole('button', { name: 'Descartar' }));
-  expect(viewer().dataset.cape).toBe(image('cape-a'));
+  await waitFor(() => expect(viewer().dataset.cape).toBe(image('cape-a')));
   expect(calls('skins_apply')).toHaveLength(0);
   await user.click(screen.getByRole('button', { name: 'Sin capa' }));
   await user.click(screen.getByRole('button', { name: 'Aplicar' }));
@@ -337,7 +340,7 @@ test('a failed synchronisation keeps the saved library and says so', async () =>
   mount();
   expect(await screen.findByRole('button', { name: /^Look b/ })).toBeTruthy();
   expect(await screen.findByText(/No pudimos sincronizar con Minecraft/)).toBeTruthy();
-  expect(viewer().dataset.skin).toBe(image(hash('a')));
+  await waitFor(() => expect(viewer().dataset.skin).toBe(image(hash('a'))));
 });
 
 test('a failed apply is reported and the page shows what the backend now holds', async () => {
