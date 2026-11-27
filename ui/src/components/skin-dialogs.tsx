@@ -1,6 +1,7 @@
-import { useId, useRef, useState, type ChangeEvent } from 'react';
-import { Ban, Check, FileUp, Save, Trash2, X } from 'lucide-react';
+import { useId, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { Ban, Check, CirclePlus, Pencil, Save, Trash2, Upload, UserCheck, X } from 'lucide-react';
 import { AccountDialog } from './account-dialog';
+import { Hint } from './hint';
 import { SkinViewer3D, prefersReducedMotion } from './skin-viewer';
 import { CapeThumbnail, SkinThumbnail } from './skin-thumbnails';
 import { TransientNotice, type TransientNoticeState } from './transient-notice';
@@ -11,15 +12,20 @@ import { useTextureUrl } from '../use-texture';
 
 export type LookDraft = { name: string; model: SkinModel; cape: string | null; png: string | null };
 
-/** Choose no cape, or one the account owns. Capes that are not cached yet cannot be previewed. */
+/**
+ * Choose no cape, or one the account owns, from a grid of square tiles. A tile carries no text: the cape's
+ * name is its accessible name and tooltip, and the dialog names the chosen one beside the field label.
+ * Capes that are not cached yet cannot be previewed.
+ */
 export function CapePicker({ view, value, onChange, name }: { view: SkinsView; value: string | null; onChange: (id: string | null) => void; name: string }) {
-  return <div className="cape-picker" role="group" aria-label={name}>
-    <button type="button" className="cape-tile" aria-pressed={value === null} onClick={() => onChange(null)}>
-      <span className="cape-thumbnail"><Ban aria-hidden="true" /></span><span>Sin capa</span>
+  const tile = (id: string | null, label: string, content: ReactNode) => <Hint key={id ?? 'none'} text={label} side="bottom">
+    <button type="button" className="cape-tile" aria-label={label} aria-pressed={value === id} onClick={() => onChange(id)}>
+      {content}{value === id && <span className="cape-tile-check" aria-hidden="true"><Check /></span>}
     </button>
-    {view.capes.map(cape => <button key={cape.id} type="button" className="cape-tile" aria-pressed={value === cape.id} onClick={() => onChange(cape.id)}>
-      <CapeThumbnail id={cape.id} cached={cape.cached} label={cape.alias} /><span>{cape.alias}</span>
-    </button>)}
+  </Hint>;
+  return <div className="cape-picker" role="group" aria-label={name}>
+    {tile(null, 'Sin capa', <span className="cape-thumbnail"><Ban aria-hidden="true" /></span>)}
+    {view.capes.map(cape => tile(cape.id, cape.alias, <CapeThumbnail id={cape.id} cached={cape.cached} label={cape.alias} />))}
     {view.capes.length === 0 && <p className="skin-hint">Tu cuenta no tiene capas.</p>}
   </div>;
 }
@@ -27,10 +33,14 @@ export function CapePicker({ view, value, onChange, name }: { view: SkinsView; v
 export function ModelToggle({ value, onChange, name }: { value: SkinModel; onChange: (model: SkinModel) => void; name: string }) {
   const group = useId();
   return <div className="segmented" role="radiogroup" aria-label={name}>
-    {(['classic', 'slim'] as const).map(model => <label key={model} className={value === model ? 'is-selected' : undefined}>
-      <input type="radio" name={group} value={model} checked={value === model} onChange={() => onChange(model)} />
-      {modelLabels[model]}
-    </label>)}
+    {(['classic', 'slim'] as const).map(model => {
+      // "Clásico (Steve)" shows as "Clásico"; the nickname stays in the accessible name.
+      const [short, nickname] = modelLabels[model].split(/ (?=\()/);
+      return <label key={model} className={value === model ? 'is-selected' : undefined}>
+        <input type="radio" name={group} value={model} checked={value === model} onChange={() => onChange(model)} />
+        {short}{nickname && <span className="sr-only"> {nickname}</span>}
+      </label>;
+    })}
   </div>;
 }
 
@@ -79,32 +89,41 @@ export function SkinDialog({ view, look, busy, error, notice, onCancel, onSave }
   }
 
   const submit = (apply: boolean) => { if (ready) onSave({ name: name.trim(), model, cape, png: file?.base64 ?? null }, apply); };
-  return <AccountDialog title={adding ? 'Añadir skin' : 'Editar skin'} className="skin-dialog" onCancel={() => { if (!busy) onCancel(); }}>
+  // Adding starts with a dashed upload panel; once there is a file (or when editing) the 3D preview takes its place.
+  const dropzone = adding && !file;
+  const capeName = view.capes.find(item => item.id === cape)?.alias;
+  const close = <button type="button" className="update-close" aria-label="Cerrar" disabled={busy} onClick={onCancel}><X aria-hidden="true" /></button>;
+  return <AccountDialog title={<>{adding ? <CirclePlus className="dialog-title-icon" aria-hidden="true" /> : <Pencil className="dialog-title-icon" aria-hidden="true" />}{adding ? 'Añadir skin' : 'Editar skin'}</>}
+    titleClassName="dialog-title" aside={close} className="skin-dialog" onCancel={() => { if (!busy) onCancel(); }}>
     <TransientNotice notice={notice} />
     <form noValidate onSubmit={event => { event.preventDefault(); submit(false); }}>
       <div className="skin-dialog-body">
-        <div className="skin-dialog-preview">
-          <SkinViewer3D skin={skinUrl} model={model} cape={capeImage.url} playing={!prefersReducedMotion()} label="Vista previa de la skin"
-            fallback={<SkinThumbnail texture={look?.texture ?? null} model={model} label="Vista previa" />} />
-          {!skinUrl && <p className="skin-dialog-empty">Elige un archivo PNG para ver tu skin en 3D.</p>}
+        <div className="skin-dialog-side">
+          <p className="sr-only" id={`${nameId}-file`}>Archivo de skin</p>
+          <input ref={fileInput} type="file" accept="image/png,.png" className="sr-only" tabIndex={-1} aria-labelledby={`${nameId}-file`} onChange={event => void choose(event)} />
+          {dropzone ? <div className="skin-dropzone">
+            <Upload aria-hidden="true" />
+            {fileError ? <p role="alert" className="skin-problem">{fileError}</p> : <p>PNG de 64×64 o 64×32 píxeles.</p>}
+            <Button type="button" variant="outline" disabled={busy} onClick={() => fileInput.current?.click()}>Elegir archivo</Button>
+          </div> : <div className="skin-dialog-preview">
+            <SkinViewer3D skin={skinUrl} model={model} cape={capeImage.url} playing={!prefersReducedMotion()} label="Vista previa de la skin"
+              fallback={<SkinThumbnail texture={look?.texture ?? null} model={model} label="Vista previa" />} />
+            <div className="skin-dialog-file">
+              <span className="skin-file-name">{file ? file.name : 'Se conserva la imagen actual'}</span>
+              <Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => fileInput.current?.click()}>Cambiar archivo</Button>
+            </div>
+          </div>}
+          {!dropzone && fileError && <p role="alert" className="skin-hint skin-problem">{fileError}</p>}
         </div>
         <div className="skin-dialog-fields">
           <label htmlFor={nameId}>Nombre</label>
           <input id={nameId} value={name} maxLength={MAX_LOOK_NAME} autoComplete="off" autoFocus onChange={event => setName(event.target.value)} aria-invalid={!!nameProblem} />
           {nameProblem && <p role="alert" className="skin-hint skin-problem">{nameProblem}</p>}
 
-          <p className="skin-field-label" id={`${nameId}-file`}>Archivo de skin</p>
-          <div className="skin-file">
-            <input ref={fileInput} type="file" accept="image/png,.png" className="sr-only" tabIndex={-1} aria-labelledby={`${nameId}-file`} onChange={event => void choose(event)} />
-            <Button type="button" variant="secondary" disabled={busy} onClick={() => fileInput.current?.click()}><FileUp aria-hidden="true" />{adding ? 'Elegir PNG…' : 'Cambiar PNG…'}</Button>
-            <span className="skin-file-name">{file ? file.name : adding ? 'Ningún archivo' : 'Se conserva la imagen actual'}</span>
-          </div>
-          {fileError ? <p role="alert" className="skin-hint skin-problem">{fileError}</p> : <p className="skin-hint">PNG de 64×64 o 64×32 píxeles.</p>}
-
-          <p className="skin-field-label">Modelo de brazos</p>
+          <p className="skin-field-label">Brazos</p>
           <ModelToggle name="Modelo de brazos" value={model} onChange={setModel} />
 
-          <p className="skin-field-label">Capa</p>
+          <p className="skin-field-label">Capa{capeName && <span className="skin-field-value"> · {capeName}</span>}</p>
           <CapePicker name="Capa de esta skin" view={view} value={cape} onChange={setCape} />
           {look?.cape && !owned && <p className="skin-hint">Esta skin tenía una capa que tu cuenta no tiene. Se quitará si guardas.</p>}
         </div>
@@ -113,7 +132,7 @@ export function SkinDialog({ view, look, busy, error, notice, onCancel, onSave }
       <div className="account-buttons">
         <Button type="button" variant="outline" disabled={busy} onClick={onCancel}><X aria-hidden="true" />Cancelar</Button>
         <Button type="submit" variant="secondary" disabled={!ready}><Save aria-hidden="true" />Guardar</Button>
-        <Button type="button" disabled={!ready} onClick={() => submit(true)}><Check aria-hidden="true" />Guardar y aplicar</Button>
+        <Button type="button" disabled={!ready} onClick={() => submit(true)}><UserCheck aria-hidden="true" />Guardar y aplicar</Button>
       </div>
     </form>
   </AccountDialog>;

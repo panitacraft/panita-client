@@ -542,6 +542,12 @@ first, because the page always works on the selected one.
   bar over it offers "Descartar" and "Aplicar" while something is unapplied. Right-clicking any card
   opens the launcher's own menu (Vista previa, Aplicar, and for saved skins Editar and Eliminar) instead
   of the browser's.
+- The add and edit skin dialog follows the owner's mockup (2026-11-26): a header with a green icon, the title
+  and a close button; on the left a dashed upload panel ("Elegir archivo", PNG of 64×64 or 64×32) that the 3D
+  preview replaces once a file is chosen (with a "Cambiar archivo" bar); on the right the name, the arm model
+  ("Brazos") and the cape ("Capa", followed by the chosen cape's name) as a grid of square tiles without text,
+  the chosen one marked with a green check. A cape's name is its tooltip and accessible name. The primary
+  button "Guardar y aplicar" uses the `UserCheck` icon.
 - The reminder "Aspecto actual sin guardar" (owner decision, 2026-11-26) appears above the skin grid only
   when no saved look has the skin and arm model the account wears; a different cape does not count. The
   player can dismiss it with an X; the dismissal is remembered per skin and model in the window's local
