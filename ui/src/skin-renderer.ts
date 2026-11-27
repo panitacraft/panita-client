@@ -28,7 +28,7 @@ export const THUMBNAIL_WIDTH = 240;
 export const THUMBNAIL_HEIGHT = 320;
 const BODY_FRAME: Frame = { width: THUMBNAIL_WIDTH, height: THUMBNAIL_HEIGHT, zoom: 0.78, lift: 0 };
 /** Head and torso seen from a little above, square like the online busts it replaces so it sits in the same place. */
-export const BUST_FRAME: Frame = { width: 256, height: 256, zoom: 1.6, lift: -5.9, pitch: 0.3, spread: 0.18, fov: 24 };
+export const BUST_FRAME: Frame = { width: 256, height: 256, zoom: 1.69, lift: -5.9, pitch: 0.42, spread: 0.1, fov: 36 };
 const CACHE_LIMIT = 240;
 
 const cache = new Map<string, string>();
