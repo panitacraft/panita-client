@@ -564,7 +564,7 @@ first, because the page always works on the selected one.
 - The accounts page and the rail show the skin the account wears from the cached texture, not from an
   online render service that keeps the old skin for a while (owner request, 2026-11-26): the rail avatar
   is the face drawn from the texture and the bust beside a Microsoft account is a 3D picture from the
-  same shared renderer, framed on the head. The launcher learns the worn skin from the Aspectos page and
+  same shared renderer, framed to match the online bust it replaces: square, seen from a little above with the arms angled out. The launcher learns the worn skin from the Aspectos page and
   from the background synchronisation, and reads it once for the selected account; an account it knows
   nothing about, or a failed read, keeps the online picture.
 - Verified by tests with an in-memory service, a loopback service and a mocked webview. Not
