@@ -561,12 +561,20 @@ first, because the page always works on the selected one.
   preview and the cards fall back to flat pictures. Textures reach the webview as data URLs, so the
   content security policy and the Tauri capabilities are unchanged. The skin file is chosen with the
   page's own file input and sent as base64; no path crosses IPC.
-- The accounts page and the rail show the skin the account wears from the cached texture, not from an
-  online render service that keeps the old skin for a while (owner request, 2026-11-26): the rail avatar
-  is the face drawn from the texture and the bust beside a Microsoft account is a 3D picture from the
-  same shared renderer, framed to match the online bust it replaces: square, seen from a little above with the arms angled out. The launcher learns the worn skin from the Aspectos page and
-  from the background synchronisation, and reads it once for the selected account; an account it knows
-  nothing about, or a failed read, keeps the online picture.
+- The accounts page and the rail draw every picture themselves and never ask an online render service
+  (owner request, 2026-11-26): the service showed first and was then replaced by the cached skin, which
+  made the picture jump. The rail avatar is the face drawn from the cached texture. The bust beside an
+  account is a 3D picture from the same shared renderer, framed to match the former online bust: square,
+  seen from a little above with the arms angled out. Accounts with no skin of their own, offline accounts,
+  Microsoft accounts the launcher has not synchronised yet and a failed read all use the default Steve
+  skin bundled with the interface (`ui/src/assets/steve.png`). While the local read is pending a Microsoft
+  account shows an empty placeholder, never another picture. `skins_worn` returns, without credentials or
+  an account, the cached texture hash and arm model each profile last wore; `skin_texture` reads a cached
+  image without requiring an account for the same reason. The launcher learns the worn skin from this
+  command, from the Aspectos page and from the background synchronisation. Busts are drawn only while the
+  accounts page is shown, and the latest 16 are kept in the window's local storage, keyed by skin, arm
+  model and framing, so a later start shows them without starting WebGL. Without WebGL the face is drawn
+  flat from the texture. The online service remains only for the activation page, which has no cached skin.
 - Verified by tests with an in-memory service, a loopback service and a mocked webview. Not
   validated against a live Microsoft account, in the installed product, or on Ubuntu x64 (§6).
 

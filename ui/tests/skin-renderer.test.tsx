@@ -6,7 +6,7 @@ const fake = vi.hoisted(() => ({ created: 0, renders: [] as Render[], frames: []
 // A stand-in for the 3D library: it records what was drawn and notices two renders at once.
 vi.mock('skinview3d', () => ({
   SkinViewer: class {
-    canvas = { toDataURL: () => `picture-${fake.renders.length}` };
+    canvas = { toDataURL: () => `data:image/png;base64,picture${fake.renders.length}` };
     playerWrapper = { rotation: { y: 0 }, position: { y: 0 } };
     width = 0; height = 0; zoom = 0; fov = 0;
     cameraY = 0; cameraZ = 1;
@@ -41,6 +41,7 @@ const request = (key: string, extra: Partial<{ skin: string; model: 'classic' | 
   ({ key, skin: `skin-${key}`, model: 'classic' as const, cape: null, yaw: -0.5, ...extra });
 
 beforeEach(() => {
+  localStorage.clear();
   vi.resetModules();
   fake.created = 0; fake.renders = []; fake.frames = []; fake.active = 0; fake.overlap = false;
 });
@@ -82,7 +83,7 @@ test('a picture that cannot be drawn fails alone, is not remembered, and the oth
   expect(results.map(result => result.status)).toEqual(['rejected', 'fulfilled']);
   expect(cachedThumbnail('x')).toBeUndefined();
   // Asking again tries again instead of replaying the failure.
-  expect(await renderThumbnail(request('x'))).toMatch(/^picture-/);
+  expect(await renderThumbnail(request('x'))).toMatch(/^data:image\/png;base64,picture/);
   expect(cachedThumbnail('x')).toBeDefined();
 });
 
@@ -118,4 +119,50 @@ test('a bust is framed on the head, and the next full-body picture goes back to 
   // Head and shoulders are a closer, lower-centred view than the whole body.
   expect(BUST_FRAME.zoom).toBeGreaterThan(fake.frames[0].zoom);
   expect(BUST_FRAME.lift).toBeLessThan(fake.frames[0].lift);
+});
+
+test('busts survive a restart: a fresh start serves them without starting the 3D renderer', async () => {
+  const first = await load();
+  const picture = await first.renderThumbnail(request('bust|v1|cached:a|classic'));
+  expect(localStorage.getItem('panita.picture.bust|v1|cached:a|classic')).toBe(picture);
+  expect(fake.created).toBe(1);
+
+  vi.resetModules();
+  fake.created = 0; fake.renders = [];
+  const restarted = await load();
+  expect(restarted.cachedThumbnail('bust|v1|cached:a|classic')).toBe(picture);
+  expect(await restarted.renderThumbnail(request('bust|v1|cached:a|classic'))).toBe(picture);
+  expect(fake.created).toBe(0);
+  expect(fake.renders).toHaveLength(0);
+});
+
+test('only busts are kept in storage, and only a few of them', async () => {
+  const { renderThumbnail } = await load();
+  await renderThumbnail(request('skin|plain'));
+  expect(localStorage.getItem('panita.picture.skin|plain')).toBeNull();
+  for (let index = 0; index < 20; index += 1) await renderThumbnail(request(`bust|k${index}`));
+  const kept = JSON.parse(localStorage.getItem('panita.picture.index') ?? '[]') as string[];
+  expect(kept).toHaveLength(16);
+  expect(kept[0]).toBe('bust|k4');
+  expect(localStorage.getItem('panita.picture.bust|k0')).toBeNull();
+  expect(localStorage.getItem('panita.picture.bust|k19')).toBeTruthy();
+});
+
+test('a stored picture that is not a PNG data URL is never shown', async () => {
+  localStorage.setItem('panita.picture.bust|bad1', 'javascript:alert(1)');
+  localStorage.setItem('panita.picture.bust|bad2', 'data:text/html;base64,PHNjcmlwdD4=');
+  localStorage.setItem('panita.picture.bust|bad3', `data:image/png;base64,${'A'.repeat(400_000)}`);
+  localStorage.setItem('panita.picture.bust|good', 'data:image/png;base64,iVBORw0KGgo=');
+  const { cachedThumbnail } = await load();
+  expect(cachedThumbnail('bust|bad1')).toBeUndefined();
+  expect(cachedThumbnail('bust|bad2')).toBeUndefined();
+  expect(cachedThumbnail('bust|bad3')).toBeUndefined();
+  expect(cachedThumbnail('bust|good')).toBe('data:image/png;base64,iVBORw0KGgo=');
+});
+
+test('storage that refuses to write only costs a new drawing next time', async () => {
+  const { renderThumbnail } = await load();
+  const failing = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  expect(await renderThumbnail(request('bust|unsaved'))).toMatch(/^data:image\/png;base64,picture/);
+  failing.mockRestore();
 });

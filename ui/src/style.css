@@ -116,6 +116,11 @@
   .profile-list .profile-row, .panita-profile { display: flex; align-items: center; gap: 16px; padding: 12px 0; border: 0; border-bottom: 1px solid #333; border-radius: 0; background: transparent; }
   .profile-list .profile-row:last-child, .panita-profile { border-bottom: 0; padding-bottom: 0; }
   .profile-bust { width: 64px; height: 72px; object-fit: contain; flex-shrink: 0; }
+  img.profile-bust { animation: bust-in 160ms ease-out; }
+  .profile-bust-pending { display: block; }
+  .profile-bust-flat { image-rendering: pixelated; }
+  @keyframes bust-in { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { img.profile-bust { animation: none; } }
   .profile-info { flex: 1; min-width: 0; }
   .profile-name { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
   .profile-type { display: flex; align-items: center; gap: 6px; color: #BABABA; font-size: 13px; margin-top: 4px; }

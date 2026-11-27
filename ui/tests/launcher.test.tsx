@@ -6,7 +6,8 @@ import { PlayProvider } from '../src/play';
 import { PreferencesProvider } from '../src/settings';
 import { CatalogArtwork } from '../src/components/catalog-artwork';
 import logoWhite from '../src/assets/logo-white.svg';
-import { AccountAvatar, avatarUrl } from '../src/components/account-avatar';
+import { AccountAvatar } from '../src/components/account-avatar';
+import { resetWornSkins } from '../src/worn-skin';
 import { InstanceBadges } from '../src/components/instance-badges';
 import type { CatalogOverview } from '../src/preview-catalog';
 import type { PlayEntry, PlaySnapshot } from '../src/play-state';
@@ -53,6 +54,7 @@ async function emit(entry: PlayEntry) {
 
 beforeEach(() => {
   backend.native = true;
+  resetWornSkins();
   catalog = { instances: [{ ...first }, { ...first, id: 'pack-b', name: 'Otra aventura' }], stale: false, cacheWarning: null, registryWarning: null };
   play = { revision: 0, processSessionId: 'test', closeBlocked: false, gracefulStopSupported: true, instances: [] };
   backend.listeners.clear();
@@ -78,6 +80,7 @@ beforeEach(() => {
       case 'import_pack_file': throw 'artifact_mismatch';
       case 'instance_variants': return variantOptions;
       case 'list_screenshots': return { screenshots: [], truncated: false };
+      case 'skins_worn': return [];
       case 'skins_snapshot': case 'skins_sync': return { profileId: 'profile', profileName: 'Otro', current: { custom: false, texture: null, model: 'classic', cape: null }, capes: [], library: [], matchingLook: null, syncedMs: null, incomplete: false };
       case 'system_resources': if (!systemResources) throw 'storage_unavailable'; return systemResources;
       case 'select_instance': case 'begin_install': case 'cancel_play': case 'begin_update': case 'confirm_play': case 'begin_play': case 'begin_repair': case 'stop_game': case 'open_game_log': case 'open_instance_folder': case 'open_curseforge_project': return;
@@ -497,7 +500,8 @@ test('the Aspectos button opens the manager from a Microsoft account row, and th
   const user = userEvent.setup(); mount();
   await screen.findByRole('button', { name: 'Ajustes Globales' });
   expect(screen.queryByRole('button', { name: 'Skins y capas' })).toBeNull();
-  expect(backend.invoke.mock.calls.some(([command]) => String(command).startsWith('skins_'))).toBe(false);
+  // Reading the saved skins is local; nothing asks Minecraft Services before the page is opened.
+  expect(backend.invoke.mock.calls.some(([command]) => String(command).startsWith('skins_') && command !== 'skins_worn')).toBe(false);
 
   await user.click(await screen.findByRole('button', { name: 'Gestionar cuenta: Jugador' }));
   // The offline row has no button, and the backend is still never asked about skins.
@@ -512,19 +516,17 @@ test('the Aspectos button opens the manager from a Microsoft account row, and th
   expect(screen.queryByRole('heading', { name: /^Aspectos/ })).toBeNull();
 });
 
-test('offline avatars stay local and Microsoft avatar failures use the same local default', () => {
+test('avatars never ask an online picture service: offline ones use the local default and Microsoft ones are drawn from the launcher', async () => {
   const metadata = accounts.accounts[0].metadata;
-  expect(avatarUrl(metadata)).toBeNull();
-  expect(avatarUrl({ ...metadata, kind: 'microsoft', username: '../unsafe' })).toBeNull();
-  const online = { ...metadata, kind: 'microsoft' as const, profile_id: '12345678-1234-1234-1234-123456789abc' };
-  expect(avatarUrl(online)).toBe('https://render.crafty.gg/2d/head/Jugador?cors=true');
   const { container, rerender } = render(<AccountAvatar metadata={metadata} />);
-  const fallback = container.querySelector('img')!.getAttribute('src');
-  expect(fallback).not.toMatch(/^https?:/);
-  expect(fallback).toBeTruthy();
-  rerender(<AccountAvatar metadata={online} />);
-  fireEvent.error(container.querySelector('img')!);
-  expect(container.querySelector('img')!.getAttribute('src')).toBe(fallback);
+  const local = container.querySelector('img')!.getAttribute('src');
+  expect(local).toBeTruthy();
+  expect(local).not.toMatch(/^https?:/);
+  rerender(<AccountAvatar metadata={{ ...metadata, kind: 'microsoft' as const, profile_id: '12345678-1234-1234-1234-123456789abc' }} />);
+  // Nothing is shown from the network while the launcher looks, and then the face is drawn from its own cache or the default skin.
+  await waitFor(() => expect(container.querySelector('canvas.account-avatar')).toBeTruthy());
+  expect(container.querySelector('img[src^="http"]')).toBeNull();
+  expect(backend.invoke.mock.calls.some(([command]) => command === 'skins_worn')).toBe(true);
 });
 
 test('a disabled installed instance keeps its options menu open to uninstall', async () => {

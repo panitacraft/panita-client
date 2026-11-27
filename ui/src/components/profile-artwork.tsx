@@ -1,19 +1,29 @@
 import { useState } from 'react';
 import defaultSkin from '../assets/default-skin.svg';
 import { useWornSkin } from '../worn-skin';
-import { BustPicture } from './skin-picture';
+import { STEVE, SkinHead } from './account-avatar';
+import { BustPicture, type SkinSource } from './skin-picture';
+
+/** Render only valid Minecraft names; Discord identifiers remain valid login inputs. This is the picture of a name someone types, so it is online. */
+export function ProfileArtwork({ username }: { username: string }) {
+  const valid = /^[A-Za-z0-9_]{3,16}$/.test(username);
+  const source = valid ? `https://render.crafty.gg/2d/head/${encodeURIComponent(username)}?cors=true` : null;
+  const [failed, setFailed] = useState<string | null>(null);
+  return <img className="profile-head" src={source && failed !== source ? source : defaultSkin} alt="" aria-hidden="true" referrerPolicy="no-referrer" decoding="async" onError={() => { if (source) setFailed(source); }} />;
+}
 
 /**
- * Render only valid Minecraft names; Discord identifiers remain valid login inputs. A Microsoft
- * profile whose skin the launcher has cached shows that skin, so a change appears at once.
+ * The bust beside an account in the accounts list, drawn by the launcher's renderer from the skin it has cached for a
+ * Microsoft profile, or from Minecraft's default skin for an account without one. No online picture service is asked.
+ * It is drawn once the page is shown (`active`), and until then and while it draws the box stays empty.
  */
-export function ProfileArtwork({ username, bust = false, profileId = null, selected = false }: { username: string; bust?: boolean; profileId?: string | null; selected?: boolean }) {
-  const valid = /^[A-Za-z0-9_]{3,16}$/.test(username);
-  const source = valid ? `https://render.crafty.gg/${bust ? '3d/bust' : '2d/head'}/${encodeURIComponent(username)}?${bust ? 'width=128&height=128' : 'cors=true'}` : null;
-  const [failed, setFailed] = useState<string | null>(null);
-  const worn = useWornSkin(bust ? profileId : null, selected);
-  const online = <img className={bust ? 'profile-bust' : 'profile-head'} src={source && failed !== source ? source : defaultSkin} alt="" aria-hidden="true" referrerPolicy="no-referrer" decoding="async" onError={() => { if (source) setFailed(source); }} />;
-  return worn ? <BustPicture texture={worn.texture} model={worn.model} className="profile-bust" fallback={online} /> : online;
+export function AccountBust({ kind, profileId, active }: { kind: 'microsoft' | 'offline'; profileId: string; active: boolean }) {
+  const worn = useWornSkin(kind === 'microsoft' ? profileId : null);
+  const pending = <span className="profile-bust profile-bust-pending" aria-hidden="true" />;
+  if (worn === undefined) return pending;
+  const source: SkinSource = worn?.texture ? { kind: 'cached', texture: worn.texture } : STEVE;
+  return <BustPicture source={source} model={worn?.texture ? worn.model : 'classic'} className="profile-bust" allowed={active} pending={pending}
+    fallback={<SkinHead source={source} className="profile-bust profile-bust-flat" fallback={pending} />} />;
 }
 
 export function DiscordIcon() {

@@ -5,7 +5,7 @@ import { TransientNotice, useTransientNotice } from './components/transient-noti
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { AccountDialog } from './components/account-dialog';
-import { MicrosoftIcon, ProfileArtwork } from './components/profile-artwork';
+import { AccountBust, MicrosoftIcon } from './components/profile-artwork';
 import minecraft from './assets/brands/minecraft.svg';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -22,7 +22,8 @@ const statusText: Record<AccountStatus, string> = {
 // `suggestedName` only pre-fills the offline name during onboarding; it is never a requirement.
 // `onEditSkins` opens the skin editor, which always works on the selected account. It is offered
 // only on Microsoft rows; the backend refuses offline accounts regardless.
-export function Accounts({ suggestedName = '', onSnapshot, onEditSkins, onboarding = false }: { onboarding?: boolean; suggestedName?: string; onSnapshot?: (view: AccountsView | null) => void; onEditSkins?: () => void }) {
+// `active` says whether the page is showing: the busts are drawn by a 3D renderer, which a hidden page should not start.
+export function Accounts({ suggestedName = '', onSnapshot, onEditSkins, onboarding = false, active = true }: { onboarding?: boolean; suggestedName?: string; onSnapshot?: (view: AccountsView | null) => void; onEditSkins?: () => void; active?: boolean }) {
   const [{ view, error, notice, busy, blocked, cleanupWarning }, dispatch] = useReducer(accountFeedback, initialAccountFeedback);
   const [attempt, setAttempt] = useState(0);
   const [username, setUsername] = useState(suggestedName);
@@ -173,7 +174,7 @@ export function Accounts({ suggestedName = '', onSnapshot, onEditSkins, onboardi
         const selected = id === view.selected_account_id;
         const microsoft = account.metadata.kind === 'microsoft';
         return <li key={id} className="profile-row">
-          <ProfileArtwork username={microsoft ? account.metadata.username : 'MHF_Steve'} bust profileId={microsoft ? account.metadata.profile_id : null} selected={selected} />
+          <AccountBust kind={account.metadata.kind} profileId={account.metadata.profile_id} active={active} />
           <div className="profile-info"><div className="profile-name"><strong>{account.metadata.username}</strong>{selected && <span className="active-badge"><Check aria-hidden="true" />Activa</span>}</div>
             <span className="profile-type">{microsoft ? <MicrosoftIcon /> : <UserRound aria-hidden="true" />}{microsoft ? 'Microsoft' : 'No-Premium'}</span>
             {microsoft && account.status !== 'ready' && <p className="profile-status">{statusText[account.status]}</p>}

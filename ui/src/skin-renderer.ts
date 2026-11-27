@@ -36,7 +36,49 @@ const cache = new Map<string, string>();
 let player: Promise<SkinViewer> | null = null;
 let queue: Promise<unknown> = Promise.resolve();
 
-export const cachedThumbnail = (key: string): string | undefined => cache.get(key);
+/**
+ * Busts are also kept in local storage, a few of them, so the accounts list can show them the moment the launcher
+ * opens without starting the 3D renderer at all. Their keys name the framing, so changing it never serves an old one.
+ */
+const STORAGE_PREFIX = 'panita.picture.';
+const STORAGE_INDEX = 'panita.picture.index';
+const STORAGE_LIMIT = 16;
+const STORED_PICTURE = /^data:image\/png;base64,[A-Za-z0-9+/=]+$/;
+const persists = (key: string) => key.startsWith('bust|');
+
+function readStored(key: string): string | undefined {
+  try {
+    const stored = localStorage.getItem(STORAGE_PREFIX + key);
+    // Only a PNG data URL of a sane size is ever shown; anything else was not written by this launcher.
+    return stored && stored.length < 400_000 && STORED_PICTURE.test(stored) ? stored : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeStored(key: string, picture: string) {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(STORAGE_INDEX) ?? '[]');
+    const index = Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    const next = [...index.filter(item => item !== key), key];
+    while (next.length > STORAGE_LIMIT) {
+      const oldest = next.shift();
+      if (oldest !== undefined) localStorage.removeItem(STORAGE_PREFIX + oldest);
+    }
+    localStorage.setItem(STORAGE_PREFIX + key, picture);
+    localStorage.setItem(STORAGE_INDEX, JSON.stringify(next));
+  } catch {
+    // Storage full or unavailable: the picture is simply drawn again next time.
+  }
+}
+
+export function cachedThumbnail(key: string): string | undefined {
+  const known = cache.get(key);
+  if (known || !persists(key)) return known;
+  const stored = readStored(key);
+  if (stored) cache.set(key, stored);
+  return stored;
+}
 
 function createPlayer(): Promise<SkinViewer> {
   player ??= import('skinview3d').then(module => {
@@ -53,6 +95,7 @@ function createPlayer(): Promise<SkinViewer> {
 function remember(key: string, picture: string) {
   cache.delete(key);
   cache.set(key, picture);
+  if (persists(key)) writeStored(key, picture);
   while (cache.size > CACHE_LIMIT) {
     const oldest = cache.keys().next();
     if (oldest.done) break;
@@ -62,10 +105,10 @@ function remember(key: string, picture: string) {
 
 /** The picture for a request, rendered after the ones already waiting. A failure is never remembered. */
 export function renderThumbnail(request: ThumbnailRequest): Promise<string> {
-  const known = cache.get(request.key);
+  const known = cachedThumbnail(request.key);
   if (known) return Promise.resolve(known);
   const work = queue.then(async () => {
-    const again = cache.get(request.key);
+    const again = cachedThumbnail(request.key);
     if (again) return again;
     const [viewer, skin, cape] = await Promise.all([createPlayer(), decodeImage(request.skin), request.cape ? decodeImage(request.cape) : Promise.resolve(null)]);
     viewer.loadSkin(skin, { model: request.model === 'slim' ? 'slim' : 'default' });

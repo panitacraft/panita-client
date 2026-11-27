@@ -60,3 +60,7 @@ export function readSkinFile(file: Blob): Promise<{ dataUrl: string; base64: str
     reader.readAsDataURL(file);
   });
 }
+
+/** What a synchronised profile last wore, from the local library only. A null texture means the default skin. */
+export type WornEntry = { profileId: string; texture: string | null; model: SkinModel };
+export const loadWornSkins = () => invoke<WornEntry[]>('skins_worn');

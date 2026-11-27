@@ -92,8 +92,9 @@ test('account management reuses offline creation and only removes after confirma
   const user = userEvent.setup(); render(<Accounts />);
   await screen.findByText('Fixture');
   expect(screen.getByText('Activa')).toBeTruthy();
-  const image = document.querySelector('.profile-bust')!;
-  expect(image.getAttribute('src')).toContain('/3d/bust/MHF_Steve?width=128&height=128');
+  // The bust is drawn by the launcher from its own default skin: no online picture is requested for any row.
+  expect(document.querySelector('.profile-bust')).toBeTruthy();
+  expect(document.querySelector('img[src^="http"]')).toBeNull();
   await user.click(screen.getByRole('button', { name: 'Añadir', exact: true }));
   await user.click(screen.getByRole('menuitem', { name: 'Añadir cuenta No-Premium' }));
   expect(screen.getByRole('dialog', { name: 'Nueva cuenta No-Premium' })).toBeTruthy();
