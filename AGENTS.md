@@ -536,7 +536,7 @@ first, because the page always works on the selected one.
   after a partial failure. Calls are serialized by one gate per process.
 - The page follows the owner's layout (2026-11-26): a heading "Aspectos · {player}"; the 3D preview
   on the left; on the right "Skins" and "Capas" tabs with their counts, a search box that ignores case
-  and accents, a sync button and a grid of cards. The Skins grid starts with a dashed "Nuevo skin" card
+  and accents, a sync button and a grid of cards. The Skins grid starts with a dashed "Nueva skin" card
   (there is no separate add button) and marks the look the account wears with a green check; the Capas
   grid starts with "Sin capa". Choosing a card previews it; the preview is labelled "Vista previa" and a
   bar over it offers "Descartar" and "Aplicar" while something is unapplied. Right-clicking any card
@@ -552,7 +552,7 @@ first, because the page always works on the selected one.
   the right of the screen (owner decision, 2026-11-26), walks in place without moving its head
   (`headBobbing` off), and turns only when the player drags it or uses the arrow keys; there is no
   animation picker and no automatic rotation. A pause/play button in the preview stops and resumes the
-  walk, which starts paused for players who ask the system for reduced motion. An "Élitros" switch shows
+  walk, which starts paused for players who ask the system for reduced motion. An "Elytra" switch shows
   the previewed cape as elytra, drawn from the cape image as the game does; it needs a cape, because the
   library has no elytra texture of its own, and is disabled without one.
 - Library cards are 3D pictures at that same angle (capes are drawn from behind, hanging on the skin
