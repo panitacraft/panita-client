@@ -47,6 +47,25 @@ function run(command, commandArgs, capture = false) {
   return result.stdout?.trim();
 }
 
+// The bundlers download their helper tools (the AppImage launcher, the NSIS plugins) from GitHub, which
+// sometimes answers a hosted runner with a 403 or a 5xx. Compilation is cached after the first attempt,
+// so repeating the whole build is cheap, deterministic and never changes the produced bytes. A real
+// failure still fails, after a bounded number of attempts.
+const buildAttempts = 3;
+function runWithRetry(command, commandArgs) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return run(command, commandArgs);
+    } catch (error) {
+      if (attempt >= buildAttempts) throw error;
+      const seconds = attempt * 20;
+      console.warn(`Build attempt ${attempt} of ${buildAttempts} failed: ${error.message}
+Retrying in ${seconds} seconds.`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, seconds * 1000);
+    }
+  }
+}
+
 const revision = run('git', ['rev-parse', 'HEAD'], true);
 const dirty = run('git', ['status', '--porcelain', '--untracked-files=normal'], true);
 if (dirty) throw new Error(`Commit task changes before producing an installer candidate:\n${dirty}`);
@@ -67,7 +86,7 @@ if (os === 'linux') run('bash', [join(root, 'scripts/linux/stage-libdecor.sh')])
 // retains the existing application identity. Updater signing needs TAURI_SIGNING_PRIVATE_KEY
 // and is skipped for internal loader-validation and ephemeral CI-validation builds, which are
 // never distributed.
-run(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', ...(loaderValidation || ciUnsigned ? ['--no-sign'] : []), '--config', release ? JSON.stringify(config) : join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundles.map(([bundle]) => bundle).join(','), ...(loaderValidation ? ['--features', 'loader-validation'] : []), '--', '--locked']);
+runWithRetry(process.execPath, [join(root, 'scripts/tauri.mjs'), 'build', '--ci', ...(loaderValidation || ciUnsigned ? ['--no-sign'] : []), '--config', release ? JSON.stringify(config) : join(root, 'desktop/tauri.beta.conf.json'), '--bundles', bundles.map(([bundle]) => bundle).join(','), ...(loaderValidation ? ['--features', 'loader-validation'] : []), '--', '--locked']);
 const compiledStatus = run('git', ['status', '--porcelain', '--untracked-files=normal'], true);
 if (run('git', ['rev-parse', 'HEAD'], true) !== revision || compiledStatus) {
   throw new Error(`Source changed during compilation. Commit changes and rebuild before preparing a candidate.${compiledStatus ? `\n${compiledStatus}` : ''}`);

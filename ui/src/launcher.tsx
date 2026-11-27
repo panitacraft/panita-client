@@ -8,6 +8,7 @@ import { messageForError } from './errors';
 import logoBackground from './assets/logo_background.svg';
 import { useInstanceRail } from './use-instance-rail';
 import { Accounts } from './accounts';
+import { SkinsPage } from './skins';
 import type { AccountsView } from './account-state';
 import { ActivationPanel, useActivation } from './activation';
 import { OperationDock, PlayControls, PlayNotice, usePlaySnapshot } from './play';
@@ -198,9 +199,14 @@ export function Launcher() {
 
         <div hidden={page !== 'accounts'} className="utility-page">
           <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>Tus cuentas</h1></div>
-          <ActivationPanel /><Accounts onSnapshot={acceptAccounts} />
+          <ActivationPanel /><Accounts onSnapshot={acceptAccounts} onEditSkins={() => setPage('skins')} active={page === 'accounts'} />
           <UtilityFooter />
         </div>
+        {/* Mounted only while shown: it starts a 3D renderer and a profile request, which the other pages never need. */}
+        {page === 'skins' && <div className="utility-page skins-page">
+          <SkinsPage account={selectedAccount} onBack={() => setPage('library')} />
+          <UtilityFooter />
+        </div>}
         <div hidden={page !== 'settings'} className="utility-page settings-page">
           <div className="page-heading"><Button variant="ghost" className="page-back h-auto p-0 hover:bg-transparent hover:text-foreground" onClick={() => setPage('library')}><ArrowLeft aria-hidden="true" />Instancias</Button><h1>{settingsScope === 'instance' ? `Ajustes · ${selected?.name ?? 'Instancia'}` : 'Ajustes Globales'}</h1><p>{settingsScope === 'instance' ? 'Sobrescribe los ajustes globales solo para esta instancia.' : 'Estos valores se aplicarán por defecto a todas las instancias.'}</p></div>
           {settingsTabs.length > 0 && <div className="settings-tabs" role="tablist" aria-label="Secciones de ajustes">

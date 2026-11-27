@@ -627,6 +627,71 @@ impl AccountController {
         Ok(self.authorize_play().await?.profile)
     }
 
+    /// The service client, for calls that need no credential.
+    pub(crate) fn auth_client(&self) -> &AuthClient {
+        &self.client
+    }
+
+    /// The selected account's Minecraft profile, only when that account is Microsoft.
+    /// Offline accounts have no profile on the service, so features that edit one refuse
+    /// them here instead of trusting the presentation layer to hide the entry point.
+    pub fn selected_microsoft_profile(&self) -> Result<JavaProfile, CoreError> {
+        let state = self.state()?;
+        let id = state
+            .selected
+            .ok_or_else(|| CoreError::new(ErrorCode::AccountNotFound))?;
+        let account = state
+            .accounts
+            .get(&id)
+            .ok_or_else(|| CoreError::new(ErrorCode::AccountNotFound))?;
+        if account.metadata.kind != AccountKind::Microsoft {
+            return Err(CoreError::new(ErrorCode::MicrosoftAccountRequired));
+        }
+        Ok(JavaProfile {
+            id: account.metadata.profile_id,
+            name: account.metadata.username.clone(),
+        })
+    }
+
+    /// Run a Minecraft Services call as the selected Microsoft account. The call sees the
+    /// access token only inside this crate. A rejected token is renewed once and the call
+    /// repeated once; the result is dropped if the selection changed meanwhile. The call
+    /// owns its session, and reaches the service client through [`Self::auth_client`], so
+    /// its future carries no borrowed lifetimes that would hide that it is `Send`.
+    pub(crate) async fn with_microsoft_session<T, Work>(
+        &self,
+        call: impl Fn(Arc<MinecraftSession>) -> Work,
+    ) -> Result<T, CoreError>
+    where
+        Work: std::future::Future<Output = Result<T, CoreError>>,
+    {
+        let (id, generation, cancellation) = {
+            let state = self.state()?;
+            let id = state
+                .selected
+                .ok_or_else(|| CoreError::new(ErrorCode::AccountNotFound))?;
+            let account = state
+                .accounts
+                .get(&id)
+                .ok_or_else(|| CoreError::new(ErrorCode::AccountNotFound))?;
+            if account.metadata.kind != AccountKind::Microsoft {
+                return Err(CoreError::new(ErrorCode::MicrosoftAccountRequired));
+            }
+            (id, state.generation, state.cancellation.subscribe())
+        };
+        let session = self.acquire(id, false).await?;
+        let first = cancellable(cancellation.clone(), call(session)).await;
+        let result = match first {
+            Err(error) if error.code() == ErrorCode::AuthenticationRequired => {
+                let renewed = self.acquire(id, true).await?;
+                cancellable(cancellation, call(renewed)).await
+            }
+            other => other,
+        };
+        verify_account_generation(&*self.state()?, id, generation)?;
+        result
+    }
+
     pub(crate) fn play_selection(&self) -> Result<PlaySelection, CoreError> {
         let state = self.state()?;
         let id = state
@@ -1130,6 +1195,89 @@ mod tests {
             ("/minecraft", 200, r#"{"access_token":"fixture-minecraft","expires_in":3600,"token_type":"Bearer"}"#.to_owned()),
             ("/profile", 200, r#"{"id":"5627dd98e6be3c21b8a8e92344183641","name":"PlayerOne"}"#.to_owned()),
         ]
+    }
+
+    #[tokio::test]
+    async fn profile_services_refuse_offline_accounts_before_any_network_use() {
+        let (client, task) = mock_client(Vec::new());
+        let (paths, controller, _) = saved_microsoft(client);
+        let offline = controller
+            .add_offline("Offline_Player")
+            .unwrap_or_else(|_| panic!("offline"));
+        controller
+            .select(offline.account_id)
+            .unwrap_or_else(|_| panic!("select"));
+        assert_eq!(
+            controller
+                .selected_microsoft_profile()
+                .err()
+                .map(|e| e.code()),
+            Some(ErrorCode::MicrosoftAccountRequired)
+        );
+        let called = std::sync::atomic::AtomicBool::new(false);
+        let result: Result<(), _> = controller
+            .with_microsoft_session(|_| async {
+                called.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+            .await;
+        assert_eq!(
+            result.err().map(|e| e.code()),
+            Some(ErrorCode::MicrosoftAccountRequired)
+        );
+        assert!(!called.load(Ordering::SeqCst));
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_rejected_profile_service_token_is_renewed_once_and_the_call_repeated() {
+        let mut responses = chain();
+        responses.push(("/profile", 401, "{}".to_owned()));
+        responses.extend(chain());
+        responses.push((
+            "/profile",
+            200,
+            r#"{"id":"5627dd98e6be3c21b8a8e92344183641","name":"PlayerOne"}"#.to_owned(),
+        ));
+        let (client, task) = mock_client(responses);
+        let (paths, controller, _) = saved_microsoft(client);
+        let profile = controller
+            .selected_microsoft_profile()
+            .unwrap_or_else(|_| panic!("microsoft profile"));
+        assert_eq!(profile.name, "PlayerOne");
+        let client = controller.auth_client();
+        let remote = controller
+            .with_microsoft_session(|session| async move { client.service_profile(&session).await })
+            .await
+            .unwrap_or_else(|_| panic!("repeated call"));
+        assert_eq!(remote.name, "PlayerOne");
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_persistently_rejected_profile_service_token_is_not_retried_again() {
+        let mut responses = chain();
+        responses.push(("/profile", 401, "{}".to_owned()));
+        responses.extend(chain());
+        responses.push(("/profile", 401, "{}".to_owned()));
+        let (client, task) = mock_client(responses);
+        let (paths, controller, _) = saved_microsoft(client);
+        let client = controller.auth_client();
+        let result = controller
+            .with_microsoft_session(|session| async move { client.service_profile(&session).await })
+            .await;
+        assert_eq!(
+            result.err().map(|e| e.code()),
+            Some(ErrorCode::AuthenticationRequired)
+        );
+        // The mock accepted exactly the scripted requests: no third attempt was made.
+        assert!(task.join().is_ok());
+        drop(controller);
+        assert!(std::fs::remove_dir_all(paths.root()).is_ok());
     }
 
     #[tokio::test]
