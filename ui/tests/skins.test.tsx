@@ -109,7 +109,7 @@ test('an offline account never reaches the backend and is told why', async () =>
   mount('offline');
   expect(await screen.findByText('Necesitas una cuenta de Microsoft')).toBeTruthy();
   expect(backend.invoke).not.toHaveBeenCalled();
-  expect(screen.queryByRole('button', { name: /^Nuevo skin/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Nueva skin/ })).toBeNull();
 });
 
 test('outside the desktop app the page explains where it works', async () => {
@@ -162,12 +162,12 @@ test('the tabs count what the account has and a search narrows the open tab only
   await screen.findByRole('button', { name: 'Caballero' });
   expect(within(screen.getByRole('tab', { name: /^Skins/ })).getByText('3')).toBeTruthy();
   expect(within(screen.getByRole('tab', { name: /^Capas/ })).getByText('2')).toBeTruthy();
-  expect(screen.getByRole('button', { name: /^Nuevo skin/ })).toBeTruthy();
+  expect(screen.getByRole('button', { name: /^Nueva skin/ })).toBeTruthy();
   // Accents and case do not matter, and the card for a new skin steps aside while searching.
   await user.type(screen.getByRole('searchbox', { name: 'Buscar skin' }), 'ARB');
   expect(screen.getByRole('button', { name: 'Árbol' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Caballero' })).toBeNull();
-  expect(screen.queryByRole('button', { name: /^Nuevo skin/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Nueva skin/ })).toBeNull();
   await user.clear(screen.getByRole('searchbox', { name: 'Buscar skin' }));
   await user.type(screen.getByRole('searchbox', { name: 'Buscar skin' }), 'zzz');
   expect(screen.getByText('Nada coincide con «zzz».')).toBeTruthy();
@@ -249,7 +249,7 @@ test('a look that already matches the account is not offered for saving', async 
 test('adding a skin previews the file, model and cape before saving and can apply it in one step', async () => {
   const user = userEvent.setup({ applyAccept: false });
   mount();
-  await user.click(await screen.findByRole('button', { name: /^Nuevo skin/ }));
+  await user.click(await screen.findByRole('button', { name: /^Nueva skin/ }));
   const dialog = await screen.findByRole('dialog', { name: 'Añadir skin' });
   const scope = within(dialog);
   expect((scope.getByRole('button', { name: 'Guardar' }) as HTMLButtonElement).disabled).toBe(true);
@@ -284,7 +284,7 @@ test('a rejected skin file keeps the dialog open with the reason and saves nothi
   const user = userEvent.setup({ applyAccept: false });
   failure = { skins_add_look: 'invalid_skin' };
   mount();
-  await user.click(await screen.findByRole('button', { name: /^Nuevo skin/ }));
+  await user.click(await screen.findByRole('button', { name: /^Nueva skin/ }));
   const dialog = await screen.findByRole('dialog', { name: 'Añadir skin' });
   await user.upload(within(dialog).getByLabelText('Archivo de skin'), new File([new Uint8Array([1, 2, 3])], 'rota.png', { type: 'image/png' }));
   await user.click(within(dialog).getByRole('button', { name: 'Guardar' }));
@@ -355,7 +355,7 @@ test('an account without a skin of its own says so instead of showing an empty v
   mount();
   expect(await screen.findByText(/skin predeterminada de Minecraft/)).toBeTruthy();
   expect(screen.queryByTestId('viewer')).toBeNull();
-  expect(screen.getByText('Aún no has guardado ninguna skin. Elige «Nuevo skin» para añadir un archivo PNG.')).toBeTruthy();
+  expect(screen.getByText('Aún no has guardado ninguna skin. Elige «Nueva skin» para añadir un archivo PNG.')).toBeTruthy();
 });
 
 test('right-clicking a card opens its own menu instead of the browser one', async () => {
@@ -378,8 +378,8 @@ test('right-clicking a card opens its own menu instead of the browser one', asyn
 test('the capes, the empty cape and the new skin card have menus too', async () => {
   const user = userEvent.setup();
   mount();
-  await user.pointer({ keys: '[MouseRight]', target: await screen.findByRole('button', { name: /^Nuevo skin/ }) });
-  await user.click(within(await screen.findByRole('menu', { name: 'Acciones de Nuevo skin' })).getByRole('menuitem', { name: 'Añadir skin' }));
+  await user.pointer({ keys: '[MouseRight]', target: await screen.findByRole('button', { name: /^Nueva skin/ }) });
+  await user.click(within(await screen.findByRole('menu', { name: 'Acciones de Nueva skin' })).getByRole('menuitem', { name: 'Añadir skin' }));
   expect(await screen.findByRole('dialog', { name: 'Añadir skin' })).toBeTruthy();
   await user.click(screen.getByRole('button', { name: 'Cancelar' }));
 
@@ -423,7 +423,7 @@ test('the elytra switch needs a cape and shows the cape as elytra in the preview
   const user = userEvent.setup();
   mount();
   await screen.findByRole('button', { name: /^Look b/ });
-  const toggle = () => screen.getByRole('switch', { name: 'Élitros' }) as HTMLInputElement;
+  const toggle = () => screen.getByRole('switch', { name: 'Elytra' }) as HTMLInputElement;
   await waitFor(() => expect(viewer().dataset.cape).toBe(image('cape-a')));
   expect(toggle().disabled).toBe(false);
   expect(viewer().dataset.elytra).toBe('false');

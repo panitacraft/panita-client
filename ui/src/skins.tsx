@@ -300,8 +300,8 @@ export function SkinsPage({ account, onBack }: { account: AccountView | undefine
             : <div className="skins-default"><img src={defaultSkin} alt="" aria-hidden="true" /><p>Tu cuenta usa la skin predeterminada de Minecraft. Elige una de tu biblioteca o añade una nueva.</p></div>}
           {dirty && <span className="skins-pending">Vista previa</span>}
           {preview.custom && <div className="skins-tools">
-            <Hint text={preview.cape ? 'Ver la capa como élitros' : 'Elige una capa para ver los élitros'}>
-              <label className="inherit-toggle skins-elytra"><span>Élitros</span>
+            <Hint text={preview.cape ? 'Ver la capa como elytra' : 'Elige una capa para ver el elytra'}>
+              <label className="inherit-toggle skins-elytra"><span>Elytra</span>
                 <input role="switch" type="checkbox" checked={elytra && !!preview.cape} disabled={!preview.cape} onChange={event => setElytra(event.target.checked)} />
               </label>
             </Hint>
@@ -339,8 +339,8 @@ export function SkinsPage({ account, onBack }: { account: AccountView | undefine
           </div>}
           {tab === 'skins' && <ul className="skin-grid">
             {!searching && <li className="skin-card"><ContextMenu><ContextMenuTrigger asChild><div className="skin-card-body">
-              <button type="button" className="skin-card-main skin-card-new" disabled={busy} onClick={() => open({ kind: 'add' })}><CirclePlus aria-hidden="true" /><span className="skin-card-name">Nuevo skin</span></button>
-            </div></ContextMenuTrigger><ContextMenuContent aria-label="Acciones de Nuevo skin"><ContextMenuItem disabled={busy} onSelect={() => open({ kind: 'add' })}><CirclePlus />Añadir skin</ContextMenuItem></ContextMenuContent></ContextMenu></li>}
+              <button type="button" className="skin-card-main skin-card-new" disabled={busy} onClick={() => open({ kind: 'add' })}><CirclePlus aria-hidden="true" /><span className="skin-card-name">Nueva skin</span></button>
+            </div></ContextMenuTrigger><ContextMenuContent aria-label="Acciones de Nueva skin"><ContextMenuItem disabled={busy} onSelect={() => open({ kind: 'add' })}><CirclePlus />Añadir skin</ContextMenuItem></ContextMenuContent></ContextMenu></li>}
             {looks.map(look => <LookCard key={look.id} look={look} busy={busy} active={wornLook === look.id} selected={selection.lookId === look.id}
               onPick={() => setSelection(pickLook(selection, look.id))}
               onApply={() => void apply({ lookId: look.id }, `«${look.name}» se aplicó a tu cuenta.`)}
@@ -358,7 +358,7 @@ export function SkinsPage({ account, onBack }: { account: AccountView | undefine
               onApply={() => void apply({ lookId: null, capeChange: { id: cape.id } }, `La capa «${cape.alias}» se aplicó a tu cuenta.`)}
               wearer={view.current?.custom ? view.current.texture : null} model={view.current?.model ?? 'classic'} onPick={() => setSelection(pickCape(view, selection, cape.id))} />)}
           </ul>}
-          {tab === 'skins' && view.library.length === 0 && !searching && <p className="skins-library-empty">Aún no has guardado ninguna skin. Elige «Nuevo skin» para añadir un archivo PNG.</p>}
+          {tab === 'skins' && view.library.length === 0 && !searching && <p className="skins-library-empty">Aún no has guardado ninguna skin. Elige «Nueva skin» para añadir un archivo PNG.</p>}
           {tab === 'capes' && view.capes.length === 0 && <p className="skins-library-empty">Tu cuenta no tiene capas.</p>}
           {searching && (tab === 'skins' ? looks.length === 0 : capes.length === 0) && <p className="skins-library-empty">Nada coincide con «{query.trim()}».</p>}
         </div>

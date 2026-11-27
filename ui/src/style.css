@@ -441,6 +441,11 @@
   .skin-card-name { max-width: 100%; overflow: hidden; color: #F9FFF8; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
   .skin-card-new { justify-content: center; gap: 10px; min-height: 150px; border-style: dashed; border-color: #515151; background: transparent; color: #F9FFF8; }
   .skin-card-new svg { width: 38px; height: 38px; stroke-width: 1.5; }
+  .skin-card-new svg { transition: transform 140ms ease, color 140ms ease; }
+  .skin-card-new { transition: background-color 140ms ease, border-color 140ms ease; }
+  .skin-card-new:not(:disabled):hover { border-color: #9a9a9a; background: #232323; }
+  .skin-card-new:not(:disabled):hover svg { color: #E4FFDA; transform: scale(1.08); }
+  .skin-card-main[aria-pressed='true']:not(:disabled):hover { border-color: #54A636; background: #1c2a17; }
   .skin-card-check { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: #3FA340; color: #fff; box-shadow: 0 0 0 2px #151515; pointer-events: none; }
   .skin-card-check svg { width: 14px; height: 14px; stroke-width: 3; }
   .skin-more { position: absolute; top: 12px; left: 12px; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid #515151; border-radius: 6px; background: #141414cc; color: #F9FFF8; opacity: 0; transition: opacity 120ms ease; }

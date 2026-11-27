@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ImageOff, LoaderCircle } from 'lucide-react';
-import { CAPE_YAW, DEFAULT_YAW } from '../skin-angles';
+import { BUST_YAW, CAPE_YAW, DEFAULT_YAW } from '../skin-angles';
 import { BUST_FRAME, cachedThumbnail, renderThumbnail, type ThumbnailRequest } from '../skin-renderer';
 import { textureUrl } from '../skin-api';
 import type { SkinModel } from '../skin-state';
@@ -66,6 +66,6 @@ export function CapePicture({ id, cached, wearer, model, label }: { id: string; 
  * until the picture is ready and whenever it cannot be drawn.
  */
 export function BustPicture({ texture, model, className, fallback }: { texture: string; model: SkinModel; className: string; fallback: ReactNode }) {
-  const { src } = usePicture({ key: `bust|${texture}|${model}`, skin: texture, model, cape: null, yaw: DEFAULT_YAW, frame: BUST_FRAME });
+  const { src } = usePicture({ key: `bust|${texture}|${model}`, skin: texture, model, cape: null, yaw: BUST_YAW, frame: BUST_FRAME });
   return src ? <img className={className} src={src} alt="" aria-hidden="true" decoding="async" draggable={false} /> : <>{fallback}</>;
 }

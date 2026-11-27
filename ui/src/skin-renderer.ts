@@ -21,8 +21,8 @@ export type ThumbnailRequest = {
 export const THUMBNAIL_WIDTH = 240;
 export const THUMBNAIL_HEIGHT = 320;
 const BODY_FRAME = { width: THUMBNAIL_WIDTH, height: THUMBNAIL_HEIGHT, zoom: 0.78, lift: 0 };
-/** Head and shoulders, for a picture beside an account name. */
-export const BUST_FRAME = { width: 192, height: 216, zoom: 2.3, lift: -10 };
+/** Head and shoulders, for a picture beside an account name: the head fills about half the height, with a small margin above it. */
+export const BUST_FRAME = { width: 192, height: 216, zoom: 1.68, lift: -7.2 };
 const CACHE_LIMIT = 240;
 
 const cache = new Map<string, string>();
