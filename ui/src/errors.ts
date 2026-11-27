@@ -19,7 +19,8 @@ export type LauncherErrorCode =
   | 'activation_consumed' | 'activation_file_invalid' | 'session_rejected' | 'api_key_rejected'
   | 'manual_files_required' | 'pack_conflict' | 'update_required'
   | 'launcher_update_required' | 'launcher_update_unsupported' | 'launcher_update_failed'
-  | 'variant_unavailable';
+  | 'variant_unavailable'
+  | 'microsoft_account_required' | 'invalid_skin' | 'skin_library_full';
 // Backend error categories are translated here; raw service payloads are excluded.
 
 const messages: Record<LauncherErrorCode, string> = {
@@ -78,6 +79,9 @@ const messages: Record<LauncherErrorCode, string> = {
   launcher_update_required: 'Actualiza Panita Client antes de jugar.',
   launcher_update_unsupported: 'Esta instalación no puede actualizarse sola. Instala la versión nueva desde la página de la versión.',
   launcher_update_failed: 'No se pudo actualizar Panita Client. Inténtalo de nuevo.',
+  microsoft_account_required: 'Las skins y capas solo están disponibles con una cuenta de Microsoft.',
+  invalid_skin: 'El archivo no es una skin válida. Usa un PNG de 64×64 o 64×32 píxeles.',
+  skin_library_full: 'Tu biblioteca está llena. Elimina alguna skin guardada para añadir otra.',
 };
 
 export function messageForError(error: unknown): string {

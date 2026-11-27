@@ -27,6 +27,7 @@ pub(super) fn start_maintenance(app: tauri::AppHandle, accounts: Arc<AccountCont
     tauri::async_runtime::spawn(async move {
         let _ = accounts.renew_selected().await;
         emit_accounts(&app, &accounts);
+        super::skin_commands::refresh_in_background(&app);
         let mut timer = tokio::time::interval(std::time::Duration::from_secs(1));
         timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut ticks = 0;
@@ -169,6 +170,9 @@ pub(super) async fn select_account(
         .logs
         .action("session renewed after account selection", &result);
     emit_accounts(&app, &accounts);
+    if result.is_ok() {
+        super::skin_commands::refresh_in_background(&app);
+    }
     result
 }
 
@@ -181,6 +185,9 @@ pub(super) async fn renew_account(
     let result = accounts.retry_selected().await.map_err(|e| e.code());
     state.logs.action("session renewal retried", &result);
     emit_accounts(&app, &accounts);
+    if result.is_ok() {
+        super::skin_commands::refresh_in_background(&app);
+    }
     result
 }
 
@@ -214,6 +221,7 @@ pub(super) async fn remove_account(
     // A Microsoft account that became selected needs its session acquired.
     let _ = accounts.renew_selected().await;
     emit_accounts(&app, &accounts);
+    super::skin_commands::refresh_in_background(&app);
     Ok(result)
 }
 
@@ -251,5 +259,8 @@ pub(super) fn handle_callback(app: &tauri::AppHandle, args: Vec<String>) {
             .map_err(|error| error.code());
         logs.action("microsoft login completed", &result);
         emit_accounts(&app, &accounts);
+        if result.is_ok() {
+            super::skin_commands::refresh_in_background(&app);
+        }
     });
 }

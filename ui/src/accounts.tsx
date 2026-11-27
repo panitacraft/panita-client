@@ -1,11 +1,11 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { MessageText } from './components/message-text';
-import { Check, ChevronDown, Copy, Ellipsis, LoaderCircle, LogIn, LogOut, Plus, RefreshCw, Save, ShieldCheck, UserRound, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, Ellipsis, LoaderCircle, LogIn, LogOut, Palette, Plus, RefreshCw, Save, ShieldCheck, UserRound, X } from 'lucide-react';
 import { TransientNotice, useTransientNotice } from './components/transient-notice';
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { AccountDialog } from './components/account-dialog';
-import { MicrosoftIcon, ProfileArtwork } from './components/profile-artwork';
+import { AccountBust, MicrosoftIcon } from './components/profile-artwork';
 import minecraft from './assets/brands/minecraft.svg';
 import { isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -20,7 +20,10 @@ const statusText: Record<AccountStatus, string> = {
 };
 
 // `suggestedName` only pre-fills the offline name during onboarding; it is never a requirement.
-export function Accounts({ suggestedName = '', onSnapshot, onboarding = false }: { onboarding?: boolean; suggestedName?: string; onSnapshot?: (view: AccountsView | null) => void }) {
+// `onEditSkins` opens the skin editor, which always works on the selected account. It is offered
+// only on Microsoft rows; the backend refuses offline accounts regardless.
+// `active` says whether the page is showing: the busts are drawn by a 3D renderer, which a hidden page should not start.
+export function Accounts({ suggestedName = '', onSnapshot, onEditSkins, onboarding = false, active = true }: { onboarding?: boolean; suggestedName?: string; onSnapshot?: (view: AccountsView | null) => void; onEditSkins?: () => void; active?: boolean }) {
   const [{ view, error, notice, busy, blocked, cleanupWarning }, dispatch] = useReducer(accountFeedback, initialAccountFeedback);
   const [attempt, setAttempt] = useState(0);
   const [username, setUsername] = useState(suggestedName);
@@ -113,6 +116,11 @@ export function Accounts({ suggestedName = '', onSnapshot, onboarding = false }:
     }
   }
 
+  /** Another account becomes the selected one first, so the editor never opens on the wrong profile. */
+  async function editSkins(id: string, selected: boolean) {
+    if (!selected && !await act('select_account', { accountId: id })) return;
+    onEditSkins?.();
+  }
   function startLogin(accountId: string | null = null) {
     toast.clear(); setDialog('microsoft');
     void act('start_microsoft_login', { accountId });
@@ -166,13 +174,15 @@ export function Accounts({ suggestedName = '', onSnapshot, onboarding = false }:
         const selected = id === view.selected_account_id;
         const microsoft = account.metadata.kind === 'microsoft';
         return <li key={id} className="profile-row">
-          <ProfileArtwork username={microsoft ? account.metadata.username : 'MHF_Steve'} bust />
+          <AccountBust kind={account.metadata.kind} profileId={account.metadata.profile_id} active={active} />
           <div className="profile-info"><div className="profile-name"><strong>{account.metadata.username}</strong>{selected && <span className="active-badge"><Check aria-hidden="true" />Activa</span>}</div>
             <span className="profile-type">{microsoft ? <MicrosoftIcon /> : <UserRound aria-hidden="true" />}{microsoft ? 'Microsoft' : 'No-Premium'}</span>
             {microsoft && account.status !== 'ready' && <p className="profile-status">{statusText[account.status]}</p>}
             {account.error && <p role="alert"><MessageText text={messageForError(account.error)} /></p>}
             {!account.persisted && <p role="alert">Esta cuenta no se ha guardado. Reintenta guardarla antes de cerrar el cliente.</p>}
           </div>
+          {microsoft && onEditSkins && <Button variant="secondary" disabled={busy === 'select_account'} aria-label={`Aspectos de ${account.metadata.username}`}
+            onClick={() => void editSkins(id, selected)}><Palette aria-hidden="true" />Aspectos</Button>}
           <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`Opciones de ${account.metadata.username}`}><Ellipsis aria-hidden="true" /></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled={selected} onSelect={() => void act('select_account', { accountId: id })}><Check />Seleccionar</DropdownMenuItem>

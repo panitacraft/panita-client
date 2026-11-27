@@ -192,6 +192,10 @@ PanitaClient/
 ├─ update-state.json      # nonsecret launcher-update channel and pending requirement (§8)
 ├─ insts-cache.json
 ├─ instance-erasures.json # temporary explicit full-instance erasure intents; never auto-retried
+├─ skins/                 # skin library (§5.5): disposable apart from saved skins
+│  ├─ skins.json          # nonsecret index: saved skins, cached capes, last known state per profile
+│  ├─ {pixel-hash}.png    # cached skin images
+│  └─ capes/              # cached cape PNGs named by the service's cape identifier
 ├─ libraries/             # shared, verified caches
 ├─ assets/
 ├─ versions/
@@ -498,6 +502,94 @@ the Minecraft log viewer, only as the two explicit player actions below.
   save dialog and the copy always covers the complete log.
 - These behaviors are verified by tests; the save dialog, clipboard and file deletion are
   unvalidated on a real desktop and on Ubuntu x64 (§6).
+
+### 5.5 Skin and cape manager (2026-11-26)
+
+Owner request, GitHub issue 51, for 1.3.0-beta.1. A "Skins y capas" page manages the skin, arm
+model and cape of the selected Microsoft account. It opens from an "Aspectos" button with a palette
+icon beside the options menu of each Microsoft row on the accounts page (owner request, 2026-11-26;
+the main toolbar has no entry). On an account that is not selected the button selects that account
+first, because the page always works on the selected one.
+
+- Only an authenticated Microsoft account can use it. The core refuses every operation for an
+  offline account (`microsoft_account_required`), so hiding the button on offline rows is a convenience
+  and not the boundary. The page offers nothing to an offline account except an explanation.
+- A "look" is a skin file, its arm model (classic or slim) and a cape or none. The library keeps
+  at most 100 looks, shared by every Microsoft account on this computer. Looks, the capes the account
+  owns and the last known state of each profile live in `skins/skins.json` (disk schema 1,
+  written under the store's interprocess lock with atomic replacement). Its list of saved skins is the
+  `skins` key; the `looks` spelling of earlier builds is still read, never written, and a document with
+  both is refused. Images live in `skins/{pixel-hash}.png` and `skins/capes/{cape-id}.png` in private
+  directories (owner decision, 2026-11-26: the index and the capes folder moved under `skins/`). When
+  the launcher finds the earlier root `skins.json` or `capes/`, it moves them in under the writer
+  lock: the capes folder whole, the index only after its bytes are published at the new path. A
+  conflicting copy is left in the root and the new location wins; entries that are not cape images stay
+  where they are. A damaged or future
+  `skins/skins.json` is reported and left untouched; every name read from it is validated before it
+  becomes a file name. Images nothing refers to are removed after the index is durable.
+- A skin is identified by the hash of its decoded pixels, never of its file, because the service
+  re-encodes uploads. This is how the page recognises that the account wears a saved look and offers
+  to save the current look when it matches none (a different skin, model or cape). Every image is
+  decoded under size limits and stored again as a plain RGBA PNG. Uploads must be 64×64 or 64×32.
+- All calls to Minecraft Services (`GET /minecraft/profile`, `POST /minecraft/profile/skins`,
+  `PUT` and `DELETE /minecraft/profile/capes/active`) run in Rust with the session's access
+  token, which never reaches the interface, logs or the index. A rejected token is renewed once and
+  the call repeated once (§4.2). Textures are fetched only from `textures.minecraft.net`, over HTTPS,
+  from addresses validated against that exact host, bounded to 1 MiB, with no credential.
+- Each session acquisition, selection, renewal or login completion starts a background
+  synchronisation that caches the current skin and every owned cape that is not cached yet; the page
+  also synchronises when it opens and on explicit request. Failures are silent in the background and
+  shown as "last saved" on the page. Applying a look or a cape records what the service answers, even
+  after a partial failure. Calls are serialized by one gate per process.
+- The page follows the owner's layout (2026-11-26): a heading "Aspectos · {player}"; the 3D preview
+  on the left; on the right "Skins" and "Capas" tabs with their counts, a search box that ignores case
+  and accents, a sync button and a grid of cards. The Skins grid starts with a dashed "Nueva skin" card
+  (there is no separate add button) and marks the look the account wears with a green check; the Capas
+  grid starts with "Sin capa". Choosing a card previews it; the preview is labelled "Vista previa" and a
+  bar over it offers "Descartar" and "Aplicar" while something is unapplied. Right-clicking any card
+  opens the launcher's own menu (Vista previa, Aplicar, and for saved skins Editar and Eliminar) instead
+  of the browser's.
+- The add and edit skin dialog follows the owner's mockup (2026-11-26): a header with a green icon, the title
+  and a close button; on the left a dashed upload panel ("Elegir archivo", PNG of 64×64 or 64×32) that the 3D
+  preview replaces once a file is chosen (with a "Cambiar archivo" bar); on the right the name, the arm model
+  ("Brazos") and the cape ("Capa", followed by the chosen cape's name) as a grid of square tiles without text,
+  the chosen one marked with a green check. A cape's name is its tooltip and accessible name. The primary
+  button "Guardar y aplicar" uses the `UserCheck` icon.
+- The reminder "Aspecto actual sin guardar" (owner decision, 2026-11-26) appears above the skin grid only
+  when no saved look has the skin and arm model the account wears; a different cape does not count. The
+  player can dismiss it with an X; the dismissal is remembered per skin and model in the window's local
+  storage (a preference, like the motion setting), and another unsaved skin asks again. The card of the
+  worn skin is marked as active by the same skin-only rule, preferring the look whose cape also matches.
+- The preview is an interactive 3D player (`skinview3d`, loaded lazily so the launcher starts
+  without it). It starts at the three-quarter angle `DEFAULT_YAW` (`ui/src/skin-angles.ts`), turned toward
+  the right of the screen (owner decision, 2026-11-26), walks in place without moving its head
+  (`headBobbing` off), and turns only when the player drags it or uses the arrow keys; there is no
+  animation picker and no automatic rotation. A pause/play button in the preview stops and resumes the
+  walk, which starts paused for players who ask the system for reduced motion. An "Elytra" switch shows
+  the previewed cape as elytra, drawn from the cape image as the game does; it needs a cape, because the
+  library has no elytra texture of its own, and is disabled without one.
+- Library cards are 3D pictures at that same angle (capes are drawn from behind, hanging on the skin
+  the account wears), not flat front views. One hidden player renders them in turn and keeps each as a
+  cached image, because a WebGL context per card would exhaust the browser's limit. Without WebGL the
+  preview and the cards fall back to flat pictures. Textures reach the webview as data URLs, so the
+  content security policy and the Tauri capabilities are unchanged. The skin file is chosen with the
+  page's own file input and sent as base64; no path crosses IPC.
+- The accounts page and the rail draw every picture themselves and never ask an online render service
+  (owner request, 2026-11-26): the service showed first and was then replaced by the cached skin, which
+  made the picture jump. The rail avatar is the face drawn from the cached texture. The bust beside an
+  account is a 3D picture from the same shared renderer, framed to match the former online bust: square,
+  seen from a little above with the arms angled out. Accounts with no skin of their own, offline accounts,
+  Microsoft accounts the launcher has not synchronised yet and a failed read all use the default Steve
+  skin bundled with the interface (`ui/src/assets/steve.png`). While the local read is pending a Microsoft
+  account shows an empty placeholder, never another picture. `skins_worn` returns, without credentials or
+  an account, the cached texture hash and arm model each profile last wore; `skin_texture` reads a cached
+  image without requiring an account for the same reason. The launcher learns the worn skin from this
+  command, from the Aspectos page and from the background synchronisation. Busts are drawn only while the
+  accounts page is shown, and the latest 16 are kept in the window's local storage, keyed by skin, arm
+  model and framing, so a later start shows them without starting WebGL. Without WebGL the face is drawn
+  flat from the texture. The online service remains only for the activation page, which has no cached skin.
+- Verified by tests with an in-memory service, a loopback service and a mocked webview. Not
+  validated against a live Microsoft account, in the installed product, or on Ubuntu x64 (§6).
 
 ## Annex A. Account and Token Storage Decision
 

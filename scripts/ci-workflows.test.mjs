@@ -76,5 +76,7 @@ test('Ubuntu PR and develop CI build and inspect real unsigned Linux packages', 
   assert.match(builder, /loaderValidation \|\| ciUnsigned \? \['--no-sign'\]/);
   assert.match(builder, /if \(!loaderValidation && !ciUnsigned\)/);
   assert.match(builder, /installer candidate:\\n\$\{dirty\}/);
+  // A transient bundler download failure (a 403 from GitHub) must not fail the whole check.
+  assert.match(builder, /runWithRetry\(process\.execPath, \[join\(root, 'scripts\/tauri\.mjs'\), 'build'/);
   assert.match(inspection, /artifact="\$root\/target\/ci\/\$version\/linux"/);
 });

@@ -1,7 +1,7 @@
 import type { CatalogInstance } from './preview-catalog';
 import type { PlayEntry } from './play-state';
 
-export type LauncherPage = 'library' | 'accounts' | 'settings';
+export type LauncherPage = 'library' | 'accounts' | 'settings' | 'skins';
 
 /** Match 52px cards, 14px gaps and 8px list padding; paged rails reserve 64px for arrows. */
 export function instanceRailCapacity(availableHeight: number, count: number): number {
