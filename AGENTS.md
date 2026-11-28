@@ -810,7 +810,10 @@ and individual measurements are evidence, not product guarantees.
   `logs/session-{timestamp}-{id}.log` from its own header, with timestamp, level, the same
   fixed events and error codes, a header with launcher version, platform and
   hardware facts (operating system, processor, logical cores, memory, graphics
-  adapter, disk capacity), and redacted free-text notes (game exit codes, settings
+  adapter, disk capacity) and the kinds of characters in the profile path
+  (owner request, 2026-11-28: whether it holds non-ASCII characters, their Unicode
+  code points and ASCII symbols such as a dot or space, never the user name itself,
+  because legacy code pages broke the Java probe), and redacted free-text notes (game exit codes, settings
   changes with old and new values, account and Panita activation actions without
   names or serials), plus network notes: one line per API call to Microsoft, Xbox,
   Minecraft services and the Panita API with a fixed service and route label,
