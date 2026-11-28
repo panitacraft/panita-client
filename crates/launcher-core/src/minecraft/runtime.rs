@@ -292,6 +292,37 @@ pub fn verify_properties(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn java_properties_in_a_legacy_code_page_are_still_verified() {
+        // Piped Java writes `-XshowSettings` in the system code page, so a Windows user
+        // name such as "José" is the single byte 0xE9, which is not UTF-8.
+        let output = b"Property settings:\r\n    java.specification.version = 21\r\n    \
+            os.arch = amd64\r\n    user.dir = C:\\Users\\Jos\xE9\\AppData\r\n"
+            .to_vec();
+        assert!(std::str::from_utf8(&output).is_err());
+        let output = output.as_slice();
+        let java = JavaRequirement {
+            component: "java-runtime-delta".into(),
+            major_version: 21,
+        };
+        let platform = Platform::x64("windows", "10").unwrap_or_else(|_| panic!("platform"));
+        assert!(
+            verify_properties(&String::from_utf8_lossy(output), &java, &platform).is_ok(),
+            "accented profile paths must not reject a valid runtime"
+        );
+        let other = JavaRequirement {
+            major_version: 17,
+            ..java
+        };
+        assert_eq!(
+            verify_properties(&String::from_utf8_lossy(output), &other, &platform)
+                .err()
+                .map(|error| error.code()),
+            Some(ErrorCode::RuntimeUnsupported)
+        );
+    }
+
     #[test]
     fn readable_runtime_allocates_conflicts_and_reuses_interrupted_reservations() {
         let paths = crate::paths::AppPaths::new(

@@ -6,6 +6,7 @@ use super::{
     *,
 };
 use crate::{
+    error::{ErrorCause, ResultDetail},
     minecraft::{
         Artifact, Platform,
         download::{Cancellation, Downloader, ensure_parent, io, native_file, verified_file},
@@ -135,12 +136,15 @@ pub async fn prepare(
         Duration::from_secs(20),
         true,
     )
-    .await?;
+    .await
+    .or_cause(ErrorCause::RuntimeProbeInvalid)?;
     if !probe.success {
         return Err(CoreError::new(ErrorCode::RuntimeUnsupported));
     }
+    // Java prints its properties in the system's legacy code page when piped, so a
+    // Windows profile path with accents is not UTF-8. Only the ASCII keys are read.
     crate::minecraft::runtime::verify_properties(
-        std::str::from_utf8(&probe.stderr).map_err(|_| invalid())?,
+        &String::from_utf8_lossy(&probe.stderr),
         &plan.java,
         &platform,
     )?;

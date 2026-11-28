@@ -27,7 +27,7 @@ use super::{
 };
 use crate::{
     catalog::{CatalogClient, CatalogInstance, CatalogSource, Variant},
-    error::{CoreError, ErrorCode},
+    error::{CoreError, ErrorCause, ErrorCode, ResultDetail},
     minecraft::{
         Platform,
         download::{Cancellation, io, lock, try_lock},
@@ -556,11 +556,15 @@ pub(crate) async fn publish_plan(request: PlanPublish<'_>) -> Result<Outcome, Co
 
     for (kind, expected) in &archives {
         let file = content::open_verified(paths, expected, cancel)?;
-        layers.push((*kind, archive::preflight(file, Limits::PACK)?));
+        layers.push((
+            *kind,
+            archive::preflight(file, Limits::PACK).or_cause(ErrorCause::ArchiveInvalid)?,
+        ));
     }
     let named = |wanted: Kind| layers.iter().find(|(kind, _)| *kind == wanted);
     if let (Some((_, first)), Some((_, second))) = (named(Kind::Defaults), named(Kind::Enforced)) {
-        config::ensure_disjoint(&first.entries, &second.entries)?;
+        config::ensure_disjoint(&first.entries, &second.entries)
+            .or_cause(ErrorCause::ArchiveInvalid)?;
     }
 
     let mut created: Vec<Created> = content_files.iter().map(|f| created_content(f)).collect();
@@ -965,9 +969,13 @@ pub async fn install_catalog(
     }
     let downloader = PackDownloader::new()?;
     let plan = match &catalog.source {
-        CatalogSource::Custom { .. } => custom_plan(&catalog, id, variant, cancel, auth).await?,
+        CatalogSource::Custom { .. } => custom_plan(&catalog, id, variant, cancel, auth)
+            .await
+            .or_cause(ErrorCause::ManifestInvalid)?,
         CatalogSource::Modrinth { .. } => {
-            mrpack_plan(paths, &downloader, &catalog, cancel, pack_progress.clone()).await?
+            mrpack_plan(paths, &downloader, &catalog, cancel, pack_progress.clone())
+                .await
+                .or_cause(ErrorCause::ManifestInvalid)?
         }
         _ => return Err(CoreError::new(ErrorCode::UnsupportedInstance)),
     };
@@ -1016,6 +1024,7 @@ pub async fn install_catalog(
             progress: pack_progress,
         })
         .await
+        .or_cause(ErrorCause::PublishedStateInvalid)
     }
     .await;
     match &result {

@@ -101,6 +101,12 @@ pub enum ErrorCause {
     ArchiveInvalid,
     /// The state an operation was about to record failed its own validation.
     PublishedStateInvalid,
+    /// The Java runtime's self-description could not be read or did not fit its bounds.
+    RuntimeProbeInvalid,
+    /// The loader installer, its plan or its processor outputs failed validation.
+    LoaderInvalid,
+    /// The game's version metadata, libraries or natives failed validation.
+    GameFilesInvalid,
     /// A pack path was refused by the game-directory path rules.
     UnsafePath,
     /// A file's bytes did not match the expected size or hash.
@@ -300,6 +306,10 @@ mod tests {
         let checksum =
             CoreError::new(ErrorCode::ArtifactMismatch).or_cause(ErrorCause::ArchiveInvalid);
         assert_eq!(checksum.cause(), Some(ErrorCause::ChecksumMismatch));
+        let probe = CoreError::new(ErrorCode::InvalidData)
+            .with_cause(ErrorCause::RuntimeProbeInvalid)
+            .or_cause(ErrorCause::LoaderInvalid);
+        assert_eq!(probe.cause(), Some(ErrorCause::RuntimeProbeInvalid));
         let first = CoreError::new(ErrorCode::InvalidData)
             .or_cause(ErrorCause::ManifestInvalid)
             .or_cause(ErrorCause::ArchiveInvalid);

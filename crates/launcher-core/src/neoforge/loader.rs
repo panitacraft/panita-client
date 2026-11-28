@@ -13,7 +13,7 @@ use super::{
     staging::{self, StagingProgress},
 };
 use crate::{
-    error::{CoreError, ErrorCode},
+    error::{CoreError, ErrorCause, ErrorCode, ResultDetail},
     minecraft::{
         Platform,
         download::{Cancellation, Downloader},
@@ -175,17 +175,26 @@ pub async fn prepare_plan(
     cancel: &Cancellation,
     maven: &Maven,
 ) -> Result<InstallPlan, CoreError> {
-    let (identity, installer) = maven.installer(minecraft, loader_version, cancel).await?;
+    let (identity, installer) = maven
+        .installer(minecraft, loader_version, cancel)
+        .await
+        .or_cause(ErrorCause::LoaderInvalid)?;
     let downloader = Downloader::new()?;
-    let mut base = plan::resolve(&downloader, minecraft, platform, cancel).await?;
+    let mut base = plan::resolve(&downloader, minecraft, platform, cancel)
+        .await
+        .or_cause(ErrorCause::GameFilesInvalid)?;
     base.allocate_runtime(paths)?;
     let version = base
         .documents
         .iter()
         .find(|document| document.source.url.ends_with(&format!("/{minecraft}.json")))
-        .ok_or_else(invalid)?;
-    let game = downloader.document(&version.source.url, cancel).await?;
-    let processors = ProcessorPlan::resolve(&installer, &identity, &game, &version.source)?;
+        .ok_or_else(|| invalid().with_cause(ErrorCause::GameFilesInvalid))?;
+    let game = downloader
+        .document(&version.source.url, cancel)
+        .await
+        .or_cause(ErrorCause::GameFilesInvalid)?;
+    let processors = ProcessorPlan::resolve(&installer, &identity, &game, &version.source)
+        .or_cause(ErrorCause::LoaderInvalid)?;
     let staged = staging::prepare(
         paths,
         &processors,
@@ -196,11 +205,13 @@ pub async fn prepare_plan(
             let _ = event;
         },
     )
-    .await?;
-    let loader = super::generation::publish(paths, &processors, staged, cancel)?;
+    .await
+    .or_cause(ErrorCause::LoaderInvalid)?;
+    let loader = super::generation::publish(paths, &processors, staged, cancel)
+        .or_cause(ErrorCause::LoaderInvalid)?;
     base.schema_version = 2;
     base.loader = Some(loader.into());
-    base.validate()?;
+    base.validate().or_cause(ErrorCause::LoaderInvalid)?;
     Ok(base)
 }
 

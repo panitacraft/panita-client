@@ -1,9 +1,71 @@
 //! Hardware and system facts for the head of each session log. Best effort: a
 //! missing value is reported as `unknown`, never as an error. No serial numbers,
-//! user names, network identifiers or locations are read.
-use std::path::Path;
+//! user names, network identifiers or locations are read. The profile path line
+//! reports only which kinds of characters the path holds, never the characters of
+//! the user name itself.
+use std::{
+    collections::BTreeSet,
+    path::{Component, Path},
+};
 
 const MIB: u64 = 1024 * 1024;
+
+/// Folder names every profile path shares, so they say nothing about the player.
+const SHARED_FOLDERS: [&str; 7] = [
+    "users",
+    "home",
+    "appdata",
+    "roaming",
+    ".local",
+    "share",
+    "panitaclient",
+];
+
+/// The kinds of characters in the player-specific part of the data path, such as accents
+/// or dots in a Windows user name, which legacy code pages and some tools mishandle.
+/// Reports Unicode code points and symbols, never the letters of the name.
+fn profile_path(root: &Path) -> String {
+    let mut non_ascii = BTreeSet::new();
+    let mut symbols = BTreeSet::new();
+    for component in root.components() {
+        let Component::Normal(name) = component else {
+            continue;
+        };
+        let name = name.to_string_lossy();
+        if SHARED_FOLDERS.contains(&name.to_lowercase().as_str()) {
+            continue;
+        }
+        for ch in name.chars() {
+            if !ch.is_ascii() {
+                non_ascii.insert(ch as u32);
+            } else if !ch.is_ascii_alphanumeric() {
+                symbols.insert(if ch == ' ' {
+                    "space".to_owned()
+                } else {
+                    ch.to_string()
+                });
+            }
+        }
+    }
+    let listed = |items: Vec<String>| {
+        if items.is_empty() {
+            "none".to_owned()
+        } else {
+            items.join(",")
+        }
+    };
+    format!(
+        "profile path non_ascii={} non_ascii_chars={} symbols={}",
+        !non_ascii.is_empty(),
+        listed(
+            non_ascii
+                .iter()
+                .map(|code| format!("U+{code:04X}"))
+                .collect()
+        ),
+        listed(symbols.into_iter().collect()),
+    )
+}
 
 pub(super) fn lines(data_root: &Path) -> Vec<String> {
     let (total, available) = memory();
@@ -25,6 +87,7 @@ pub(super) fn lines(data_root: &Path) -> Vec<String> {
         ),
         format!("gpu name={}", gpu()),
         format!("disk total_mib={} free_mib={}", mib(disk.0), mib(disk.1)),
+        profile_path(data_root),
     ]
 }
 
@@ -210,6 +273,30 @@ PCI_ID=10DE:2684
     }
 
     #[test]
+    fn profile_path_reports_character_kinds_without_the_name() {
+        // Built from segments so the check means the same on every platform.
+        let path = |name: &str| -> std::path::PathBuf {
+            ["Users", name, "AppData", "Roaming", "PanitaClient"]
+                .iter()
+                .collect()
+        };
+        let text = profile_path(&path("José.Peña"));
+        assert_eq!(
+            text,
+            "profile path non_ascii=true non_ascii_chars=U+00E9,U+00F1 symbols=."
+        );
+        assert!(!text.contains("Jos"), "{text}");
+        assert_eq!(
+            profile_path(&path("plain user")),
+            "profile path non_ascii=false non_ascii_chars=none symbols=space"
+        );
+        assert_eq!(
+            profile_path(Path::new("/home/ana/.local/share/PanitaClient")),
+            "profile path non_ascii=false non_ascii_chars=none symbols=none"
+        );
+    }
+
+    #[test]
     fn reports_memory_and_free_disk_even_when_the_data_root_does_not_exist_yet() {
         let missing = std::env::temp_dir().join("panita-resources-test/not/created/yet");
         let found = resources(&missing);
@@ -228,6 +315,7 @@ PCI_ID=10DE:2684
             "memory total_mib=",
             "gpu name=",
             "disk total_mib=",
+            "profile path non_ascii=",
         ] {
             assert!(text.contains(key), "{key}");
         }

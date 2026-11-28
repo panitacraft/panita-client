@@ -17,7 +17,7 @@ use super::plan::{InstallPlan, PlannedArtifact};
 use super::{Artifact, Platform, invalid};
 use crate::{
     catalog::{CatalogClient, CatalogSource},
-    error::{CoreError, ErrorCode},
+    error::{CoreError, ErrorCause, ErrorCode, ResultDetail},
     panita_api::PanitaCredentials,
     paths::AppPaths,
     registry::{InstallationRecord, InstallationState, InstanceRegistry},
@@ -244,14 +244,16 @@ async fn verify_java(
             .await
             .map_err(io)?;
         if output.len() > 16 * 1024 {
-            return Err(invalid());
+            return Err(invalid().with_cause(ErrorCause::RuntimeProbeInvalid));
         }
         let status = child.wait().await.map_err(io)?;
         if !status.success() {
             return Err(CoreError::new(ErrorCode::RuntimeUnsupported));
         }
+        // Java prints its properties in the system's legacy code page when piped, so a
+        // Windows profile path with accents is not UTF-8. Only the ASCII keys are read.
         super::runtime::verify_properties(
-            std::str::from_utf8(&output).map_err(|_| invalid())?,
+            &String::from_utf8_lossy(&output),
             &plan.version.java,
             platform,
         )
@@ -536,19 +538,24 @@ pub(crate) async fn prepare_recorded(
     progress: Progress,
 ) -> Result<InstalledLock, CoreError> {
     let root = metadata_root(paths, id)?;
-    plan.validate()?;
+    plan.validate().or_cause(ErrorCause::GameFilesInvalid)?;
     if plan.platform != platform.os || plan.architecture != platform.arch {
         return Err(CoreError::new(ErrorCode::RuntimeUnsupported));
     }
     let downloader = Downloader::new()?;
-    download_all(paths, &downloader, &plan, cancel, progress).await?;
+    download_all(paths, &downloader, &plan, cancel, progress)
+        .await
+        .or_cause(ErrorCause::GameFilesInvalid)?;
     {
         let _timer = Timer::new(Stage::Dependencies);
-        plan.verify_dependencies(paths)?;
+        plan.verify_dependencies(paths)
+            .or_cause(ErrorCause::GameFilesInvalid)?;
     }
     {
         let _timer = Timer::new(Stage::Java);
-        verify_java(paths, &plan, platform, cancel).await?;
+        verify_java(paths, &plan, platform, cancel)
+            .await
+            .or_cause(ErrorCause::RuntimeProbeInvalid)?;
     }
     if let Some(loader) = &plan.loader {
         let _timer = Timer::new(Stage::Loader);
@@ -579,12 +586,15 @@ pub(crate) async fn prepare_recorded(
         if !verified_file(&directory, &leaf, &native.artifact)? {
             return Err(CoreError::new(ErrorCode::ArtifactMismatch));
         }
-        native_files.extend(super::natives::extract(
-            directory.open_file(leaf).map_err(map_private_error)?,
-            &native_root,
-            &native.excludes,
-            cancel,
-        )?);
+        native_files.extend(
+            super::natives::extract(
+                directory.open_file(leaf).map_err(map_private_error)?,
+                &native_root,
+                &native.excludes,
+                cancel,
+            )
+            .or_cause(ErrorCause::GameFilesInvalid)?,
+        );
     }
     drop(native_timer);
     cancel.check()?;

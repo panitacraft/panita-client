@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    error::{CoreError, ErrorCode},
+    error::{CoreError, ErrorCause, ErrorCode, ResultDetail},
     minecraft::{
         JavaRequirement, Platform,
         download::Cancellation,
@@ -263,7 +263,8 @@ pub async fn prepare_base(
                 cancel,
                 &maven,
             )
-            .await?;
+            .await
+            .or_cause(ErrorCause::LoaderInvalid)?;
             prepare_recorded(paths, id, operation, platform, plan, cancel, progress).await
         }
     }
